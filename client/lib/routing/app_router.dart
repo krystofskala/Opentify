@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/artist/artist_screen.dart';
 import '../features/home/home_screen.dart';
+import '../features/profile/profile_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
 import 'home_shell.dart';
@@ -19,6 +20,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
           ]),
         ],
       ),

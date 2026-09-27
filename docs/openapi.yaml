@@ -22,6 +22,10 @@ tags:
     description: Uživatelské a generované playlisty
   - name: recommendations
     description: Doporučení generovaná z ListenBrainz
+  - name: library
+    description: >
+      Osobní knihovna — import Liked Songs (Spotify export) a sken lokální
+      hudební knihovny namapované z hostitele (MUSIC_DIR).
 
 paths:
   # ---------------------------------------------------------------------
@@ -319,6 +323,132 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PlaylistDetail" }
 
+  /recommendations/trending:
+    get:
+      tags: [recommendations]
+      summary: >
+        Nejhranější nahrávky napříč veřejnou komunitou ListenBrainz
+        (https://api.listenbrainz.org/1/stats/sitewide/recordings) — ne data
+        z téhle instance, server sám žádné poslechy nesleduje.
+      parameters:
+        - name: range
+          in: query
+          schema: { type: string, enum: [week, month, year, all_time], default: week }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Recording" }
+
+  /recommendations/my-top:
+    get:
+      tags: [recommendations]
+      summary: >
+        Nejposlouchanější nahrávky configurovaného účtu (LISTENBRAINZ_USERNAME)
+        přímo z jeho ListenBrainz statistik — na rozdíl od /daily-jams funguje
+        i bez vygenerovaného troi doporučení, stačí mít zaznamenané poslechy.
+      parameters:
+        - name: range
+          in: query
+          schema: { type: string, enum: [week, month, year, all_time], default: month }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Recording" }
+
+  /recommendations/community:
+    get:
+      tags: [recommendations]
+      summary: >
+        Doporučení odvozená z poslechů uživatelů s podobným vkusem na veřejném
+        ListenBrainz (similar-users + jejich top nahrávky). Prázdné, dokud
+        LISTENBRAINZ_USERNAME není skutečný účet na listenbrainz.org s
+        poslechovou historií.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Recording" }
+
+  /library/scan:
+    post:
+      tags: [library]
+      summary: >
+        Projde lokální hudební knihovnu (bind mount MUSIC_DIR, kontejnerová
+        cesta /data/local-music) a zaeviduje nalezené soubory jako available.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  root: { type: string }
+                  scanned: { type: integer }
+                  matched: { type: integer }
+                  skippedNoTags: { type: integer }
+                  errors: { type: integer }
+
+  /library/import/spotify:
+    post:
+      tags: [library]
+      summary: >
+        Naimportuje Spotify "Your Library" export (YourLibrary.json) do
+        Liked Songs — páruje skladby na katalog jménem, ne přes MusicBrainz.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalInFile: { type: integer }
+                  matched: { type: integer }
+                  alreadyLiked: { type: integer }
+                  skipped: { type: integer }
+        "400": { description: Neplatný JSON export }
+
+  /library/liked-songs:
+    get:
+      tags: [library]
+      summary: Liked Songs naimportované ze Spotify (nebo prázdný playlist, pokud nic).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlaylistDetail" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -424,6 +554,13 @@ components:
           format: uri
           nullable: true
           description: 30s náhled z Deezer (doplňkové metadata, best-effort — nemusí být vyplněno).
+        listenCount:
+          type: integer
+          nullable: true
+          description: >
+            Počet poslechů z veřejného ListenBrainz API (doplňkové metadata,
+            jen u /recommendations/trending a /recommendations/community —
+            jinde vždy null).
 
     SearchResultItem:
       allOf:

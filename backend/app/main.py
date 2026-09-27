@@ -13,8 +13,9 @@ from app.catalog.deezer import close_deezer_client
 from app.catalog.musicbrainz import close_musicbrainz_client
 from app.db import init_db
 from app.realtime import redis_listener, websocket_endpoint
-from app.recommendations.listenbrainz import close_listenbrainz_client
+from app.recommendations.listenbrainz import close_listenbrainz_client, close_listenbrainz_public_client
 from app.routes.catalog import catalog_router
+from app.routes.library import library_router
 from app.routes.provisioning import jobs_router, tracks_router
 from app.routes.recommendations import recommendations_router
 
@@ -40,6 +41,7 @@ app.include_router(tracks_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(recommendations_router, prefix="/api/v1")
+app.include_router(library_router, prefix="/api/v1")
 
 
 @app.on_event("startup")
@@ -53,6 +55,7 @@ async def on_shutdown() -> None:
     await close_musicbrainz_client()
     await close_deezer_client()
     await close_listenbrainz_client()
+    await close_listenbrainz_public_client()
 
 
 @app.get("/health")

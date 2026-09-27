@@ -5,6 +5,7 @@ import '../core/config.dart';
 import '../core/realtime_event.dart';
 import '../core/ws_client.dart';
 import '../data/catalog_repository.dart';
+import '../data/library_repository.dart';
 import '../data/provisioning_repository.dart';
 import '../data/recommendations_repository.dart';
 
@@ -30,6 +31,10 @@ final recommendationsRepositoryProvider = Provider<RecommendationsRepository>((r
 
 final provisioningRepositoryProvider = Provider<ProvisioningRepository>((ref) {
   return ProvisioningRepository(ref.watch(apiClientProvider));
+});
+
+final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
+  return LibraryRepository(ref.watch(apiClientProvider));
 });
 
 /// Jedno WS spojení pro celou appku -- playback i provisioning controller

@@ -13,7 +13,12 @@ from sqlmodel import Session
 
 from app.auth import get_current_user
 from app.db import get_session
-from app.recommendations.listenbrainz import ListenBrainzClient, get_listenbrainz_client
+from app.recommendations.listenbrainz import (
+    ListenBrainzClient,
+    ListenBrainzPublicClient,
+    get_listenbrainz_client,
+    get_listenbrainz_public_client,
+)
 from app.recommendations.service import RecommendationService
 
 recommendations_router = APIRouter(prefix="/recommendations", tags=["recommendations"])
@@ -27,8 +32,9 @@ LISTENBRAINZ_USERNAME = os.environ.get("LISTENBRAINZ_USERNAME", "demo-user")
 def get_recommendation_service(
     session: Session = Depends(get_session),
     lb_client: ListenBrainzClient = Depends(get_listenbrainz_client),
+    lb_public_client: ListenBrainzPublicClient = Depends(get_listenbrainz_public_client),
 ) -> RecommendationService:
-    return RecommendationService(session, lb_client)
+    return RecommendationService(session, lb_client, lb_public_client)
 
 
 @recommendations_router.get("/discover")
@@ -49,3 +55,35 @@ async def daily_jams(
     user_id, _device_id = current
     playlist = await service.daily_jams(user_id, LISTENBRAINZ_USERNAME)
     return playlist.model_dump(by_alias=True)
+
+
+@recommendations_router.get("/trending")
+async def trending(
+    range: str = Query(default="week", pattern="^(week|month|year|all_time)$"),
+    limit: int = Query(default=20, ge=1, le=50),
+    service: RecommendationService = Depends(get_recommendation_service),
+    _current=Depends(get_current_user),
+):
+    recordings = await service.trending(limit, range)
+    return [r.model_dump(by_alias=True) for r in recordings]
+
+
+@recommendations_router.get("/my-top")
+async def my_top(
+    range: str = Query(default="month", pattern="^(week|month|year|all_time)$"),
+    limit: int = Query(default=20, ge=1, le=50),
+    service: RecommendationService = Depends(get_recommendation_service),
+    _current=Depends(get_current_user),
+):
+    recordings = await service.my_top_tracks(LISTENBRAINZ_USERNAME, limit, range)
+    return [r.model_dump(by_alias=True) for r in recordings]
+
+
+@recommendations_router.get("/community")
+async def community(
+    limit: int = Query(default=20, ge=1, le=50),
+    service: RecommendationService = Depends(get_recommendation_service),
+    _current=Depends(get_current_user),
+):
+    recordings = await service.community_picks(LISTENBRAINZ_USERNAME, limit)
+    return [r.model_dump(by_alias=True) for r in recordings]

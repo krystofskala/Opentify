@@ -20,4 +20,26 @@ class RecommendationsRepository {
     final json = await _api.getJson('/recommendations/daily-jams');
     return PlaylistDetailModel.fromJson(json);
   }
+
+  /// Sitewide žebříček veřejné komunity ListenBrainz, ne dat téhle instance
+  /// (server sám poslechy nesleduje) -- viz backend `RecommendationService.trending`.
+  Future<List<RecordingModel>> trending({int limit = 20, String range = 'week'}) async {
+    final json = await _api.getJsonList('/recommendations/trending', query: {'limit': '$limit', 'range': range});
+    return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Nejposlouchanější nahrávky nastaveného účtu (LISTENBRAINZ_USERNAME)
+  /// přímo z jeho statistik -- funguje, i když ještě nemá vygenerované
+  /// Daily Jams/Objevuj (ty čekají na dávkově počítaný troi patch).
+  Future<List<RecordingModel>> myTopTracks({int limit = 20, String range = 'month'}) async {
+    final json = await _api.getJsonList('/recommendations/my-top', query: {'limit': '$limit', 'range': range});
+    return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Top nahrávky uživatelů s podobným vkusem na veřejném ListenBrainz --
+  /// prázdné, dokud LISTENBRAINZ_USERNAME není skutečný účet s historií.
+  Future<List<RecordingModel>> communityPicks({int limit = 20}) async {
+    final json = await _api.getJsonList('/recommendations/community', query: {'limit': '$limit'});
+    return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
 }

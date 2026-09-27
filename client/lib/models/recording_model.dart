@@ -15,6 +15,7 @@ class RecordingModel {
     this.trackNumber,
     required this.availability,
     this.previewUrl,
+    this.listenCount,
   });
 
   final String id;
@@ -27,6 +28,10 @@ class RecordingModel {
   final int? trackNumber;
   final Availability availability;
   final String? previewUrl;
+
+  /// Jen u `/recommendations/trending` a `/recommendations/community` --
+  /// počet poslechů z veřejného ListenBrainz API, viz docs/openapi.yaml.
+  final int? listenCount;
 
   String get durationLabel {
     if (durationMs == null) return '--:--';
@@ -47,6 +52,7 @@ class RecordingModel {
         trackNumber: json['trackNumber'] as int?,
         availability: availabilityFromJson(json['availability'] as String?),
         previewUrl: json['previewUrl'] as String?,
+        listenCount: json['listenCount'] as int?,
       );
 
   RecordingModel copyWith({Availability? availability}) => RecordingModel(

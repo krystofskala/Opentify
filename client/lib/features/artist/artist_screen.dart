@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../models/discography_model.dart';
 import '../../models/release_model.dart';
 import '../../state/providers.dart';
+import '../../widgets/player_bar.dart';
 
 final discographyProvider =
     FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
@@ -52,6 +54,7 @@ class _ArtistBody extends StatelessWidget {
     final grouped = discography.groupedByType;
 
     return Scaffold(
+      bottomNavigationBar: const PlayerBar(),
       body: CustomScrollView(
         slivers: [
         SliverAppBar(
@@ -60,7 +63,13 @@ class _ArtistBody extends StatelessWidget {
           flexibleSpace: FlexibleSpaceBar(
             title: Text(artist.name),
             background: artist.coverImageUrl != null
-                ? Image.network(artist.coverImageUrl!, fit: BoxFit.cover, color: Colors.black26, colorBlendMode: BlendMode.darken)
+                ? CachedNetworkImage(
+                    imageUrl: artist.coverImageUrl!,
+                    fit: BoxFit.cover,
+                    color: Colors.black26,
+                    colorBlendMode: BlendMode.darken,
+                    fadeInDuration: const Duration(milliseconds: 300),
+                  )
                 : Container(color: Theme.of(context).colorScheme.primaryContainer),
           ),
         ),
@@ -105,24 +114,53 @@ class _ReleaseRow extends StatelessWidget {
             padding: const EdgeInsets.only(right: 12),
             child: SizedBox(
               width: 130,
-              child: InkWell(
-                onTap: () => context.push('/releases/${release.id}'),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: release.coverImageUrl != null
-                            ? Image.network(release.coverImageUrl!, fit: BoxFit.cover)
-                            : Container(color: Theme.of(context).colorScheme.surfaceVariant, child: const Icon(Icons.album)),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => context.push('/releases/${release.id}'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 1,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.25),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: release.coverImageUrl != null
+                                ? CachedNetworkImage(
+                                    imageUrl: release.coverImageUrl!,
+                                    fit: BoxFit.cover,
+                                    fadeInDuration: const Duration(milliseconds: 250),
+                                    placeholder: (context, url) =>
+                                        Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+                                    errorWidget: (context, url, error) => Container(
+                                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                      child: const Icon(Icons.album),
+                                    ),
+                                  )
+                                : Container(
+                                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                    child: const Icon(Icons.album),
+                                  ),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(release.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text(release.yearLabel, style: Theme.of(context).textTheme.bodySmall),
-                  ],
+                      const SizedBox(height: 6),
+                      Text(release.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(release.yearLabel, style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ),
                 ),
               ),
             ),

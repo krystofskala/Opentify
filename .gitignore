@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 *.db
 .env
+
+# Výchozí bind-mount cíl pro MUSIC_DIR, když proměnná není v .env nastavená
+# (viz docker-compose.yml) -- Docker složku sám vytvoří, obsah sem nepatří.
+/local-music/

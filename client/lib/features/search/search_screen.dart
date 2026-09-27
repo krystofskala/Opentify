@@ -1,12 +1,14 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/availability.dart';
 import '../../models/search_result.dart';
-import '../../state/playback_controller.dart';
+import '../../state/artwork_provider.dart';
+import '../../state/audio_player_controller.dart';
 import '../../state/provisioning_controller.dart';
 import '../../state/providers.dart';
 import '../../widgets/availability_badge.dart';
@@ -101,18 +103,42 @@ class _SearchResultRow extends ConsumerWidget {
       SearchEntityType.recording => Icons.music_note,
     };
 
+    // `/catalog/search` posílá `imageUrl` přímo jen pro artist/release --
+    // recording ho nemá (viz docs/openapi.yaml), tak se zkusí dohledat přes
+    // album/interpreta, jen když ho máme čím (artistId/releaseId z odpovědi).
+    final fallbackArtUrl = item.imageUrl == null && (item.releaseId != null || item.artistId != null)
+        ? ref.watch(recordingArtworkProvider((releaseId: item.releaseId, artistId: item.artistId))).valueOrNull
+        : null;
+    final resolvedImageUrl = item.imageUrl ?? fallbackArtUrl;
+
     return ListTile(
-      leading: item.imageUrl != null
-          ? CircleAvatar(backgroundImage: NetworkImage(item.imageUrl!))
-          : CircleAvatar(child: Icon(leadingIcon)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: resolvedImageUrl != null
+              ? CachedNetworkImage(
+                  imageUrl: resolvedImageUrl,
+                  fit: BoxFit.cover,
+                  fadeInDuration: const Duration(milliseconds: 250),
+                  errorWidget: (context, url, error) => Icon(leadingIcon),
+                )
+              : Container(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: Icon(leadingIcon),
+                ),
+        ),
+      ),
       title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: item.subtitle == null ? null : Text(item.subtitle!),
       trailing: item.availability == null ? null : AvailabilityBadge(availability: item.availability!),
-      onTap: () => _onTap(context, ref),
+      onTap: () => _onTap(context, ref, resolvedImageUrl),
     );
   }
 
-  void _onTap(BuildContext context, WidgetRef ref) {
+  void _onTap(BuildContext context, WidgetRef ref, String? resolvedImageUrl) {
     switch (item.entityType) {
       case SearchEntityType.artist:
         context.push('/artists/${item.id}');
@@ -122,7 +148,11 @@ class _SearchResultRow extends ConsumerWidget {
         // Skladby nemají vlastní detailní obrazovku -- klik ji buď rovnou
         // přehraje (available), nebo spustí on-demand provisioning.
         if (item.availability == Availability.available) {
-          ref.read(playbackControllerProvider.notifier).play(item.id);
+          final streamUrl = ref.read(provisioningRepositoryProvider).streamUrl(item.id);
+          ref.read(audioPlayerControllerProvider.notifier).playTrack(
+                NowPlayingInfo(recordingId: item.id, title: item.title, artworkUrl: resolvedImageUrl),
+                streamUrl,
+              );
         } else {
           ref.read(provisioningControllerProvider.notifier).provision(item.id);
           ScaffoldMessenger.of(context).showSnackBar(

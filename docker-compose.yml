@@ -11,12 +11,27 @@ services:
       MUSICBRAINZ_BASE_URL: https://musicbrainz.org/ws/2
       MUSICBRAINZ_USER_AGENT: ${MUSICBRAINZ_USER_AGENT:?nastav v .env dle MusicBrainz API etiquette, např. "VaultPersonal/0.1 (tvuj@email)"}
       DEEZER_API_BASE: https://api.deezer.com
-      LISTENBRAINZ_BASE_URL: http://listenbrainz:8080
+      # Výchozí `http://listenbrainz:8080` čeká na vlastní self-hostnutou
+      # instanci (viz zakomentovaná `listenbrainz:` služba níž) -- pro reálný
+      # účet na veřejném listenbrainz.org přepiš v `.env` na
+      # `LISTENBRAINZ_BASE_URL=https://api.listenbrainz.org`.
+      LISTENBRAINZ_BASE_URL: ${LISTENBRAINZ_BASE_URL:-http://listenbrainz:8080}
       LISTENBRAINZ_USERNAME: ${LISTENBRAINZ_USERNAME:-demo-user}
       JWT_SECRET: ${JWT_SECRET:?set a real secret in .env}
+      LOCAL_MUSIC_ROOT: /data/local-music
     volumes:
       - vault-db:/data/db
       - media-library:/data/media
+      # Vlastní hudební knihovna (externí HDD/NAS) -- `POST /library/scan` ji
+      # projde a zaeviduje jako `available` bez provisioningu. `MUSIC_DIR` je
+      # jediná věc, co se mění mezi prostředími (Windows vývoj vs. 24/7 Linux
+      # server) -- kontejnerová cesta je vždy `/data/local-music`, kód se
+      # nikdy nedotkne. Příklady do `.env`:
+      #   Windows:  MUSIC_DIR=D:/Music
+      #   Linux:    MUSIC_DIR=/mnt/music-hdd
+      # Nenastavené `MUSIC_DIR` mountne prázdnou složku vedle repozitáře —
+      # sken pak jen nic nenajde, ne chyba.
+      - ${MUSIC_DIR:-./local-music}:/data/local-music:ro
     depends_on:
       - redis
     restart: unless-stopped

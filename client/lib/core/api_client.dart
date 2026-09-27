@@ -63,6 +63,23 @@ class ApiClient {
     return _decode(response) as Map<String, dynamic>;
   }
 
+  /// Upload souboru (multipart/form-data) — `http.MultipartRequest` si sám
+  /// nastaví `Content-Type` s boundary, takže mu do hlaviček nesmí přijít
+  /// pevné `application/json` z `_headers`.
+  Future<Map<String, dynamic>> postMultipart(
+    String path, {
+    required String fieldName,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    final request = http.MultipartRequest('POST', _uri(path, null));
+    request.headers.addAll(Map<String, String>.from(_headers)..remove('Content-Type'));
+    request.files.add(http.MultipartFile.fromBytes(fieldName, bytes, filename: filename));
+    final streamed = await _http.send(request);
+    final response = await http.Response.fromStream(streamed);
+    return _decode(response) as Map<String, dynamic>;
+  }
+
   dynamic _decode(http.Response response) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiException(statusCode: response.statusCode, body: response.body);

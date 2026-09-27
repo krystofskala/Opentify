@@ -16,6 +16,8 @@ class SearchResultItem {
     this.subtitle,
     this.availability,
     this.imageUrl,
+    this.artistId,
+    this.releaseId,
   });
 
   final SearchEntityType entityType;
@@ -27,6 +29,14 @@ class SearchResultItem {
   /// ne třístavovou dostupnost média.
   final Availability? availability;
   final String? imageUrl;
+
+  /// Jen pro `recording` — `RecordingOut` je nese (viz backend
+  /// `app/catalog/schemas.py`), ale samo `imageUrl` nemá (žádné pole v
+  /// `Recording` schématu, viz docs/openapi.yaml). Použij je jako klíč do
+  /// `recordingArtworkProvider`, když chceš pro řádek reálný obal/foto
+  /// interpreta místo placeholderu.
+  final String? artistId;
+  final String? releaseId;
 
   factory SearchResultItem.fromJson(Map<String, dynamic> json) {
     final rawType = json['entityType'] as String;
@@ -60,6 +70,8 @@ class SearchResultItem {
           title: json['title'] as String,
           subtitle: 'Skladba',
           availability: availabilityFromJson(json['availability'] as String?),
+          artistId: json['artistId'] as String?,
+          releaseId: json['releaseId'] as String?,
         );
       default:
         throw FormatException('Neznámý entityType v /catalog/search: $rawType');

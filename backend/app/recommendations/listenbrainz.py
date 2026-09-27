@@ -54,6 +54,11 @@ class ListenBrainzClient:
         if resp.status_code == 404:
             raise ListenBrainzError(f"ListenBrainz 404 na {path}")
         resp.raise_for_status()
+        # LB vrací 204 (prázdné tělo) pro účty/entity bez dostatečných dat na
+        # spočtení statistiky -- to je legitimní "zatím nic", ne chyba, ale
+        # `.json()` na prázdném těle by spadlo na JSONDecodeError.
+        if resp.status_code == 204 or not resp.content:
+            return {}
         return resp.json()
 
     async def list_created_for_playlists(self, user_name: str) -> list[dict[str, Any]]:
@@ -109,3 +114,90 @@ async def close_listenbrainz_client() -> None:
     if _client is not None:
         await _client.aclose()
         _client = None
+
+
+# ---------------------------------------------------------------------
+# Veřejné listenbrainz.org — sitewide statistiky a similar-users existují
+# smysluplně jen na skutečné komunitní instanci (LB je počítá batch Spark
+# jobem nad celým datasetem), self-hosted `LISTENBRAINZ_BASE_URL` výše je
+# typicky jednouživatelská instance bez týhle pipeline. Proto samostatný
+# klient s napevno danou URL veřejného API, ne env-přepsatelný jako výše.
+# ---------------------------------------------------------------------
+
+LISTENBRAINZ_PUBLIC_API_BASE_URL = "https://api.listenbrainz.org"
+
+SITEWIDE_STATS_TTL_SECONDS = 60 * 60
+SIMILAR_USERS_TTL_SECONDS = 60 * 60 * 6
+USER_STATS_TTL_SECONDS = 60 * 60
+
+_public_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.2)
+
+
+class ListenBrainzPublicClient:
+    def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
+        self._client = http_client or httpx.AsyncClient(
+            base_url=LISTENBRAINZ_PUBLIC_API_BASE_URL, timeout=10.0
+        )
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        await _public_rate_limiter.wait()
+        try:
+            resp = await self._client.get(path, params=params or {})
+        except httpx.TransportError as exc:
+            raise ListenBrainzError(f"listenbrainz.org nedostupný: {exc}") from exc
+        if resp.status_code == 404:
+            raise ListenBrainzError(f"listenbrainz.org 404 na {path}")
+        resp.raise_for_status()
+        # 204 = LB nemá pro tenhle účet/rozsah spočtenou statistiku (nová
+        # nebo neaktivní konta) -- legitimní prázdný stav, ne chyba.
+        if resp.status_code == 204 or not resp.content:
+            return {}
+        return resp.json()
+
+    async def sitewide_top_recordings(self, range_: str, count: int) -> list[dict[str, Any]]:
+        cache_key = f"lb-public:sitewide-recordings:{range_}:{count}"
+
+        async def fetch() -> list[dict[str, Any]]:
+            data = await self._get("/1/stats/sitewide/recordings", {"range": range_, "count": count})
+            return data.get("payload", {}).get("recordings", [])
+
+        return await cached_json(cache_key, SITEWIDE_STATS_TTL_SECONDS, fetch)
+
+    async def similar_users(self, user_name: str, count: int) -> list[dict[str, Any]]:
+        cache_key = f"lb-public:similar-users:{user_name}"
+
+        async def fetch() -> list[dict[str, Any]]:
+            data = await self._get(f"/1/user/{user_name}/similar-users")
+            return data.get("payload", [])
+
+        users = await cached_json(cache_key, SIMILAR_USERS_TTL_SECONDS, fetch)
+        return users[:count]
+
+    async def user_top_recordings(self, user_name: str, range_: str, count: int) -> list[dict[str, Any]]:
+        cache_key = f"lb-public:user-recordings:{user_name}:{range_}:{count}"
+
+        async def fetch() -> list[dict[str, Any]]:
+            data = await self._get(f"/1/stats/user/{user_name}/recordings", {"range": range_, "count": count})
+            return data.get("payload", {}).get("recordings", [])
+
+        return await cached_json(cache_key, USER_STATS_TTL_SECONDS, fetch)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+
+_public_client: ListenBrainzPublicClient | None = None
+
+
+def get_listenbrainz_public_client() -> ListenBrainzPublicClient:
+    global _public_client
+    if _public_client is None:
+        _public_client = ListenBrainzPublicClient()
+    return _public_client
+
+
+async def close_listenbrainz_public_client() -> None:
+    global _public_client
+    if _public_client is not None:
+        await _public_client.aclose()
+        _public_client = None
