@@ -10,3 +10,7 @@
 /build/
 *.g.dart
 *.freezed.dart
+
+# IDE projektové soubory (IntelliJ/Android Studio) přidané `flutter create`.
+.idea/
+*.iml
