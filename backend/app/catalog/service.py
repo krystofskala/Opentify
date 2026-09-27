@@ -21,14 +21,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.catalog.availability import compute_availability
 from app.catalog.deezer import DeezerClient
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError
 from app.catalog.schemas import ArtistOut, DiscographyOut, ReleaseOut, RecordingOut
+from app.catalog.upsert import upsert_artist, upsert_recording, upsert_release
 from app.models import Artist, Recording, Release
-from app.utils import utcnow
 
 _MB_ENTITY_FOR_TYPE = {
     "artist": "artist",
@@ -64,96 +64,8 @@ class CatalogService:
         self._dz = deezer_client
 
     # ------------------------------------------------------------------
-    # Upsert helpery — jediné místo, kde se MB/Deezer JSON stává řádkem v DB.
-    # ------------------------------------------------------------------
-
-    def _upsert_artist(self, *, mbid: str | None, name: str, sort_name: str | None) -> Artist:
-        artist = None
-        if mbid:
-            artist = self._session.exec(select(Artist).where(Artist.mbid == mbid)).first()
-        if artist is None:
-            artist = Artist(mbid=mbid, name=name, sort_name=sort_name or name)
-            self._session.add(artist)
-        else:
-            artist.name = name
-            artist.sort_name = sort_name or artist.sort_name
-            artist.updated_at = utcnow()
-            self._session.add(artist)
-        self._session.commit()
-        self._session.refresh(artist)
-        return artist
-
-    def _upsert_release(
-        self,
-        *,
-        mbid: str | None,
-        artist_id: str,
-        title: str,
-        release_date: str | None,
-        release_type: str,
-    ) -> Release:
-        release = None
-        if mbid:
-            release = self._session.exec(select(Release).where(Release.mbid == mbid)).first()
-        if release is None:
-            release = Release(
-                mbid=mbid,
-                artist_id=artist_id,
-                title=title,
-                release_date=release_date,
-                release_type=release_type,
-            )
-            self._session.add(release)
-        else:
-            release.title = title
-            release.release_date = release_date or release.release_date
-            release.release_type = release_type
-            release.updated_at = utcnow()
-            self._session.add(release)
-        self._session.commit()
-        self._session.refresh(release)
-        return release
-
-    def _upsert_recording(
-        self,
-        *,
-        mbid: str | None,
-        release_id: str | None,
-        artist_id: str | None,
-        title: str,
-        duration_ms: int | None,
-        isrc: str | None,
-        track_number: int | None,
-    ) -> Recording:
-        recording = None
-        if mbid:
-            recording = self._session.exec(select(Recording).where(Recording.mbid == mbid)).first()
-        if recording is None:
-            recording = Recording(
-                mbid=mbid,
-                release_id=release_id,
-                artist_id=artist_id,
-                title=title,
-                duration_ms=duration_ms,
-                isrc=isrc,
-                track_number=track_number,
-            )
-            self._session.add(recording)
-        else:
-            recording.title = title
-            recording.release_id = release_id or recording.release_id
-            recording.artist_id = artist_id or recording.artist_id
-            recording.duration_ms = duration_ms or recording.duration_ms
-            recording.isrc = isrc or recording.isrc
-            recording.track_number = track_number or recording.track_number
-            recording.updated_at = utcnow()
-            self._session.add(recording)
-        self._session.commit()
-        self._session.refresh(recording)
-        return recording
-
-    # ------------------------------------------------------------------
-    # MB JSON -> lokální řádky
+    # MB JSON -> lokální řádky (upsert samotný žije v app.catalog.upsert,
+    # sdílený s RecommendationService)
     # ------------------------------------------------------------------
 
     def _ingest_artist_credit(self, artist_credit: list[dict[str, Any]] | None) -> Artist | None:
@@ -162,7 +74,8 @@ class CatalogService:
         primary = artist_credit[0].get("artist", {})
         if not primary.get("name"):
             return None
-        return self._upsert_artist(
+        return upsert_artist(
+            self._session,
             mbid=primary.get("id"),
             name=primary["name"],
             sort_name=primary.get("sort-name"),
@@ -178,7 +91,8 @@ class CatalogService:
             release_type = "compilation"
         else:
             release_type = _MB_PRIMARY_TYPE_TO_RELEASE_TYPE.get(primary_type, "album")
-        return self._upsert_release(
+        return upsert_release(
+            self._session,
             mbid=rg.get("id"),
             artist_id=artist.id,
             title=rg.get("title", "Untitled"),
@@ -200,7 +114,8 @@ class CatalogService:
                 )
                 release_id = release.id if release else None
         isrcs = rec.get("isrcs") or []
-        return self._upsert_recording(
+        return upsert_recording(
+            self._session,
             mbid=rec.get("id"),
             release_id=release_id,
             artist_id=artist.id if artist else None,
@@ -271,8 +186,11 @@ class CatalogService:
         for t, data in raw_results:
             if t == "artist":
                 for a in data.get("artists", []):
-                    artist = self._upsert_artist(
-                        mbid=a.get("id"), name=a.get("name", "Unknown"), sort_name=a.get("sort-name")
+                    artist = upsert_artist(
+                        self._session,
+                        mbid=a.get("id"),
+                        name=a.get("name", "Unknown"),
+                        sort_name=a.get("sort-name"),
                     )
                     results.append(
                         {"entityType": "artist", **self._to_artist_out(artist).model_dump(by_alias=True)}
@@ -375,7 +293,8 @@ class CatalogService:
                 if not title:
                     continue
                 isrcs = rec_json.get("isrcs") or []
-                recording = self._upsert_recording(
+                recording = upsert_recording(
+                    self._session,
                     mbid=rec_json.get("id") or track.get("id"),
                     release_id=release.id,
                     artist_id=release.artist_id,

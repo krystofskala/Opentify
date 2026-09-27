@@ -40,6 +40,12 @@ class ProvisioningJobStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 
+class PlaylistKind(str, enum.Enum):
+    USER = "USER"
+    GENERATED_RECOMMENDATION = "GENERATED_RECOMMENDATION"
+    RADIO = "RADIO"
+
+
 class Artist(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     mbid: str | None = Field(default=None, index=True, unique=True)
@@ -111,3 +117,22 @@ class ProvisioningJob(SQLModel, table=True):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error_message: str | None = None
+
+
+class Playlist(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    owner_user_id: str = Field(index=True)
+    title: str
+    kind: PlaylistKind = Field(default=PlaylistKind.USER)
+    source: str | None = Field(default=None, index=True)  # např. "listenbrainz:daily-jams"
+    generated_at: datetime | None = None
+    is_pinned: bool = False
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class PlaylistItem(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    playlist_id: str = Field(foreign_key="playlist.id", index=True)
+    recording_id: str = Field(foreign_key="recording.id", index=True)
+    position: int = 0
+    added_at: datetime = Field(default_factory=utcnow)
