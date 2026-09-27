@@ -1,6 +1,7 @@
 """REST routy pro osobní knihovnu — `/library/*`:
 
-  - `POST /library/scan`           -- projde lokální hudební soubory (MUSIC_DIR).
+  - `POST /library/scan`           -- spustí sken lokálních souborů (MUSIC_DIR) na pozadí.
+  - `GET  /library/scan/status`    -- průběh běžícího/posledního skenu.
   - `POST /library/import/spotify` -- naimportuje Spotify `YourLibrary.json`.
   - `GET  /library/liked-songs`    -- vrátí naimportované/lokální "Liked Songs".
 
@@ -12,8 +13,10 @@ přes `Depends`, takže samostatná service třída by byla jen obálka navíc.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -22,8 +25,8 @@ from sqlmodel import Session, select
 from app.auth import get_current_user
 from app.catalog.availability import compute_availability
 from app.catalog.schemas import RecordingOut
-from app.db import get_session
-from app.library.scanner import scan_library
+from app.db import engine, get_session
+from app.library.scanner import ScanProgress, get_scan_progress, scan_library
 from app.library.spotify_import import LIKED_SONGS_SOURCE, LIKED_SONGS_TITLE, import_spotify_library
 from app.models import Playlist, PlaylistItem, PlaylistKind, Recording
 
@@ -35,19 +38,44 @@ library_router = APIRouter(prefix="/library", tags=["library"])
 LOCAL_MUSIC_ROOT = Path(os.environ.get("LOCAL_MUSIC_ROOT", "/data/local-music"))
 
 
-@library_router.post("/scan")
-def scan(
-    session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
-):
-    result = scan_library(session, LOCAL_MUSIC_ROOT)
+def _progress_dict(p: ScanProgress) -> dict:
     return {
-        "root": str(LOCAL_MUSIC_ROOT),
-        "scanned": result.scanned,
-        "matched": result.matched,
-        "skippedNoTags": result.skipped_no_tags,
-        "errors": result.errors,
+        "status": p.status,
+        "root": p.root,
+        "totalFiles": p.total_files,
+        "scanned": p.scanned,
+        "matchedMusicbrainz": p.matched_musicbrainz,
+        "matchedLocal": p.matched_local,
+        "alreadyScanned": p.already_scanned,
+        "skippedNoTags": p.skipped_no_tags,
+        "errors": p.errors,
+        "errorMessage": p.error_message,
     }
+
+
+@library_router.post("/scan")
+async def scan(_current: tuple[str, str] = Depends(get_current_user)):
+    progress = get_scan_progress()
+    if progress.status == "running":
+        # Už jeden běží (např. po refreshi stránky) -- jen vrať jeho stav,
+        # nezakládej druhý souběžný sken.
+        return _progress_dict(progress)
+
+    async def _run() -> None:
+        # Vlastní DB session -- request-scoped `Depends(get_session)` by se
+        # zavřela hned po návratu z tohohle handleru, sken ale běží dál jako
+        # samostatná asyncio úloha (MusicBrainz limituje na 1 req/s, tisíce
+        # souborů by se v jednom HTTP requestu dávno nestihly).
+        with Session(engine) as session:
+            await scan_library(session, LOCAL_MUSIC_ROOT)
+
+    asyncio.create_task(_run())
+    return {"status": "started", "root": str(LOCAL_MUSIC_ROOT)}
+
+
+@library_router.get("/scan/status")
+def scan_status(_current: tuple[str, str] = Depends(get_current_user)):
+    return _progress_dict(get_scan_progress())
 
 
 @library_router.post("/import/spotify")
@@ -60,16 +88,17 @@ async def import_spotify(
     raw = await file.read()
     try:
         result = import_spotify_library(session, user_id, raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, zipfile.BadZipFile) as exc:
         raise HTTPException(
             status_code=400,
-            detail="Neplatný JSON -- očekává se Spotify `YourLibrary.json` export.",
+            detail="Nepodařilo se rozpoznat formát -- očekává se ZIP s CSV playlisty nebo `YourLibrary.json`.",
         ) from exc
     return {
         "totalInFile": result.total_in_file,
         "matched": result.matched,
-        "alreadyLiked": result.already_liked,
+        "alreadyPresent": result.already_present,
         "skipped": result.skipped,
+        "playlistsImported": result.playlists_imported,
     }
 
 

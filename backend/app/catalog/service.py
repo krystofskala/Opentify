@@ -309,6 +309,23 @@ class CatalogService:
         recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
         return [self._to_recording_out(r) for r in recordings]
 
+    async def match_recording_by_text(self, query: str) -> Recording | None:
+        """Najde a napojí nahrávku na MusicBrainz podle volného textu (typicky
+        "interpret název" z ID3 tagů) -- používá `app/library/scanner.py` pro
+        lokální soubory se špatnými/chybějícími/nesouvisejícími názvy složek:
+        na rozdíl od jména souboru MusicBrainz search výsledek nezávisí na
+        tom, jak je track lokálně pojmenovaný. Vezme jen první (nejrelevantnější)
+        výsledek -- žádné ruční rozhodování mezi kandidáty, stejné zjednodušení
+        jako `search()` bere search výsledky tak, jak přijdou z MB."""
+        try:
+            data = await self._mb.search("recording", query, limit=1, offset=0)
+        except MusicBrainzError:
+            return None
+        recordings = data.get("recordings", [])
+        if not recordings:
+            return None
+        return self._ingest_recording_search_json(recordings[0])
+
     # ------------------------------------------------------------------
     # Deezer enrichment — best-effort, nikdy nesmí shodit request na MB datech.
     # ------------------------------------------------------------------

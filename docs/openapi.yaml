@@ -394,8 +394,13 @@ paths:
     post:
       tags: [library]
       summary: >
-        Projde lokální hudební knihovnu (bind mount MUSIC_DIR, kontejnerová
-        cesta /data/local-music) a zaeviduje nalezené soubory jako available.
+        Spustí na pozadí sken lokální hudební knihovny (bind mount MUSIC_DIR,
+        kontejnerová cesta /data/local-music) -- páruje soubory na MusicBrainz
+        podle tagů (ne podle často nespolehlivého jména složky/souboru),
+        dotáhne obaly přes Deezer a zaeviduje je jako available. Vrací se
+        okamžitě (MusicBrainz limituje na 1 request/s, sken tisíců souborů by
+        v jednom HTTP requestu nestihl doběhnout) -- průběh sleduj přes
+        `GET /library/scan/status`.
       responses:
         "200":
           description: OK
@@ -404,18 +409,41 @@ paths:
               schema:
                 type: object
                 properties:
+                  status: { type: string, enum: [started, running] }
                   root: { type: string }
+
+  /library/scan/status:
+    get:
+      tags: [library]
+      summary: Průběh běžícího/posledního skenu spuštěného přes POST /library/scan.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [idle, running, done, error] }
+                  root: { type: string }
+                  totalFiles: { type: integer }
                   scanned: { type: integer }
-                  matched: { type: integer }
+                  matchedMusicbrainz: { type: integer }
+                  matchedLocal: { type: integer }
+                  alreadyScanned: { type: integer }
                   skippedNoTags: { type: integer }
                   errors: { type: integer }
+                  errorMessage: { type: string, nullable: true }
 
   /library/import/spotify:
     post:
       tags: [library]
       summary: >
-        Naimportuje Spotify "Your Library" export (YourLibrary.json) do
-        Liked Songs — páruje skladby na katalog jménem, ne přes MusicBrainz.
+        Naimportuje Spotify export -- autodetekce podle obsahu, ne přípony:
+        ZIP s CSV playlisty (Exportify apod., jeden soubor na playlist,
+        `Liked_Songs.csv` jde do Liked Songs, ostatní se stanou vlastními
+        playlisty) nebo oficiální `YourLibrary.json` (vždy do Liked Songs).
+        Páruje skladby na katalog jménem, ne přes MusicBrainz.
       requestBody:
         required: true
         content:
@@ -434,9 +462,10 @@ paths:
                 properties:
                   totalInFile: { type: integer }
                   matched: { type: integer }
-                  alreadyLiked: { type: integer }
+                  alreadyPresent: { type: integer }
                   skipped: { type: integer }
-        "400": { description: Neplatný JSON export }
+                  playlistsImported: { type: integer }
+        "400": { description: Nerozpoznaný formát (ani ZIP, ani JSON) }
 
   /library/liked-songs:
     get:

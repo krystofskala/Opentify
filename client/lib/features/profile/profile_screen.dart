@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/library_repository.dart';
 import '../../models/playlist_model.dart';
 import '../../state/providers.dart';
 import '../../widgets/glass_container.dart';
@@ -13,22 +16,61 @@ final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref)
   return ref.watch(libraryRepositoryProvider).likedSongs();
 });
 
+/// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
+/// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
+/// tenhle provider čte jeho aktuální stav; `ProfileScreen` ho drží
+/// pravidelně obnovovaný, dokud `status == running`.
+final scanStatusProvider = FutureProvider.autoDispose<LibraryScanStatus>((ref) {
+  return ref.watch(libraryRepositoryProvider).scanStatus();
+});
+
 /// Osobní profil: import Spotify "Liked Songs" exportu a sken lokální hudební
 /// knihovny (`MUSIC_DIR`, viz docker-compose.yml) -- obojí naplňuje stejnou
 /// lokální knihovnu, na které teď primárně staví "Daily Jams" na Home
 /// (viz `RecommendationService.daily_jams`).
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  Timer? _pollTimer;
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Zavolat po každém načtení stavu -- pokud sken běží, spustí (nebo nechá
+  /// běžet) pravidelné dotazování; jakmile doběhne, časovač sám zruší.
+  void _syncPolling(LibraryScanStatus status) {
+    if (status.isRunning) {
+      _pollTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
+        ref.invalidate(scanStatusProvider);
+      });
+    } else {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final likedSongs = ref.watch(likedSongsProvider);
+    final scanStatus = ref.watch(scanStatusProvider);
+    scanStatus.whenData(_syncPolling);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
       bottomNavigationBar: const PlayerBar(),
       body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(likedSongsProvider),
+        onRefresh: () async {
+          ref.invalidate(likedSongsProvider);
+          ref.invalidate(scanStatusProvider);
+        },
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -36,11 +78,12 @@ class ProfileScreen extends ConsumerWidget {
               icon: Icons.cloud_upload_outlined,
               title: 'Import ze Spotify',
               description:
-                  'Nahraj YourLibrary.json ze svého Spotify exportu (Nastavení účtu → '
-                  'Soukromí → Stáhnout svá data). Naimportované skladby se objeví níž '
-                  'jako Liked Songs a použijí se pro tvůj denní mix.',
+                  'Nahraj export playlistů (ZIP s CSV, např. z Exportify) nebo '
+                  'YourLibrary.json z oficiálního Spotify exportu. Liked Songs se '
+                  'použijí pro tvůj denní mix, ostatní playlisty se naimportují '
+                  'pod svým jménem.',
               buttonLabel: 'Vybrat soubor…',
-              onPressed: () => _importFromSpotify(context, ref),
+              onPressed: () => _importFromSpotify(context),
             ),
             const SizedBox(height: 12),
             _ActionCard(
@@ -48,9 +91,17 @@ class ProfileScreen extends ConsumerWidget {
               title: 'Lokální knihovna',
               description:
                   'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
-                  'v .env) a zaeviduje je jako rovnou dostupné, bez obstarávání.',
-              buttonLabel: 'Skenovat knihovnu',
-              onPressed: () => _scanLibrary(context, ref),
+                  'v .env), spáruje je na MusicBrainz podle tagů (ne podle jména '
+                  'souboru/složky) a dotáhne obaly. Běží na pozadí -- MusicBrainz '
+                  'dovolí jen 1 dotaz za sekundu, u větší knihovny to chvíli potrvá.',
+              buttonLabel: scanStatus.valueOrNull?.isRunning == true ? 'Skenuji…' : 'Skenovat knihovnu',
+              onPressed: scanStatus.valueOrNull?.isRunning == true ? null : () => _startScan(context),
+            ),
+            scanStatus.maybeWhen(
+              data: (status) => status.status == 'idle'
+                  ? const SizedBox.shrink()
+                  : Padding(padding: const EdgeInsets.only(top: 12), child: _ScanStatusCard(status: status)),
+              orElse: () => const SizedBox.shrink(),
             ),
             const SizedBox(height: 20),
             Text('Liked Songs', style: Theme.of(context).textTheme.titleLarge),
@@ -74,10 +125,10 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _importFromSpotify(BuildContext context, WidgetRef ref) async {
+  Future<void> _importFromSpotify(BuildContext context) async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['json'],
+      allowedExtensions: ['json', 'zip'],
       withData: true,
     );
     if (picked == null || picked.files.isEmpty) return; // uživatel zavřel dialog
@@ -95,8 +146,8 @@ class ProfileScreen extends ConsumerWidget {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'Hotovo: ${result.matched}/${result.totalInFile} napárováno '
-            '(${result.alreadyLiked} už bylo v Liked Songs, ${result.skipped} přeskočeno).',
+            'Hotovo: ${result.matched}/${result.totalInFile} napárováno napříč '
+            '${result.playlistsImported} playlisty (${result.skipped} přeskočeno).',
           ),
         ),
       );
@@ -105,22 +156,74 @@ class ProfileScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _scanLibrary(BuildContext context, WidgetRef ref) async {
+  Future<void> _startScan(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(const SnackBar(content: Text('Skenuji knihovnu…')));
     try {
-      final result = await ref.read(libraryRepositoryProvider).scan();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Nalezeno ${result.scanned} souborů v ${result.root}, '
-            '${result.matched} zaevidováno, ${result.skippedNoTags} bez tagů, ${result.errors} chyb.',
-          ),
-        ),
-      );
+      await ref.read(libraryRepositoryProvider).startScan();
+      ref.invalidate(scanStatusProvider);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Sken selhal: $e')));
+      messenger.showSnackBar(SnackBar(content: Text('Sken se nepodařilo spustit: $e')));
     }
+  }
+}
+
+class _ScanStatusCard extends StatelessWidget {
+  const _ScanStatusCard({required this.status});
+  final LibraryScanStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final progress = status.totalFiles == 0 ? null : status.scanned / status.totalFiles;
+
+    return GlassContainer(
+      borderRadius: BorderRadius.circular(14),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                switch (status.status) {
+                  'running' => Icons.sync,
+                  'done' => Icons.check_circle_outline,
+                  'error' => Icons.error_outline,
+                  _ => Icons.info_outline,
+                },
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                switch (status.status) {
+                  'running' => 'Skenuji ${status.root}…',
+                  'done' => 'Sken dokončen',
+                  'error' => 'Sken selhal',
+                  _ => status.status,
+                },
+                style: theme.textTheme.titleSmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (status.errorMessage != null)
+            Text(status.errorMessage!, style: TextStyle(color: theme.colorScheme.error))
+          else ...[
+            LinearProgressIndicator(value: progress),
+            const SizedBox(height: 6),
+            Text(
+              '${status.scanned}/${status.totalFiles} souborů · '
+              '${status.matchedMusicbrainz} přes MusicBrainz · '
+              '${status.matchedLocal} jen lokálně · '
+              '${status.alreadyScanned} už dřív naskenováno · '
+              '${status.skippedNoTags} bez tagů · '
+              '${status.errors} chyb',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -137,7 +240,7 @@ class _ActionCard extends StatelessWidget {
   final String title;
   final String description;
   final String buttonLabel;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
