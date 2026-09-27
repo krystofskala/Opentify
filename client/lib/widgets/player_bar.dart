@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../state/audio_player_controller.dart';
 
@@ -23,8 +24,8 @@ class PlayerBar extends ConsumerWidget {
     final theme = Theme.of(context);
     final accent = playback.accentColor ?? theme.colorScheme.primary;
     final duration = playback.duration ?? Duration.zero;
-    final positionMs =
-        playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
+    final positionMs = playback.position.inMilliseconds
+        .clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -34,7 +35,8 @@ class PlayerBar extends ConsumerWidget {
           children: [
             if (nowPlaying.artworkUrl != null)
               Positioned.fill(
-                child: CachedNetworkImage(imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover),
+                child: CachedNetworkImage(
+                    imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover),
               )
             else
               Positioned.fill(child: Container(color: accent)),
@@ -52,7 +54,8 @@ class PlayerBar extends ConsumerWidget {
                         Colors.black.withValues(alpha: 0.55),
                       ],
                     ),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.14)),
                   ),
                 ),
               ),
@@ -62,86 +65,106 @@ class PlayerBar extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Neinteraktivní ukazatel -- jen "at a glance" průběh, žádný
+                  // Slider. Flutterí Slider si i přes vizuálně tenký track
+                  // (trackHeight: 2) drží dotykovou plochu ~40dp vysokou, což
+                  // v týhle 8px liště kradlo tapy určené pro rozbalení Now
+                  // Playing pod ním -- klik na řádek dole místo expandu
+                  // omylem seekoval skladbu. Reálný seek slider zůstává jen
+                  // v `NowPlayingScreen`, přesně jak to řeší PixelPlayer.
                   SizedBox(
-                    height: 8,
+                    height: 3,
                     child: duration.inMilliseconds == 0
                         ? (playback.isBuffering
-                            ? const LinearProgressIndicator(minHeight: 2, backgroundColor: Colors.transparent)
+                            ? const LinearProgressIndicator(
+                                minHeight: 3,
+                                backgroundColor: Colors.transparent)
                             : const SizedBox.shrink())
-                        : SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              trackHeight: 2,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              overlayShape: SliderComponentShape.noOverlay,
-                              activeTrackColor: Colors.white,
-                              inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
-                              thumbColor: Colors.white,
-                            ),
-                            child: Slider(
-                              value: positionMs.toDouble(),
-                              max: duration.inMilliseconds.toDouble(),
-                              onChanged: (value) => ref
-                                  .read(audioPlayerControllerProvider.notifier)
-                                  .seek(Duration(milliseconds: value.round())),
-                            ),
+                        : LinearProgressIndicator(
+                            value: positionMs / duration.inMilliseconds,
+                            minHeight: 3,
+                            backgroundColor: Colors.white.withValues(alpha: 0.25),
+                            valueColor: const AlwaysStoppedAnimation(Colors.white),
                           ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: SizedBox(
-                            width: 44,
-                            height: 44,
-                            child: nowPlaying.artworkUrl != null
-                                ? CachedNetworkImage(imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover)
-                                : Container(
-                                    color: Colors.white.withValues(alpha: 0.15),
-                                    child: const Icon(Icons.music_note, color: Colors.white, size: 20),
-                                  ),
+                  InkWell(
+                    // Klik kdekoliv na řádek (mimo samotné tlačítko play/pause
+                    // vpravo, které si tap vezme samo) rozbalí celoobrazovkový
+                    // přehrávač -- "nejde zvětšit" byl reálný nedostatek dřívější
+                    // verze, PixelPlayer to řeší přesně takhle (mini bar -> Now Playing).
+                    onTap: () => context.push('/now-playing'),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: nowPlaying.artworkUrl != null
+                                  ? CachedNetworkImage(
+                                      imageUrl: nowPlaying.artworkUrl!,
+                                      fit: BoxFit.cover)
+                                  : Container(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.15),
+                                      child: const Icon(Icons.music_note,
+                                          color: Colors.white, size: 20),
+                                    ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                nowPlaying.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                              ),
-                              if (nowPlaying.artistName != null)
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
-                                  nowPlaying.artistName!,
+                                  nowPlaying.title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600),
                                 ),
-                            ],
+                                if (nowPlaying.artistName != null)
+                                  Text(
+                                    nowPlaying.artistName!,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.75),
+                                        fontSize: 12),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          icon: playback.isBuffering
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : Icon(
-                                  playback.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                  color: Colors.white,
-                                  size: 38,
-                                ),
-                          onPressed: playback.isBuffering
-                              ? null
-                              : () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
-                        ),
-                      ],
+                          IconButton(
+                            icon: playback.isBuffering
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: Colors.white),
+                                  )
+                                : Icon(
+                                    playback.isPlaying
+                                        ? Icons.pause_circle_filled
+                                        : Icons.play_circle_filled,
+                                    color: Colors.white,
+                                    size: 38,
+                                  ),
+                            onPressed: playback.isBuffering
+                                ? null
+                                : () => ref
+                                    .read(
+                                        audioPlayerControllerProvider.notifier)
+                                    .togglePlayPause(),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

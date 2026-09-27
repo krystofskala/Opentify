@@ -461,6 +461,46 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Recording" }
 
+  /library/local-albums:
+    get:
+      tags: [library]
+      summary: Alba z lokální knihovny, seskupená (jeden dotaz, ne per-track).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    title: { type: string }
+                    coverImageUrl: { type: string, nullable: true }
+                    artistId: { type: string, format: uuid }
+                    artistName: { type: string }
+                    trackCount: { type: integer }
+
+  /library/local-artists:
+    get:
+      tags: [library]
+      summary: Interpreti z lokální knihovny, seskupení (jeden dotaz, ne per-track).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    name: { type: string }
+                    imageUrl: { type: string, nullable: true }
+                    trackCount: { type: integer }
+
   /library/import/spotify:
     post:
       tags: [library]

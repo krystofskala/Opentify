@@ -8,7 +8,6 @@ import '../../data/library_repository.dart';
 import '../../models/playlist_model.dart';
 import '../../state/providers.dart';
 import '../../widgets/glass_container.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/recording_tile.dart';
 import '../home/home_screen.dart' show dailyJamsProvider;
 
@@ -65,7 +64,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),
-      bottomNavigationBar: const PlayerBar(),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(likedSongsProvider);

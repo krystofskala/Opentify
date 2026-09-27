@@ -1,9 +1,11 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/artist/artist_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/local_library_screen.dart';
+import '../features/player/now_playing_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
@@ -37,6 +39,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/releases/:releaseId',
         builder: (context, state) => ReleaseScreen(releaseId: state.pathParameters['releaseId']!),
+      ),
+      GoRoute(
+        path: '/now-playing',
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const NowPlayingScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) => SlideTransition(
+            position: Tween(begin: const Offset(0, 1), end: Offset.zero)
+                .chain(CurveTween(curve: Curves.easeOutCubic))
+                .animate(animation),
+            child: child,
+          ),
+        ),
       ),
     ],
   );

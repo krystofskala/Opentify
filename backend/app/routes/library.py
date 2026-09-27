@@ -3,6 +3,8 @@
   - `POST /library/scan`           -- spustí sken lokálních souborů (MUSIC_DIR) na pozadí.
   - `GET  /library/scan/status`    -- průběh běžícího/posledního skenu.
   - `GET  /library/local-tracks`   -- naskenované lokální soubory, rovnou přehratelné.
+  - `GET  /library/local-albums`   -- ta samá knihovna seskupená po albech.
+  - `GET  /library/local-artists`  -- ta samá knihovna seskupená po interpretech.
   - `POST /library/import/spotify` -- naimportuje Spotify export (ZIP/JSON).
   - `GET  /library/liked-songs`    -- vrátí naimportované/lokální "Liked Songs".
 
@@ -21,6 +23,7 @@ import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
@@ -29,7 +32,9 @@ from app.catalog.schemas import RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
 from app.library.spotify_import import LIKED_SONGS_SOURCE, LIKED_SONGS_TITLE, import_spotify_library
-from app.models import MediaAsset, Playlist, PlaylistItem, PlaylistKind, Recording
+from app.models import Artist, MediaAsset, Playlist, PlaylistItem, PlaylistKind, Recording, Release
+
+_LOCAL_SOURCE_PROVIDERS = ["local", "musicbrainz-local"]
 
 library_router = APIRouter(prefix="/library", tags=["library"])
 
@@ -89,7 +94,7 @@ def local_tracks(
     """Nahrávky naskenované z lokální knihovny (`POST /library/scan`) --
     `MediaAsset.status` je u nich vždy `AVAILABLE` bez provisioningu, takže
     jde v klientu o obrazovku "přehraj rovnou"."""
-    base_query = select(MediaAsset).where(MediaAsset.source_provider.in_(["local", "musicbrainz-local"]))
+    base_query = select(MediaAsset).where(MediaAsset.source_provider.in_(_LOCAL_SOURCE_PROVIDERS))
     total = len(session.exec(base_query).all())
     assets = session.exec(
         base_query.order_by(MediaAsset.updated_at.desc()).offset(offset).limit(limit)
@@ -116,6 +121,71 @@ def local_tracks(
         )
 
     return {"total": total, "items": [i.model_dump(by_alias=True) for i in items]}
+
+
+@library_router.get("/local-albums")
+def local_albums(
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """Alba seskupená z lokální knihovny -- jeden SQL dotaz místo N+1 dotazů
+    z klienta (viz `LocalLibraryScreen` záložka "Alba"). Vrací jen alba, ke
+    kterým je zaevidovaná aspoň jedna lokální nahrávka."""
+    rows = session.exec(
+        select(
+            Release.id,
+            Release.title,
+            Release.images,
+            Release.artist_id,
+            Artist.name,
+            func.count(func.distinct(Recording.id)),
+        )
+        .join(Recording, Recording.release_id == Release.id)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .join(Artist, Artist.id == Release.artist_id)
+        .where(MediaAsset.source_provider.in_(_LOCAL_SOURCE_PROVIDERS))
+        .group_by(Release.id)
+        .order_by(Artist.name, Release.title)
+    ).all()
+
+    return [
+        {
+            "id": release_id,
+            "title": title,
+            "coverImageUrl": images[0] if images else None,
+            "artistId": artist_id,
+            "artistName": artist_name,
+            "trackCount": track_count,
+        }
+        for release_id, title, images, artist_id, artist_name, track_count in rows
+    ]
+
+
+@library_router.get("/local-artists")
+def local_artists(
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """Interpreti seskupení z lokální knihovny -- viz `local_albums`, stejný
+    princip (jeden GROUP BY dotaz, ne N+1 z klienta)."""
+    rows = session.exec(
+        select(Artist.id, Artist.name, Artist.images, func.count(func.distinct(Recording.id)))
+        .join(Recording, Recording.artist_id == Artist.id)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .where(MediaAsset.source_provider.in_(_LOCAL_SOURCE_PROVIDERS))
+        .group_by(Artist.id)
+        .order_by(Artist.name)
+    ).all()
+
+    return [
+        {
+            "id": artist_id,
+            "name": name,
+            "imageUrl": images[0] if images else None,
+            "trackCount": track_count,
+        }
+        for artist_id, name, images, track_count in rows
+    ]
 
 
 @library_router.post("/import/spotify")

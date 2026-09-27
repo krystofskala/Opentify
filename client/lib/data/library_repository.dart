@@ -17,6 +17,51 @@ class LocalTracksPage {
       );
 }
 
+/// Album seskupené z lokální knihovny (`GET /library/local-albums`).
+class LocalAlbum {
+  const LocalAlbum({
+    required this.id,
+    required this.title,
+    this.coverImageUrl,
+    required this.artistId,
+    required this.artistName,
+    required this.trackCount,
+  });
+
+  final String id;
+  final String title;
+  final String? coverImageUrl;
+  final String artistId;
+  final String artistName;
+  final int trackCount;
+
+  factory LocalAlbum.fromJson(Map<String, dynamic> json) => LocalAlbum(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        coverImageUrl: json['coverImageUrl'] as String?,
+        artistId: json['artistId'] as String,
+        artistName: json['artistName'] as String,
+        trackCount: json['trackCount'] as int,
+      );
+}
+
+/// Interpret seskupený z lokální knihovny (`GET /library/local-artists`).
+class LocalArtist {
+  const LocalArtist({required this.id, required this.name, this.imageUrl, required this.trackCount});
+
+  final String id;
+  final String name;
+  final String? imageUrl;
+  final int trackCount;
+
+  factory LocalArtist.fromJson(Map<String, dynamic> json) => LocalArtist(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        imageUrl: json['imageUrl'] as String?,
+        trackCount: json['trackCount'] as int,
+      );
+}
+
 /// Průběh skenu (`POST /library/scan` ho jen odstartuje na pozadí --
 /// MusicBrainz limituje na 1 request/s, takže tisíce souborů by se v jednom
 /// HTTP requestu nestihly, viz backend `app/library/scanner.py`).
@@ -126,5 +171,17 @@ class LibraryRepository {
   Future<LocalTracksPage> localTracks({int limit = 100, int offset = 0}) async {
     final json = await _api.getJson('/library/local-tracks', query: {'limit': '$limit', 'offset': '$offset'});
     return LocalTracksPage.fromJson(json);
+  }
+
+  /// Stejná knihovna seskupená po albech -- jeden dotaz na backendu, ne
+  /// N+1 z klienta (viz `routes/library.py::local_albums`).
+  Future<List<LocalAlbum>> localAlbums() async {
+    final json = await _api.getJsonList('/library/local-albums');
+    return json.map((e) => LocalAlbum.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<LocalArtist>> localArtists() async {
+    final json = await _api.getJsonList('/library/local-artists');
+    return json.map((e) => LocalArtist.fromJson(e as Map<String, dynamic>)).toList();
   }
 }
