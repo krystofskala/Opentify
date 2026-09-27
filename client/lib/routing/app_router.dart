@@ -1,0 +1,35 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../features/artist/artist_screen.dart';
+import '../features/home/home_screen.dart';
+import '../features/release/release_screen.dart';
+import '../features/search/search_screen.dart';
+import 'home_shell.dart';
+
+final appRouterProvider = Provider<GoRouter>((ref) {
+  return GoRouter(
+    initialLocation: '/',
+    routes: [
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) => HomeShell(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
+          ]),
+        ],
+      ),
+      GoRoute(
+        path: '/artists/:artistId',
+        builder: (context, state) => ArtistScreen(artistId: state.pathParameters['artistId']!),
+      ),
+      GoRoute(
+        path: '/releases/:releaseId',
+        builder: (context, state) => ReleaseScreen(releaseId: state.pathParameters['releaseId']!),
+      ),
+    ],
+  );
+});

@@ -4,8 +4,10 @@ zatím jde o provisioning flow + minimální WS realtime hub."""
 from __future__ import annotations
 
 import asyncio
+import os
 
 from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.catalog.deezer import close_deezer_client
 from app.catalog.musicbrainz import close_musicbrainz_client
@@ -17,6 +19,23 @@ from app.routes.provisioning import jobs_router, tracks_router
 from app.routes.recommendations import recommendations_router
 
 app = FastAPI(title="Vault API", version="0.1.0")
+
+# Flutter web klient (client/) běží při vývoji na jiném originu než backend
+# (`flutter run -d chrome` má vlastní dev server port), takže bez CORS by
+# prohlížeč každý REST request zablokoval. Celý systém žije jen za
+# Tailscale/VPN (docs/ARCHITECTURE.md) -- povolit origin natvrdo na
+# "*" tady neotevírá nic navíc, co by VPN perimetr nekryl už teď; přesto
+# jde přepsat na konkrétní origin(y) přes env, jakmile bude jasné, odkud se
+# web klient reálně servíruje.
+_cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(tracks_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")

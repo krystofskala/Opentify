@@ -1,0 +1,12 @@
+# Standardní Flutter/Dart ignores. Platformní složky (android/, ios/, web/,
+# linux/, windows/) vzniknou až `flutter create` (viz README.md) a přinesou
+# si vlastní .gitignore pro svoje build výstupy (Pods/, .gradle/ apod.) —
+# nesnažíme se je odhadovat tady předem.
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+*.g.dart
+*.freezed.dart
