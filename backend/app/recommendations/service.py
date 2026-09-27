@@ -27,6 +27,7 @@ from app.catalog.schemas import RecordingOut
 from app.catalog.upsert import upsert_artist, upsert_recording
 from app.library.spotify_import import LIKED_SONGS_SOURCE
 from app.models import Playlist, PlaylistItem, PlaylistKind, Recording
+from app.recommendations.anti_ai_filter import AntiAIFilter
 from app.recommendations.listenbrainz import (
     ListenBrainzClient,
     ListenBrainzError,
@@ -64,6 +65,7 @@ class RecommendationService:
         self._session = session
         self._lb = lb_client
         self._lb_public = lb_public_client
+        self._anti_ai = AntiAIFilter()
 
     # ------------------------------------------------------------------
     # JSPF track -> lokální Recording
@@ -73,6 +75,8 @@ class RecommendationService:
         title = track.get("title")
         if not title:
             return None
+        if self._anti_ai.is_blocked_jspf_track(track):
+            return None  # AI-spam vzorec v názvu/interpretovi -- viz AntiAIFilter
 
         recording_mbid = _mbid_from_identifier(track.get("identifier"))
         artist_name = track.get("creator") or "Unknown Artist"
@@ -155,6 +159,7 @@ class RecommendationService:
 
         async def resolve_and_cache() -> list[dict[str, Any]]:
             entries = await fetch_entries()
+            entries = self._anti_ai.filter_stats_entries(entries)  # AI spam ven, viz AntiAIFilter
             resolved: list[dict[str, Any]] = []
             seen: set[str] = set()
             for entry in entries:

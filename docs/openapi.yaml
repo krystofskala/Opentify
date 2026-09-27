@@ -435,6 +435,32 @@ paths:
                   errors: { type: integer }
                   errorMessage: { type: string, nullable: true }
 
+  /library/local-tracks:
+    get:
+      tags: [library]
+      summary: >
+        Nahrávky naskenované z lokální knihovny (POST /library/scan) --
+        vždy AVAILABLE bez provisioningu, rovnou přehratelné.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Recording" }
+
   /library/import/spotify:
     post:
       tags: [library]

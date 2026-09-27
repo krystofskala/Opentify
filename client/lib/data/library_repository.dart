@@ -1,5 +1,21 @@
 import '../core/api_client.dart';
 import '../models/playlist_model.dart';
+import '../models/recording_model.dart';
+
+/// Stránkovaný výsledek `GET /library/local-tracks`.
+class LocalTracksPage {
+  const LocalTracksPage({required this.total, required this.items});
+
+  final int total;
+  final List<RecordingModel> items;
+
+  factory LocalTracksPage.fromJson(Map<String, dynamic> json) => LocalTracksPage(
+        total: json['total'] as int,
+        items: (json['items'] as List<dynamic>)
+            .map((e) => RecordingModel.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
 
 /// Průběh skenu (`POST /library/scan` ho jen odstartuje na pozadí --
 /// MusicBrainz limituje na 1 request/s, takže tisíce souborů by se v jednom
@@ -103,5 +119,12 @@ class LibraryRepository {
   Future<PlaylistDetailModel> likedSongs() async {
     final json = await _api.getJson('/library/liked-songs');
     return PlaylistDetailModel.fromJson(json);
+  }
+
+  /// Naskenované lokální soubory (`POST /library/scan`) -- vždy `available`,
+  /// takže je jde v klientu rovnou přehrát bez obstarávání.
+  Future<LocalTracksPage> localTracks({int limit = 100, int offset = 0}) async {
+    final json = await _api.getJson('/library/local-tracks', query: {'limit': '$limit', 'offset': '$offset'});
+    return LocalTracksPage.fromJson(json);
   }
 }
