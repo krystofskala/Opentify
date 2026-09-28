@@ -491,6 +491,23 @@ class CatalogService:
             if release is not None:
                 releases.append(release)
 
+        # MusicBrainz má u menších interpretů mezery (živě: Hector Gachan --
+        # MB 2 alba, Deezer 17 vydání vč. 14 singlů). Doplníme z Deezeru to,
+        # co v MB chybí; shoda podle normalizovaného názvu, ať se alba
+        # nezdvojí ("Untitled '91" z MB i z Deezeru = jedno).
+        try:
+            deezer_releases = await self._deezer_discography(artist)
+        except Exception:  # noqa: BLE001 - doplněk, nesmí shodit diskografii
+            deezer_releases = []
+        known_titles = {norm(r.title) for r in releases}
+        for extra in deezer_releases:
+            if release_type and extra.release_type != release_type:
+                continue
+            if norm(extra.title) in known_titles or extra.id in {r.id for r in releases}:
+                continue
+            known_titles.add(norm(extra.title))
+            releases.append(extra)
+
         releases.sort(key=lambda r: r.release_date or "9999")
         return DiscographyOut(
             artist=self._to_artist_out(artist),
