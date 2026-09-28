@@ -1,6 +1,7 @@
 import '../core/api_client.dart';
 import '../models/playlist_model.dart';
 import '../models/recording_model.dart';
+import 'playlists_repository.dart' show PlaylistSummaryModel;
 
 /// Stránkovaný výsledek `GET /library/local-tracks`.
 class LocalTracksPage {
@@ -131,6 +132,7 @@ class SpotifyImportResult {
     required this.alreadyPresent,
     required this.skipped,
     required this.playlistsImported,
+    this.playlists = const [],
   });
 
   final int totalInFile;
@@ -138,6 +140,7 @@ class SpotifyImportResult {
   final int alreadyPresent;
   final int skipped;
   final int playlistsImported;
+  final List<ImportedPlaylistReport> playlists;
 
   factory SpotifyImportResult.fromJson(Map<String, dynamic> json) => SpotifyImportResult(
         totalInFile: json['totalInFile'] as int,
@@ -145,7 +148,71 @@ class SpotifyImportResult {
         alreadyPresent: json['alreadyPresent'] as int,
         skipped: json['skipped'] as int,
         playlistsImported: json['playlistsImported'] as int? ?? 1,
+        playlists: (json['playlists'] as List<dynamic>? ?? const [])
+            .map((e) => ImportedPlaylistReport.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
+}
+
+/// Jeden playlist z importu -- `inLibrary` = kolik jeho skladeb už jde
+/// rovnou přehrát (zbytek se obstará při prvním přehrání).
+class ImportedPlaylistReport {
+  const ImportedPlaylistReport({
+    required this.id,
+    required this.title,
+    required this.total,
+    required this.matched,
+    required this.skipped,
+    required this.inLibrary,
+  });
+
+  final String id;
+  final String title;
+  final int total;
+  final int matched;
+  final int skipped;
+  final int inLibrary;
+
+  factory ImportedPlaylistReport.fromJson(Map<String, dynamic> json) => ImportedPlaylistReport(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        total: json['total'] as int,
+        matched: json['matched'] as int,
+        skipped: json['skipped'] as int,
+        inLibrary: json['inLibrary'] as int,
+      );
+}
+
+/// Výsledek `GET /library/search` -- hledání jen v obsahu knihovny, bez
+/// diakritiky (viz backend `routes/library.py:search_library`).
+class LibrarySearchResult {
+  const LibrarySearchResult({
+    required this.query,
+    required this.tracks,
+    required this.albums,
+    required this.artists,
+    required this.playlists,
+  });
+
+  final String query;
+  final List<RecordingModel> tracks;
+  final List<LocalAlbum> albums;
+  final List<LocalArtist> artists;
+  final List<PlaylistSummaryModel> playlists;
+
+  bool get isEmpty => tracks.isEmpty && albums.isEmpty && artists.isEmpty && playlists.isEmpty;
+
+  factory LibrarySearchResult.fromJson(Map<String, dynamic> json) {
+    List<T> list<T>(String key, T Function(Map<String, dynamic>) parse) =>
+        (json[key] as List<dynamic>? ?? const []).map((e) => parse(e as Map<String, dynamic>)).toList();
+    return LibrarySearchResult(
+      query: json['query'] as String? ?? '',
+      tracks: list('tracks', RecordingModel.fromJson),
+      albums: list('albums', LocalAlbum.fromJson),
+      artists: list('artists', LocalArtist.fromJson),
+      playlists: list('playlists', PlaylistSummaryModel.fromJson),
+    );
+  }
 }
 
 /// Tenká vrstva nad `/library/*` (docs/openapi.yaml) — sken lokální hudební
@@ -173,6 +240,11 @@ class LibraryRepository {
       filename: filename,
     );
     return SpotifyImportResult.fromJson(json);
+  }
+
+  Future<LibrarySearchResult> searchLibrary(String query, {int limit = 20}) async {
+    final json = await _api.getJson('/library/search', query: {'q': query, 'limit': '$limit'});
+    return LibrarySearchResult.fromJson(json);
   }
 
   Future<PlaylistDetailModel> likedSongs() async {

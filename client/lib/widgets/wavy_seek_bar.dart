@@ -7,7 +7,8 @@ import 'package:flutter/material.dart';
 /// protože Kotlin/Jetpack Compose (`LinearWavyProgressIndicator` z Material3
 /// Expressive) nejde s Flutterem/Skiou sdílet přímo, žádný cross-framework
 /// mechanismus neexistuje. Chová se stejně jako originál:
-///   - odehraná část vlní (sinusoida), zbytek je plochá tečkovaná linka,
+///   - odehraná část vlní (sinusoida, u puku plynule doběhne do roviny),
+///     zbytek je vždy rovná čára,
 ///   - amplituda vlnění doběhne na 0, když nic nehraje nebo se zrovna táhne,
 ///   - "puk" uprostřed se při tažení protáhne ze kolečka do svislé čárky.
 /// `interactive: false` (viz `PlayerBar`) vypne gesta úplně -- jen vizuál,
@@ -230,48 +231,54 @@ class _WavySeekBarPainter extends CustomPainter {
     // interactionFraction stejně jako `dynamicGapSize` v originále.
     final gap = _lerp(thumbRadius + 3, thumbWidth / 2 + 4, interactionFraction);
 
-    _drawSegment(canvas, size, 0, (thumbX - gap).clamp(0.0, size.width), centerY, amplitude, activeColor, active: true);
-    _drawSegment(
-        canvas, size, (thumbX + gap).clamp(0.0, size.width), size.width, centerY, amplitude, inactiveColor,
-        active: false);
+    // Vlní JEN odehraná část (Android 13 / PixelPlay styl) -- zbytek je vždy
+    // rovná čára, nezávisle na tom, jestli se hraje.
+    _drawWave(canvas, 0, (thumbX - gap).clamp(0.0, size.width), centerY, amplitude, activeColor);
+    _drawFlat(canvas, (thumbX + gap).clamp(0.0, size.width), size.width, centerY, inactiveColor);
 
     final thumbPaint = Paint()..color = thumbColor;
     final rect = Rect.fromCenter(center: Offset(thumbX, centerY), width: thumbWidth, height: thumbHeight);
     canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(thumbWidth / 2)), thumbPaint);
   }
 
-  void _drawSegment(
-    Canvas canvas,
-    Size size,
-    double startX,
-    double endX,
-    double centerY,
-    double amplitude,
-    Color color, {
-    required bool active,
-  }) {
-    if (endX - startX < 1) return;
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
+  Paint _strokePaint(Color color) => Paint()
+    ..color = color
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = strokeWidth
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
 
+  void _drawFlat(Canvas canvas, double startX, double endX, double centerY, Color color) {
+    if (endX - startX < 1) return;
+    canvas.drawLine(Offset(startX, centerY), Offset(endX, centerY), _strokePaint(color));
+  }
+
+  void _drawWave(Canvas canvas, double startX, double endX, double centerY, double amplitude, Color color) {
+    if (endX - startX < 1) return;
+    final paint = _strokePaint(color);
     if (amplitude < 0.05) {
       canvas.drawLine(Offset(startX, centerY), Offset(endX, centerY), paint);
       return;
     }
 
-    // `x` zůstává v absolutních souřadnicích celého baru (ne relativních k
-    // segmentu), takže vlna zůstává jedna spojitá sinusoida přes celou šířku
-    // s "vystřiženou" mezerou u puku -- přesně vizuální chování originálu.
+    // Obálka amplitudy: na začátku baru a těsně před pukem plynule klesá k
+    // nule (smoothstep přes ~jednu vlnovou délku), takže vlna do rovné
+    // čáry za pukem přechází měkce, ne ostrým zlomem. `x` je absolutní, ať
+    // vlna při posunu playheadu "neplave" spolu s ním.
+    final length = endX - startX;
+    final ramp = math.min(wavelength, length / 2);
+    double envelope(double x) {
+      final fromStart = ((x - startX) / ramp).clamp(0.0, 1.0);
+      final toEnd = ((endX - x) / ramp).clamp(0.0, 1.0);
+      double smooth(double t) => t * t * (3 - 2 * t);
+      return smooth(fromStart) * smooth(toEnd);
+    }
+
     final path = Path();
-    const sampleStep = 3.0;
+    const sampleStep = 2.0;
     var first = true;
-    for (double x = startX; x <= endX; x += sampleStep) {
-      final theta = (x / wavelength) * 2 * math.pi + phase;
-      final y = centerY + amplitude * math.sin(theta);
+    for (double x = startX; x < endX; x += sampleStep) {
+      final y = centerY + amplitude * envelope(x) * math.sin((x / wavelength) * 2 * math.pi + phase);
       if (first) {
         path.moveTo(x, y);
         first = false;
@@ -279,8 +286,7 @@ class _WavySeekBarPainter extends CustomPainter {
         path.lineTo(x, y);
       }
     }
-    final thetaEnd = (endX / wavelength) * 2 * math.pi + phase;
-    path.lineTo(endX, centerY + amplitude * math.sin(thetaEnd));
+    path.lineTo(endX, centerY);
     canvas.drawPath(path, paint);
   }
 

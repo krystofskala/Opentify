@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +8,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../models/recording_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -23,27 +26,139 @@ final _localArtistsProvider = FutureProvider.autoDispose((ref) => ref.watch(libr
 /// Knihovna -- všechno, co je na disku k okamžitému přehrání, v pilulkových
 /// tabech Skladby/Alba/Interpreti/Playlisty (PixelPlayer styl). Karty
 /// alb/interpretů vedou na sdílené Album/Interpret obrazovky.
-class LocalLibraryScreen extends StatelessWidget {
+class LocalLibraryScreen extends StatefulWidget {
   const LocalLibraryScreen({super.key});
 
   @override
+  State<LocalLibraryScreen> createState() => _LocalLibraryScreenState();
+}
+
+/// Hledání přes CELOU knihovnu (backend `GET /library/search`, bez
+/// diakritiky) -- ne jen přes právě načtenou stránku skladeb. Během hledání
+/// taby nahradí čipy rozsahu a obsah seskupené výsledky, stejné jako v Hledání.
+class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+  String _query = '';
+  LibrarySearchScope _scope = LibrarySearchScope.all;
+
+  static const _scopeLabels = {
+    LibrarySearchScope.all: 'Vše',
+    LibrarySearchScope.tracks: 'Skladby',
+    LibrarySearchScope.artists: 'Interpreti',
+    LibrarySearchScope.albums: 'Alba',
+  };
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String value) {
+    setState(() {}); // tlačítko vymazat
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() {
+        _query = value.trim();
+        if (_query.isEmpty) _scope = LibrarySearchScope.all;
+      });
+    });
+  }
+
+  void _clear() {
+    _debounce?.cancel();
+    _controller.clear();
+    setState(() {
+      _query = '';
+      _scope = LibrarySearchScope.all;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const DefaultTabController(
+    final searching = _query.isNotEmpty;
+    return DefaultTabController(
       length: 4,
       child: Scaffold(
         appBar: SectionAppBar(
           'Knihovna',
-          bottom: TabBar(
-            tabs: [
-              Tab(text: 'Skladby'),
-              Tab(text: 'Alba'),
-              Tab(text: 'Interpreti'),
-              Tab(text: 'Playlisty'),
-            ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(64 + 48),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
+                  child: TextField(
+                    controller: _controller,
+                    onChanged: _onChanged,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Hledat v knihovně…',
+                      prefixIcon: const Icon(Symbols.search_rounded),
+                      suffixIcon: _controller.text.isEmpty
+                          ? null
+                          : IconButton(icon: const Icon(Symbols.close_rounded), tooltip: 'Vymazat', onPressed: _clear),
+                      filled: true,
+                      isDense: true,
+                      border: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(AppRadii.pill)),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 48,
+                  child: searching
+                      ? ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                          children: [
+                            for (final s in LibrarySearchScope.values)
+                              Padding(
+                                padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
+                                child: ChoiceChip(
+                                  label: Text(_scopeLabels[s]!),
+                                  selected: _scope == s,
+                                  onSelected: (_) => setState(() => _scope = s),
+                                ),
+                              ),
+                          ],
+                        )
+                      : const TabBar(
+                          tabs: [
+                            Tab(text: 'Skladby'),
+                            Tab(text: 'Alba'),
+                            Tab(text: 'Interpreti'),
+                            Tab(text: 'Playlisty'),
+                          ],
+                        ),
+                ),
+              ],
+            ),
           ),
         ),
-        body: TabBarView(
-          children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab()],
+        // Taby zůstávají ve stromu (Offstage) i během hledání -- jinak by se
+        // po vymazání dotazu znovu načítala celá knihovna a ztratil se scroll.
+        body: Stack(
+          children: [
+            Offstage(
+              offstage: searching,
+              child: const TabBarView(
+                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab()],
+              ),
+            ),
+            if (searching)
+              LibrarySearchResults(
+                key: ValueKey('$_scope-$_query'),
+                query: _query,
+                scope: _scope,
+                onSeeAll: (scope) => setState(() => _scope = scope),
+              ),
+          ],
         ),
       ),
     );

@@ -1,20 +1,26 @@
 """Import Spotify exportů do lokální knihovny.
 
-Podporuje dva tvary, autodetekované z obsahu (ne z přípony souboru):
+Podporuje tvary, autodetekované z obsahu (ne z přípony souboru):
 
-  - **ZIP s CSV** (Exportify a podobné nástroje: Nastavení soukromí →
-    "Stáhnout svá data", nebo export jednotlivých playlistů třetí stranou) --
-    jeden CSV soubor na playlist, sloupce `Track Name`/`Artist Name(s)`/
-    `Album Name`. `Liked_Songs.csv` se namapuje na speciální "Liked Songs"
-    (viz `RecommendationService.daily_jams`), každý další CSV se stane
-    vlastním uživatelským playlistem pojmenovaným podle souboru.
-  - **`YourLibrary.json`** (oficiální Spotify GDPR export), tvar
-    `{"tracks": [{"artist", "album", "track"}]}` -- vždy jde do Liked Songs.
+  - **ZIP s CSV** (Exportify a podobné nástroje) -- jeden CSV soubor na
+    playlist, sloupce `Track Name`/`Artist Name(s)`/`Album Name`/`Duration (ms)`.
+    `Liked_Songs.csv` se namapuje na speciální "Liked Songs", každý další CSV
+    se stane vlastním uživatelským playlistem pojmenovaným podle souboru.
+  - **Oficiální Spotify export** ("Stáhnout svá data" -> Account data) --
+    ZIP nebo samostatné JSONy: `Playlist1.json`, `Playlist2.json`...
+    (`{"playlists": [{"name", "items": [{"track": {"trackName",
+    "artistName", "albumName"}}]}]}`) a `YourLibrary.json`
+    (`{"tracks": [{"artist", "album", "track"}]}` -> Liked Songs).
+
+Importované playlisty se **zrcadlí**: opakovaný import stejného playlistu
+(klíč `Playlist.source == "spotify-import:<název>"`) nahradí jeho obsah a
+pořadí podle souboru, nevzniká duplikát ani se nic nepřilepuje na konec.
+Liked Songs naopak jen přibývají -- skladby oblíbené přímo v appce nesmí
+reimport smazat.
 
 Matchování na katalog jede přes `app.library.matching` (jméno interpreta a
-název skladby, ne MusicBrainz vyhledávání) — u stovek až tisíců položek by
-živé MB dotazy narazily na rate limit; přesné přiřazení k mbid může doběhnout
-později, až uživatel danou skladbu/album otevře přes normální search/browse.
+název skladby, ne MusicBrainz vyhledávání) -- u stovek až tisíců položek by
+živé MB dotazy narazily na rate limit.
 """
 
 from __future__ import annotations
@@ -22,28 +28,60 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import zipfile
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.library.matching import attach_release_if_missing, find_or_create_artist, find_or_create_recording, find_or_create_release
-from app.models import Playlist, PlaylistItem, PlaylistKind
+from app.models import MediaAsset, MediaAssetStatus, Playlist, PlaylistItem, PlaylistKind
 from app.utils import utcnow
 
 LIKED_SONGS_SOURCE = "liked-songs"
 LIKED_SONGS_TITLE = "Liked Songs"
+_IMPORT_SOURCE_PREFIX = "spotify-import:"
+
+# (interpret, název skladby, album|None, délka ms|None)
+TrackRow = tuple[str, str, str | None, int | None]
+
+
+@dataclass
+class PlaylistReport:
+    playlist_id: str
+    title: str
+    total: int
+    matched: int
+    skipped: int
+    in_library: int
+    already_present: int
 
 
 @dataclass
 class ImportResult:
-    total_in_file: int
-    matched: int
-    already_present: int
-    skipped: int
-    playlists_imported: int = 1
+    playlists: list[PlaylistReport] = field(default_factory=list)
+
+    @property
+    def total_in_file(self) -> int:
+        return sum(p.total for p in self.playlists)
+
+    @property
+    def matched(self) -> int:
+        return sum(p.matched for p in self.playlists)
+
+    @property
+    def already_present(self) -> int:
+        return sum(p.already_present for p in self.playlists)
+
+    @property
+    def skipped(self) -> int:
+        return sum(p.skipped for p in self.playlists)
+
+    @property
+    def playlists_imported(self) -> int:
+        return len(self.playlists)
 
 
 def get_or_create_liked_songs_playlist(session: Session, user_id: str) -> Playlist:
@@ -59,108 +97,194 @@ def _get_or_create_playlist(session: Session, user_id: str, source: str, title: 
         session.add(playlist)
         session.commit()
         session.refresh(playlist)
+    elif playlist.title != title and source != LIKED_SONGS_SOURCE:
+        playlist.title = title
+        session.add(playlist)
+        session.commit()
     return playlist
 
 
+def _import_source_key(name: str) -> str:
+    # Exportify pojmenuje soubor "Moje_oblibene.csv", oficiální export nese
+    # "Moje oblibene" -- stejný klíč pro oba, ať se playlist nezdvojí, když
+    # uživatel přejde z jednoho formátu na druhý.
+    return _IMPORT_SOURCE_PREFIX + re.sub(r"\s+", "_", name.strip())
+
+
 def _import_tracks_into_playlist(
-    session: Session, playlist: Playlist, tracks: list[tuple[str, str, str | None]]
-) -> tuple[int, int, int]:
-    """`tracks` je (artist_name, track_name, album_name|None). Vrací
-    (matched, already_present, skipped)."""
-    existing_recording_ids = {
-        item.recording_id
-        for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all()
-    }
-    next_position = len(existing_recording_ids)
+    session: Session, playlist: Playlist, tracks: list[TrackRow], *, mirror: bool
+) -> PlaylistReport:
+    existing_items = session.exec(
+        select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position)
+    ).all()
+    existing_ids = {item.recording_id for item in existing_items}
 
-    matched = already_present = skipped = 0
-    for artist_name, track_name, album_name in tracks:
-        artist_name = artist_name.strip()
-        track_name = track_name.strip()
+    matched = skipped = 0
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for artist_name, track_name, album_name, duration_ms in tracks:
+        artist_name = (artist_name or "").strip()
+        track_name = (track_name or "").strip()
         if not artist_name or not track_name:
-            skipped += 1
+            skipped += 1  # epizody podcastů, lokální soubory bez metadat
             continue
-
         artist = find_or_create_artist(session, artist_name)
         release = find_or_create_release(session, artist, album_name) if album_name else None
-        recording = find_or_create_recording(session, artist, track_name)
+        recording = find_or_create_recording(session, artist, track_name, duration_ms=duration_ms)
         attach_release_if_missing(session, recording, release)
         matched += 1
+        if recording.id not in seen:  # stejná skladba 2x v jednom playlistu -> jednou
+            seen.add(recording.id)
+            resolved.append(recording.id)
 
-        if recording.id in existing_recording_ids:
-            already_present += 1
-            continue
-        session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording.id, position=next_position))
-        existing_recording_ids.add(recording.id)
-        next_position += 1
+    already_present = sum(1 for rid in resolved if rid in existing_ids)
+    if mirror:
+        session.exec(delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id))
+        final_ids = resolved
+        for position, rid in enumerate(final_ids):
+            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=position))
+    else:
+        final_ids = [item.recording_id for item in existing_items]
+        next_position = len(existing_items)
+        for rid in resolved:
+            if rid in existing_ids:
+                continue
+            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=next_position))
+            final_ids.append(rid)
+            next_position += 1
 
     playlist.updated_at = utcnow()
     session.add(playlist)
     session.commit()
-    return matched, already_present, skipped
+
+    in_library = 0
+    if final_ids:
+        in_library = len(
+            session.exec(
+                select(MediaAsset.recording_id).where(
+                    MediaAsset.recording_id.in_(final_ids),  # type: ignore[union-attr]
+                    MediaAsset.status == MediaAssetStatus.AVAILABLE,
+                )
+            ).all()
+        )
+    return PlaylistReport(
+        playlist_id=playlist.id,
+        title=playlist.title,
+        total=len(tracks),
+        matched=matched,
+        skipped=skipped,
+        in_library=in_library,
+        already_present=already_present,
+    )
 
 
-def _import_json(session: Session, user_id: str, raw: bytes) -> ImportResult:
-    data: dict[str, Any] = json.loads(raw)
-    entries = data.get("tracks", [])
-    tracks = [
-        (e.get("artist") or "", e.get("track") or "", (e.get("album") or "").strip() or None) for e in entries
-    ]
-    playlist = get_or_create_liked_songs_playlist(session, user_id)
-    matched, already_present, skipped = _import_tracks_into_playlist(session, playlist, tracks)
-    return ImportResult(total_in_file=len(entries), matched=matched, already_present=already_present, skipped=skipped)
+def _import_named_playlist(session: Session, user_id: str, name: str, tracks: list[TrackRow]) -> PlaylistReport:
+    if name.replace(" ", "_").lower() == "liked_songs":
+        playlist = get_or_create_liked_songs_playlist(session, user_id)
+        return _import_tracks_into_playlist(session, playlist, tracks, mirror=False)
+    playlist = _get_or_create_playlist(session, user_id, _import_source_key(name), name)
+    return _import_tracks_into_playlist(session, playlist, tracks, mirror=True)
 
 
-def _primary_artist(field: str) -> str:
+def _primary_artist(field_value: str) -> str:
     # "Artist Name(s)" u kolaborací obsahuje víc jmen oddělených čárkou --
     # pro matchování bereme první (hlavní) interpretku/interpreta.
-    return (field or "").split(",")[0].strip()
+    return (field_value or "").split(",")[0].strip()
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _csv_tracks(text: str) -> list[TrackRow]:
+    return [
+        (
+            _primary_artist(row.get("Artist Name(s)", "")),
+            (row.get("Track Name") or "").strip(),
+            (row.get("Album Name") or "").strip() or None,
+            _int_or_none(row.get("Duration (ms)")),
+        )
+        for row in csv.DictReader(io.StringIO(text))
+    ]
+
+
+def _official_playlists(data: dict[str, Any]) -> list[tuple[str, list[TrackRow]]]:
+    result = []
+    for pl in data.get("playlists") or []:
+        tracks: list[TrackRow] = []
+        for item in pl.get("items") or []:
+            track = item.get("track") or {}
+            tracks.append(
+                (
+                    track.get("artistName") or "",
+                    track.get("trackName") or "",
+                    (track.get("albumName") or "").strip() or None,
+                    None,
+                )
+            )
+        result.append(((pl.get("name") or "Playlist").strip() or "Playlist", tracks))
+    return result
+
+
+def _library_liked(data: dict[str, Any]) -> list[TrackRow]:
+    return [
+        (e.get("artist") or "", e.get("track") or "", (e.get("album") or "").strip() or None, None)
+        for e in data.get("tracks") or []
+    ]
+
+
+def _import_json_document(session: Session, user_id: str, data: dict[str, Any]) -> list[PlaylistReport]:
+    reports = []
+    if "playlists" in data:
+        for name, tracks in _official_playlists(data):
+            reports.append(_import_named_playlist(session, user_id, name, tracks))
+    if "tracks" in data and isinstance(data["tracks"], list):
+        playlist = get_or_create_liked_songs_playlist(session, user_id)
+        reports.append(_import_tracks_into_playlist(session, playlist, _library_liked(data), mirror=False))
+    return reports
+
+
+def _zip_entry_name(info: zipfile.ZipInfo) -> str:
+    # ZIPy z Windows/Exportify často nesou UTF-8 jména BEZ příznaku 0x800 --
+    # Python je pak dekóduje jako cp437 ("Rádio" -> "R├ídio").
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        return info.filename.encode("cp437").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return info.filename
 
 
 def _import_zip(session: Session, user_id: str, raw: bytes) -> ImportResult:
-    total = matched = already_present = skipped = 0
-    playlists_imported = 0
-
+    result = ImportResult()
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        for name in zf.namelist():
-            if not name.lower().endswith(".csv"):
+        for info in zf.infolist():
+            if info.is_dir():
                 continue
-            text = zf.read(name).decode("utf-8-sig", errors="replace")
-            rows = list(csv.DictReader(io.StringIO(text)))
-            total += len(rows)
-
-            stem = Path(name).stem.strip() or "Playlist"
-            if stem.replace(" ", "_").lower() == "liked_songs":
-                playlist = get_or_create_liked_songs_playlist(session, user_id)
-            else:
-                playlist = _get_or_create_playlist(
-                    session, user_id, f"spotify-import:{stem}", stem.replace("_", " ")
-                )
-
-            tracks = [
-                (
-                    _primary_artist(row.get("Artist Name(s)", "")),
-                    (row.get("Track Name") or "").strip(),
-                    (row.get("Album Name") or "").strip() or None,
-                )
-                for row in rows
-            ]
-            m, a, s = _import_tracks_into_playlist(session, playlist, tracks)
-            matched += m
-            already_present += a
-            skipped += s
-            playlists_imported += 1
-
-    return ImportResult(
-        total_in_file=total,
-        matched=matched,
-        already_present=already_present,
-        skipped=skipped,
-        playlists_imported=playlists_imported,
-    )
+            name = _zip_entry_name(info)
+            stem = PurePosixPath(name).stem.strip()
+            lower = name.lower()
+            if lower.endswith(".csv"):
+                text = zf.read(info).decode("utf-8-sig", errors="replace")
+                title = (stem or "Playlist").replace("_", " ")
+                result.playlists.append(_import_named_playlist(session, user_id, title, _csv_tracks(text)))
+            elif lower.endswith(".json") and (stem.lower().startswith("playlist") or stem.lower() == "yourlibrary"):
+                try:
+                    data = json.loads(zf.read(info).decode("utf-8-sig"))
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict):
+                    result.playlists.extend(_import_json_document(session, user_id, data))
+    return result
 
 
 def import_spotify_library(session: Session, user_id: str, raw: bytes) -> ImportResult:
     if raw[:2] == b"PK":  # ZIP magic bytes
         return _import_zip(session, user_id, raw)
-    return _import_json(session, user_id, raw)
+    data = json.loads(raw.decode("utf-8-sig"))
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("očekává se JSON objekt", "", 0)
+    return ImportResult(playlists=_import_json_document(session, user_id, data))

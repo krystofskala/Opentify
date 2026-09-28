@@ -22,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import unicodedata
 import zipfile
 from pathlib import Path
 
@@ -198,6 +200,95 @@ def local_artists(
     ]
 
 
+def _fold(text: str | None) -> str:
+    """Bez diakritiky, malá písmena, jen alfanumerické tokeny oddělené
+    mezerou -- "Vypsaná fiXa" i "vypsana fixa" dají stejný řetězec."""
+    folded = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().casefold()
+    return " ".join(re.findall(r"[a-z0-9]+", folded))
+
+
+def _match_score(query_tokens: list[str], *fields: str | None) -> int:
+    """0 = neodpovídá. Všechny tokeny dotazu musí být někde v polích;
+    shoda od začátku slova/celého pole se řadí výš než shoda uprostřed."""
+    haystack = " ".join(_fold(f) for f in fields if f)
+    if not all(token in haystack for token in query_tokens):
+        return 0
+    primary = _fold(fields[0])
+    joined = " ".join(query_tokens)
+    if primary == joined:
+        return 4
+    if primary.startswith(joined):
+        return 3
+    if all(re.search(rf"(^| ){re.escape(t)}", haystack) for t in query_tokens):
+        return 2
+    return 1
+
+
+@library_router.get("/search")
+def search_library(
+    q: str = Query(min_length=1, max_length=200),
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Hledání jen v tom, co je v knihovně (přehratelné skladby, jejich alba
+    a interpreti, vlastní playlisty) -- bez diakritiky a velikosti písmen.
+    Normalizace v Pythonu, ne SQL `LIKE`: SQLite neumí porovnání bez
+    diakritiky a knihovna má řádově tisíce skladeb, takže průchod v paměti
+    je rychlejší než cokoli, co by se muselo složitě indexovat."""
+    user_id, _device_id = current
+    tokens = _fold(q).split()
+    if not tokens:
+        return {"query": q, "tracks": [], "albums": [], "artists": [], "playlists": []}
+
+    rows = session.exec(
+        select(Recording, Artist.name, Release.title)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .join(Artist, Artist.id == Recording.artist_id, isouter=True)
+        .join(Release, Release.id == Recording.release_id, isouter=True)
+        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+    ).all()
+    # Skóre bere lepší z "název je hlavní pole" a "interpret je hlavní pole"
+    # -- dotaz "radiohead" jinak řadil skladbu *pojmenovanou* "Radiohead" od
+    # jiného interpreta nad skladby Radiohead.
+    def track_score(rec: Recording, artist_name: str | None, album_title: str | None) -> tuple[int, int]:
+        by_title = _match_score(tokens, rec.title, artist_name, album_title)
+        by_artist = _match_score(tokens, artist_name, rec.title, album_title)
+        return max(by_title, by_artist), by_artist
+
+    scored_tracks = sorted(
+        ((score, rec) for rec, artist_name, album_title in rows
+         if (score := track_score(rec, artist_name, album_title))[0]),
+        key=lambda pair: (-pair[0][0], -pair[0][1], pair[1].title.casefold()),
+    )[:limit]
+
+    albums = [a for a in local_albums(session=session, _current=current) if _match_score(tokens, a["title"], a["artistName"])]
+    albums.sort(key=lambda a: (-_match_score(tokens, a["title"], a["artistName"]), a["title"].casefold()))
+    artists = [a for a in local_artists(session=session, _current=current) if _match_score(tokens, a["name"])]
+    artists.sort(key=lambda a: (-_match_score(tokens, a["name"]), -a["trackCount"]))
+
+    playlists = session.exec(
+        select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.kind == PlaylistKind.USER)
+    ).all()
+    playlist_hits = []
+    for p in playlists:
+        if p.source == LIKED_SONGS_SOURCE or not _match_score(tokens, p.title):
+            continue
+        count = session.exec(
+            select(func.count()).select_from(PlaylistItem).where(PlaylistItem.playlist_id == p.id)
+        ).one()
+        playlist_hits.append({"id": p.id, "title": p.title, "kind": p.kind, "source": p.source, "itemCount": count})
+    playlist_hits.sort(key=lambda p: (-_match_score(tokens, p["title"]), p["title"].casefold()))
+
+    return {
+        "query": q,
+        "tracks": [_local_recording_out(session, rec).model_dump(by_alias=True) for _score, rec in scored_tracks],
+        "albums": albums[:limit],
+        "artists": artists[:limit],
+        "playlists": playlist_hits[:limit],
+    }
+
+
 def _local_recording_out(session: Session, recording: Recording) -> RecordingOut:
     return RecordingOut(
         id=recording.id,
@@ -300,7 +391,7 @@ async def import_spotify(
     except (json.JSONDecodeError, zipfile.BadZipFile) as exc:
         raise HTTPException(
             status_code=400,
-            detail="Nepodařilo se rozpoznat formát -- očekává se ZIP s CSV playlisty nebo `YourLibrary.json`.",
+            detail="Nepodařilo se rozpoznat formát -- očekává se Spotify export (ZIP, Playlist1.json nebo YourLibrary.json).",
         ) from exc
     return {
         "totalInFile": result.total_in_file,
@@ -308,6 +399,17 @@ async def import_spotify(
         "alreadyPresent": result.already_present,
         "skipped": result.skipped,
         "playlistsImported": result.playlists_imported,
+        "playlists": [
+            {
+                "id": p.playlist_id,
+                "title": p.title,
+                "total": p.total,
+                "matched": p.matched,
+                "skipped": p.skipped,
+                "inLibrary": p.in_library,
+            }
+            for p in result.playlists
+        ],
     }
 
 

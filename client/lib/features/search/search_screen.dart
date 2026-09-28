@@ -12,6 +12,7 @@ import '../../state/providers.dart';
 import '../../state/search_history_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass_container.dart';
+import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -40,6 +41,18 @@ const _releaseTypeLabels = {'album': 'Album', 'ep': 'EP', 'single': 'Singl', 'co
 /// Aktuální dotaz do vyhledávání (s debounce z textového pole).
 final searchQueryProvider = StateProvider.autoDispose<String>((ref) => '');
 final searchFilterProvider = StateProvider.autoDispose<SearchFilter>((ref) => SearchFilter.all);
+
+/// "Jen moje knihovna" -- místo globálního katalogu hledá jen v tom, co
+/// už je v knihovně (`GET /library/search`). Přežívá přepnutí záložky
+/// (ne `autoDispose`), ať se uživateli nevrací zpátky na katalog.
+final searchLibraryOnlyProvider = StateProvider<bool>((ref) => false);
+
+const _libraryScopeFor = {
+  SearchFilter.all: LibrarySearchScope.all,
+  SearchFilter.tracks: LibrarySearchScope.tracks,
+  SearchFilter.artists: LibrarySearchScope.artists,
+  SearchFilter.albums: LibrarySearchScope.albums,
+};
 
 typedef _SectionKey = ({String query, String type, int limit});
 
@@ -120,6 +133,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget build(BuildContext context) {
     final query = ref.watch(searchQueryProvider).trim();
     final filter = ref.watch(searchFilterProvider);
+    final libraryOnly = ref.watch(searchLibraryOnlyProvider);
 
     return Scaffold(
       appBar: SectionAppBar(
@@ -145,6 +159,25 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                     children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
+                        child: FilterChip(
+                          avatar: Icon(libraryOnly ? Symbols.check_rounded : Symbols.library_music_rounded, size: 18),
+                          showCheckmark: false,
+                          label: const Text('Jen moje knihovna'),
+                          selected: libraryOnly,
+                          onSelected: (value) => ref.read(searchLibraryOnlyProvider.notifier).state = value,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
+                        child: VerticalDivider(
+                          width: 1,
+                          indent: 10,
+                          endIndent: 10,
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                      ),
                       for (final f in SearchFilter.values)
                         Padding(
                           padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
@@ -169,7 +202,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ),
         child: query.isEmpty
             ? _SearchHistoryView(key: const ValueKey('history'), onPick: _runSearch)
-            : filter == SearchFilter.all
+            : libraryOnly
+                ? LibrarySearchResults(
+                    key: ValueKey('library-$filter-$query'),
+                    query: query,
+                    scope: _libraryScopeFor[filter]!,
+                    onSeeAll: (scope) => ref.read(searchFilterProvider.notifier).state =
+                        _libraryScopeFor.entries.firstWhere((e) => e.value == scope).key,
+                  )
+                : filter == SearchFilter.all
                 ? _AllResults(key: ValueKey('all-$query'), query: query)
                 : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
       ),

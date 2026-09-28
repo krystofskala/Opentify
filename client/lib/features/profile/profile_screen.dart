@@ -13,6 +13,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass_container.dart';
 import '../../widgets/section_app_bar.dart';
+import '../../widgets/spotify_import_report.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
@@ -215,14 +216,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       final result = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
       ref.invalidate(likedSongsProvider);
       ref.invalidate(dailyJamsProvider);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Hotovo: ${result.matched}/${result.totalInFile} napárováno napříč '
-            '${result.playlistsImported} playlisty (${result.skipped} přeskočeno).',
-          ),
-        ),
-      );
+      ref.invalidate(myPlaylistsProvider);
+      messenger.hideCurrentSnackBar();
+      if (!context.mounted) return;
+      if (result.playlists.isEmpty) {
+        messenger.showSnackBar(const SnackBar(content: Text('V souboru nebyly žádné playlisty ani skladby.')));
+        return;
+      }
+      await showSpotifyImportReport(context, result);
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Import selhal: $e')));
     }
