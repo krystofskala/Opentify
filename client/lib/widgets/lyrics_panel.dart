@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../data/lyrics_repository.dart';
 import '../state/audio_player_controller.dart';
@@ -39,9 +40,6 @@ class _LyricsPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lyricsAsync = ref.watch(_lyricsProvider(recordingId));
-    final playback = ref.watch(audioPlayerControllerProvider);
-
     return DraggableScrollableSheet(
       initialChildSize: 0.75,
       minChildSize: 0.4,
@@ -62,50 +60,105 @@ class _LyricsPanel extends ConsumerWidget {
                 height: 4,
                 decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
               ),
-              const SizedBox(height: 14),
-              const Text('TEXT SKLADBY', style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2)),
-              const SizedBox(height: 4),
-              Expanded(
-                child: lyricsAsync.when(
-                  data: (lyrics) {
-                    if (lyrics == null || !lyrics.hasAny) {
-                      return const Center(
-                        child: Text('Text není k dispozici.', style: TextStyle(color: Colors.white70)),
-                      );
-                    }
-                    if (lyrics.instrumental) {
-                      return const Center(
-                        child: Text('Instrumentální skladba.', style: TextStyle(color: Colors.white70)),
-                      );
-                    }
-                    if (lyrics.hasSynced) {
-                      return _SyncedLyricsList(
-                        lines: lyrics.syncedLines!,
-                        position: playback.position,
-                        onSeek: (time) => ref.read(audioPlayerControllerProvider.notifier).seek(time),
-                      );
-                    }
-                    return SingleChildScrollView(
-                      controller: sheetController,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                      child: Text(
-                        lyrics.plain ?? '',
-                        style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.6),
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  },
-                  loading: () => const Center(child: ExpressiveLoadingIndicator(color: Colors.white)),
-                  error: (error, stack) =>
-                      const Center(child: Text('Text se nepodařilo načíst.', style: TextStyle(color: Colors.white70))),
-                ),
-              ),
+              const SizedBox(height: 6),
+              Expanded(child: LyricsView(recordingId: recordingId, scrollController: sheetController)),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+/// Ruční posun časování textu pro skladbu (kladný = text dřív). Jen po dobu
+/// běhu appky -- řeší zbylé případy, kdy verze textu sedí délkou, ale
+/// zpěv je o kus posunutý.
+final lyricsOffsetProvider = StateProvider.family<Duration, String>((ref, recordingId) => Duration.zero);
+
+/// Text skladby bez obalu (sheet na mobilu, sloupec v přehrávači na PC):
+/// nadpis s posunem časování + synchronizovaný/prostý text.
+class LyricsView extends ConsumerWidget {
+  const LyricsView({super.key, required this.recordingId, this.scrollController});
+
+  final String recordingId;
+  final ScrollController? scrollController;
+
+  /// Řádek se rozsvítí o kousek dřív -- oko ho musí stihnout přečíst, než
+  /// zazní, a pozice z přehrávače chodí s malým zpožděním.
+  static const _lead = Duration(milliseconds: 350);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lyricsAsync = ref.watch(_lyricsProvider(recordingId));
+    final position = ref.watch(audioPlayerControllerProvider.select((s) => s.position));
+    final offset = ref.watch(lyricsOffsetProvider(recordingId));
+    final synced = lyricsAsync.valueOrNull?.hasSynced ?? false;
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 40,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (synced) _offsetButton(ref, -1),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text('TEXT SKLADBY', style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2)),
+              ),
+              if (synced) _offsetButton(ref, 1),
+            ],
+          ),
+        ),
+        if (synced && offset != Duration.zero)
+          Text(
+            'Posun ${offset.isNegative ? '−' : '+'}${(offset.inMilliseconds.abs() / 1000).toStringAsFixed(1)} s',
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+        Expanded(
+          child: lyricsAsync.when(
+            data: (lyrics) {
+              if (lyrics == null || !lyrics.hasAny) {
+                return const Center(child: Text('Text není k dispozici.', style: TextStyle(color: Colors.white70)));
+              }
+              if (lyrics.instrumental) {
+                return const Center(child: Text('Instrumentální skladba.', style: TextStyle(color: Colors.white70)));
+              }
+              if (lyrics.hasSynced) {
+                return _SyncedLyricsList(
+                  lines: lyrics.syncedLines!,
+                  position: position + _lead + offset,
+                  onSeek: (time) => ref.read(audioPlayerControllerProvider.notifier).seek(time - offset),
+                );
+              }
+              return SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                child: Text(
+                  lyrics.plain ?? '',
+                  style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.6),
+                  textAlign: TextAlign.center,
+                ),
+              );
+            },
+            loading: () => const Center(child: ExpressiveLoadingIndicator(color: Colors.white)),
+            error: (error, stack) =>
+                const Center(child: Text('Text se nepodařilo načíst.', style: TextStyle(color: Colors.white70))),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _offsetButton(WidgetRef ref, int direction) => IconButton(
+        visualDensity: VisualDensity.compact,
+        iconSize: 18,
+        tooltip: direction > 0 ? 'Text dřív (+0,5 s)' : 'Text později (−0,5 s)',
+        icon: Icon(direction > 0 ? Symbols.fast_forward_rounded : Symbols.fast_rewind_rounded, color: Colors.white70),
+        onPressed: () => ref.read(lyricsOffsetProvider(recordingId).notifier).update(
+              (d) => d + Duration(milliseconds: 500 * direction),
+            ),
+      );
 }
 
 class _SyncedLyricsList extends StatefulWidget {
@@ -160,7 +213,8 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _keys[index].currentContext;
       if (ctx != null) {
-        Scrollable.ensureVisible(ctx, alignment: 0.4, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        Scrollable.ensureVisible(ctx,
+            alignment: 0.4, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }

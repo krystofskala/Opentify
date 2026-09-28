@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/physics.dart';
 // Flutter má od 3.47 vlastní `RepeatMode` (`RepeatingAnimationBuilder`) --
 // skrytý, ať nekoliduje s naším (`AudioPlayerState.repeatMode`).
@@ -35,8 +37,14 @@ class NowPlayingScreen extends ConsumerStatefulWidget {
   ConsumerState<NowPlayingScreen> createState() => _NowPlayingScreenState();
 }
 
+/// Od téhle šířky je text skladby sloupec vedle přehrávače (PC), ne sheet.
+const _lyricsColumnMinWidth = 1100.0;
+
 class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with SingleTickerProviderStateMixin {
   NowPlayingSheetController? _sheet;
+
+  /// Sloupec s textem na PC -- tlačítko textu v liště ho skryje/zobrazí.
+  bool _lyricsColumn = true;
   // Tear-off metody je `==` sama se sebou -- `detach` tak pozná svou trasu.
   void _pop() {
     if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
@@ -189,6 +197,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
     final positionMs =
         playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
     final isWide = MediaQuery.sizeOf(context).width >= 720;
+    final showLyricsColumn = MediaQuery.sizeOf(context).width >= _lyricsColumnMinWidth && _lyricsColumn;
 
     final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
     final isProvisioning = provisioningState?.isInFlight ?? false;
@@ -253,24 +262,52 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                           _grabber(),
                           _header(context, nowPlaying, accent),
                           Expanded(
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(maxWidth: isWide ? 480 : double.infinity),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Flexible(child: _carouselView(playback)),
-                                    const SizedBox(height: 28),
-                                    _titleBlock(context, playback, isProvisioning, provisioningState),
-                                    const SizedBox(height: 24),
-                                    // Ovládání drží u obalu a názvu (jedna
-                                    // skupina uprostřed), ne přilepené ke
-                                    // spodní hraně (živě nahlášeno). Panel se
-                                    // sklem si kreslí `_controls` sám.
-                                    _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
-                                  ],
-                                ),
-                              ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final player = ConstrainedBox(
+                                  constraints: BoxConstraints(maxWidth: isWide ? 480 : double.infinity),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(child: _carouselView(playback)),
+                                      const SizedBox(height: 28),
+                                      _titleBlock(context, playback, isProvisioning, provisioningState),
+                                      const SizedBox(height: 24),
+                                      // Ovládání drží u obalu a názvu (jedna
+                                      // skupina uprostřed), ne přilepené ke
+                                      // spodní hraně (živě nahlášeno). Panel se
+                                      // sklem si kreslí `_controls` sám.
+                                      _controls(
+                                          playback, accent, duration, positionMs, isProvisioning, provisioningPct),
+                                    ],
+                                  ),
+                                );
+                                if (!showLyricsColumn) return Center(child: player);
+                                // PC: text skladby jako druhý sloupec vedle
+                                // obalu a ovládání (stejné světlejší sklo).
+                                return Center(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(child: player),
+                                      const SizedBox(width: 40),
+                                      SizedBox(
+                                        width: 460,
+                                        height: math.min(constraints.maxHeight, 780),
+                                        child: GlassContainer(
+                                          blur: false,
+                                          baseFill: false,
+                                          emphasis: GlassTokens.emphasis,
+                                          borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
+                                          padding: const EdgeInsets.only(top: 8),
+                                          fit: StackFit.expand,
+                                          child: LyricsView(recordingId: nowPlaying.recordingId),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
                           ),
                         ],
@@ -354,7 +391,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               IconButton(
                 icon: const Icon(Symbols.lyrics_rounded, color: Colors.white, size: 24),
                 tooltip: 'Text skladby',
-                onPressed: () => showLyricsPanel(context, recordingId: nowPlaying.recordingId, accentColor: accent),
+                // PC: přepíná sloupec s textem; mobil: sheet.
+                onPressed: () => MediaQuery.sizeOf(context).width >= _lyricsColumnMinWidth
+                    ? setState(() => _lyricsColumn = !_lyricsColumn)
+                    : showLyricsPanel(context, recordingId: nowPlaying.recordingId, accentColor: accent),
               ),
               IconButton(
                 icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),

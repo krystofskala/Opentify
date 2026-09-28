@@ -10,7 +10,7 @@ from sqlmodel import Session
 
 from app.db import get_session
 from app.lyrics_service import fetch_lyrics
-from app.models import Artist, Recording, Release
+from app.models import Artist, MediaAsset, Recording, Release
 
 lyrics_router = APIRouter(prefix="/lyrics", tags=["lyrics"])
 
@@ -31,7 +31,16 @@ async def get_lyrics(recording_id: str, session: Session = Depends(get_session))
         release = session.get(Release, recording.release_id)
         album_name = release.title if release else None
 
-    result = await fetch_lyrics(track_name=recording.title, artist_name=artist_name, album_name=album_name)
+    # Délka toho, co se SKUTEČNĚ přehrává (stažený soubor), ne katalogová --
+    # podle ní se vybírá správně časovaná verze textu.
+    asset = session.get(MediaAsset, recording.id)
+    duration_ms = (asset.waveform_duration_ms if asset else None) or recording.duration_ms
+    result = await fetch_lyrics(
+        track_name=recording.title,
+        artist_name=artist_name,
+        album_name=album_name,
+        duration_s=duration_ms / 1000 if duration_ms else None,
+    )
     if result is None:
         raise HTTPException(status_code=404, detail="text skladby nenalezen")
     return result
