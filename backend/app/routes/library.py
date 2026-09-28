@@ -393,7 +393,7 @@ class RemoveTracksBody(CamelModel):
     recording_ids: list[str]
 
 
-def _remove_from_library(session: Session, recording_id: str) -> dict:
+def _remove_from_library(session: Session, recording_id: str, dry_run: bool = False) -> dict:
     """Stažený soubor (pod MEDIA_ROOT) se smaže a skladba se vrátí do stavu
     "nestaženo" -- při dalším přehrání se prostě stáhne znovu. Soubor mimo
     MEDIA_ROOT (uživatelova hudební složka, jen pro čtení) se nemaže, jen
@@ -404,6 +404,14 @@ def _remove_from_library(session: Session, recording_id: str) -> dict:
 
     path = Path(asset.storage_path) if asset.storage_path else None
     owned = path is not None and path.resolve().is_relative_to(MEDIA_ROOT.resolve())
+    if dry_run:
+        size = 0
+        if owned:
+            try:
+                size = path.stat().st_size
+            except FileNotFoundError:
+                size = 0
+        return {"recordingId": recording_id, "result": "deleted" if owned else "hidden", "freedBytes": size}
     if not owned:
         asset.hidden_from_library = True
         session.add(asset)
@@ -441,10 +449,13 @@ def remove_track(
 @library_router.post("/tracks/remove")
 def remove_tracks(
     body: RemoveTracksBody,
+    dry_run: bool = Query(default=False, alias="dryRun"),
     session: Session = Depends(get_session),
     _current: tuple[str, str] = Depends(get_current_user),
 ):
-    results = [_remove_from_library(session, rid) for rid in body.recording_ids[:500]]
+    """`?dryRun=true` -- jen spočítá, co by se stalo (kolik MB se uvolní, co
+    se jen skryje), pro potvrzovací sheet v klientovi. Nic nemění."""
+    results = [_remove_from_library(session, rid, dry_run) for rid in body.recording_ids[:500]]
     return {
         "removed": sum(1 for r in results if r["result"] != "not_in_library"),
         "freedBytes": sum(r["freedBytes"] for r in results),

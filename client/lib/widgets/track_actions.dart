@@ -5,12 +5,15 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../models/recording_model.dart';
 import '../state/audio_player_controller.dart';
+import '../models/availability.dart';
 import '../state/liked_songs_controller.dart';
+import '../state/provisioning_controller.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'add_to_playlist_sheet.dart';
 import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
+import 'remove_from_library.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -88,6 +91,10 @@ class _TrackActionsSheet extends ConsumerWidget {
     final artistName = recording.artistName ?? artistNameFallback;
     final isLiked = ref.watch(likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(recording.id) ?? false));
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
+    final provisioningStatus = ref.watch(provisioningControllerProvider.select((s) => s[recording.id]?.status));
+    // Jen co je opravdu v knihovně (stažené / z vlastní složky).
+    final inLibrary = provisioningStatus == 'AVAILABLE' ||
+        (provisioningStatus == null && recording.availability == Availability.available);
 
     void run(VoidCallback action) {
       Navigator.of(context).pop();
@@ -181,6 +188,13 @@ class _TrackActionsSheet extends ConsumerWidget {
                     icon: Symbols.info_rounded,
                     label: 'Detail skladby',
                     onTap: () => run(() => hostContext.push('/tracks/${recording.id}')),
+                  ),
+                if (inLibrary)
+                  _Item(
+                    icon: Symbols.delete_rounded,
+                    label: 'Odebrat z knihovny',
+                    destructive: true,
+                    onTap: () => run(() => confirmRemoveFromLibrary(hostContext, [recording])),
                   ),
                 for (final action in extraActions)
                   _Item(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../models/playlist_model.dart';
@@ -72,9 +73,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
 
   Widget _buildBody(BuildContext context, PlaylistDetailModel detail, List<RecordingModel> items) {
     final first = items.isEmpty ? null : items.first;
-    final cover = first == null
-        ? null
-        : ref.watch(recordingArtworkProvider((releaseId: first.releaseId, artistId: first.artistId))).valueOrNull;
+    final readOnly = detail.isReadOnly;
+    final cover = detail.coverUrls.isNotEmpty
+        ? detail.coverUrls.first
+        : first == null
+            ? null
+            : ref.watch(recordingArtworkProvider((releaseId: first.releaseId, artistId: first.artistId))).valueOrNull;
     final totalMs = items.fold<int>(0, (sum, r) => sum + (r.durationMs ?? 0));
     final minutes = (totalMs / 60000).round();
 
@@ -88,20 +92,28 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               title: detail.title,
               imageUrl: cover,
               accent: accent,
-              eyebrow: 'Playlist',
+              eyebrow: _eyebrowFor(detail.kind),
               placeholderIcon: Symbols.queue_music_rounded,
               subtitle: [
+                if (detail.description != null) HeroMeta(detail.description!),
                 HeroMeta([
                   '${items.length} skladeb',
-                  if (minutes > 0) '$minutes min',
+                  if (minutes > 0 && items.where((r) => r.durationMs != null).length >= items.length * 0.9) '$minutes min',
                 ].join(' · ')),
               ],
               actions: [
-                IconButton(
-                  icon: const Icon(Symbols.delete_outline_rounded),
-                  tooltip: 'Smazat playlist',
-                  onPressed: () => _confirmDelete(context),
-                ),
+                if (readOnly)
+                  IconButton(
+                    icon: const Icon(Symbols.library_add_rounded),
+                    tooltip: 'Přidat do knihovny',
+                    onPressed: () => _copyToLibrary(context, detail),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Symbols.delete_outline_rounded),
+                    tooltip: 'Smazat playlist',
+                    onPressed: () => _confirmDelete(context),
+                  ),
               ],
             ),
             if (items.isEmpty)
@@ -122,9 +134,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     allTracks: items,
                     visibleTracks: _collection.apply(items),
                     sourceLabel: detail.title,
-                    onRemoveSelected: (selected) => _removeTracks(selected),
-                    // Vlastní playlist: stáhnout celý na pozadí.
-                    downloadWholeList: true,
+                    onRemoveSelected: readOnly ? null : (selected) => _removeTracks(selected),
+                    // Vlastní playlist: stáhnout celý na pozadí (žebříček ne --
+                    // 100 skladeb najednou by zahltilo stahování).
+                    downloadWholeList: !readOnly,
                   ),
                 ),
               ),
@@ -154,16 +167,17 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           selected: _collection.isSelected(r.id),
           onSelectedChanged: (value) => _collection.toggle(r.id, value),
           extraMenuActions: [
-            TrackMenuAction(
-              icon: Symbols.playlist_remove_rounded,
-              label: 'Odebrat z playlistu',
-              destructive: true,
-              onSelected: () => _removeTracks([r]),
-            ),
+            if (!detail.isReadOnly)
+              TrackMenuAction(
+                icon: Symbols.playlist_remove_rounded,
+                label: 'Odebrat z playlistu',
+                destructive: true,
+                onSelected: () => _removeTracks([r]),
+              ),
           ],
         );
 
-    final canReorder = !_collection.isModified && !_collection.selecting;
+    final canReorder = !detail.isReadOnly && !_collection.isModified && !_collection.selecting;
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
       sliver: canReorder
@@ -213,7 +227,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       for (final id in ids) {
         await repo.removeItem(widget.playlistId, id);
       }
-      messenger?.showSnackBar(SnackBar(content: Text(ids.length == 1 ? 'Skladba odebrána' : '${ids.length} skladeb odebráno')));
+      messenger?.showSnackBar(
+          SnackBar(content: Text(ids.length == 1 ? 'Skladba odebrána' : '${ids.length} skladeb odebráno')));
     } catch (e) {
       messenger?.showSnackBar(SnackBar(content: Text('Odebrání selhalo: $e')));
     } finally {
@@ -228,6 +243,30 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     }
   }
 
+  String _eyebrowFor(String kind) => switch (kind) {
+        'CHART' => 'Žebříček',
+        'GENRE' => 'Žánr',
+        'EDITORIAL' => 'Výběr',
+        'GENERATED_RECOMMENDATION' => 'Mix',
+        _ => 'Playlist',
+      };
+
+  Future<void> _copyToLibrary(BuildContext context, PlaylistDetailModel detail) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final copy = await ref.read(playlistsRepositoryProvider).copy(detail.id);
+      ref.invalidate(myPlaylistsProvider);
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text('„${detail.title}“ přidán do knihovny'),
+          action: SnackBarAction(label: 'Otevřít', onPressed: () => context.push('/playlists/${copy.id}')),
+        ),
+      );
+    } catch (e) {
+      messenger?.showSnackBar(SnackBar(content: Text('Přidání selhalo: $e')));
+    }
+  }
+
   Future<void> _confirmDelete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -236,7 +275,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         content: const Text('Tohle nejde vrátit zpátky.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Zrušit')),
-          GlassButton(label: 'Smazat', destructive: true, compact: true, onPressed: () => Navigator.of(context).pop(true)),
+          GlassButton(
+              label: 'Smazat', destructive: true, compact: true, onPressed: () => Navigator.of(context).pop(true)),
         ],
       ),
     );

@@ -248,6 +248,16 @@ class LibraryRepository {
     return LibrarySearchResult.fromJson(json);
   }
 
+  /// "Odebrat z knihovny" -- `dryRun` jen spočítá, co by se stalo (pro
+  /// potvrzovací sheet), nic nemění.
+  Future<LibraryRemovalResult> removeTracks(List<String> recordingIds, {bool dryRun = false}) async {
+    final json = await _api.postJson(
+      '/library/tracks/remove${dryRun ? '?dryRun=true' : ''}',
+      body: {'recordingIds': recordingIds},
+    );
+    return LibraryRemovalResult.fromJson(json);
+  }
+
   Future<PlaylistDetailModel> likedSongs() async {
     final json = await _api.getJson('/library/liked-songs');
     return PlaylistDetailModel.fromJson(json);
@@ -299,4 +309,34 @@ class LibraryRepository {
     final json = await _api.getJson('/library/czech');
     return LocalTracksPage.fromJson(json);
   }
+}
+
+
+/// Výsledek (nebo náhled) odebrání z knihovny.
+class LibraryRemovalResult {
+  const LibraryRemovalResult({required this.removed, required this.freedBytes, required this.deleted, required this.hidden});
+
+  final int removed;
+  final int freedBytes;
+
+  /// Stažené soubory -- smažou se a uvolní místo.
+  final int deleted;
+
+  /// Soubory z uživatelovy vlastní složky -- jen se skryjí, nic se nemaže.
+  final int hidden;
+
+  factory LibraryRemovalResult.fromJson(Map<String, dynamic> json) {
+    final results = (json['results'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
+    return LibraryRemovalResult(
+      removed: json['removed'] as int? ?? 0,
+      freedBytes: json['freedBytes'] as int? ?? 0,
+      deleted: results.where((r) => r['result'] == 'deleted').length,
+      hidden: results.where((r) => r['result'] == 'hidden').length,
+    );
+  }
+}
+
+String formatMegabytes(int bytes) {
+  final mb = bytes / (1024 * 1024);
+  return mb >= 10 ? '${mb.round()} MB' : '${mb.toStringAsFixed(1).replaceAll('.', ',')} MB';
 }

@@ -124,6 +124,7 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
     this.albumArtUrl,
     this.artistName,
     this.onRemoveSelected,
+    this.removeLabel = 'Odebrat',
     this.trailing,
     this.downloadWholeList = false,
   });
@@ -137,6 +138,9 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
 
   /// Jen ve vlastním playlistu -- přidá do hromadných akcí "Odebrat".
   final Future<void> Function(List<RecordingModel> selected)? onRemoveSelected;
+
+  /// Popisek hromadného odebrání ("Odebrat" z playlistu / "Odebrat z knihovny").
+  final String removeLabel;
 
   /// Extra ovladač vpravo (např. seznam/karty přepínač v Knihovně).
   final Widget? trailing;
@@ -235,7 +239,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
             ),
             if (widget.onRemoveSelected != null)
               GlassButton(
-                label: 'Odebrat',
+                label: widget.removeLabel,
                 icon: Symbols.delete_rounded,
                 compact: true,
                 destructive: true,

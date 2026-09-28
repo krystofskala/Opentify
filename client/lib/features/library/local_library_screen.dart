@@ -11,6 +11,8 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
+import 'liked_songs_screen.dart' show LikedSongsCard;
+import '../../widgets/remove_from_library.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
@@ -22,8 +24,15 @@ const _pageSize = 100;
 const _fullLoadPageSize = 500;
 const _librarySourceLabel = 'Knihovna';
 
-final _localAlbumsProvider = FutureProvider.autoDispose((ref) => ref.watch(libraryRepositoryProvider).localAlbums());
-final _localArtistsProvider = FutureProvider.autoDispose((ref) => ref.watch(libraryRepositoryProvider).localArtists());
+// `libraryRevisionProvider` -- po "Odebrat z knihovny" se přenačtou samy.
+final _localAlbumsProvider = FutureProvider.autoDispose((ref) {
+  ref.watch(libraryRevisionProvider);
+  return ref.watch(libraryRepositoryProvider).localAlbums();
+});
+final _localArtistsProvider = FutureProvider.autoDispose((ref) {
+  ref.watch(libraryRevisionProvider);
+  return ref.watch(libraryRepositoryProvider).localArtists();
+});
 
 /// Knihovna -- všechno, co je na disku k okamžitému přehrání, v pilulkových
 /// tabech Skladby/Alba/Interpreti/Playlisty (PixelPlayer styl). Karty
@@ -230,6 +239,10 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    ref.listen(libraryRevisionProvider, (_, __) {
+      _collection.setSelecting(false);
+      _refresh();
+    });
     if (!_initialLoadDone) return const LoadingState();
     if (_error != null && _items.isEmpty) {
       return ErrorState(message: 'Knihovnu se nepodařilo načíst.', error: _error, onRetry: _refresh);
@@ -257,6 +270,8 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   allTracks: _items,
                   visibleTracks: visible,
                   sourceLabel: _librarySourceLabel,
+                  onRemoveSelected: (selected) => confirmRemoveFromLibrary(context, selected),
+                  removeLabel: 'Odebrat z knihovny',
                   trailing: ViewModeToggle(mode: _viewMode, onChanged: (mode) => setState(() => _viewMode = mode)),
                 ),
               ),
@@ -602,6 +617,10 @@ class _PlaylistsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlists = ref.watch(myPlaylistsProvider);
+    const liked = Padding(
+      padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.xs),
+      child: LikedSongsCard(),
+    );
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _createPlaylist(context, ref),
@@ -609,18 +628,24 @@ class _PlaylistsTab extends ConsumerWidget {
         label: const Text('Nový playlist'),
       ),
       body: playlists.when(
-        data: (items) => items.isEmpty
-            ? const EmptyState(
-                icon: Symbols.queue_music_rounded,
-                message: 'Zatím žádné playlisty -- založ první tlačítkem vpravo dole.',
-              )
-            : RefreshIndicator(
-                onRefresh: () async => ref.invalidate(myPlaylistsProvider),
+        data: (items) => RefreshIndicator(
+                onRefresh: () async {
+                  ref.invalidate(myPlaylistsProvider);
+                  ref.invalidate(likedSongsProvider);
+                },
                 child: ListView.builder(
                   padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
-                  itemCount: items.length,
+                  itemCount: items.length + 1 + (items.isEmpty ? 1 : 0),
                   itemBuilder: (context, index) {
-                    final playlist = items[index];
+                    if (index == 0) return liked;
+                    if (items.isEmpty) {
+                      return const EmptyState(
+                        compact: true,
+                        icon: Symbols.queue_music_rounded,
+                        message: 'Zatím žádné vlastní playlisty -- založ první tlačítkem vpravo dole.',
+                      );
+                    }
+                    final playlist = items[index - 1];
                     return MediaCard(
                       layout: MediaCardLayout.row,
                       placeholderIcon: Symbols.queue_music_rounded,

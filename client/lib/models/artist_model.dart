@@ -9,6 +9,7 @@ class ArtistModel {
     required this.name,
     this.sortName,
     this.images = const [],
+    this.bannerUrl,
   });
 
   final String id;
@@ -17,6 +18,9 @@ class ArtistModel {
   final String name;
   final String? sortName;
   final List<String> images;
+
+  /// Široká fotka pro hlavičku (fanart.tv), `images` je čtvercová fotka.
+  final String? bannerUrl;
 
   String? get coverImageUrl => images.isEmpty ? null : images.first;
 
@@ -27,5 +31,6 @@ class ArtistModel {
         name: json['name'] as String,
         sortName: json['sortName'] as String?,
         images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
+        bannerUrl: json['bannerUrl'] as String?,
       );
 }

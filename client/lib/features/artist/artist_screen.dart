@@ -11,7 +11,9 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/media_card.dart';
+import '../../widgets/glass/glass.dart';
 import '../../widgets/player_bar.dart';
+import '../../widgets/playlist_card.dart' show RankBadge;
 import '../../widgets/queue_action_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
@@ -27,6 +29,11 @@ final discographyProvider =
 final artistBioProvider =
     FutureProvider.autoDispose.family<ArtistBioModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getArtistBio(artistId);
+});
+
+final artistRaritiesProvider =
+    FutureProvider.autoDispose.family<List<({ReleaseModel release, String rarity})>, String>((ref, artistId) {
+  return ref.watch(catalogRepositoryProvider).getRarities(artistId);
 });
 
 const _releaseTypeLabels = {
@@ -90,6 +97,7 @@ class _ArtistBody extends ConsumerWidget {
               circleImage: true,
               placeholderIcon: Symbols.person_rounded,
               banner: true,
+              bannerImageUrl: artist.bannerUrl,
               expandedHeight: 320,
               bannerFallbackUrl: sortedReleases
                   .map((r) => r.coverImageUrl)
@@ -161,6 +169,9 @@ class _ArtistBody extends ConsumerWidget {
                 SliverToBoxAdapter(child: SectionHeader(_releaseTypeLabels[entry.key] ?? entry.key)),
                 SliverToBoxAdapter(child: _ReleaseRail(releases: entry.value)),
               ],
+            // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru
+            // slučuje do kanonického interpreta s MBID.
+            SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id)),
             const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
           ],
         ),
@@ -276,6 +287,95 @@ class _ReleaseRail extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+
+const _rarityLabels = {'demo': 'Dema', 'live': 'Živě', 'bootleg': 'Bootlegy'};
+const _rarityBadges = {'demo': 'DEMO', 'live': 'ŽIVĚ', 'bootleg': 'BOOTLEG'};
+
+/// "Nevydané a vzácné" pod oficiální diskografií -- dema, živé nahrávky a
+/// bootlegy z MusicBrainz. Líně, se skeletonem; prázdné/nedostupné (503) se
+/// vůbec neukáže.
+class _RaritiesSection extends ConsumerStatefulWidget {
+  const _RaritiesSection({required this.artistId});
+  final String artistId;
+
+  @override
+  ConsumerState<_RaritiesSection> createState() => _RaritiesSectionState();
+}
+
+class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
+  String? _selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final rarities = ref.watch(artistRaritiesProvider(widget.artistId));
+    return rarities.when(
+      loading: () => const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [SectionHeader('Nevydané a vzácné'), SkeletonCardRail(height: 190)],
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        final kinds = [for (final k in _rarityLabels.keys) if (items.any((i) => i.rarity == k)) k];
+        final selected = kinds.contains(_selected) ? _selected! : kinds.first;
+        final visible = items.where((i) => i.rarity == selected).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SectionHeader('Nevydané a vzácné'),
+            if (kinds.length > 1)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
+                child: GlassSegmentedControl<String>(
+                  segments: [
+                    for (final k in kinds)
+                      GlassSegment(value: k, label: '${_rarityLabels[k]} · ${items.where((i) => i.rarity == k).length}'),
+                  ],
+                  selected: selected,
+                  onChanged: (k) => setState(() => _selected = k),
+                ),
+              ),
+            SizedBox(
+              height: 190,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                itemCount: visible.length,
+                itemBuilder: (context, index) {
+                  final item = visible[index];
+                  final release = item.release;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.sm),
+                    child: SizedBox(
+                      width: 140,
+                      child: Stack(
+                        children: [
+                          MediaCard(
+                            title: release.title,
+                            subtitle: release.yearLabel,
+                            imageUrl: release.coverImageUrl,
+                            artworkKey: (releaseId: release.id, artistId: release.artistId),
+                            onTap: () => context.push('/releases/${release.id}'),
+                          ),
+                          Positioned(
+                            left: AppSpacing.xs,
+                            top: AppSpacing.xs,
+                            child: RankBadge(label: _rarityBadges[item.rarity] ?? item.rarity.toUpperCase()),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

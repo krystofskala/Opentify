@@ -7,8 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/library_repository.dart';
-import '../../models/playlist_model.dart';
-import '../../state/liked_songs_controller.dart';
 import '../../state/providers.dart';
 import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
@@ -16,15 +14,7 @@ import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_import_report.dart';
-import '../../widgets/state_views.dart';
-import '../../widgets/track_collection.dart';
-import '../../widgets/track_tile.dart';
-import '../home/home_screen.dart' show dailyJamsProvider;
 import '../../routing/home_shell.dart' show navBottomInset;
-
-final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) {
-  return ref.watch(libraryRepositoryProvider).likedSongs();
-});
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -47,12 +37,10 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Timer? _pollTimer;
-  final _collection = TrackCollectionController();
 
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _collection.dispose();
     super.dispose();
   }
 
@@ -71,27 +59,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final likedSongs = ref.watch(likedSongsProvider);
-    final likedIds = ref.watch(likedSongsControllerProvider).valueOrNull;
     final scanStatus = ref.watch(scanStatusProvider);
     scanStatus.whenData(_syncPolling);
-    // Srdíčko kdekoliv v appce -> seznam tady se hned přizpůsobí: odebrané
-    // zmizí okamžitě (filtr podle živé sady), nově přidané po přenačtení.
-    ref.listen(likedSongsControllerProvider, (previous, next) {
-      if (previous?.valueOrNull?.length != next.valueOrNull?.length) {
-        Future.delayed(const Duration(milliseconds: 600), () {
-          if (mounted) ref.invalidate(likedSongsProvider);
-        });
-      }
-    });
-
     return Scaffold(
       appBar: const SectionAppBar('Profil'),
       body: RefreshIndicator(
-        onRefresh: () async {
-          ref.invalidate(likedSongsProvider);
-          ref.invalidate(scanStatusProvider);
-        },
+        onRefresh: () async => ref.invalidate(scanStatusProvider),
         child: ListView(
           padding: EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.md + navBottomInset(context)),
           children: [
@@ -142,61 +115,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ],
               ),
             ),
-            const SectionHeader('Oblíbené skladby'),
-            likedSongs.when(
-              data: (playlist) {
-                final items = likedIds == null
-                    ? playlist.items
-                    : playlist.items.where((r) => likedIds.contains(r.id)).toList();
-                if (items.isEmpty) {
-                  return const EmptyState(
-                    compact: true,
-                    icon: Symbols.favorite_rounded,
-                    message: 'Zatím nic -- klepni na srdíčko u skladby, nebo naimportuj Liked Songs ze Spotify výše.',
-                  );
-                }
-                return ListenableBuilder(
-                  listenable: _collection,
-                  builder: (context, _) {
-                    final visible = _collection.apply(items);
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        TrackCollectionToolbar(
-                          controller: _collection,
-                          allTracks: items,
-                          visibleTracks: visible,
-                          sourceLabel: 'Oblíbené skladby',
-                        ),
-                        if (visible.isEmpty) const EmptyState(compact: true, message: 'Filtru nic neodpovídá.'),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                          child: Column(
-                            children: [
-                              for (final r in visible)
-                                TrackTile(
-                                  recording: r,
-                                  queueRecordings: visible,
-                                  sourceLabel: 'Oblíbené skladby',
-                                  selectionMode: _collection.selecting,
-                                  selected: _collection.isSelected(r.id),
-                                  onSelectedChanged: (value) => _collection.toggle(r.id, value),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-              loading: () => const SkeletonTrackList(count: 6),
-              error: (error, stack) => ErrorState(
-                compact: true,
-                message: 'Oblíbené skladby se nepodařilo načíst.',
-                onRetry: () => ref.invalidate(likedSongsProvider),
-              ),
-            ),
           ],
         ),
       ),
@@ -220,7 +138,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     try {
       final result = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
       ref.invalidate(likedSongsProvider);
-      ref.invalidate(dailyJamsProvider);
+      ref.invalidate(homeProvider);
       ref.invalidate(myPlaylistsProvider);
       messenger.hideCurrentSnackBar();
       if (!context.mounted) return;

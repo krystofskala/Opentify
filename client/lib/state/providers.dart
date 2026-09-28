@@ -5,6 +5,8 @@ import '../core/config.dart';
 import '../core/realtime_event.dart';
 import '../core/ws_client.dart';
 import '../data/catalog_repository.dart';
+import '../models/playlist_model.dart';
+import '../data/home_repository.dart';
 import '../data/library_repository.dart';
 import '../data/lyrics_repository.dart';
 import '../data/playlists_repository.dart';
@@ -33,6 +35,20 @@ final recommendationsRepositoryProvider = Provider<RecommendationsRepository>((r
 
 final provisioningRepositoryProvider = Provider<ProvisioningRepository>((ref) {
   return ProvisioningRepository(ref.watch(apiClientProvider));
+});
+
+final homeRepositoryProvider = Provider<HomeRepository>((ref) {
+  return HomeRepository(ref.watch(apiClientProvider));
+});
+
+/// Celá obrazovka Domů jedním voláním (`GET /home`, snapshoty v DB).
+final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
+  return ref.watch(homeRepositoryProvider).home();
+});
+
+/// Oblíbené skladby -- sdílené Knihovnou (karta + detail); dřív žily v Profilu.
+final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) {
+  return ref.watch(libraryRepositoryProvider).likedSongs();
 });
 
 final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {

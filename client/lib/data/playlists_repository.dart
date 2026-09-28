@@ -52,6 +52,12 @@ class PlaylistsRepository {
     return PlaylistDetailModel.fromJson(json);
   }
 
+  /// "Přidat do knihovny" -- vlastní kopie žebříčku/mixu z Domů.
+  Future<PlaylistDetailModel> copy(String playlistId) async {
+    final json = await _api.postJson('/playlists/$playlistId/copy');
+    return PlaylistDetailModel.fromJson(json);
+  }
+
   Future<void> delete(String playlistId) async {
     await _api.deleteJson('/playlists/$playlistId');
   }

@@ -170,6 +170,14 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
     }
   }
 
+  /// Po "Odebrat z knihovny" -- zapomenout lokální stav, ať skladba znovu
+  /// vypadá jako nestažená (další přehrání ji stáhne znovu).
+  void forget(String recordingId) {
+    if (!state.containsKey(recordingId)) return;
+    _loudnessGains.remove(recordingId);
+    state = {...state}..remove(recordingId);
+  }
+
   void _update(String recordingId, TrackProvisioningState Function(TrackProvisioningState) transform) {
     final current = state[recordingId] ?? const TrackProvisioningState.idle();
     state = {...state, recordingId: transform(current)};

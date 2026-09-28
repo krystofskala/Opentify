@@ -1,244 +1,221 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../../data/library_repository.dart';
-import '../../models/playlist_model.dart';
+import '../../data/home_repository.dart';
 import '../../models/recording_model.dart';
+import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/audio_player_controller.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../widgets/glass/glass.dart';
+import '../../widgets/media_card.dart';
+import '../../widgets/playlist_card.dart';
 import '../../widgets/recently_played_pill.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
-import '../../widgets/track_list_sheet.dart';
 import '../../widgets/track_tile.dart';
-import '../../routing/home_shell.dart' show navBottomInset;
 
-final genresProvider = FutureProvider.autoDispose<List<LocalGenre>>((ref) {
-  return ref.watch(libraryRepositoryProvider).genres();
-});
-
-final czechMusicProvider = FutureProvider.autoDispose<LocalTracksPage>((ref) {
-  return ref.watch(libraryRepositoryProvider).czechMusic();
-});
-
-final discoverProvider = FutureProvider.autoDispose<List<RecordingModel>>((ref) {
-  return ref.watch(recommendationsRepositoryProvider).discover();
-});
-
-final dailyJamsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) {
-  return ref.watch(recommendationsRepositoryProvider).dailyJams();
-});
-
-/// Nejposlouchanější nahrávky nastaveného účtu přímo z jeho ListenBrainz
-/// statistik.
-final myTopTracksProvider = FutureProvider.autoDispose<List<RecordingModel>>((ref) {
-  return ref.watch(recommendationsRepositoryProvider).myTopTracks();
-});
-
-/// Sitewide žebříček veřejné komunity ListenBrainz.
-final trendingProvider = FutureProvider.autoDispose<List<RecordingModel>>((ref) {
-  return ref.watch(recommendationsRepositoryProvider).trending();
-});
-
-/// Top nahrávky uživatelů s podobným vkusem na veřejném ListenBrainz.
-final communityPicksProvider = FutureProvider.autoDispose<List<RecordingModel>>((ref) {
-  return ref.watch(recommendationsRepositoryProvider).communityPicks();
-});
-
-/// Domovská obrazovka -- osobní (Daily Jams, Moje nejposlouchanější),
-/// Objevuj, globální (Trendy, Komunita, ListenBrainz), žánry a česká hudba.
-/// Prázdné sekce jsou legitimní stav (data ještě nejsou), ne chyba.
+/// Domů -- celá obrazovka z `GET /home` (žebříčky, mixy, nová a populární
+/// alba, žánry, nálady), sekce se vykreslují podle `type`. Prázdné sekce
+/// server vůbec nepošle.
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 5) return 'Dobrou noc';
+    if (hour < 10) return 'Dobré ráno';
+    if (hour < 18) return 'Dobrý den';
+    return 'Dobrý večer';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final home = ref.watch(homeProvider);
     final recentlyPlayed = ref.watch(audioPlayerControllerProvider.select((s) => s.recentlyPlayed));
-    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: const SectionAppBar('Opentify'),
+      appBar: SectionAppBar(_greeting()),
       body: RefreshIndicator(
         onRefresh: () async {
-          ref.invalidate(dailyJamsProvider);
-          ref.invalidate(discoverProvider);
-          ref.invalidate(myTopTracksProvider);
-          ref.invalidate(trendingProvider);
-          ref.invalidate(communityPicksProvider);
-          ref.invalidate(genresProvider);
-          ref.invalidate(czechMusicProvider);
+          ref.invalidate(homeProvider);
+          try {
+            await ref.read(homeProvider.future);
+          } catch (_) {}
         },
-        child: ListView(
-          padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
-          children: [
-            // PixelPlayerova "bublinová" řada naposledy přehraných -- skrytá,
-            // dokud toho není aspoň pár.
-            if (recentlyPlayed.length >= 3) ...[
-              const SectionHeader('Naposledy přehráno'),
-              SizedBox(
-                height: 66,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                  itemCount: recentlyPlayed.length,
-                  itemBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.only(right: AppSpacing.sm),
-                    child: RecentlyPlayedPill(info: recentlyPlayed[index], queue: recentlyPlayed),
-                  ),
+        child: home.when(
+          data: (sections) => ListView(
+            padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
+            children: [
+              if (sections.isEmpty)
+                const EmptyState(
+                  icon: Symbols.home_rounded,
+                  message: 'Domů se zatím připravuje -- žebříčky a mixy se generují na pozadí, zkus to za pár minut.',
                 ),
+              for (final section in sections) ...[
+                _HomeSectionView(section: section),
+                // Naposledy přehrané hned pod rychlým výběrem.
+                if (section.type == HomeSectionType.quickPicks && recentlyPlayed.length >= 3)
+                  _RecentlyPlayed(recentlyPlayed: recentlyPlayed),
+              ],
+            ],
+          ),
+          loading: () => const _HomeSkeleton(),
+          error: (error, stack) => ListView(
+            children: [
+              ErrorState(
+                message: 'Domů se nepodařilo načíst.',
+                error: error,
+                onRetry: () => ref.invalidate(homeProvider),
               ),
             ],
-            _TrackRailSection(
-              title: 'Daily Jams',
-              badge: SectionBadge(icon: Symbols.favorite_rounded, label: 'Pro tebe', color: scheme.primary),
-              value: ref.watch(dailyJamsProvider).whenData((p) => p.items),
-              onRetry: () => ref.invalidate(dailyJamsProvider),
-              emptyMessage: 'Zatím žádný denní mix -- naimportuj Liked Songs v Profilu, '
-                  'nebo počkej, až ListenBrainz nasbírá poslechovou historii.',
-            ),
-            _TrackRailSection(
-              title: 'Moje nejposlouchanější',
-              badge: SectionBadge(icon: Symbols.person_rounded, label: 'Moje', color: scheme.secondary),
-              value: ref.watch(myTopTracksProvider),
-              onRetry: () => ref.invalidate(myTopTracksProvider),
-              emptyMessage: 'ListenBrainz účet zatím nemá dost zaznamenaných poslechů pro statistiku.',
-            ),
-            _TrackRailSection(
-              title: 'Objevuj',
-              value: ref.watch(discoverProvider),
-              onRetry: () => ref.invalidate(discoverProvider),
-              emptyMessage: 'Zatím nic k objevování -- zkus to za pár dní znovu.',
-            ),
-            _TrackRailSection(
-              title: 'Populární na serveru',
-              badge: SectionBadge(icon: Symbols.local_fire_department_rounded, label: 'Trendy', color: scheme.tertiary),
-              value: ref.watch(trendingProvider),
-              onRetry: () => ref.invalidate(trendingProvider),
-              emptyMessage: 'Veřejný ListenBrainz teď žebříček nevrací -- zkus to později.',
-            ),
-            _TrackRailSection(
-              title: 'Komunitní objevy',
-              badge: SectionBadge(icon: Symbols.groups_rounded, label: 'Komunita', color: scheme.secondary),
-              value: ref.watch(communityPicksProvider),
-              onRetry: () => ref.invalidate(communityPicksProvider),
-              emptyMessage: 'Zatím nic -- nastav LISTENBRAINZ_USERNAME na účet s poslechovou historií.',
-            ),
-            const SectionHeader('Podle nálady a žánru'),
-            ref.watch(genresProvider).when(
-                  data: (items) => items.isEmpty
-                      ? const EmptyState(
-                          compact: true,
-                          message: 'Zatím žádné rozpoznané žánry -- otevři pár alb v knihovně, ať se dotáhnou.',
-                        )
-                      : _GenreChipRow(genres: items),
-                  loading: () => const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-                    child: Row(
-                      children: [
-                        SkeletonBox(width: 90, height: 32, radius: AppRadii.pill),
-                        SizedBox(width: AppSpacing.xs),
-                        SkeletonBox(width: 110, height: 32, radius: AppRadii.pill),
-                        SizedBox(width: AppSpacing.xs),
-                        SkeletonBox(width: 80, height: 32, radius: AppRadii.pill),
-                      ],
-                    ),
-                  ),
-                  error: (error, stack) => ErrorState(
-                    compact: true,
-                    message: 'Žánry se nepodařilo načíst.',
-                    onRetry: () => ref.invalidate(genresProvider),
-                  ),
-                ),
-            _TrackRailSection(
-              title: 'Česká hudba',
-              value: ref.watch(czechMusicProvider).whenData((p) => p.items),
-              onRetry: () => ref.invalidate(czechMusicProvider),
-              emptyMessage: 'Zatím žádní čeští interpreti rozpoznaní v knihovně.',
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Jedna sekce Home -- nadpis (+ štítek, "Zobrazit vše"), pak skeleton,
-/// prázdný stav, chyba nebo vodorovná řada karet. Dřív měla každá sekce
-/// vlastní kopii téhož `.when(...)` bloku.
-class _TrackRailSection extends StatelessWidget {
-  const _TrackRailSection({
-    required this.title,
-    required this.value,
-    required this.onRetry,
-    required this.emptyMessage,
-    this.badge,
-  });
+class _RecentlyPlayed extends StatelessWidget {
+  const _RecentlyPlayed({required this.recentlyPlayed});
+  final List<NowPlayingInfo> recentlyPlayed;
 
-  final String title;
-  final Widget? badge;
-  final AsyncValue<List<RecordingModel>> value;
-  final VoidCallback onRetry;
-  final String emptyMessage;
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionHeader('Naposledy přehráno'),
+          SizedBox(
+            height: 66,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              itemCount: recentlyPlayed.length,
+              itemBuilder: (context, index) => Padding(
+                padding: const EdgeInsets.only(right: AppSpacing.sm),
+                child: RecentlyPlayedPill(info: recentlyPlayed[index], queue: recentlyPlayed),
+              ),
+            ),
+          ),
+        ],
+      );
+}
+
+class _HomeSectionView extends StatelessWidget {
+  const _HomeSectionView({required this.section});
+  final HomeSection section;
 
   @override
   Widget build(BuildContext context) {
-    final items = value.valueOrNull;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SectionHeader(
-          title,
-          badge: badge,
-          onSeeAll: items != null && items.length > 3
-              ? () => showTrackListSheet(context, title: title, recordings: items)
-              : null,
-        ),
-        value.when(
-          data: (recordings) => recordings.isEmpty
-              ? EmptyState(compact: true, message: emptyMessage)
-              : _TrackCardRow(recordings: recordings, sourceLabel: title),
-          loading: () => const SkeletonCardRail(),
-          error: (error, stack) => ErrorState(compact: true, message: 'Sekci se nepodařilo načíst.', onRetry: onRetry),
-        ),
-      ],
+    switch (section.type) {
+      case HomeSectionType.quickPicks:
+        return _QuickPicks(cards: section.playlists);
+      case HomeSectionType.playlistCards:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(
+              section.title,
+              onSeeAll: section.playlists.length > 3
+                  ? () => _showPlaylistGrid(context, section.title, section.playlists)
+                  : null,
+            ),
+            SizedBox(
+              height: 214,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: section.playlists.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) {
+                  final card = section.playlists[index];
+                  return PlaylistCardView(card: card, onTap: () => context.push('/playlists/${card.id}'));
+                },
+              ),
+            ),
+          ],
+        );
+      case HomeSectionType.albumCards:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(
+              section.title,
+              onSeeAll: section.albums.length > 3 ? () => _showAlbumGrid(context, section.title, section.albums) : null,
+            ),
+            SizedBox(
+              height: 204,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: section.albums.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) =>
+                    SizedBox(width: 150, child: _albumCard(context, section.albums[index], index)),
+              ),
+            ),
+          ],
+        );
+      case HomeSectionType.trackRail:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(
+              section.title,
+              onSeeAll: section.playlistId != null ? () => context.push('/playlists/${section.playlistId}') : null,
+            ),
+            _TrackCardRow(recordings: section.tracks, sourceLabel: section.title),
+          ],
+        );
+      case HomeSectionType.unknown:
+        return const SizedBox.shrink();
+    }
+  }
+}
+
+Widget _albumCard(BuildContext context, HomeAlbumCard album, int? index) => MediaCard(
+      title: album.title,
+      subtitle: album.artistName,
+      imageUrl: album.images.isEmpty ? null : album.images.first,
+      artworkKey: (releaseId: album.id, artistId: album.artistId),
+      onTap: () => context.push('/releases/${album.id}'),
+      animationIndex: index == null ? null : index % 8,
+    );
+
+/// Rychlý výběr -- 2 sloupce kompaktních dlaždic.
+class _QuickPicks extends StatelessWidget {
+  const _QuickPicks({required this.cards});
+  final List<HomePlaylistCard> cards;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.xs),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const gap = AppSpacing.xs;
+          final columns = constraints.maxWidth >= 720 ? 3 : 2;
+          final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: [
+              for (final card in cards)
+                SizedBox(
+                  width: width,
+                  height: 56,
+                  child: QuickPickTile(card: card, onTap: () => context.push('/playlists/${card.id}')),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
 
-/// Vodorovná řada žánrových čipů -- klik otevře sheet se skladbami žánru.
-class _GenreChipRow extends ConsumerWidget {
-  const _GenreChipRow({required this.genres});
-  final List<LocalGenre> genres;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) => SizedBox(
-        height: 40,
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-          itemCount: genres.length,
-          itemBuilder: (context, index) {
-            final genre = genres[index];
-            return Padding(
-              padding: const EdgeInsets.only(right: AppSpacing.xs),
-              child: ActionChip(
-                label: Text('${genre.genre} · ${genre.trackCount}'),
-                onPressed: () => showTrackListSheet(
-                  context,
-                  title: genre.genre,
-                  load: (ref) async => (await ref.read(libraryRepositoryProvider).tracksByGenre(genre.genre)).items,
-                ),
-              ),
-            );
-          },
-        ),
-      );
-}
-
-/// Karty skladeb v jedné vodorovně scrollovatelné sekci -- `sourceLabel`
-/// (název sekce) se propíše do "Přehráváno z …" v přehrávači.
 class _TrackCardRow extends StatelessWidget {
   const _TrackCardRow({required this.recordings, required this.sourceLabel});
   final List<RecordingModel> recordings;
@@ -258,7 +235,6 @@ class _TrackCardRow extends StatelessWidget {
               child: TrackTile(
                 layout: TrackTileLayout.card,
                 recording: recordings[index],
-                subtitle: _subtitleFor(recordings[index]),
                 queueRecordings: recordings,
                 sourceLabel: sourceLabel,
                 animationIndex: index,
@@ -269,12 +245,108 @@ class _TrackCardRow extends StatelessWidget {
       );
 }
 
-/// Karta ukazuje interpreta (proklikávací); jen Trendy/Komunita, kde
-/// interpret chybí, spadnou na počet poslechů z ListenBrainz.
-String? _subtitleFor(RecordingModel recording) {
-  if (recording.artistName != null) return null;
-  final count = recording.listenCount;
-  if (count == null) return null;
-  final formatted = count.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (match) => ' ');
-  return '$formatted poslechů';
+/// "Zobrazit vše" -- mřížka ve skleněném sheetu (překryv = sklo).
+Future<void> _showGrid(
+    BuildContext context, String title, int count, Widget Function(BuildContext, int) itemBuilder, double aspect) {
+  return showGlassSheet(
+    context,
+    builder: (sheetContext) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => GlassSheet(
+        expand: true,
+        child: CustomScrollView(
+          controller: scroll,
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.sm),
+                child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg),
+              sliver: SliverGrid.builder(
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 180,
+                  childAspectRatio: aspect,
+                  crossAxisSpacing: AppSpacing.sm,
+                  mainAxisSpacing: AppSpacing.sm,
+                ),
+                itemCount: count,
+                itemBuilder: itemBuilder,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _showPlaylistGrid(BuildContext context, String title, List<HomePlaylistCard> cards) => _showGrid(
+      context,
+      title,
+      cards.length,
+      (context, index) => LayoutBuilder(
+        builder: (context, c) => PlaylistCardView(
+          card: cards[index],
+          width: c.maxWidth,
+          onTap: () {
+            Navigator.of(context).pop();
+            context.push('/playlists/${cards[index].id}');
+          },
+        ),
+      ),
+      0.72,
+    );
+
+Future<void> _showAlbumGrid(BuildContext context, String title, List<HomeAlbumCard> albums) => _showGrid(
+      context,
+      title,
+      albums.length,
+      (context, index) => MediaCard(
+        title: albums[index].title,
+        subtitle: albums[index].artistName,
+        imageUrl: albums[index].images.isEmpty ? null : albums[index].images.first,
+        onTap: () {
+          Navigator.of(context).pop();
+          context.push('/releases/${albums[index].id}');
+        },
+      ),
+      0.74,
+    );
+
+class _HomeSkeleton extends StatelessWidget {
+  const _HomeSkeleton();
+
+  @override
+  Widget build(BuildContext context) => ListView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          Wrap(
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
+            children: [
+              for (var i = 0; i < 6; i++)
+                LayoutBuilder(
+                  builder: (context, _) => SkeletonBox(
+                    width: (MediaQuery.sizeOf(context).width - AppSpacing.md * 2 - AppSpacing.xs) / 2,
+                    height: 56,
+                    radius: AppRadii.md,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          for (var i = 0; i < 3; i++) ...[
+            const SkeletonBox(width: 140, height: 20),
+            const SizedBox(height: AppSpacing.sm),
+            const SkeletonCardRail(height: 190, cardWidth: 150),
+            const SizedBox(height: AppSpacing.md),
+          ],
+        ],
+      );
 }

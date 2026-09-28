@@ -46,6 +46,16 @@ class CatalogRepository {
     return DiscographyModel.fromJson(json);
   }
 
+  /// Nevydané a vzácné nahrávky (dema, živáky, bootlegy) -- může trvat
+  /// několik sekund (MusicBrainz), volá se líně až pod diskografií.
+  Future<List<({ReleaseModel release, String rarity})>> getRarities(String artistId) async {
+    final json = await _api.getJson('/catalog/artists/$artistId/rarities');
+    return (json['items'] as List<dynamic>? ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map((e) => (release: ReleaseModel.fromJson(e), rarity: e['rarity'] as String? ?? 'live'))
+        .toList();
+  }
+
   Future<ReleaseModel> getRelease(String releaseId) async {
     final json = await _api.getJson('/catalog/releases/$releaseId');
     return ReleaseModel.fromJson(json);

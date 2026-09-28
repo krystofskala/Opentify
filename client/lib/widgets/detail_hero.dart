@@ -82,6 +82,7 @@ class DetailHeroAppBar extends StatelessWidget {
     this.expandedHeight = 300,
     this.banner = false,
     this.bannerFallbackUrl,
+    this.bannerImageUrl,
   });
 
   final String title;
@@ -102,12 +103,16 @@ class DetailHeroAppBar extends StatelessWidget {
   /// ať hlavička nikdy není prázdný šedý obdélník.
   final String? bannerFallbackUrl;
 
+  /// Skutečně široká fotka (fanart.tv `artistbackground`) -- má přednost
+  /// před čtvercovou `imageUrl`, přes celou šířku bez ořezu hlav.
+  final String? bannerImageUrl;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final topPadding = MediaQuery.paddingOf(context).top;
     final collapsedHeight = kToolbarHeight + topPadding;
-    final blurSource = imageUrl ?? bannerFallbackUrl;
+    final blurSource = bannerImageUrl ?? imageUrl ?? bannerFallbackUrl;
 
     return SliverAppBar(
       expandedHeight: expandedHeight,
@@ -119,78 +124,10 @@ class DetailHeroAppBar extends StatelessWidget {
         builder: (context, constraints) {
           final range = (expandedHeight + topPadding) - collapsedHeight;
           final t = range <= 0 ? 0.0 : ((constraints.maxHeight - collapsedHeight) / range).clamp(0.0, 1.0);
-          if (banner) return _buildBanner(context, t, blurSource);
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              if (imageUrl != null)
-                NetImage(url: imageUrl!)
-              else
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [theme.colorScheme.primaryContainer, theme.colorScheme.tertiaryContainer],
-                    ),
-                  ),
-                ),
-              ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                  child: ColoredBox(color: (accent ?? Colors.black).withValues(alpha: 0.4)),
-                ),
-              ),
-              // Jemné ztmavení dole, ať bílý text vždy čitelně stojí na
-              // světlých obalech.
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.black26, Colors.transparent, Colors.black38],
-                  ),
-                ),
-              ),
-              if (t > 0.05)
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Opacity(
-                    opacity: t,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
-                      child: _HeroCard(
-                        title: title,
-                        imageUrl: imageUrl,
-                        eyebrow: eyebrow,
-                        subtitle: subtitle,
-                        circleImage: circleImage,
-                        placeholderIcon: placeholderIcon,
-                      ),
-                    ),
-                  ),
-                ),
-              if (t < 0.4)
-                Positioned(
-                  left: 56,
-                  right: (actions?.length ?? 0) * 48.0 + AppSpacing.md,
-                  bottom: 0,
-                  height: kToolbarHeight,
-                  child: Opacity(
-                    opacity: (1 - t / 0.4).clamp(0.0, 1.0),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleLarge?.copyWith(color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          );
+          // Oříznout CELOU hlavičku na její obdélník -- rozostřené/zvětšené
+          // vrstvy (Transform.scale, boční výplň na širokém okně) jinak
+          // přetékaly pod hlavičku přes obsah pod ní (živě na iPhonu).
+          return ClipRect(child: banner ? _buildBanner(context, t, blurSource) : _buildStandard(context, t, theme));
         },
       ),
     );
@@ -198,6 +135,114 @@ class DetailHeroAppBar extends StatelessWidget {
 }
 
 extension on DetailHeroAppBar {
+  /// Sbalená hlavička = čistá skleněná lišta (Liquid Glass "clear" varianta s
+  /// ztmavením, HIG Materials: nad médii 35 % ztmavení) -- obsah pod ní je
+  /// vidět rozmazaný, bílý název a šipka zpět zůstávají čitelné ve světlém
+  /// i tmavém režimu. Obrázkové vrstvy nad ní se při sbalování plynule
+  /// ztrácí, takže se nic nepřekrývá a nic nepřetéká.
+  Widget _collapsedGlass(double t) {
+    if (t >= 0.98) return const SizedBox.shrink();
+    return Opacity(
+      opacity: (1 - t).clamp(0.0, 1.0),
+      child: GlassContainer(
+        borderRadius: BorderRadius.zero,
+        tint: Color.lerp(accent ?? Colors.black, Colors.black, 0.6),
+        tintOpacity: 0.55,
+        showEdgeHighlight: false,
+        fit: StackFit.expand,
+        child: const SizedBox.expand(),
+      ),
+    );
+  }
+
+  Widget _collapsedTitle(BuildContext context, double t) {
+    final theme = Theme.of(context);
+    return Positioned(
+      left: 56,
+      right: (actions?.length ?? 0) * 48.0 + AppSpacing.md,
+      bottom: 0,
+      height: kToolbarHeight,
+      child: Opacity(
+        opacity: (1 - t / 0.4).clamp(0.0, 1.0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge?.copyWith(color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStandard(BuildContext context, double t, ThemeData theme) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _collapsedGlass(t),
+        if (t > 0.02)
+          Opacity(
+            opacity: t,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (imageUrl != null)
+                  NetImage(url: imageUrl!)
+                else
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [theme.colorScheme.primaryContainer, theme.colorScheme.tertiaryContainer],
+                      ),
+                    ),
+                  ),
+                ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+                    child: ColoredBox(color: (accent ?? Colors.black).withValues(alpha: 0.4)),
+                  ),
+                ),
+                // Jemné ztmavení dole, ať bílý text vždy čitelně stojí na
+                // světlých obalech.
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black26, Colors.transparent, Colors.black38],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (t > 0.05)
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Opacity(
+              opacity: t,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
+                child: _HeroCard(
+                  title: title,
+                  imageUrl: imageUrl,
+                  eyebrow: eyebrow,
+                  subtitle: subtitle,
+                  circleImage: circleImage,
+                  placeholderIcon: placeholderIcon,
+                ),
+              ),
+            ),
+          ),
+        if (t < 0.4) _collapsedTitle(context, t),
+      ],
+    );
+  }
+
   Widget _blurred(BuildContext context, String? url, {double sigma = 40, double dim = 0.4}) {
     final theme = Theme.of(context);
     return Stack(
@@ -278,32 +323,37 @@ extension on DetailHeroAppBar {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Sbalený pruh: rozostřený obrázek + ztmavení, ať bílý název/šipka
-        // zpět vždy čitelně stojí.
-        Opacity(opacity: (1 - t).clamp(0.0, 1.0), child: _blurred(context, blurSource, dim: 0.55)),
-        Opacity(
-          opacity: t,
-          child: faded(
-            imageUrl != null
-                ? _bannerPhoto(context, imageUrl!)
-                : _blurred(context, bannerFallbackUrl, sigma: 24, dim: 0.25),
-          ),
-        ),
-        // Ztmavení nahoře kvůli šipce zpět/akcím na světlých fotkách.
-        IgnorePointer(
-          child: Opacity(
+        _collapsedGlass(t),
+        // Fotka + horní ztmavení v JEDNÉ vrstvě se stejnou průhledností --
+        // při sbalování se hýbou a mizí spolu, nic se nerozjede.
+        if (t > 0.02)
+          Opacity(
             opacity: t,
-            child: const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.center,
-                  colors: [Colors.black45, Colors.transparent],
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                faded(
+                  bannerImageUrl != null
+                      ? NetImage(url: bannerImageUrl!, alignment: const Alignment(0, -0.3))
+                      : imageUrl != null
+                          ? _bannerPhoto(context, imageUrl!)
+                          : _blurred(context, bannerFallbackUrl, sigma: 24, dim: 0.25),
                 ),
-              ),
+                // Ztmavení nahoře kvůli šipce zpět/akcím na světlých fotkách.
+                const IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.center,
+                        colors: [Colors.black45, Colors.transparent],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
         if (t > 0.05)
           Positioned(
             left: AppSpacing.md,
@@ -346,25 +396,7 @@ extension on DetailHeroAppBar {
               ),
             ),
           ),
-        if (t < 0.4)
-          Positioned(
-            left: 56,
-            right: (actions?.length ?? 0) * 48.0 + AppSpacing.md,
-            bottom: 0,
-            height: kToolbarHeight,
-            child: Opacity(
-              opacity: (1 - t / 0.4).clamp(0.0, 1.0),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge?.copyWith(color: Colors.white),
-                ),
-              ),
-            ),
-          ),
+        if (t < 0.4) _collapsedTitle(context, t),
       ],
     );
   }
