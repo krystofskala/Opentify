@@ -38,8 +38,7 @@ Future<Color?> _extract(String imageUrl, Size size) async {
       size: size,
       maximumColorCount: 16,
     );
-    final raw = palette.vibrantColor?.color ?? palette.dominantColor?.color ?? palette.mutedColor?.color;
-    return raw == null ? null : normalizeAccent(raw);
+    return pickAccent(palette);
   } catch (_) {
     // Obal se nepodařilo stáhnout/zanalyzovat -- volající použije svůj fallback.
     return null;
@@ -50,11 +49,37 @@ Future<Color?> _extract(String imageUrl, Size size) async {
 /// by daly buď vybledlé, nebo "špinavé" schéma. Světlost se stáhne do
 /// středu, a téměř nesytá barva dostane aspoň jemný nádech sytosti (odstín
 /// zůstává z obalu), ať je schéma pořád příjemné a kontrastní.
+/// Vybere barvu obalu: "živá" (vibrant) barva jen když na obalu opravdu
+/// něco znamená (≥ 6 % plochy převládající barvy), jinak převládající.
+/// Dřív vyhrála vibrant barva i z drobného detailu -- bílý obal s pár
+/// červenými tečkami pak obarvil celou appku do červena.
+Color? pickAccent(PaletteGenerator palette) {
+  final dominant = palette.dominantColor;
+  final vibrant = palette.vibrantColor;
+  final base = dominant?.population ?? 0;
+  final vibrantMatters = vibrant != null && base > 0 && vibrant.population >= base * 0.06;
+  final raw = (vibrantMatters ? vibrant.color : null) ??
+      dominant?.color ??
+      palette.mutedColor?.color ??
+      vibrant?.color;
+  return raw == null ? null : normalizeAccent(raw);
+}
+
+/// Pod touhle sytostí je barva prakticky šedá/černobílá -- nemá odstín.
+const achromaticSaturation = 0.12;
+
+bool isAchromatic(Color color) => HSLColor.fromColor(color).saturation < achromaticSaturation;
+
 Color normalizeAccent(Color color) {
   final hsl = HSLColor.fromColor(color);
   final lightness = hsl.lightness.clamp(0.32, 0.62);
-  final saturation = hsl.saturation < 0.08 ? 0.12 : hsl.saturation.clamp(0.0, 0.9);
-  return hsl.withLightness(lightness).withSaturation(saturation).toColor();
+  // Šedá/bílá/černá nemá žádný odstín a HSL ji vede jako 0° = ČERVENÁ.
+  // Dřív se u ní sytost zvedla na 0.12, takže černobílé obaly obarvily appku
+  // do červena (živě nahlášeno). Teď zůstane neutrální grafit (sytost 0).
+  if (hsl.saturation < achromaticSaturation) {
+    return hsl.withLightness(lightness).withSaturation(0).toColor();
+  }
+  return hsl.withLightness(lightness).withSaturation(hsl.saturation.clamp(0.0, 0.9)).toColor();
 }
 
 /// Jednotná délka/křivka všech barevných přechodů (téma, přehrávač,
