@@ -48,6 +48,10 @@ class RealtimeClient {
     });
     try {
       final channel = WebSocketChannel.connect(uri);
+      // Selhání spojení chodí i přes `stream.onError` níž (-> reconnect);
+      // `ready` future by jinak skončil jako neošetřená výjimka v konzoli
+      // při každém výpadku/restartu serveru.
+      channel.ready.catchError((Object _) {});
       _channel = channel;
       _channelSub = channel.stream.listen(
         _onMessage,

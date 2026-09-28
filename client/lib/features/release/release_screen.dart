@@ -1,16 +1,19 @@
-import 'dart:ui';
-
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../../models/artist_model.dart';
 import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
 import '../../state/providers.dart';
-import '../../widgets/glass_container.dart';
+import '../../theme/design_tokens.dart';
+import '../../widgets/detail_hero.dart';
+import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/player_bar.dart';
-import '../../widgets/recording_tile.dart';
+import '../../widgets/state_views.dart';
+import '../../widgets/track_collection.dart';
+import '../../widgets/track_tile.dart';
 
 final releaseProvider = FutureProvider.autoDispose.family<ReleaseModel, String>((ref, releaseId) {
   return ref.watch(catalogRepositoryProvider).getRelease(releaseId);
@@ -21,17 +24,20 @@ final releaseTracksProvider =
   return ref.watch(catalogRepositoryProvider).getReleaseTracks(releaseId);
 });
 
-/// Jméno interpreta pro `PlayerBar` (Release má jen `artistId`) -- samostatné
-/// volání, ne součást `releaseProvider`, protože `ArtistModel` se jinde
-/// stejně už cachuje přes stejný provider (viz `ArtistScreen`).
+/// Jméno interpreta pro hlavičku (Release má jen `artistId`).
 final releaseArtistProvider = FutureProvider.autoDispose.family<ArtistModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getArtist(artistId);
 });
 
-/// Detail alba: metadata + obal (`GET /catalog/releases/{id}`) a tracklist
-/// (`GET /catalog/releases/{id}/tracks`) jako dvě samostatná volání, protože
-/// se různě cachují a tracklist může chvíli trvat (MusicBrainz release lookup).
-/// Akce na řádku skladby (přehrát/obstarat) řeší `RecordingTile`.
+const releaseTypeLabels = {
+  'album': 'Album',
+  'ep': 'EP',
+  'single': 'Singl',
+  'compilation': 'Kompilace',
+};
+
+/// Detail alba: metadata + obal a tracklist jako dvě samostatná volání
+/// (tracklist může chvíli trvat -- MusicBrainz release lookup).
 class ReleaseScreen extends ConsumerWidget {
   const ReleaseScreen({super.key, required this.releaseId});
 
@@ -40,150 +46,141 @@ class ReleaseScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final release = ref.watch(releaseProvider(releaseId));
-    final tracks = ref.watch(releaseTracksProvider(releaseId));
 
-    return Scaffold(
-      // Datový stav má vlastní `SliverAppBar` (viz `_ReleaseBody`) s obalem
-      // na pozadí -- loading/error zůstávají bez něj bez zpětného tlačítka,
-      // proto ho tady dodá tenhle vnější Scaffold.
-      appBar: release.hasValue ? null : AppBar(),
-      bottomNavigationBar: const PlayerBar(),
-      body: release.when(
-        data: (releaseModel) => _ReleaseBody(release: releaseModel, tracks: tracks),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Center(child: Text('Album se nepodařilo načíst: $error')),
+    return release.when(
+      data: (releaseModel) => _ReleaseBody(release: releaseModel),
+      loading: () => const DetailLoadingScaffold(),
+      error: (error, stack) => DetailErrorScaffold(
+        message: 'Album se nepodařilo načíst.',
+        error: error,
+        onRetry: () => ref.invalidate(releaseProvider(releaseId)),
       ),
     );
   }
 }
 
-class _ReleaseBody extends ConsumerWidget {
-  const _ReleaseBody({required this.release, required this.tracks});
+class _ReleaseBody extends ConsumerStatefulWidget {
+  const _ReleaseBody({required this.release});
 
   final ReleaseModel release;
-  final AsyncValue<List<RecordingModel>> tracks;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final artistName = ref.watch(releaseArtistProvider(release.artistId)).maybeWhen(
-          data: (artist) => artist.name,
-          orElse: () => null,
-        );
+  ConsumerState<_ReleaseBody> createState() => _ReleaseBodyState();
+}
 
-    return CustomScrollView(
-      slivers: [
-        SliverAppBar(
-          expandedHeight: 280,
-          pinned: true,
-          flexibleSpace: FlexibleSpaceBar(
-            background: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (release.coverImageUrl != null)
-                  CachedNetworkImage(imageUrl: release.coverImageUrl!, fit: BoxFit.cover)
-                else
-                  Container(color: theme.colorScheme.primaryContainer),
-                // Rozostřená verze obalu na pozadí + skleněná vrstva -- "hero"
-                // efekt v duchu Liquid Glass, obal zůstává jen jemně čitelný.
-                Positioned.fill(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                    child: Container(color: Colors.black.withValues(alpha: 0.35)),
+class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
+  final _collection = TrackCollectionController();
+
+  @override
+  void dispose() {
+    _collection.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final release = widget.release;
+    final tracks = ref.watch(releaseTracksProvider(release.id));
+    final artistName = ref.watch(releaseArtistProvider(release.artistId)).valueOrNull?.name;
+    final trackCount = tracks.valueOrNull?.length;
+
+    return ScreenAccent(
+      imageUrl: release.coverImageUrl,
+      builder: (context, accent) => Scaffold(
+        bottomNavigationBar: const PlayerBar(),
+        body: CustomScrollView(
+          slivers: [
+            DetailHeroAppBar(
+              title: release.title,
+              imageUrl: release.coverImageUrl,
+              accent: accent,
+              eyebrow: releaseTypeLabels[release.releaseType] ?? release.releaseType,
+              subtitle: [
+                if (artistName != null)
+                  HeroLink(
+                    text: artistName,
+                    icon: Symbols.person_rounded,
+                    onTap: () => context.push('/artists/${release.artistId}'),
                   ),
-                ),
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: GlassContainer(
-                      borderRadius: BorderRadius.circular(20),
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: SizedBox(
-                              width: 84,
-                              height: 84,
-                              child: release.coverImageUrl != null
-                                  ? CachedNetworkImage(
-                                      imageUrl: release.coverImageUrl!,
-                                      fit: BoxFit.cover,
-                                      fadeInDuration: const Duration(milliseconds: 250),
-                                    )
-                                  : Container(
-                                      color: Colors.white.withValues(alpha: 0.15),
-                                      child: const Icon(Icons.album, size: 32, color: Colors.white),
-                                    ),
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  release.title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleLarge?.copyWith(color: Colors.white),
-                                ),
-                                const SizedBox(height: 4),
-                                if (artistName != null)
-                                  Text(artistName, style: TextStyle(color: Colors.white.withValues(alpha: 0.85))),
-                                Text(
-                                  '${release.releaseType.toUpperCase()} · ${release.yearLabel}',
-                                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                HeroMeta([
+                  release.yearLabel,
+                  if (trackCount != null) '$trackCount skladeb',
+                ].join(' · ')),
+              ],
+            ),
+            ...tracks.when(
+              data: (recordings) => recordings.isEmpty
+                  ? [
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: EmptyState(message: 'Tracklist se nepodařilo dohledat v MusicBrainz.'),
                       ),
-                    ),
+                    ]
+                  : _trackSlivers(recordings, artistName),
+              loading: () => const [SliverToBoxAdapter(child: SkeletonTrackList(count: 8))],
+              error: (error, stack) => [
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: ErrorState(
+                    message: 'Tracklist se nepodařilo načíst.',
+                    error: error,
+                    onRetry: () => ref.invalidate(releaseTracksProvider(release.id)),
                   ),
                 ),
               ],
             ),
-          ),
+            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+          ],
         ),
-        tracks.when(
-          data: (recordings) => recordings.isEmpty
-              ? const SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('Tracklist se nepodařilo dohledat v MusicBrainz.'),
-                  ),
-                )
-              : SliverPadding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  sliver: SliverList.builder(
-                    itemCount: recordings.length,
-                    itemBuilder: (context, index) => RecordingTile(
-                      recording: recordings[index],
-                      leadingIndex: recordings[index].trackNumber,
-                      albumArtUrl: release.coverImageUrl,
-                      artistName: artistName,
-                    ),
-                  ),
-                ),
-          loading: () => const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          ),
-          error: (error, stack) => SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Tracklist se nepodařilo načíst: $error'),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
+  }
+
+  List<Widget> _trackSlivers(List<RecordingModel> recordings, String? artistName) {
+    final release = widget.release;
+    return [
+      SliverToBoxAdapter(
+        child: ListenableBuilder(
+          listenable: _collection,
+          builder: (context, _) => TrackCollectionToolbar(
+            controller: _collection,
+            allTracks: recordings,
+            visibleTracks: _collection.apply(recordings),
+            sourceLabel: release.title,
+            albumArtUrl: release.coverImageUrl,
+            artistName: artistName,
+          ),
+        ),
+      ),
+      ListenableBuilder(
+        listenable: _collection,
+        builder: (context, _) {
+          final visible = _collection.apply(recordings);
+          if (visible.isEmpty) {
+            return const SliverToBoxAdapter(child: EmptyState(compact: true, message: 'Filtru nic neodpovídá.'));
+          }
+          return SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
+            sliver: SliverList.builder(
+              itemCount: visible.length,
+              itemBuilder: (context, index) {
+                final r = visible[index];
+                return TrackTile(
+                  recording: r,
+                  leadingIndex: r.trackNumber ?? index + 1,
+                  albumArtUrl: release.coverImageUrl,
+                  artistName: artistName,
+                  queueRecordings: visible,
+                  sourceLabel: release.title,
+                  selectionMode: _collection.selecting,
+                  selected: _collection.isSelected(r.id),
+                  onSelectedChanged: (value) => _collection.toggle(r.id, value),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    ];
   }
 }

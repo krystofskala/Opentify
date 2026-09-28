@@ -63,6 +63,20 @@ class ApiClient {
     return _decode(response) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> patchJson(String path, {Object? body}) async {
+    final response = await _http.patch(
+      _uri(path, null),
+      headers: _headers,
+      body: body == null ? null : jsonEncode(body),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>?> deleteJson(String path) async {
+    final response = await _http.delete(_uri(path, null), headers: _headers);
+    return _decode(response) as Map<String, dynamic>?;
+  }
+
   /// Upload souboru (multipart/form-data) — `http.MultipartRequest` si sám
   /// nastaví `Content-Type` s boundary, takže mu do hlaviček nesmí přijít
   /// pevné `application/json` z `_headers`.

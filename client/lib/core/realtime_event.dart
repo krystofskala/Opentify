@@ -35,6 +35,11 @@ sealed class RealtimeEvent {
           recordingId: payload['recordingId'] as String,
           streamUrl: payload['streamUrl'] as String,
         );
+      case 'track.streaming':
+        return TrackStreamingEvent(
+          recordingId: payload['recordingId'] as String,
+          streamUrl: payload['streamUrl'] as String,
+        );
       case 'job.progress':
         return JobProgressEvent(
           jobId: payload['jobId'] as String,
@@ -78,6 +83,18 @@ final class QueueConflictEvent extends RealtimeEvent {
 
 final class TrackAvailableEvent extends RealtimeEvent {
   const TrackAvailableEvent({required this.recordingId, required this.streamUrl});
+  final String recordingId;
+  final String streamUrl;
+}
+
+/// Soubor se ještě stahuje, ale `streamUrl` je už servírovatelný -- backend
+/// (`_tail_growing_file`) servíruje ještě rostoucí soubor. Posílá se jen z
+/// `SlskdProvider` cesty (stahuje rovnou ve finálním formátu), ne z YouTube
+/// fallbacku (ten potřebuje dokončit ffmpeg konverzi, viz `OnFileLocated`
+/// v backendu). `ProvisioningController`/`AudioPlayerController` na tenhle
+/// event reagují stejně jako na `TrackAvailableEvent` -- viz jejich komentáře.
+final class TrackStreamingEvent extends RealtimeEvent {
+  const TrackStreamingEvent({required this.recordingId, required this.streamUrl});
   final String recordingId;
   final String streamUrl;
 }

@@ -10,9 +10,22 @@ class ProvisioningRepository {
 
   final ApiClient _api;
 
-  Future<ProvisionResultModel> provision(String recordingId) async {
-    final json = await _api.postJson('/tracks/$recordingId/provision');
+  /// `interactive` -- uživatel právě zmáčkl Přehrát a čeká: backend job
+  /// zařadí do prioritní fronty a nechá slskd závodit s YouTube. Prefetch
+  /// fronty ho posílá bez něj (kvalita má přednost před rychlostí).
+  Future<ProvisionResultModel> provision(String recordingId, {bool interactive = false}) async {
+    final json = await _api.postJson(
+      '/tracks/$recordingId/provision',
+      body: interactive ? const {'priority': 'interactive'} : null,
+    );
     return ProvisionResultModel.fromJson(json);
+  }
+
+  /// `GET /tracks/{id}/loudness` -- korekce hlasitosti v dB, `null` =
+  /// backend ji ještě nezměřil (čerstvě obstaraná skladba, viz app/loudness.py).
+  Future<double?> loudnessGain(String recordingId) async {
+    final json = await _api.getJson('/tracks/$recordingId/loudness');
+    return (json['loudnessGainDb'] as num?)?.toDouble();
   }
 
   Future<ProvisioningJobModel> getJob(String jobId) async {

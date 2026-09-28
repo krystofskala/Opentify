@@ -6,6 +6,8 @@ import '../core/realtime_event.dart';
 import '../core/ws_client.dart';
 import '../data/catalog_repository.dart';
 import '../data/library_repository.dart';
+import '../data/lyrics_repository.dart';
+import '../data/playlists_repository.dart';
 import '../data/provisioning_repository.dart';
 import '../data/recommendations_repository.dart';
 
@@ -35,6 +37,22 @@ final provisioningRepositoryProvider = Provider<ProvisioningRepository>((ref) {
 
 final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
   return LibraryRepository(ref.watch(apiClientProvider));
+});
+
+final lyricsRepositoryProvider = Provider<LyricsRepository>((ref) {
+  return LyricsRepository(ref.watch(apiClientProvider));
+});
+
+final playlistsRepositoryProvider = Provider<PlaylistsRepository>((ref) {
+  return PlaylistsRepository(ref.watch(apiClientProvider));
+});
+
+/// Seznam VLASTNÍCH playlistů uživatele -- sdílený mezi Knihovna tabem
+/// ("Playlisty") a "Přidat do playlistu" sheetem (`widgets/add_to_playlist_sheet.dart`),
+/// ať se po vytvoření/smazání playlistu obojí zdroj pravdy shodne po jednom
+/// `ref.invalidate(myPlaylistsProvider)`, ne dvou nezávislých voláních API.
+final myPlaylistsProvider = FutureProvider.autoDispose((ref) {
+  return ref.watch(playlistsRepositoryProvider).list();
 });
 
 /// Jedno WS spojení pro celou appku -- playback i provisioning controller

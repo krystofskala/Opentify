@@ -1,4 +1,5 @@
 import '../core/api_client.dart';
+import '../models/artist_bio_model.dart';
 import '../models/discography_model.dart';
 import '../models/artist_model.dart';
 import '../models/release_model.dart';
@@ -32,6 +33,11 @@ class CatalogRepository {
     return ArtistModel.fromJson(json);
   }
 
+  Future<ArtistBioModel> getArtistBio(String artistId) async {
+    final json = await _api.getJson('/catalog/artists/$artistId/bio');
+    return ArtistBioModel.fromJson(json);
+  }
+
   Future<DiscographyModel> getDiscography(String artistId, {String? releaseType}) async {
     final json = await _api.getJson(
       '/catalog/artists/$artistId/discography',
@@ -43,6 +49,11 @@ class CatalogRepository {
   Future<ReleaseModel> getRelease(String releaseId) async {
     final json = await _api.getJson('/catalog/releases/$releaseId');
     return ReleaseModel.fromJson(json);
+  }
+
+  Future<RecordingModel> getRecording(String recordingId) async {
+    final json = await _api.getJson('/catalog/recordings/$recordingId');
+    return RecordingModel.fromJson(json);
   }
 
   Future<List<RecordingModel>> getReleaseTracks(String releaseId) async {

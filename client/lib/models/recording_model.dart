@@ -9,6 +9,7 @@ class RecordingModel {
     this.mbid,
     this.releaseId,
     this.artistId,
+    this.artistName,
     required this.title,
     this.durationMs,
     this.isrc,
@@ -22,6 +23,12 @@ class RecordingModel {
   final String? mbid;
   final String? releaseId;
   final String? artistId;
+
+  /// Denormalizované jméno interpreta -- bez tohohle nemá klient u
+  /// smíšených seznamů (Domů, Knihovna, Oblíbené, playlisty) odkud vzít
+  /// jméno k zobrazení, jen `artistId`. Viz backend
+  /// app/catalog/schemas.py:RecordingOut.artist_name.
+  final String? artistName;
   final String title;
   final int? durationMs;
   final String? isrc;
@@ -46,6 +53,7 @@ class RecordingModel {
         mbid: json['mbid'] as String?,
         releaseId: json['releaseId'] as String?,
         artistId: json['artistId'] as String?,
+        artistName: json['artistName'] as String?,
         title: json['title'] as String,
         durationMs: json['durationMs'] as int?,
         isrc: json['isrc'] as String?,
@@ -60,11 +68,13 @@ class RecordingModel {
         mbid: mbid,
         releaseId: releaseId,
         artistId: artistId,
+        artistName: artistName,
         title: title,
         durationMs: durationMs,
         isrc: isrc,
         trackNumber: trackNumber,
         availability: availability ?? this.availability,
         previewUrl: previewUrl,
+        listenCount: listenCount,
       );
 }

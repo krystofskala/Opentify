@@ -5,10 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../features/artist/artist_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/local_library_screen.dart';
+import '../features/library/playlist_detail_screen.dart';
 import '../features/player/now_playing_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/profile/year_in_review_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/track/track_screen.dart';
 import 'home_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -39,6 +42,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/releases/:releaseId',
         builder: (context, state) => ReleaseScreen(releaseId: state.pathParameters['releaseId']!),
+      ),
+      GoRoute(
+        path: '/playlists/:playlistId',
+        builder: (context, state) => PlaylistDetailScreen(playlistId: state.pathParameters['playlistId']!),
+      ),
+      GoRoute(
+        path: '/tracks/:recordingId',
+        builder: (context, state) => TrackScreen(recordingId: state.pathParameters['recordingId']!),
+      ),
+      GoRoute(
+        path: '/year-in-review',
+        builder: (context, state) => const YearInReviewScreen(),
       ),
       GoRoute(
         path: '/now-playing',

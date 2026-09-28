@@ -62,6 +62,20 @@ class LocalArtist {
       );
 }
 
+/// Žánr napříč lokální knihovnou (`GET /library/genres`) -- MusicBrainz
+/// genre tagy na albech, viz backend `CatalogService._enrich_release_genres`.
+class LocalGenre {
+  const LocalGenre({required this.genre, required this.trackCount});
+
+  final String genre;
+  final int trackCount;
+
+  factory LocalGenre.fromJson(Map<String, dynamic> json) => LocalGenre(
+        genre: json['genre'] as String,
+        trackCount: json['trackCount'] as int,
+      );
+}
+
 /// Průběh skenu (`POST /library/scan` ho jen odstartuje na pozadí --
 /// MusicBrainz limituje na 1 request/s, takže tisíce souborů by se v jednom
 /// HTTP requestu nestihly, viz backend `app/library/scanner.py`).
@@ -166,6 +180,14 @@ class LibraryRepository {
     return PlaylistDetailModel.fromJson(json);
   }
 
+  Future<void> likeSong(String recordingId) async {
+    await _api.postJson('/library/liked-songs/$recordingId');
+  }
+
+  Future<void> unlikeSong(String recordingId) async {
+    await _api.deleteJson('/library/liked-songs/$recordingId');
+  }
+
   /// Naskenované lokální soubory (`POST /library/scan`) -- vždy `available`,
   /// takže je jde v klientu rovnou přehrát bez obstarávání.
   Future<LocalTracksPage> localTracks({int limit = 100, int offset = 0}) async {
@@ -183,5 +205,25 @@ class LibraryRepository {
   Future<List<LocalArtist>> localArtists() async {
     final json = await _api.getJsonList('/library/local-artists');
     return json.map((e) => LocalArtist.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Žánry napříč lokální knihovnou, řídké dokud se knihovna neprojde/nedoplní
+  /// (žánry se doplňují líně při otevření alba, viz backend) -- pohání
+  /// "Podle nálady a žánru" na Home.
+  Future<List<LocalGenre>> genres() async {
+    final json = await _api.getJsonList('/library/genres');
+    return json.map((e) => LocalGenre.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<LocalTracksPage> tracksByGenre(String genre) async {
+    final json = await _api.getJson('/library/by-genre/${Uri.encodeComponent(genre)}');
+    return LocalTracksPage.fromJson(json);
+  }
+
+  /// Skladby interpretů s MusicBrainz `country == "CZ"` -- pohání "Česká
+  /// hudba" na Home.
+  Future<LocalTracksPage> czechMusic() async {
+    final json = await _api.getJson('/library/czech');
+    return LocalTracksPage.fromJson(json);
   }
 }

@@ -30,12 +30,17 @@ class ProvisionResultModel {
     required this.status,
     this.streamUrl,
     this.job,
+    this.loudnessGainDb,
   });
 
   final String recordingId;
   final String status; // MediaAsset.status
   final String? streamUrl; // vyplněno jen když status == AVAILABLE
   final ProvisioningJobModel? job; // vyplněno jen když se čeká na obstarání (HTTP 202)
+
+  /// Korekce hlasitosti k cíli -14 LUFS (backend app/loudness.py) --
+  /// doplňkové pole mimo strict OpenAPI schéma, `null` = ještě neměřeno.
+  final double? loudnessGainDb;
 
   factory ProvisionResultModel.fromJson(Map<String, dynamic> json) => ProvisionResultModel(
         recordingId: json['recordingId'] as String,
@@ -44,5 +49,6 @@ class ProvisionResultModel {
         job: json['job'] == null
             ? null
             : ProvisioningJobModel.fromJson(json['job'] as Map<String, dynamic>),
+        loudnessGainDb: (json['loudnessGainDb'] as num?)?.toDouble(),
       );
 }

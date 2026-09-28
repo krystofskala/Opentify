@@ -3,12 +3,19 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/library_repository.dart';
 import '../../models/playlist_model.dart';
+import '../../state/liked_songs_controller.dart';
 import '../../state/providers.dart';
+import '../../theme/design_tokens.dart';
 import '../../widgets/glass_container.dart';
-import '../../widgets/recording_tile.dart';
+import '../../widgets/section_app_bar.dart';
+import '../../widgets/state_views.dart';
+import '../../widgets/track_collection.dart';
+import '../../widgets/track_tile.dart';
 import '../home/home_screen.dart' show dailyJamsProvider;
 
 final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) {
@@ -36,10 +43,12 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Timer? _pollTimer;
+  final _collection = TrackCollectionController();
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _collection.dispose();
     super.dispose();
   }
 
@@ -59,21 +68,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final likedSongs = ref.watch(likedSongsProvider);
+    final likedIds = ref.watch(likedSongsControllerProvider).valueOrNull;
     final scanStatus = ref.watch(scanStatusProvider);
     scanStatus.whenData(_syncPolling);
+    // Srdíčko kdekoliv v appce -> seznam tady se hned přizpůsobí: odebrané
+    // zmizí okamžitě (filtr podle živé sady), nově přidané po přenačtení.
+    ref.listen(likedSongsControllerProvider, (previous, next) {
+      if (previous?.valueOrNull?.length != next.valueOrNull?.length) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) ref.invalidate(likedSongsProvider);
+        });
+      }
+    });
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profil')),
+      appBar: const SectionAppBar('Profil'),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(likedSongsProvider);
           ref.invalidate(scanStatusProvider);
         },
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
           children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
             _ActionCard(
-              icon: Icons.cloud_upload_outlined,
+              icon: Symbols.cloud_upload_rounded,
               title: 'Import ze Spotify',
               description:
                   'Nahraj export playlistů (ZIP s CSV, např. z Exportify) nebo '
@@ -85,7 +109,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 12),
             _ActionCard(
-              icon: Icons.folder_outlined,
+              icon: Symbols.equalizer_rounded,
+              title: 'Rok v hudbě',
+              description: 'Souhrn nejposlouchanějších skladeb a interpretů za poslední rok.',
+              buttonLabel: 'Zobrazit',
+              onPressed: () => context.push('/year-in-review'),
+            ),
+            const SizedBox(height: 12),
+            _ActionCard(
+              icon: Symbols.folder_rounded,
               title: 'Lokální knihovna',
               description:
                   'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
@@ -101,21 +133,63 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   : Padding(padding: const EdgeInsets.only(top: 12), child: _ScanStatusCard(status: status)),
               orElse: () => const SizedBox.shrink(),
             ),
-            const SizedBox(height: 20),
-            Text('Liked Songs', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            likedSongs.when(
-              data: (playlist) => playlist.items.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Text('Zatím nic -- naimportuj Liked Songs ze Spotify výše.'),
-                    )
-                  : Column(children: [for (final r in playlist.items) RecordingTile(recording: r)]),
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(child: CircularProgressIndicator()),
+                ],
               ),
-              error: (error, stack) => Text('Nepodařilo se načíst: $error'),
+            ),
+            const SectionHeader('Oblíbené skladby'),
+            likedSongs.when(
+              data: (playlist) {
+                final items = likedIds == null
+                    ? playlist.items
+                    : playlist.items.where((r) => likedIds.contains(r.id)).toList();
+                if (items.isEmpty) {
+                  return const EmptyState(
+                    compact: true,
+                    icon: Symbols.favorite_rounded,
+                    message: 'Zatím nic -- klepni na srdíčko u skladby, nebo naimportuj Liked Songs ze Spotify výše.',
+                  );
+                }
+                return ListenableBuilder(
+                  listenable: _collection,
+                  builder: (context, _) {
+                    final visible = _collection.apply(items);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TrackCollectionToolbar(
+                          controller: _collection,
+                          allTracks: items,
+                          visibleTracks: visible,
+                          sourceLabel: 'Oblíbené skladby',
+                        ),
+                        if (visible.isEmpty) const EmptyState(compact: true, message: 'Filtru nic neodpovídá.'),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                          child: Column(
+                            children: [
+                              for (final r in visible)
+                                TrackTile(
+                                  recording: r,
+                                  queueRecordings: visible,
+                                  sourceLabel: 'Oblíbené skladby',
+                                  selectionMode: _collection.selecting,
+                                  selected: _collection.isSelected(r.id),
+                                  onSelectedChanged: (value) => _collection.toggle(r.id, value),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+              loading: () => const SkeletonTrackList(count: 6),
+              error: (error, stack) => ErrorState(
+                compact: true,
+                message: 'Oblíbené skladby se nepodařilo načíst.',
+                onRetry: () => ref.invalidate(likedSongsProvider),
+              ),
             ),
           ],
         ),
@@ -175,8 +249,8 @@ class _ScanStatusCard extends StatelessWidget {
     final progress = status.totalFiles == 0 ? null : status.scanned / status.totalFiles;
 
     return GlassContainer(
-      borderRadius: BorderRadius.circular(14),
-      padding: const EdgeInsets.all(14),
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -184,10 +258,10 @@ class _ScanStatusCard extends StatelessWidget {
             children: [
               Icon(
                 switch (status.status) {
-                  'running' => Icons.sync,
-                  'done' => Icons.check_circle_outline,
-                  'error' => Icons.error_outline,
-                  _ => Icons.info_outline,
+                  'running' => Symbols.sync_rounded,
+                  'done' => Symbols.check_circle_rounded,
+                  'error' => Symbols.error_rounded,
+                  _ => Symbols.info_rounded,
                 },
                 size: 18,
               ),
@@ -244,9 +318,9 @@ class _ActionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return GlassContainer(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.lg),
       tint: theme.colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

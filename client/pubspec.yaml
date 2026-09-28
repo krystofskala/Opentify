@@ -32,6 +32,20 @@ dependencies:
   palette_generator: ^0.3.3+7
   web_socket_channel: ^2.4.5
 
+  # Perzistence per-zařízení (historie hledání) -- žádná z toho nepatří na
+  # server, je to čistě UI pohodlí konkrétního prohlížeče/zařízení.
+  shared_preferences: ^2.3.2
+
+  # Vizuální jazyk PixelPlayeru (github.com/brendmung/PixelPlayer) přenesený
+  # do Flutteru přes reálné, udržované balíčky místo dalších ručně psaných
+  # widgetů -- ikony (Material Symbols Rounded, přesně stejná rodina, co
+  # PixelPlayer používá jako exportované `rounded_<name>_24` vektory),
+  # "squircle" tvary (`AbsoluteSmoothCornerShape` ekvivalent) a lehké
+  # staggered entrance animace.
+  material_symbols_icons: ^4.2960.0
+  figma_squircle: ^0.6.3
+  flutter_animate: ^4.5.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -39,3 +53,23 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # PixelPlay-inspired jednotný zaoblený typeface napříč appkou (viz
+  # lib/theme/app_theme.dart) -- bundlovaný OFL soubor, ne `google_fonts`
+  # balíček s běhovým fetchem, ať appka zůstane funkční čistě self-hosted
+  # bez závislosti na Google serverech. Jeden variabilní soubor pokrývá
+  # celou váhovou škálu (400-800), Flutter si z něj sám vybere instanci
+  # podle FontWeight v TextStyle.
+  fonts:
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito/Nunito-VariableFont_wght.ttf
+          weight: 400
+        - asset: assets/fonts/Nunito/Nunito-VariableFont_wght.ttf
+          weight: 500
+        - asset: assets/fonts/Nunito/Nunito-VariableFont_wght.ttf
+          weight: 600
+        - asset: assets/fonts/Nunito/Nunito-VariableFont_wght.ttf
+          weight: 700
+        - asset: assets/fonts/Nunito/Nunito-VariableFont_wght.ttf
+          weight: 800

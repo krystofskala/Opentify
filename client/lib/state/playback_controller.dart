@@ -38,6 +38,7 @@ class PlaybackController extends StateNotifier<PlaybackSession> {
         // touhle novou verzí (retry je na něm, kontroler jen sesynchronizuje stav).
         state = state.copyWith(queue: queue, version: version);
       case TrackAvailableEvent():
+      case TrackStreamingEvent():
       case JobProgressEvent():
       case UnknownEvent():
         break; // mimo scope playback controlleru, viz ProvisioningController

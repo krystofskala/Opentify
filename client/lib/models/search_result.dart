@@ -1,4 +1,5 @@
 import 'availability.dart';
+import 'recording_model.dart';
 
 enum SearchEntityType { artist, release, recording }
 
@@ -17,7 +18,9 @@ class SearchResultItem {
     this.availability,
     this.imageUrl,
     this.artistId,
+    this.artistName,
     this.releaseId,
+    this.durationMs,
   });
 
   final SearchEntityType entityType;
@@ -36,7 +39,26 @@ class SearchResultItem {
   /// `recordingArtworkProvider`, když chceš pro řádek reálný obal/foto
   /// interpreta místo placeholderu.
   final String? artistId;
+
+  /// Jen pro `recording` -- denormalizované jméno interpreta z
+  /// `RecordingOut.artist_name` (backend `app/catalog/schemas.py`), použité
+  /// jako `subtitle` a předané dál do `NowPlayingInfo` při přehrání.
+  final String? artistName;
   final String? releaseId;
+  final int? durationMs;
+
+  /// Nahrávka z výsledku hledání jako běžný `RecordingModel` -- ať se ve
+  /// výsledcích vykresluje stejným `TrackTile` jako kdekoliv jinde v appce
+  /// (interpret, proklik, srdíčko, kontextové menu).
+  RecordingModel toRecordingModel() => RecordingModel(
+        id: id,
+        releaseId: releaseId,
+        artistId: artistId,
+        artistName: artistName,
+        title: title,
+        durationMs: durationMs,
+        availability: availability ?? Availability.provisionable,
+      );
 
   factory SearchResultItem.fromJson(Map<String, dynamic> json) {
     final rawType = json['entityType'] as String;
@@ -48,6 +70,7 @@ class SearchResultItem {
           id: json['id'] as String,
           title: json['name'] as String,
           subtitle: 'Interpret',
+          artistId: json['id'] as String,
           imageUrl: images.isEmpty ? null : images.first,
         );
       case 'release':
@@ -57,6 +80,7 @@ class SearchResultItem {
           entityType: SearchEntityType.release,
           id: json['id'] as String,
           title: json['title'] as String,
+          artistId: json['artistId'] as String?,
           subtitle: [
             (json['releaseType'] as String?) ?? 'album',
             if (year != null && year.length >= 4) year.substring(0, 4),
@@ -68,10 +92,12 @@ class SearchResultItem {
           entityType: SearchEntityType.recording,
           id: json['id'] as String,
           title: json['title'] as String,
-          subtitle: 'Skladba',
+          subtitle: (json['artistName'] as String?) ?? 'Skladba',
           availability: availabilityFromJson(json['availability'] as String?),
           artistId: json['artistId'] as String?,
+          artistName: json['artistName'] as String?,
           releaseId: json['releaseId'] as String?,
+          durationMs: json['durationMs'] as int?,
         );
       default:
         throw FormatException('Neznámý entityType v /catalog/search: $rawType');

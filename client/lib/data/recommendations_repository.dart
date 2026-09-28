@@ -1,6 +1,7 @@
 import '../core/api_client.dart';
 import '../models/playlist_model.dart';
 import '../models/recording_model.dart';
+import '../models/year_in_review_model.dart';
 
 /// Tenká vrstva nad `/recommendations/*` (docs/openapi.yaml). Backend vrací
 /// pro obojí prázdný výsledek, když ListenBrainz instance neběží/nemá pro
@@ -41,5 +42,12 @@ class RecommendationsRepository {
   Future<List<RecordingModel>> communityPicks({int limit = 20}) async {
     final json = await _api.getJsonList('/recommendations/community', query: {'limit': '$limit'});
     return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// "Rok v hudbě" -- top skladby/interpreti + celkový počet poslechů za
+  /// poslední rok, viz `YearInReviewModel` docstring pro přesnost okna.
+  Future<YearInReviewModel> yearInReview({int limit = 10}) async {
+    final json = await _api.getJson('/recommendations/year-in-review', query: {'limit': '$limit'});
+    return YearInReviewModel.fromJson(json);
   }
 }
