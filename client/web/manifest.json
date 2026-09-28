@@ -1,12 +1,14 @@
 {
-    "name": "opentify_client",
-    "short_name": "opentify_client",
+    "name": "Opentify",
+    "short_name": "Opentify",
+    "id": "/",
     "start_url": ".",
+    "scope": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#1a0f2e",
+    "theme_color": "#1a0f2e",
+    "description": "Vlastní hudební knihovna a streaming.",
+    "orientation": "portrait",
     "prefer_related_applications": false,
     "icons": [
         {

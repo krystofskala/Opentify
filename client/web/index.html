@@ -1,46 +1,73 @@
 <!DOCTYPE html>
-<html>
+<html lang="cs">
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Vlastní hudební knihovna a streaming.">
+  <meta name="theme-color" content="#1a0f2e">
 
-  <!-- iOS meta tags & icons -->
+  <!-- iOS: po "Přidat na plochu" běží přes celou obrazovku jako appka -->
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- `black`, ne `black-translucent`: s průsvitným by obsah vjel pod
+       status bar a Flutter web na iOS safe-area odsazení spolehlivě nehlásí. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="opentify_client">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <meta name="apple-mobile-web-app-title" content="Opentify">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>opentify_client</title>
+  <title>Opentify</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Tmavé pozadí hned od prvního bajtu -- dřív se při načítání ukázala
+       šedá plocha, která vypadala jako rozbitá appka. */
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #1a0f2e;
+      background: linear-gradient(135deg, #2e1065 0%, #6b2170 55%, #3a1440 100%);
+      overflow: hidden;
+    }
+    #splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 300ms ease;
+      pointer-events: none;
+    }
+    #splash img {
+      width: 96px;
+      height: 96px;
+      border-radius: 22px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.06); opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #splash img { animation: none; }
+    }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
+  <div id="splash"><img src="icons/Icon-192.png" alt=""></div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var splash = document.getElementById('splash');
+      if (!splash) return;
+      splash.style.opacity = '0';
+      setTimeout(function () { splash.remove(); }, 350);
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
