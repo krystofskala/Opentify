@@ -68,6 +68,30 @@
 </head>
 <body>
   <div id="app"></div>
+  <script>
+    // iOS bug: an app launched from the home screen with a translucent status
+    // bar gets a viewport that is short by the status bar height, leaving a
+    // strip of page background under the tab bar. Size #app to the real
+    // screen height there instead.
+    (function () {
+      var standalone = window.navigator.standalone === true;
+      if (!standalone) return;
+      function fit() {
+        var app = document.getElementById('app');
+        if (!app) return;
+        var portrait = window.innerHeight >= window.innerWidth;
+        var full = portrait ? Math.max(screen.height, screen.width) : Math.min(screen.height, screen.width);
+        var height = Math.max(window.innerHeight, full);
+        app.style.bottom = 'auto';
+        app.style.height = height + 'px';
+        document.documentElement.style.height = height + 'px';
+        document.body.style.height = height + 'px';
+      }
+      fit();
+      window.addEventListener('resize', fit);
+      window.addEventListener('orientationchange', function () { setTimeout(fit, 250); });
+    })();
+  </script>
   <div id="splash"><img src="icons/Icon-192.png" alt=""></div>
   <script>
     window.addEventListener('flutter-first-frame', function () {
