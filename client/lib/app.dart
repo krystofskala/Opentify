@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'routing/app_router.dart';
 import 'state/audio_player_controller.dart';
 import 'theme/accent_color.dart';
 import 'theme/app_theme.dart';
+import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
 
 const _defaultSeed = Colors.deepPurple;
@@ -15,21 +17,13 @@ class OpentifyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
-    // "PixelPlay"-styl dynamické zabarvení: seed M3 palety appky se ladí
-    // podle toho, na co se uživatel PRÁVĚ DÍVÁ (barva alba na Release, barva
-    // interpreta na Artist -- `activeScreenAccentProvider`), a jen když
-    // žádná taková obrazovka není otevřená (Home, Search, ...) padá zpátky
-    // na barvu právě hrající skladby -- dřív to bylo jen naopak (vázané
-    // výhradně na přehrávač), takže procházení cizích alb/interpretů zůstalo
-    // barevně "mrtvé" (výchozí fialová), dokud něco nezačalo hrát.
+    // Seed M3 tématu: barva právě prohlížené obrazovky (album/interpret),
+    // jinak naposledy vybraná barva relace (poslední otevřené album nebo
+    // hrající skladba) -- stejná, jakou má pozadí, takže se téma a pozadí
+    // po návratu na Domů nerozejdou. Výchozí fialová jen úplně na začátku.
     final screenAccent = ref.watch(activeScreenAccentProvider);
-    final playingAccent = ref.watch(audioPlayerControllerProvider.select((s) => s.accentColor));
-    final seed = screenAccent ?? playingAccent ?? _defaultSeed;
-    // Vícebarevný gradient jen tam, kde žádná obrazovka barvu explicitně
-    // neurčuje (Domů/Hledání/Knihovna/Profil) -- jakmile se otevře Album/
-    // Interpret a nastaví `screenAccent`, `AppBackground` zredukuje paletu na
-    // jeden odstín, přesně jak žádal uživatel ("barvy zmizí").
-    final isMulti = screenAccent == null;
+    final selectedAccent = ref.watch(selectedAccentProvider);
+    final seed = screenAccent ?? selectedAccent ?? _defaultSeed;
     final isPlaying = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
 
     return MaterialApp.router(
@@ -42,19 +36,37 @@ class OpentifyApp extends ConsumerWidget {
       // plynule, stejnou křivkou jako přehrávač a pozadí -- ne skokem.
       themeAnimationDuration: accentTransitionDuration,
       themeAnimationCurve: accentTransitionCurve,
-      // Gradient + zrno pozadí pod úplně vším -- `Theme.of(context)` tady už
-      // je vyřešené `theme`/`darkTheme` podle aktuální platformní jasnosti,
-      // takže `AppBackground` dostane správný `brightness` bez druhého zdroje
-      // pravdy. `Scaffold`y jsou teď průhledné (`buildAppTheme`), takže tohle
-      // prosvítá skrz -- kromě `NowPlayingScreen`/`PlayerBar`, které mají
-      // vlastní neprůhledné pozadí a tohle jednoduše překryjí.
-      builder: (context, child) => AppBackground(
-        seed: seed,
-        brightness: Theme.of(context).brightness,
-        isMulti: isMulti,
-        isPlaying: isPlaying,
-        child: child ?? const SizedBox.shrink(),
+      // Zrnité pozadí pod úplně vším -- `Scaffold`y jsou průhledné
+      // (`buildAppTheme`), takže prosvítá skrz. Přehrávač má vlastní plnou
+      // výplň; když je otevřený, pozadí se zastaví (není vidět).
+      builder: (context, child) => ListenableBuilder(
+        listenable: router.routerDelegate,
+        builder: (context, _) => AppBackground(
+          selectedAccent: screenAccent ?? selectedAccent,
+          brightness: Theme.of(context).brightness,
+          isPlaying: isPlaying,
+          hidden: _isNowPlayingOpen(router),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
+  }
+}
+
+bool _isNowPlayingOpen(GoRouter router) {
+  bool contains(List<RouteMatchBase> matches) {
+    for (final match in matches) {
+      if (match is ImperativeRouteMatch && contains(match.matches.matches)) return true;
+      if (match is ShellRouteMatch && contains(match.matches)) return true;
+      final route = match.route;
+      if (route is GoRoute && route.path == '/now-playing') return true;
+    }
+    return false;
+  }
+
+  try {
+    return contains(router.routerDelegate.currentConfiguration.matches);
+  } catch (_) {
+    return false;
   }
 }

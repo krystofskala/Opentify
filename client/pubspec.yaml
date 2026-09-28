@@ -35,6 +35,7 @@ dependencies:
   # Perzistence per-zařízení (historie hledání) -- žádná z toho nepatří na
   # server, je to čistě UI pohodlí konkrétního prohlížeče/zařízení.
   shared_preferences: ^2.3.2
+  web: ^0.5.1
 
   # Vizuální jazyk PixelPlayeru (github.com/brendmung/PixelPlayer) přenesený
   # do Flutteru přes reálné, udržované balíčky místo dalších ručně psaných
@@ -53,6 +54,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Animované zrnité pozadí (lib/widgets/app_background.dart).
+  shaders:
+    - shaders/chroma_grain.frag
 
   # PixelPlay-inspired jednotný zaoblený typeface napříč appkou (viz
   # lib/theme/app_theme.dart) -- bundlovaný OFL soubor, ne `google_fonts`

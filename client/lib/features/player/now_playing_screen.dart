@@ -68,10 +68,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // Plná barva vždy vespod -- přehrávač nemá mít gradient pozadí
+          // appky, ani na okamžik, než se obal načte.
+          ColoredBox(color: accent),
           if (nowPlaying.artworkUrl != null)
-            CachedNetworkImage(imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover)
-          else
-            Container(color: accent),
+            CachedNetworkImage(imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover),
           Positioned.fill(
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),

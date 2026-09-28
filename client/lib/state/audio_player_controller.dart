@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/media_session.dart';
 import '../core/ws_client.dart';
 import '../models/playback_model.dart' show RepeatMode;
 import '../theme/accent_color.dart';
@@ -282,6 +283,53 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _maybeWarmUpNext(position);
     });
     _player.durationStream.listen((duration) => state = state.copyWith(duration: duration));
+    _mediaSession.setHandlers(
+      onPlay: () => unawaited(_setPlaying(true)),
+      onPause: () => unawaited(_setPlaying(false)),
+      onNext: () => unawaited(next()),
+      onPrevious: () => unawaited(previous()),
+      onSeek: (position) => unawaited(seek(position)),
+    );
+    addListener(_syncMediaSession, fireImmediately: false);
+  }
+
+  final MediaSessionBridge _mediaSession = MediaSessionBridge();
+  String? _mediaSessionKey;
+  bool? _mediaSessionPlaying;
+  Duration? _mediaSessionDuration;
+
+  /// Zamčená obrazovka/Ovládací centrum: metadata jen při změně skladby nebo
+  /// obalu, stav přehrávání při play/pause, pozice jen když se změní délka
+  /// nebo stav (systém si ji dál dopočítává sám z `playbackRate`) -- ne na
+  /// každý tik `positionStream`u.
+  void _syncMediaSession(AudioPlayerState s) {
+    final info = s.nowPlaying;
+    if (info == null) {
+      if (_mediaSessionKey != null) _mediaSession.clear();
+      _mediaSessionKey = null;
+      return;
+    }
+    final key = '${info.recordingId}|${info.artworkUrl}|${info.artistName}';
+    if (key != _mediaSessionKey) {
+      _mediaSessionKey = key;
+      _mediaSession.setMetadata(
+        title: info.title,
+        artist: info.artistName,
+        album: s.queueSourceLabel,
+        artworkUrl: info.artworkUrl,
+      );
+    }
+    if (s.isPlaying != _mediaSessionPlaying || s.duration != _mediaSessionDuration) {
+      _mediaSessionPlaying = s.isPlaying;
+      _mediaSessionDuration = s.duration;
+      _mediaSession.setPlaying(s.isPlaying);
+      _mediaSession.setPosition(position: s.position, duration: s.duration, speed: s.speed);
+    }
+  }
+
+  Future<void> _setPlaying(bool playing) async {
+    if (state.nowPlaying == null || _player.playing == playing) return;
+    await togglePlayPause();
   }
 
   static const _normalizationPrefKey = 'player.normalization_enabled';
@@ -973,6 +1021,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> seek(Duration position) async {
     await _player.seek(position);
     _realtime.playbackSeek(position.inMilliseconds);
+    _mediaSession.setPosition(position: position, duration: state.duration, speed: state.speed);
   }
 
   void _onPlayerStateChanged(PlayerState playerState) {

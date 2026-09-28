@@ -61,13 +61,14 @@ class PlayerBar extends ConsumerWidget {
         borderRadius: BorderRadius.circular(AppRadii.xl),
         child: Stack(
           children: [
+            // Plná barva vždy vespod -- lišta nemá propouštět gradient
+            // pozadí appky, ani než se obal načte.
+            Positioned.fill(child: ColoredBox(color: accent)),
             if (nowPlaying.artworkUrl != null)
               Positioned.fill(
                 child: CachedNetworkImage(
                     imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover),
-              )
-            else
-              Positioned.fill(child: Container(color: accent)),
+              ),
             GlassContainer(
               borderRadius: BorderRadius.circular(AppRadii.xl),
               blurSigma: GlassTokens.blurLight,
