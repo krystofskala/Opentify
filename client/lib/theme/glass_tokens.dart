@@ -47,12 +47,13 @@ import 'package:flutter/physics.dart';
 ///   se stane aliasy (xs 8, sm 12, md 16, lg 20, xl 28); žádné literály.
 ///   Náhled/obrázek uvnitř kontejneru má o stupeň menší poloměr než
 ///   kontejner.
-/// - **Vybraný stav** (segmenty, taby, čipy -- jeden recept): NEUTRÁLNÍ
-///   skleněná kapsle (`SelectedCapsule()` bez barvy -- stejný materiál +
-///   `GlassTokens.emphasis`, vlasová hrana, jemný stín), text/ikona
-///   `onSurface` w700. Žádná barevná tónová pilulka ani lesklý přechod --
-///   působilo to levně (zpětná vazba uživatele). Barva ze seedu je
-///   vyhrazená hlavním akcím (Přehrát) a obsahu, ne výběru.
+/// - **Vybraný stav** (segmenty, taby, čipy -- jeden recept): skleněná
+///   "čočka" `SelectedCapsule` po vzoru iOS 26 -- převážně průhledná,
+///   v segmentech jemně tónovaná `primary` (tab bar neutrální), ostrá
+///   gradientní světelná hrana (nahoře jasná, dole slábne), jemný odlesk
+///   jen v horních 40 %, měkký dvojitý stín; text/ikona `onSurface` w700.
+///   NIKDY plná barevná pilulka s lesklým pruhem přes půl výšky -- působilo
+///   to levně (zpětná vazba uživatele).
 /// - **Barvy textu na skle**: primární `onSurface`, sekundární
 ///   `onSurfaceVariant` (0.8). Bílá JEN nad médii (obal/fotka) spolu se
 ///   ztmavením `GlassTokens.mediaDimming`. Žádné natvrdo `Colors.white*`.

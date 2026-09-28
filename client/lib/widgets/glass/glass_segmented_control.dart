@@ -72,12 +72,11 @@ class GlassSegmentedControl<T> extends StatelessWidget {
           child: FractionallySizedBox(
             widthFactor: 1 / segments.length,
             heightFactor: 1,
-            // Neutrální skleněná kapsle (jako tab bar). Tónová barevná
-            // pilulka s leskem působila levně (zpětná vazba uživatele) --
-            // barva zůstává vyhrazená hlavním akcím (Přehrát).
-            child: const Padding(
-              padding: EdgeInsets.all(3),
-              child: SelectedCapsule(),
+            // Tónovaná skleněná "čočka" (viz SelectedCapsule) -- barva
+            // ze seedu jen jemně prosvítá sklem, žádná plná plastová pilulka.
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: SelectedCapsule(tint: theme.colorScheme.primary),
             ),
           ),
         ),
@@ -156,54 +155,86 @@ class GlassSegmentedControl<T> extends StatelessWidget {
 Alignment slideAlignment(int index, int count) =>
     Alignment(count <= 1 ? 0 : -1 + 2 * index / (count - 1), 0);
 
-/// Vybraná kapsle v segmentech/tab baru: v obsahu (světlý režim) bílá
-/// s drobným stínem jako iOS, jinak "stejný materiál + bílá navíc"
-/// (`GlassTokens.emphasis`) s vlasovou hranou.
+/// Vybraná kapsle v segmentech/tab baru -- "čočka" z tónovaného skla po
+/// vzoru iOS 26: převážně průhledná (pod ní dál prosvítá stopa), jemně
+/// tónovaná barvou ze seedu, s ostrou světelnou hranou (nahoře jasná,
+/// dole téměř neviditelná), tenkou tmavší linkou u spodní hrany a
+/// měkkým dvojitým stínem, který ji "zvedne" nad stopu. Žádný plastový
+/// lesklý pruh přes polovinu výšky -- to působilo levně.
 class SelectedCapsule extends StatelessWidget {
-  const SelectedCapsule({super.key, this.color});
+  const SelectedCapsule({super.key, this.tint});
 
-  /// `null` = neutrální skleněná kapsle (tab bar, navigace); jinak tónová
-  /// barva (segmenty -- M3 Expressive vybraný stav).
-  final Color? color;
+  /// `null` = neutrální sklo (tab bar); jinak barva, kterou se sklo jemně
+  /// tónuje (segmenty).
+  final Color? tint;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final shape = glassShape(const BorderRadius.all(Radius.circular(999)));
-    final fill = color ??
-        (isDark ? Colors.white.withValues(alpha: 0.14 + GlassTokens.emphasis) : Colors.white.withValues(alpha: 0.6));
+    final base = isDark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.62);
+    final fill = tint == null ? base : Color.alphaBlend(tint!.withValues(alpha: isDark ? 0.24 : 0.14), base);
     return AnimatedContainer(
       duration: Motion.state.duration,
       curve: Motion.state,
       decoration: ShapeDecoration(
         shape: shape,
         color: fill,
-        shadows: const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))],
+        shadows: [
+          BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.10), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.12 : 0.06), blurRadius: 2, offset: const Offset(0, 1)),
+        ],
       ),
       child: CustomPaint(
-        painter: GlassEdgePainter(shape: shape),
-        // Tónová pilulka (M3) dostane skleněný vnitřní lesk u horní hrany --
-        // jediný recept "vybráno", kde se oba jazyky spojují (design audit).
-        child: color == null
-            ? const SizedBox.expand()
-            : ClipPath(
-                clipper: ShapeBorderClipper(shape: shape),
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: [0, 0.5],
-                      colors: [
-                        Color.fromRGBO(255, 255, 255, Expressive.selectedPillHighlightAlpha),
-                        Color.fromRGBO(255, 255, 255, 0),
-                      ],
-                    ),
-                  ),
-                  child: SizedBox.expand(),
-                ),
-              ),
+        foregroundPainter: _LensRimPainter(shape: shape, isDark: isDark),
+        child: const SizedBox.expand(),
       ),
     );
   }
+}
+
+/// Světelná hrana skleněné čočky: gradientní obrys (nahoře jasný, dole
+/// slábne) + velmi jemný vnitřní odlesk jen u horní hrany.
+class _LensRimPainter extends CustomPainter {
+  const _LensRimPainter({required this.shape, required this.isDark});
+
+  final ShapeBorder shape;
+  final bool isDark;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final outline = shape.getOuterPath(rect.deflate(0.5));
+    canvas.drawPath(
+      outline,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withValues(alpha: isDark ? 0.55 : 0.9),
+            Colors.white.withValues(alpha: isDark ? 0.10 : 0.35),
+            Colors.black.withValues(alpha: isDark ? 0.18 : 0.06),
+          ],
+          stops: const [0, 0.55, 1],
+        ).createShader(rect),
+    );
+    canvas.save();
+    canvas.clipPath(shape.getOuterPath(rect));
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height * 0.4),
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.white.withValues(alpha: isDark ? 0.10 : 0.35), Colors.white.withValues(alpha: 0)],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height * 0.4)),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_LensRimPainter old) => old.isDark != isDark || old.shape != shape;
 }
