@@ -72,10 +72,12 @@ class GlassSegmentedControl<T> extends StatelessWidget {
           child: FractionallySizedBox(
             widthFactor: 1 / segments.length,
             heightFactor: 1,
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              // Mix: stopa sklo/plochá, vybraná kapsle expresivně tónová (M3).
-              child: SelectedCapsule(color: theme.colorScheme.primaryContainer),
+            // Neutrální skleněná kapsle (jako tab bar). Tónová barevná
+            // pilulka s leskem působila levně (zpětná vazba uživatele) --
+            // barva zůstává vyhrazená hlavním akcím (Přehrát).
+            child: const Padding(
+              padding: EdgeInsets.all(3),
+              child: SelectedCapsule(),
             ),
           ),
         ),
@@ -98,7 +100,7 @@ class GlassSegmentedControl<T> extends StatelessWidget {
                         style: theme.textTheme.labelLarge!.copyWith(
                           fontWeight: segment.value == selected ? FontWeight.w700 : FontWeight.w500,
                           color: segment.value == selected
-                              ? theme.colorScheme.onPrimaryContainer
+                              ? theme.colorScheme.onSurface
                               : theme.colorScheme.onSurfaceVariant,
                         ),
                         child: segment.icon == null
@@ -110,7 +112,7 @@ class GlassSegmentedControl<T> extends StatelessWidget {
                                     segment.icon,
                                     size: 18,
                                     color: segment.value == selected
-                                        ? theme.colorScheme.onPrimaryContainer
+                                        ? theme.colorScheme.onSurface
                                         : theme.colorScheme.onSurfaceVariant,
                                   ),
                                   // `.icons` = jen ikona (popisek pro čtečky),

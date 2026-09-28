@@ -47,10 +47,12 @@ import 'package:flutter/physics.dart';
 ///   se stane aliasy (xs 8, sm 12, md 16, lg 20, xl 28); žádné literály.
 ///   Náhled/obrázek uvnitř kontejneru má o stupeň menší poloměr než
 ///   kontejner.
-/// - **Vybraný stav** (segmenty, taby, čipy -- jeden recept): tónová pilulka
-///   `primaryContainer` + vnitřní horní lesk
-///   `Expressive.selectedPillHighlightAlpha`, text/ikona
-///   `onPrimaryContainer`. Stopa pod ní = sklo s `GlassTokens.emphasis`.
+/// - **Vybraný stav** (segmenty, taby, čipy -- jeden recept): NEUTRÁLNÍ
+///   skleněná kapsle (`SelectedCapsule()` bez barvy -- stejný materiál +
+///   `GlassTokens.emphasis`, vlasová hrana, jemný stín), text/ikona
+///   `onSurface` w700. Žádná barevná tónová pilulka ani lesklý přechod --
+///   působilo to levně (zpětná vazba uživatele). Barva ze seedu je
+///   vyhrazená hlavním akcím (Přehrát) a obsahu, ne výběru.
 /// - **Barvy textu na skle**: primární `onSurface`, sekundární
 ///   `onSurfaceVariant` (0.8). Bílá JEN nad médii (obal/fotka) spolu se
 ///   ztmavením `GlassTokens.mediaDimming`. Žádné natvrdo `Colors.white*`.
@@ -236,8 +238,8 @@ class Expressive {
   /// Vnitřní rohy spojené skupiny tlačítek (M3 connected button group).
   static const double groupInnerCorner = cornerSmall;
 
-  /// Vnitřní lesk vybrané tónové pilulky (segmenty; po sjednocení i taby a
-  /// čipy) -- horní světlá linka jako u skla. Tady se oba jazyky potkávají.
+  /// Vnitřní lesk tónové pilulky -- jen pro případné tónové kapsle mimo
+  /// vybraný stav (vybraný stav je neutrální, viz pravidla výš).
   static const double selectedPillHighlightAlpha = 0.25;
 }
 
