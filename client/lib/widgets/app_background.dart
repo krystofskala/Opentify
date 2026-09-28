@@ -596,7 +596,7 @@ List<Color> _paletteFor(
   // červený). Malá podlaha jen proto, že šedé obaly řeší větev výš.
   final coverSat = (character?.saturation ?? hsl.saturation).clamp(0.0, 1.0);
   final coverLight = (character?.lightness ?? 0.5).clamp(0.0, 1.0);
-  final s = math.max(0.18, ui.lerpDouble(0.15, 0.85, coverSat)!);
+  final s = math.max(0.26, ui.lerpDouble(0.26, 0.85, coverSat)!);
   // Světlost sleduje světlost obalu: světlý pastel posune paletu výš a
   // stáhne kontrast mezi sloty (měkčí), temný obal ji posune do hloubky.
   // Tmavý režim zůstává tmavý a světlý světlý (L ≥ 0.72 kvůli textu).
@@ -630,7 +630,9 @@ List<Color> _paletteFor(
       final chroma = (1 - (2 * src.lightness - 1).abs()) * src.saturation;
       final room = math.max(0.05, 1 - (2 * target - 1).abs());
       // Papír/šeď zůstane skoro neutrální (ne červená z odstínu 0°).
-      final sat = chroma < 0.04 ? 0.04 : math.min(0.85, chroma * 0.95 / room);
+      // Tlumené barvy zesílit (×1.6) -- 1:1 přenesená chroma dělala z
+      // prachových obalů skoro šedé pozadí (živě nahlášeno).
+      final sat = chroma < 0.03 ? 0.03 : math.min(0.85, chroma * 1.6 / room);
       return HSLColor.fromAHSL(1, src.hue, sat, target).toColor();
     }
 

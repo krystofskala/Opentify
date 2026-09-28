@@ -58,10 +58,31 @@ Color? pickAccent(PaletteGenerator palette) {
   final vibrant = palette.vibrantColor;
   final base = dominant?.population ?? 0;
   final vibrantMatters = vibrant != null && base > 0 && vibrant.population >= base * 0.06;
-  final raw = (vibrantMatters ? vibrant.color : null) ??
+  var raw = (vibrantMatters ? vibrant.color : null) ??
       dominant?.color ??
       palette.mutedColor?.color ??
       vibrant?.color;
+  if (raw != null && isAchromatic(raw)) {
+    // Šedá převládající barva, ale obal jinak barevný (tlumená růžovo-béžová
+    // fotka) -- dřív z toho byla čistě šedá appka, i když obal šedý není
+    // (živě nahlášeno). Když barevné plochy dohromady tvoří ≥ 20 % obalu,
+    // vzít tu s největší "váhou" (plocha × chroma); skutečně černobílé
+    // obaly žádné nemají.
+    double chroma(Color c) {
+      final hsl = HSLColor.fromColor(c);
+      return (1 - (2 * hsl.lightness - 1).abs()) * hsl.saturation;
+    }
+
+    final total = palette.paletteColors.fold<int>(0, (sum, c) => sum + c.population);
+    final colored = palette.paletteColors
+        .where((c) => !isAchromatic(c.color) && chroma(c.color) >= 0.06)
+        .toList();
+    final coloredShare = colored.fold<int>(0, (sum, c) => sum + c.population);
+    if (total > 0 && coloredShare >= total * 0.2) {
+      colored.sort((a, b) => (b.population * chroma(b.color)).compareTo(a.population * chroma(a.color)));
+      raw = colored.first.color;
+    }
+  }
   return raw == null ? null : normalizeAccent(raw);
 }
 
