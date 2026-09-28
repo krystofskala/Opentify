@@ -11,6 +11,7 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
+import '../../widgets/playlist_card.dart' show PlaylistArtwork;
 import 'liked_songs_screen.dart' show LikedSongsCard;
 import '../../widgets/remove_from_library.dart';
 import '../../widgets/section_app_bar.dart';
@@ -646,11 +647,22 @@ class _PlaylistsTab extends ConsumerWidget {
                       );
                     }
                     final playlist = items[index - 1];
+                    final artists = playlist.artistNames;
+                    final who = artists.isEmpty
+                        ? 'Playlist'
+                        : artists.length < 3
+                            ? artists.join(', ')
+                            : '${artists.take(2).join(', ')} a další';
                     return MediaCard(
                       layout: MediaCardLayout.row,
                       placeholderIcon: Symbols.queue_music_rounded,
+                      artwork: PlaylistArtwork(
+                        title: playlist.title,
+                        coverUrls: playlist.coverUrls,
+                        showTitle: false,
+                      ),
                       title: playlist.title,
-                      subtitle: 'Playlist · ${playlist.itemCount} skladeb',
+                      subtitle: '$who · ${playlist.itemCount} skladeb',
                       onTap: () => context.push('/playlists/${playlist.id}'),
                     );
                   },

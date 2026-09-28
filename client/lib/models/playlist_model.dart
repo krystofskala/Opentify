@@ -1,3 +1,4 @@
+import '../core/media_url.dart';
 import 'recording_model.dart';
 
 /// 1:1 s `components.schemas.Playlist`/`PlaylistDetail` v docs/openapi.yaml.
@@ -45,6 +46,6 @@ class PlaylistDetailModel {
             .map((e) => RecordingModel.fromJson(e as Map<String, dynamic>))
             .toList(),
         description: json['description'] as String?,
-        coverUrls: (json['coverUrls'] as List<dynamic>? ?? const []).cast<String>(),
+        coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
       );
 }

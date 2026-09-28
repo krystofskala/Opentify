@@ -1,4 +1,5 @@
 import '../core/api_client.dart';
+import '../core/media_url.dart';
 import '../models/playlist_model.dart';
 
 /// Souhrn playlistu pro seznamovou obrazovku (`GET /playlists`) -- bez
@@ -11,6 +12,8 @@ class PlaylistSummaryModel {
     required this.kind,
     this.source,
     required this.itemCount,
+    this.coverUrls = const [],
+    this.artistNames = const [],
   });
 
   final String id;
@@ -19,12 +22,20 @@ class PlaylistSummaryModel {
   final String? source;
   final int itemCount;
 
+  /// Až 4 různé obaly pro mozaiku (jako karty na Domů).
+  final List<String> coverUrls;
+
+  /// Nejčastější interpreti v playlistu (max 3) -- do podtitulku.
+  final List<String> artistNames;
+
   factory PlaylistSummaryModel.fromJson(Map<String, dynamic> json) => PlaylistSummaryModel(
         id: json['id'] as String,
         title: json['title'] as String,
         kind: json['kind'] as String,
         source: json['source'] as String?,
         itemCount: json['itemCount'] as int,
+        coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
+        artistNames: (json['artistNames'] as List<dynamic>? ?? const []).cast<String>(),
       );
 }
 

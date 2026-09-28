@@ -30,8 +30,12 @@ class MediaCard extends ConsumerWidget {
     this.placeholderIcon = Symbols.album_rounded,
     this.layout = MediaCardLayout.card,
     this.animationIndex,
+    this.artwork,
     required this.onTap,
   });
+
+  /// Vlastní obrázek místo `imageUrl` (např. mozaika playlistu).
+  final Widget? artwork;
 
   final String title;
   final String? subtitle;
@@ -51,7 +55,7 @@ class MediaCard extends ConsumerWidget {
     final cardShape = AppShapes.of(isCircle ? AppRadii.pill : AppRadii.md);
     final resolved = imageUrl ??
         (artworkKey != null ? ref.watch(recordingArtworkProvider(artworkKey!)).valueOrNull : null);
-    final image = ArtworkImage(url: resolved, icon: placeholderIcon);
+    final image = artwork ?? ArtworkImage(url: resolved, icon: placeholderIcon);
 
     Widget card = layout == MediaCardLayout.row
         ? _buildRow(context, image, isCircle)

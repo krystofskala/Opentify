@@ -9,6 +9,8 @@ Dart straně je pro oba stejný typ)."""
 
 from __future__ import annotations
 
+from collections import Counter
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -17,6 +19,7 @@ from app.auth import get_current_user
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import RecordingOut
 from app.db import get_session
+from app.home.generators import _covers_for
 from app.models import GLOBAL_PLAYLIST_OWNER, Playlist, PlaylistItem, PlaylistKind, Recording
 from app.recommendations.schemas import PlaylistDetailOut, PlaylistOut
 
@@ -65,6 +68,21 @@ def _playlist_items(session: Session, playlist_id: str) -> list[PlaylistItem]:
     ).all()
 
 
+def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) -> tuple[list[str], list[str]]:
+    """Náhled do seznamu playlistů (jako karty na Domů): mozaika z prvních
+    různých obalů + nejčastější interpreti. Vlastní playlisty se mění, tak
+    mozaika z aktuálních položek; uložená (kopie z Domů) jen jako záloha."""
+    ids = [item.recording_id for item in items]
+    covers = _covers_for(ids[:40]) or list(playlist.cover_urls or [])
+    counts: Counter[str] = Counter()
+    for recording_id in ids:
+        recording = session.get(Recording, recording_id)
+        if recording is not None and recording.artist_id:
+            counts[recording.artist_id] += 1
+    names = [name for artist_id, _ in counts.most_common(4) if (name := resolve_artist_name(session, artist_id))]
+    return covers, names[:3]
+
+
 def _playlist_detail(session: Session, playlist: Playlist) -> PlaylistDetailOut:
     items = _playlist_items(session, playlist.id)
     recordings = [r for item in items if (r := _to_recording_out(session, item.recording_id)) is not None]
@@ -77,7 +95,7 @@ def _playlist_detail(session: Session, playlist: Playlist) -> PlaylistDetailOut:
         item_count=len(recordings),
         items=recordings,
         description=playlist.description,
-        cover_urls=playlist.cover_urls or [],
+        cover_urls=playlist.cover_urls or _covers_for([item.recording_id for item in items[:40]]),
     )
 
 
@@ -116,17 +134,17 @@ def list_playlists(
     for p in playlists:
         if p.source == "liked-songs":
             continue
-        count = len(_playlist_items(session, p.id))
-        results.append(
-            PlaylistOut(
-                id=p.id,
-                title=p.title,
-                kind=p.kind,
-                source=p.source,
-                generated_at=p.generated_at,
-                item_count=count,
-            ).model_dump(by_alias=True)
-        )
+        items = _playlist_items(session, p.id)
+        covers, artist_names = _preview(session, p, items)
+        out = PlaylistOut(
+            id=p.id,
+            title=p.title,
+            kind=p.kind,
+            source=p.source,
+            generated_at=p.generated_at,
+            item_count=len(items),
+        ).model_dump(by_alias=True)
+        results.append({**out, "coverUrls": covers, "artistNames": artist_names})
     return results
 
 
