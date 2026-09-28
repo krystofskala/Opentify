@@ -150,8 +150,8 @@ class _GlassSearchFieldState extends State<GlassSearchField> {
       children: [
         Expanded(child: capsule),
         AnimatedSize(
-          duration: GlassTokens.stateDuration,
-          curve: Curves.easeOut,
+          duration: Motion.enter.duration,
+          curve: Motion.enter,
           child: widget.showCancel && _focus.hasFocus
               ? Padding(
                   padding: const EdgeInsets.only(left: 4),

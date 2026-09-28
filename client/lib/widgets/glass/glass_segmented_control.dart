@@ -67,8 +67,8 @@ class GlassSegmentedControl<T> extends StatelessWidget {
       children: [
         AnimatedAlign(
           alignment: slideAlignment(index, segments.length),
-          duration: Expressive.spatialDefault.duration,
-          curve: Expressive.spatialDefault,
+          duration: Motion.enter.duration,
+          curve: Motion.enter,
           child: FractionallySizedBox(
             widthFactor: 1 / segments.length,
             heightFactor: 1,
@@ -171,14 +171,37 @@ class SelectedCapsule extends StatelessWidget {
     final fill = color ??
         (isDark ? Colors.white.withValues(alpha: 0.14 + GlassTokens.emphasis) : Colors.white.withValues(alpha: 0.6));
     return AnimatedContainer(
-      duration: Expressive.effectsDefault.duration,
-      curve: Expressive.effectsDefault,
+      duration: Motion.state.duration,
+      curve: Motion.state,
       decoration: ShapeDecoration(
         shape: shape,
         color: fill,
         shadows: const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))],
       ),
-      child: CustomPaint(painter: GlassEdgePainter(shape: shape), child: const SizedBox.expand()),
+      child: CustomPaint(
+        painter: GlassEdgePainter(shape: shape),
+        // Tónová pilulka (M3) dostane skleněný vnitřní lesk u horní hrany --
+        // jediný recept "vybráno", kde se oba jazyky spojují (design audit).
+        child: color == null
+            ? const SizedBox.expand()
+            : ClipPath(
+                clipper: ShapeBorderClipper(shape: shape),
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0, 0.5],
+                      colors: [
+                        Color.fromRGBO(255, 255, 255, Expressive.selectedPillHighlightAlpha),
+                        Color.fromRGBO(255, 255, 255, 0),
+                      ],
+                    ),
+                  ),
+                  child: SizedBox.expand(),
+                ),
+              ),
+      ),
     );
   }
 }

@@ -23,6 +23,7 @@ class GlassPressable extends StatefulWidget {
     this.tooltip,
     this.minSize = const Size(GlassTokens.minHitTarget, GlassTokens.minHitTarget),
     this.highlightColor,
+    this.squish = false,
   });
 
   final Widget? child;
@@ -38,6 +39,12 @@ class GlassPressable extends StatefulWidget {
   final String? tooltip;
   final Size minSize;
   final Color? highlightColor;
+
+  /// M3 Expressive morfologie stisku pro libovolného potomka: při stisku se
+  /// kapsle ořízne na rohy `Expressive.pressedCornerFraction` × výška
+  /// (pružina `Motion.press`) a po puštění se vrátí. Opt-in -- prvky, které
+  /// si tvar morfují samy (`GlassButton`), ho nepotřebují.
+  final bool squish;
 
   @override
   State<GlassPressable> createState() => _GlassPressableState();
@@ -60,14 +67,17 @@ class _GlassPressableState extends State<GlassPressable> {
         (theme.brightness == Brightness.dark ? Colors.white : Colors.black)
             .withValues(alpha: GlassTokens.pressedHighlight);
 
+    Widget pressedChild = widget.builder?.call(context, _pressed) ?? widget.child!;
+    if (widget.squish) pressedChild = _SquishClip(pressed: _pressed, child: pressedChild);
+
     Widget content = AnimatedScale(
       scale: _pressed ? GlassTokens.pressedScale : 1,
-      duration: Expressive.spatialFast.duration,
-      curve: Expressive.spatialFast,
+      duration: Motion.press.duration,
+      curve: Motion.press,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          widget.builder?.call(context, _pressed) ?? widget.child!,
+          pressedChild,
           Positioned.fill(
             child: IgnorePointer(
               child: AnimatedOpacity(
@@ -132,4 +142,42 @@ class _GlassPressableState extends State<GlassPressable> {
     if (widget.tooltip != null) content = Tooltip(message: widget.tooltip!, child: content);
     return content;
   }
+}
+
+/// Ořez potomka tvarem, který při stisku zmáčkne rohy z kapsle na
+/// `Expressive.pressedCornerFraction` výšky -- pružinou `Motion.press`.
+/// Poloměr se počítá ze skutečné velikosti potomka (clipper), ne z omezení.
+class _SquishClip extends StatelessWidget {
+  const _SquishClip({required this.pressed, required this.child});
+
+  final bool pressed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: pressed ? 1 : 0),
+      duration: Motion.press.duration,
+      curve: Motion.press,
+      child: child,
+      builder: (context, t, child) => ClipRRect(clipper: _SquishClipper(t), child: child),
+    );
+  }
+}
+
+class _SquishClipper extends CustomClipper<RRect> {
+  const _SquishClipper(this.t);
+
+  final double t;
+
+  @override
+  RRect getClip(Size size) {
+    final capsule = size.shortestSide / 2;
+    final pressed = size.height * Expressive.pressedCornerFraction;
+    final radius = (capsule + (pressed - capsule) * t).clamp(0.0, capsule);
+    return RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius));
+  }
+
+  @override
+  bool shouldReclip(_SquishClipper oldClipper) => oldClipper.t != t;
 }

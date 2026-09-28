@@ -68,8 +68,8 @@ class _GlassSwitchState extends State<GlassSwitch> {
                 opacity: _enabled ? 1 : GlassTokens.disabledOpacity,
                 duration: GlassTokens.stateDuration,
                 child: AnimatedContainer(
-                  duration: Expressive.effectsDefault.duration,
-                  curve: Expressive.effectsDefault,
+                  duration: Motion.state.duration,
+                  curve: Motion.state,
                   width: GlassSwitch.width,
                   height: GlassSwitch.height,
                   decoration: BoxDecoration(
@@ -79,8 +79,8 @@ class _GlassSwitchState extends State<GlassSwitch> {
                   child: Stack(
                     children: [
                       AnimatedPositioned(
-                        duration: Expressive.spatialFast.duration,
-                        curve: Expressive.spatialFast,
+                        duration: Motion.press.duration,
+                        curve: Motion.press,
                         top: inset,
                         left: widget.value ? GlassSwitch.width - thumbWidth - inset : inset,
                         width: thumbWidth,

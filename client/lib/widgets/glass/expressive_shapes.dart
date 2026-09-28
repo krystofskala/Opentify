@@ -80,7 +80,7 @@ class ExpressiveMorph extends StatefulWidget {
 
 class _ExpressiveMorphState extends State<ExpressiveMorph> with SingleTickerProviderStateMixin {
   late final AnimationController _controller =
-      AnimationController(vsync: this, duration: Expressive.spatialDefault.duration)..value = 1;
+      AnimationController(vsync: this, duration: Motion.enter.duration)..value = 1;
   late ExpressiveShape _from = widget.shape;
   late ExpressiveShape _to = widget.shape;
 
@@ -108,7 +108,7 @@ class _ExpressiveMorphState extends State<ExpressiveMorph> with SingleTickerProv
         painter: _ShapePainter(
           from: _from,
           to: _to,
-          t: Expressive.spatialDefault.transform(_controller.value),
+          t: Motion.enter.transform(_controller.value),
           color: widget.color,
         ),
         child: child,
@@ -187,7 +187,7 @@ class _ExpressiveLoadingIndicatorState extends State<ExpressiveLoadingIndicator>
             }
             final phase = v * _sequence.length;
             final i = phase.floor() % _sequence.length;
-            final local = Expressive.spatialDefault.transform((phase - phase.floor()).clamp(0.0, 1.0));
+            final local = Motion.enter.transform((phase - phase.floor()).clamp(0.0, 1.0));
             return CustomPaint(
               painter: _ShapePainter(
                 from: _sequence[i],

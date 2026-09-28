@@ -141,11 +141,11 @@ class _MorphingSurface extends StatelessWidget {
     if (color == null) return child;
     return TweenAnimationBuilder<BorderRadius?>(
       tween: BorderRadiusTween(end: radius),
-      duration: Expressive.spatialFast.duration,
-      curve: Expressive.spatialFast,
+      duration: Motion.press.duration,
+      curve: Motion.press,
       builder: (context, value, child) => AnimatedContainer(
-        duration: Expressive.effectsDefault.duration,
-        curve: Expressive.effectsDefault,
+        duration: Motion.state.duration,
+        curve: Motion.state,
         decoration: ShapeDecoration(shape: glassShape(value ?? radius), color: color),
         child: child,
       ),

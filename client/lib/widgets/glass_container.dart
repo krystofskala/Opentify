@@ -88,6 +88,7 @@ class GlassContainer extends StatelessWidget {
     final fills = <Color>[
       if (baseFill && isDark) Colors.black.withValues(alpha: GlassTokens.fillDark),
       if (baseFill && isDark) Colors.white.withValues(alpha: GlassTokens.fillDarkWhiteHint),
+      if (baseFill && isDark) Colors.white.withValues(alpha: GlassTokens.frostDark),
       if (baseFill && !isDark) Colors.white.withValues(alpha: GlassTokens.fillLight),
       if (tint != null) tint!.withValues(alpha: tintOpacity),
       if (frost > 0) Colors.white.withValues(alpha: frost),

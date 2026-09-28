@@ -42,6 +42,26 @@ import 'package:flutter/physics.dart';
 /// `GlassSegmentedControl` stopa je plochá výplň).
 /// Nikdy sklo na skle se dvěma rozmazáními -- vnořený panel používá
 /// `GlassContainer(blur: false)`.
+/// ## Sjednocená pravidla (design audit, schváleno) -- drž se jich
+/// - **Škála zaoblení**: jedna, M3 (`Expressive.corner*`). Plán: `AppRadii`
+///   se stane aliasy (xs 8, sm 12, md 16, lg 20, xl 28); žádné literály.
+///   Náhled/obrázek uvnitř kontejneru má o stupeň menší poloměr než
+///   kontejner.
+/// - **Vybraný stav** (segmenty, taby, čipy -- jeden recept): tónová pilulka
+///   `primaryContainer` + vnitřní horní lesk
+///   `Expressive.selectedPillHighlightAlpha`, text/ikona
+///   `onPrimaryContainer`. Stopa pod ní = sklo s `GlassTokens.emphasis`.
+/// - **Barvy textu na skle**: primární `onSurface`, sekundární
+///   `onSurfaceVariant` (0.8). Bílá JEN nad médii (obal/fotka) spolu se
+///   ztmavením `GlassTokens.mediaDimming`. Žádné natvrdo `Colors.white*`.
+/// - **Pohyb**: `Motion.enter / exit / state` (pružiny), nic jiného.
+/// - **Ikony**: Material Symbols Rounded, `weight 300`, `opticalSize 24`
+///   (globálně v `app_theme.dart`); `fill: 1` JEN pro vybraný/aktivní stav,
+///   jinak obrys.
+/// - **Tlačítka**: hlavní akce `primaryContainer` (ne `primary`), vedlejší
+///   tónová `secondaryContainer`; dvojice akcí v jedné spojené skupině.
+/// - **Řádek ovládání v obsahu** (filtr, řazení, výběr): vše 40 px, jedna
+///   výplň `surfaceContainerHigh` 0.72.
 class GlassTokens {
   const GlassTokens._();
 
@@ -50,7 +70,9 @@ class GlassTokens {
   /// Rozmazání "regular" varianty (chrome). HIG Materials: regular varianta
   /// "blurs and adjusts the luminosity of background content to maintain
   /// legibility".
-  static const double blur = 28;
+  /// Sjednocení (audit): 28 → 32 -- přes zrnité pozadí má chrome působit
+  /// hladce matně, ne zrnitě.
+  static const double blur = 32;
 
   /// Silnější rozmazání pro celoobrazovkový přehrávač (obal za sklem).
   static const double blurPlayer = 56;
@@ -58,7 +80,9 @@ class GlassTokens {
   /// Vibrance -- zvýšená sytost toho, co je za sklem. Klíč k Apple vzhledu:
   /// obsah za sklem zůstává živý, ne vybledle šedý. (Materials: "use vibrant
   /// colors on top of materials").
-  static const double vibrancy = 1.8;
+  /// Sjednocení (audit): 1.8 → 1.5 -- vyšší sytost zesilovala zrno
+  /// pozadí a barvila sklo do červena.
+  static const double vibrancy = 1.5;
 
   /// Mírné zjasnění rozmazaného pozadí (součást vibrance).
   static const double brightness = 1.04;
@@ -66,8 +90,12 @@ class GlassTokens {
   /// Neutrální výplň skla -- žádné akcentové tónování na chrome.
   /// Světlý režim: bílá ~12 %, tmavý: černá ~26 % + náznak bílé.
   static const double fillLight = 0.12;
-  static const double fillDark = 0.26;
+  static const double fillDark = 0.30;
   static const double fillDarkWhiteHint = 0.04;
+
+  /// Tlumení zrna v tmavém režimu: tenký bílý závoj navíc (jen tmavý
+  /// režim, jen s neutrální výplní), aby se šum pozadí neprokreslil do skla.
+  static const double frostDark = 0.03;
 
   /// Tónování barvou skladby -- JEN plochy přehrávače, jemně.
   static const double playerTint = 0.14;
@@ -207,6 +235,31 @@ class Expressive {
 
   /// Vnitřní rohy spojené skupiny tlačítek (M3 connected button group).
   static const double groupInnerCorner = cornerSmall;
+
+  /// Vnitřní lesk vybrané tónové pilulky (segmenty; po sjednocení i taby a
+  /// čipy) -- horní světlá linka jako u skla. Tady se oba jazyky potkávají.
+  static const double selectedPillHighlightAlpha = 0.25;
+}
+
+/// Pohybové aliasy -- JEDINÉ, co obrazovky používají pro animace.
+/// Pravidlo: žádné holé `Curves.*` ani ručně zadané délky mimo
+/// `widgets/app_background.dart` (to má vlastní hodiny). Délka animace =
+/// `Motion.x.duration` (čas ustálení pružiny).
+class Motion {
+  const Motion._();
+
+  /// Příchod / změna polohy, velikosti, tvaru (smí mírně překmitnout).
+  static SpringCurve get enter => Expressive.spatialDefault;
+
+  /// Odchod -- rychlejší, bez výrazného překmitu.
+  static SpringCurve get exit => Expressive.spatialFast;
+
+  /// Změna stavu: barva, průhlednost, výplň (bez překmitu).
+  static SpringCurve get state => Expressive.effectsDefault;
+
+  /// Odezva na dotek (zmáčknutí rohů, posun palce přepínače) -- rychlá
+  /// pružina s mírným překmitem.
+  static SpringCurve get press => Expressive.spatialFast;
 }
 
 /// Pružina (`SpringDescription`, hmotnost 1) jako `Curve` -- aby šla použít

@@ -35,7 +35,9 @@ class SectionHeader extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    // 22/w800: pod nadpisem stránky (28-34/w900), ať hierarchie
+                    // nahoře není plochá (design audit).
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 22, fontWeight: FontWeight.w800),
                   ),
                 ),
                 if (badge != null) ...[const SizedBox(width: AppSpacing.xs), badge!],
@@ -43,14 +45,14 @@ class SectionHeader extends StatelessWidget {
             ),
           ),
           if (trailing != null) trailing!,
-          // Leží přímo na barevném pozadí -> `onSurface`, ne akcent (HIG
-          // Accessibility: kontrast ≥ 4.5:1 v obou režimech).
+          // `primary` z tónové palety (tmavý režim světlý tón, světlý režim
+          // tmavý) drží kontrast ≥ 4.5:1 a odliší akci od nadpisu.
           if (onSeeAll != null)
             TextButton(
               onPressed: onSeeAll,
               style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.onSurface,
-                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                foregroundColor: Theme.of(context).colorScheme.primary,
+                textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               child: const Text('Zobrazit vše'),
             ),

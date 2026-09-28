@@ -31,6 +31,11 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
   return base.copyWith(
     scaffoldBackgroundColor: Colors.transparent,
     textTheme: _buildTextTheme(base.textTheme),
+    // Tenčí Material Symbols (variabilní font) -- vedle vlasových skleněných
+    // hran působí výchozí váha 400 těžce. `fill: 1` jen pro vybraný/aktivní
+    // stav, jinak obrys (viz pravidla v `theme/glass_tokens.dart`).
+    iconTheme: IconThemeData(color: colorScheme.onSurface, weight: 300, opticalSize: 24, grade: 0),
+    primaryIconTheme: IconThemeData(color: colorScheme.onPrimary, weight: 300, opticalSize: 24, grade: 0),
     appBarTheme: AppBarTheme(
       centerTitle: false,
       elevation: 0,
@@ -45,7 +50,7 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
         letterSpacing: -0.8,
         color: colorScheme.onSurface,
       ),
-      iconTheme: IconThemeData(color: colorScheme.onSurface),
+      iconTheme: IconThemeData(color: colorScheme.onSurface, weight: 300, opticalSize: 24, grade: 0),
     ),
     cardTheme: CardThemeData(
       elevation: 0,
@@ -76,7 +81,7 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       backgroundColor: colorScheme.secondaryContainer,
       selectedColor: colorScheme.primaryContainer,
       labelStyle: TextStyle(color: colorScheme.onSecondaryContainer, fontWeight: FontWeight.w600),
-      iconTheme: IconThemeData(color: colorScheme.onSecondaryContainer, size: 18),
+      iconTheme: IconThemeData(color: colorScheme.onSecondaryContainer, size: 18, weight: 300, grade: 0),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
