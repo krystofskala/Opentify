@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math' show pow;
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 // Flutter má od 3.47 vlastní `RepeatMode` (`RepeatingAnimationBuilder`) --
 // skrytý, ať nekoliduje s naším (viz níže).
 import 'package:flutter/material.dart' hide RepeatMode;
@@ -279,10 +281,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     unawaited(_loadPreferences());
     _player.playerStateStream.listen(_onPlayerStateChanged);
     _player.positionStream.listen((position) {
+      if (_priming) return;
       state = state.copyWith(position: position);
       _maybeWarmUpNext(position);
     });
-    _player.durationStream.listen((duration) => state = state.copyWith(duration: duration));
+    _player.durationStream.listen((duration) {
+      if (_priming) return;
+      state = state.copyWith(duration: duration);
+    });
     _mediaSession.setHandlers(
       onPlay: () => unawaited(_setPlaying(true)),
       onPause: () => unawaited(_setPlaying(false)),
@@ -412,6 +418,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
+    _primeAudioElement(items[index].recordingId);
     state = AudioPlayerState(
       nowPlaying: items[index],
       isPlaying: false,
@@ -776,8 +783,50 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     unawaited(_player.setVolume(_effectiveVolume));
   }
 
+  /// iOS Safari pustí zvuk jen v přímé reakci na klepnutí. U skladby, co se
+  /// teprve stahuje (pár vteřin), "platnost" klepnutí vyprší dřív, než je
+  /// soubor hotový, a pozdější `play()` Safari potichu odmítne -- skladba se
+  /// po stažení sama nespustila (živě nahlášeno). Proto hned při klepnutí
+  /// spustíme vteřinu ticha na TOMTÉŽ audio prvku: tím ho Safari "odemkne" a
+  /// pozdější přepnutí na skutečnou skladbu (`_startStream`) už smí hrát.
+  /// Musí proběhnout synchronně v obsluze klepnutí, před prvním `await`.
+  void _primeAudioElement(String recordingId) {
+    if (!kIsWeb) return;
+    final known = _ref.read(provisioningControllerProvider)[recordingId];
+    if (known?.status == 'AVAILABLE' && known?.streamUrl != null) return;
+    _priming = true;
+    unawaited(_player.setAudioSource(AudioSource.uri(_silenceUri)).then<void>((_) {}, onError: (Object _) {}));
+    unawaited(_player.play().catchError((Object _) {}));
+  }
+
+  bool _priming = false;
+
+  /// 1 s ticha, 8 kHz / 8 bit mono WAV jako data URI (~8 kB).
+  static final Uri _silenceUri = () {
+    const sampleRate = 8000;
+    const samples = sampleRate;
+    final bytes = BytesBuilder();
+    void u32(int v) => bytes.add([v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff]);
+    void u16(int v) => bytes.add([v & 0xff, (v >> 8) & 0xff]);
+    bytes.add('RIFF'.codeUnits);
+    u32(36 + samples);
+    bytes.add('WAVEfmt '.codeUnits);
+    u32(16);
+    u16(1); // PCM
+    u16(1); // mono
+    u32(sampleRate);
+    u32(sampleRate); // byte rate
+    u16(1); // block align
+    u16(8); // bits per sample
+    bytes.add('data'.codeUnits);
+    u32(samples);
+    bytes.add(List<int>.filled(samples, 128)); // 8bit PCM ticho = 128
+    return Uri.dataFromBytes(bytes.takeBytes(), mimeType: 'audio/wav');
+  }();
+
   Future<void> _playAtIndex(int index) async {
     final info = state.queue[index];
+    _primeAudioElement(info.recordingId);
     state = AudioPlayerState(
       nowPlaying: info,
       isPlaying: false,
@@ -893,6 +942,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Rozlišení je klíčové pro `_handleStreamFailure` níž -- selhání na ještě
   /// nedokončeném souboru neznamená, že skladba nejde přehrát vůbec.
   Future<void> _startStream(NowPlayingInfo info, String streamUrl, {required bool isProgressive}) async {
+    _priming = false;
     _awaitingProvisioning = false;
     _warmedUpAfter = null;
     // Korekci z cache (už stažené skladby ji dostaly rovnou v `provision()`)
@@ -1045,6 +1095,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   void _onPlayerStateChanged(PlayerState playerState) {
+    if (_priming) {
+      // Stav tichého "odemykacího" zvuku není stav skladby -- UI dál ukazuje
+      // načítání a jeho konec nesmí spustit `next()`.
+      state = state.copyWith(isPlaying: false, isBuffering: true);
+      return;
+    }
     state = state.copyWith(
       isPlaying: playerState.playing,
       isBuffering: _awaitingProvisioning ||
