@@ -13,9 +13,8 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <!-- `black-translucent`: pod hodinami/výřezem prosvítá tmavé pozadí
-       stránky místo bílého pruhu. Flutter běží v #app, odsazeném o
-       safe-area (viz styl níž a flutter_bootstrap.js), takže obsah pod
-       status bar nevjede. POZOR: iOS si styl pamatuje z okamžiku "Přidat na
+       stránky místo bílého pruhu a pozadí appky jde až pod hodiny; obsah
+       odsazuje appka sama podle safe-area (core/safe_area_insets.dart). POZOR: iOS si styl pamatuje z okamžiku "Přidat na
        plochu" -- po změně je potřeba ikonu smazat a přidat znovu. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Opentify">
@@ -35,14 +34,12 @@
       background: #120a1f;
       overflow: hidden;
     }
-    /* Tmavý tón za status barem/home indikátorem (mimo #app) -- ladí s
-       tmavým pozadím appky, ať pruh nahoře nesvítí. */
+    /* Flutter kreslí přes celou obrazovku (i pod hodiny a home indikátor),
+       ať pozadí appky jde až do krajů. Odsazení obsahu od výřezu řeší
+       appka sama (core/safe_area_insets.dart čte env(safe-area-inset-*)). */
     #app {
       position: fixed;
-      top: env(safe-area-inset-top, 0px);
-      right: env(safe-area-inset-right, 0px);
-      bottom: env(safe-area-inset-bottom, 0px);
-      left: env(safe-area-inset-left, 0px);
+      inset: 0;
     }
     #splash {
       position: fixed;
