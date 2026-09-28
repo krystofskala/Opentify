@@ -7,14 +7,17 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="Vlastní hudební knihovna a streaming.">
-  <meta name="theme-color" content="#1a0f2e">
+  <meta name="theme-color" content="#120a1f">
 
   <!-- iOS: po "Přidat na plochu" běží přes celou obrazovku jako appka -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <!-- `black`, ne `black-translucent`: s průsvitným by obsah vjel pod
-       status bar a Flutter web na iOS safe-area odsazení spolehlivě nehlásí. -->
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <!-- `black-translucent`: pod hodinami/výřezem prosvítá tmavé pozadí
+       stránky místo bílého pruhu. Flutter běží v #app, odsazeném o
+       safe-area (viz styl níž a flutter_bootstrap.js), takže obsah pod
+       status bar nevjede. POZOR: iOS si styl pamatuje z okamžiku "Přidat na
+       plochu" -- po změně je potřeba ikonu smazat a přidat znovu. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Opentify">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 
@@ -29,9 +32,17 @@
     html, body {
       margin: 0;
       height: 100%;
-      background: #1a0f2e;
-      background: linear-gradient(135deg, #2e1065 0%, #6b2170 55%, #3a1440 100%);
+      background: #120a1f;
       overflow: hidden;
+    }
+    /* Tmavý tón za status barem/home indikátorem (mimo #app) -- ladí s
+       tmavým pozadím appky, ať pruh nahoře nesvítí. */
+    #app {
+      position: fixed;
+      top: env(safe-area-inset-top, 0px);
+      right: env(safe-area-inset-right, 0px);
+      bottom: env(safe-area-inset-bottom, 0px);
+      left: env(safe-area-inset-left, 0px);
     }
     #splash {
       position: fixed;
@@ -59,6 +70,7 @@
   </style>
 </head>
 <body>
+  <div id="app"></div>
   <div id="splash"><img src="icons/Icon-192.png" alt=""></div>
   <script>
     window.addEventListener('flutter-first-frame', function () {
