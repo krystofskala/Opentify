@@ -17,7 +17,7 @@ from app.auth import get_current_user
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import RecordingOut
 from app.db import get_session
-from app.models import Playlist, PlaylistItem, PlaylistKind, Recording
+from app.models import GLOBAL_PLAYLIST_OWNER, Playlist, PlaylistItem, PlaylistKind, Recording
 from app.recommendations.schemas import PlaylistDetailOut, PlaylistOut
 
 playlists_router = APIRouter(prefix="/playlists", tags=["playlists"])
@@ -76,7 +76,18 @@ def _playlist_detail(session: Session, playlist: Playlist) -> PlaylistDetailOut:
         generated_at=playlist.generated_at,
         item_count=len(recordings),
         items=recordings,
+        description=playlist.description,
+        cover_urls=playlist.cover_urls or [],
     )
+
+
+def _readable_playlist_or_404(session: Session, playlist_id: str, user_id: str) -> Playlist:
+    """Čtení: vlastní playlisty + globální snapshoty z Domů (žebříčky,
+    žánry, výběry). Úpravy dál jen přes `_owned_playlist_or_404`."""
+    playlist = session.get(Playlist, playlist_id)
+    if playlist is None or playlist.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER):
+        raise HTTPException(status_code=404, detail="playlist nenalezen")
+    return playlist
 
 
 def _owned_playlist_or_404(session: Session, playlist_id: str, user_id: str) -> Playlist:
@@ -143,8 +154,28 @@ def get_playlist(
     current: tuple[str, str] = Depends(get_current_user),
 ):
     user_id, _device_id = current
-    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    playlist = _readable_playlist_or_404(session, playlist_id, user_id)
     return _playlist_detail(session, playlist).model_dump(by_alias=True)
+
+
+@playlists_router.post("/{playlist_id}/copy")
+def copy_playlist(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """"Přidat do knihovny" -- žebříček/mix z Domů jako vlastní playlist
+    (zmrazená kopie; původní snapshot se dál přegenerovává)."""
+    user_id, _device_id = current
+    source = _readable_playlist_or_404(session, playlist_id, user_id)
+    copy = Playlist(owner_user_id=user_id, title=source.title, kind=PlaylistKind.USER, cover_urls=source.cover_urls or [])
+    session.add(copy)
+    session.flush()
+    for position, item in enumerate(_playlist_items(session, source.id)):
+        session.add(PlaylistItem(playlist_id=copy.id, recording_id=item.recording_id, position=position))
+    session.commit()
+    session.refresh(copy)
+    return _playlist_detail(session, copy).model_dump(by_alias=True)
 
 
 @playlists_router.delete("/{playlist_id}")

@@ -14,6 +14,8 @@ services:
       # stejná hodnota jako MusicBrainz výš stačí, samostatná `.env` proměnná
       # navíc by byla jen duplicitní nastavení stejné věci.
       WIKIMEDIA_USER_AGENT: ${MUSICBRAINZ_USER_AGENT}
+      # fanart.tv (volitelné, zdarma) -- široké fotky interpretů do hlavičky.
+      FANART_API_KEY: ${FANART_API_KEY:-}
       DEEZER_API_BASE: https://api.deezer.com
       # Výchozí `http://listenbrainz:8080` čeká na vlastní self-hostnutou
       # instanci (viz zakomentovaná `listenbrainz:` služba níž) -- pro reálný

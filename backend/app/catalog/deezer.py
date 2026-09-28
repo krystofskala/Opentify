@@ -27,7 +27,13 @@ DEEZER_BASE_URL = os.environ.get("DEEZER_API_BASE", "https://api.deezer.com")
 SEARCH_TTL_SECONDS = 60 * 60
 LOOKUP_TTL_SECONDS = 24 * 60 * 60
 
-_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.15)
+# Deezer povoluje ~50 req / 5 s -> 0.1 s je přesně na hraně, bez rezervy
+# by se občas vrátila kvóta (HTTP 200 s `error`), proto 0.11.
+_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.11)
+
+
+class DeezerUnavailable(RuntimeError):
+    pass
 
 
 class DeezerClient:
@@ -83,6 +89,74 @@ class DeezerClient:
 
         data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
         return (data or {}).get("data") or []
+
+    async def _cached_data(self, cache_key: str, ttl: int, path: str, params: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """`data` pole z Deezer seznamové odpovědi; `None` = zdroj selhal
+        (odlišené od prázdného výsledku, ať volající může spadnout na zálohu)."""
+
+        async def fetch() -> dict[str, Any]:
+            result = await self._get(path, params)
+            if result is None:
+                # Výpadek/kvóta (Deezer vrací chybu jako HTTP 200 `{"error"}`)
+                # -- vyhodit, ať se NEuloží do cache jako "nic" na celé TTL.
+                raise DeezerUnavailable(path)
+            return result
+
+        try:
+            data = await cached_json(cache_key, ttl, fetch)
+        except (DeezerUnavailable, httpx.HTTPError):
+            return None
+        return data.get("data") or []
+
+    async def search_typed(self, kind: str, query: str, limit: int, offset: int = 0) -> list[dict[str, Any]] | None:
+        """`kind` = track|artist|album -- katalogové hledání (rychlé a s
+        velkorysým limitem, na rozdíl od MusicBrainz 1 req/s)."""
+        return await self._cached_data(
+            f"dz:search:{kind}:{query}:{limit}:{offset}",
+            SEARCH_TTL_SECONDS,
+            f"/search/{kind}",
+            {"q": query, "limit": limit, "index": offset},
+        )
+
+    async def find_track(self, artist: str, title: str) -> dict[str, Any] | None:
+        """Přesnější párování "interpret + název" (Apple žebříčky, budoucí
+        generované playlisty) přes Deezer advanced search syntaxi."""
+        query = f'artist:"{artist}" track:"{title}"'
+        tracks = await self._cached_data(f"dz:find_track:{query}", LOOKUP_TTL_SECONDS, "/search/track", {"q": query, "limit": 3})
+        if not tracks:
+            tracks = await self._cached_data(
+                f"dz:find_track_loose:{artist} {title}", LOOKUP_TTL_SECONDS, "/search/track", {"q": f"{artist} {title}", "limit": 3}
+            )
+        return tracks[0] if tracks else None
+
+    async def playlist_tracks(self, playlist_id: str, limit: int = 100) -> list[dict[str, Any]] | None:
+        return await self._cached_data(
+            f"dz:playlist_tracks:{playlist_id}:{limit}", 60 * 60, f"/playlist/{playlist_id}/tracks", {"limit": limit}
+        )
+
+    async def playlist(self, playlist_id: str) -> dict[str, Any] | None:
+        async def fetch() -> dict[str, Any]:
+            result = await self._get(f"/playlist/{playlist_id}", {"limit": 1})
+            if result is None:
+                raise DeezerUnavailable(playlist_id)
+            return result
+
+        try:
+            return await cached_json(f"dz:playlist:{playlist_id}", 60 * 60, fetch)
+        except (DeezerUnavailable, httpx.HTTPError):
+            return None
+
+    async def chart_tracks(self, genre_id: int, limit: int = 50) -> list[dict[str, Any]] | None:
+        return await self._cached_data(f"dz:chart:{genre_id}:tracks:{limit}", 60 * 60, f"/chart/{genre_id}/tracks", {"limit": limit})
+
+    async def chart_playlists(self, limit: int = 20) -> list[dict[str, Any]] | None:
+        return await self._cached_data(f"dz:chart:0:playlists:{limit}", 60 * 60, "/chart/0/playlists", {"limit": limit})
+
+    async def album_tracks(self, album_id: str) -> list[dict[str, Any]] | None:
+        return await self._cached_data(f"dz:album_tracks:{album_id}", LOOKUP_TTL_SECONDS, f"/album/{album_id}/tracks", {"limit": 200})
+
+    async def artist_albums(self, artist_id: str) -> list[dict[str, Any]] | None:
+        return await self._cached_data(f"dz:artist_albums:{artist_id}", LOOKUP_TTL_SECONDS, f"/artist/{artist_id}/albums", {"limit": 100})
 
     async def aclose(self) -> None:
         await self._client.aclose()

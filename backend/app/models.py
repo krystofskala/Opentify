@@ -44,6 +44,10 @@ class PlaylistKind(str, enum.Enum):
     USER = "USER"
     GENERATED_RECOMMENDATION = "GENERATED_RECOMMENDATION"
     RADIO = "RADIO"
+    # Globální (owner `GLOBAL_PLAYLIST_OWNER`) snapshoty pro Domů, viz app/home.
+    CHART = "CHART"
+    GENRE = "GENRE"
+    EDITORIAL = "EDITORIAL"
 
 
 class Artist(SQLModel, table=True):
@@ -72,6 +76,9 @@ class Release(SQLModel, table=True):
     title: str
     release_date: str | None = None  # ISO string; MB má často jen rok nebo rok-měsíc
     release_type: str = "album"  # album|ep|single|compilation
+    # Deezer album id -- dedup klíč pro vyhledávání/žebříčky z Deezeru, které
+    # MBID nemají (MBID se dohledá líně, viz app/catalog/deezer_ingest.py).
+    deezer_id: str | None = Field(default=None, index=True)
     # Jména MusicBrainz genre tagů (`inc=genres`, viz `CatalogService.
     # _ingest_release_group_json`/`_enrich_release_genres`) -- jen `name`
     # řetězce, ne celé `{id,name,count}` objekty, stejně jako `images`.
@@ -90,6 +97,7 @@ class Recording(SQLModel, table=True):
     duration_ms: int | None = None
     isrc: str | None = Field(default=None, index=True)
     track_number: int | None = None
+    deezer_id: str | None = Field(default=None, index=True)
     external_refs: dict = Field(default_factory=dict, sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -138,6 +146,12 @@ class Playlist(SQLModel, table=True):
     source: str | None = Field(default=None, index=True)  # např. "listenbrainz:daily-jams"
     generated_at: datetime | None = None
     is_pinned: bool = False
+    # Jen Domů (app/home): popisek karty, až 4 obaly pro mozaiku, sekce a do
+    # kdy snapshot platí. Uživatelské playlisty je nechávají prázdné.
+    description: str | None = None
+    cover_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    section: str | None = Field(default=None, index=True)
+    expires_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -147,3 +161,16 @@ class PlaylistItem(SQLModel, table=True):
     recording_id: str = Field(foreign_key="recording.id", index=True)
     position: int = 0
     added_at: datetime = Field(default_factory=utcnow)
+
+
+GLOBAL_PLAYLIST_OWNER = "__global__"
+
+
+class HomeSnapshot(SQLModel, table=True):
+    """Poslední úspěšný výsledek jednoho generátoru Domů (seznam id alb pro
+    "Nové vydání", čas posledního úspěšného běhu...) -- v DB, ne v Redisu, ať
+    přežije restart a neúspěšný běh nikdy nesmaže poslední dobrá data."""
+
+    key: str = Field(primary_key=True)
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    generated_at: datetime = Field(default_factory=utcnow)

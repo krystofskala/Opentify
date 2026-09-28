@@ -23,16 +23,20 @@ import re
 import unicodedata
 from typing import Any
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.catalog.artwork import fill_artist, fill_release
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient
+from app.catalog.deezer_ingest import ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
+from app.catalog.fanart import fill_artist_banner
+from app.recommendations.anti_ai_filter import AntiAIFilter
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError
 from app.catalog.schemas import ArtistBioOut, ArtistOut, DiscographyOut, ReleaseOut, RecordingOut
 from app.catalog.upsert import upsert_artist, upsert_recording, upsert_release
 from app.catalog.wikimedia import get_wikimedia_client
 from app.models import Artist, Recording, Release
+from app.utils import utcnow
 
 _TRACKLIST_OVERLAP_THRESHOLD = 0.4
 _TRACKLIST_CANDIDATE_LIMIT = 3
@@ -56,6 +60,13 @@ _MB_ENTITY_FOR_TYPE = {
     "release": "release-group",
     "recording": "recording",
 }
+
+_DEEZER_KIND_FOR_TYPE = {"artist": "artist", "release": "album", "recording": "track"}
+# Karaoke/"ve stylu"/tribute nahrávky zaplevelují hledání skladeb (živě:
+# "nirvana lake of fire" -> 2 karaoke verze v top 4). Pryč, pokud je uživatel
+# výslovně nehledá.
+_JUNK_TRACK_MARKERS = ("karaoke", "originally performed", "in the style of", "made famous by", "tribute to")
+_ANTI_AI = AntiAIFilter()
 
 _MB_PRIMARY_TYPE_TO_RELEASE_TYPE = {
     "album": "album",
@@ -168,6 +179,7 @@ class CatalogService:
             name=artist.name,
             sort_name=artist.sort_name,
             images=artist.images,
+            banner_url=(artist.external_refs or {}).get("bannerUrl"),
         )
 
     def _to_release_out(self, release: Release) -> ReleaseOut:
@@ -201,6 +213,48 @@ class CatalogService:
     # ------------------------------------------------------------------
 
     async def search(
+        self, query: str, entity_type: str | None, limit: int, offset: int
+    ) -> dict[str, Any]:
+        """Deezer (rychlý, velkorysý limit) -- MusicBrainz jen jako záloha,
+        když Deezer úplně selže. Dřív šlo všechno přes MusicBrainz (1 req/s):
+        klient při psaní posílá 3 typy dotazů na každé písmeno, fronta
+        rostla a hledání vracelo 503 / "nic se nenačítá" (živě)."""
+        types_to_query = [entity_type] if entity_type else list(_MB_ENTITY_FOR_TYPE)
+        fetched = await asyncio.gather(
+            *(self._dz.search_typed(_DEEZER_KIND_FOR_TYPE[t], query, limit, offset) for t in types_to_query)
+        )
+        if all(data is None for data in fetched):
+            return await self._search_musicbrainz(query, entity_type, limit, offset)
+
+        # Upsert až po všech `await`ech a bez dalších -- viz deezer_ingest
+        # (souběžná hledání se tu nemůžou proložit a zdvojit řádky).
+        results: list[dict[str, Any]] = []
+        for t, data in zip(types_to_query, fetched):
+            for item in data or []:
+                if t == "artist":
+                    artist = ingest_artist(self._session, item)
+                    if artist is not None:
+                        results.append({"entityType": "artist", **self._to_artist_out(artist).model_dump(by_alias=True)})
+                elif t == "release":
+                    artist = ingest_artist(self._session, item.get("artist") or {})
+                    release = ingest_album(self._session, item, artist) if artist else None
+                    if release is not None:
+                        results.append({"entityType": "release", **self._to_release_out(release).model_dump(by_alias=True)})
+                else:
+                    if _ANTI_AI.is_blocked_text((item.get("artist") or {}).get("name"), item.get("title")):
+                        continue
+                    title_lower = (item.get("title") or "").lower()
+                    if any(m in title_lower and m not in query.lower() for m in _JUNK_TRACK_MARKERS):
+                        continue
+                    recording = ingest_track_with_context(self._session, item)
+                    if recording is not None:
+                        results.append(
+                            {"entityType": "recording", **self._to_recording_out(recording).model_dump(by_alias=True)}
+                        )
+        self._session.commit()
+        return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
+
+    async def _search_musicbrainz(
         self, query: str, entity_type: str | None, limit: int, offset: int
     ) -> dict[str, Any]:
         types_to_query = [entity_type] if entity_type else list(_MB_ENTITY_FOR_TYPE)
@@ -277,16 +331,61 @@ class CatalogService:
         artist = self._session.get(Artist, artist_id)
         if artist is None:
             return None
+        await self._resolve_artist_mbid_lazily(artist)
         await self._enrich_artist_images(artist)
         await self._enrich_artist_country(artist)
+        self._session.commit()
+        if await fill_artist_banner(artist.id):
+            self._session.refresh(artist)
         return self._to_artist_out(artist)
+
+    _MB_LOOKUP_KEY = "mbLookupAt"
+
+    async def _resolve_artist_mbid_lazily(self, artist: Artist) -> None:
+        """Interpret založený z Deezer hledání nemá MBID -- ten je potřeba
+        pro životopis, podobné interprety a fanart.tv banner. Dohledá se
+        jednou, až při otevření detailu (1 MusicBrainz dotaz), ne při
+        hledání. Jen jistá shoda (přesné jméno, skóre >= 90) a jen když
+        stejné MBID nemá jiný řádek (ten by byl duplicita k sloučení)."""
+        if artist.mbid is not None or (artist.external_refs or {}).get(self._MB_LOOKUP_KEY):
+            return
+        artist.external_refs = {**(artist.external_refs or {}), self._MB_LOOKUP_KEY: utcnow().isoformat()}
+        self._session.add(artist)
+        try:
+            data = await self._mb.search("artist", f'artist:"{artist.name}"', 5, 0)
+        except MusicBrainzError:
+            self._session.commit()
+            return
+        wanted = norm(artist.name)
+        for candidate in data.get("artists", []):
+            if norm(candidate.get("name")) != wanted or int(candidate.get("score") or 0) < 90:
+                continue
+            mbid = candidate.get("id")
+            if mbid and self._session.exec(select(Artist).where(Artist.mbid == mbid)).first() is None:
+                artist.mbid = mbid
+                artist.sort_name = candidate.get("sort-name") or artist.sort_name
+            break
+        self._session.commit()
+
+    async def _deezer_discography(self, artist: Artist) -> list[Release]:
+        albums = await self._dz.artist_albums(artist.deezer_id) if artist.deezer_id else None
+        releases = [r for r in (ingest_album(self._session, a, artist) for a in albums or []) if r is not None]
+        self._session.commit()
+        return releases
 
     async def get_discography(
         self, artist_id: str, release_type: str | None
     ) -> DiscographyOut | None:
         artist = self._session.get(Artist, artist_id)
-        if artist is None or artist.mbid is None:
+        if artist is None:
             return None
+        if artist.mbid is None:
+            # Interpret jen z Deezeru (hledání/žebříček) -- diskografie odtud.
+            releases = await self._deezer_discography(artist)
+            if release_type:
+                releases = [r for r in releases if r.release_type == release_type]
+            releases.sort(key=lambda r: r.release_date or "9999")
+            return DiscographyOut(artist=self._to_artist_out(artist), releases=[self._to_release_out(r) for r in releases])
 
         try:
             data = await self._mb.browse_release_groups(
@@ -393,16 +492,16 @@ class CatalogService:
         if release is None:
             return None
         if release.mbid is None:
-            return []
+            return await self._deezer_release_tracks(release)
 
         try:
             data = await self._mb.get_release_group_tracks(release.mbid)
         except MusicBrainzError:
-            return []
+            return await self._deezer_release_tracks(release)
 
         mb_releases = data.get("releases") or []
         if not mb_releases:
-            return []
+            return await self._deezer_release_tracks(release)
         chosen = mb_releases[0]  # jedna kanonická edice stačí pro osobní katalog
 
         recordings: list[Recording] = []
@@ -426,6 +525,38 @@ class CatalogService:
                 recordings.append(recording)
 
         await self._enrich_recording_previews(recordings)
+        recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
+        return [self._to_recording_out(r) for r in recordings]
+
+    async def _deezer_release_tracks(self, release: Release) -> list[RecordingOut]:
+        """Tracklist alba z Deezeru -- pro alba bez MBID (z Deezer hledání/
+        žebříčků) nebo když MusicBrainz selže/nic nemá."""
+        if not release.deezer_id:
+            # MusicBrainz tracklist nemá (čerstvé album, prázdná edice) a
+            # Deezer id jsme ještě neznali -- dohledat album jménem.
+            artist = self._session.get(Artist, release.artist_id)
+            candidates = await self._dz.search_album(artist.name, release.title) if artist else []
+            wanted = norm(release.title)
+            match = next(
+                (a for a in candidates or [] if norm(a.get("title")) == wanted and norm((a.get("artist") or {}).get("name")) == norm(artist.name)),
+                None,
+            )
+            if match is None:
+                return []
+            release.deezer_id = str(match["id"])
+            self._session.add(release)
+            self._session.commit()
+        tracks = await self._dz.album_tracks(release.deezer_id)
+        if not tracks:
+            return []
+        album_artist = self._session.get(Artist, release.artist_id)
+        recordings: list[Recording] = []
+        for position, item in enumerate(tracks, start=1):
+            track_artist = ingest_artist(self._session, item.get("artist") or {}) or album_artist
+            recording = ingest_track(self._session, {"track_position": position, **item}, artist=track_artist, release=release)
+            if recording is not None:
+                recordings.append(recording)
+        self._session.commit()
         recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
         return [self._to_recording_out(r) for r in recordings]
 

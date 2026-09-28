@@ -29,8 +29,15 @@ def _ensure_columns() -> None:
     """
     migrations: dict[str, list[tuple[str, str]]] = {
         "artist": [("country", "VARCHAR")],
-        "release": [("genres", "JSON")],
+        "release": [("genres", "JSON"), ("deezer_id", "VARCHAR")],
         "mediaasset": [("loudness_gain_db", "FLOAT")],
+        "recording": [("deezer_id", "VARCHAR")],
+        "playlist": [
+            ("description", "VARCHAR"),
+            ("cover_urls", "JSON"),
+            ("section", "VARCHAR"),
+            ("expires_at", "DATETIME"),
+        ],
     }
     with engine.connect() as conn:
         for table, columns in migrations.items():
@@ -38,6 +45,12 @@ def _ensure_columns() -> None:
             for name, sql_type in columns:
                 if name not in existing:
                     conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+        for index_sql in (
+            "CREATE INDEX IF NOT EXISTS ix_release_deezer_id ON release (deezer_id)",
+            "CREATE INDEX IF NOT EXISTS ix_recording_deezer_id ON recording (deezer_id)",
+            "CREATE INDEX IF NOT EXISTS ix_playlist_section ON playlist (section)",
+        ):
+            conn.exec_driver_sql(index_sql)
         conn.commit()
 
 

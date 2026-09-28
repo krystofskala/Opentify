@@ -31,6 +31,9 @@ class ArtistOut(CamelModel):
     name: str
     sort_name: str | None = None
     images: list[str] = []
+    # Široká fotka interpreta pro hlavičku (fanart.tv `artistbackground`),
+    # `images` zůstává čtvercová fotka. `None`, dokud není/nejde doplnit.
+    banner_url: str | None = None
 
 
 class ReleaseOut(CamelModel):

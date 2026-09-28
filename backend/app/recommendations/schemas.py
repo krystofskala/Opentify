@@ -22,6 +22,8 @@ class PlaylistOut(CamelModel):
 
 class PlaylistDetailOut(PlaylistOut):
     items: list[RecordingOut]
+    description: str | None = None
+    cover_urls: list[str] = []
 
 
 class YearInReviewOut(CamelModel):

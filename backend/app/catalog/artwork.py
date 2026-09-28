@@ -30,6 +30,7 @@ import httpx
 from sqlmodel import Session, select
 
 from app.catalog.deezer import get_deezer_client
+from app.catalog.fanart import fill_artist_banner, pending_banner_artist_ids
 from app.catalog.embedded_art import extract_release_art
 from app.catalog.musicbrainz import get_musicbrainz_client
 from app.catalog.wikimedia import WIKIMEDIA_USER_AGENT
@@ -217,7 +218,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
     return picture is not None
 
 
-def _pending(limit: int) -> tuple[list[str], list[str]]:
+def _pending(limit: int) -> tuple[list[str], list[str], list[str]]:
     """Nejdřív to, co je v knihovně (má přehratelnou skladbu) -- to uživatel
     vidí na Domů/Knihovně, zbytek katalogu (výsledky hledání, diskografie)
     až potom."""
@@ -246,9 +247,10 @@ def _pending(limit: int) -> tuple[list[str], list[str]]:
             for a in session.exec(select(Artist)).all()
             if (not a.images or _is_deezer_placeholder(a.images[0])) and not _recently_checked(a.external_refs or {})
         ]
+        banner_ids = pending_banner_artist_ids(session, library_artist_ids, limit)
     releases.sort(key=lambda r: r.id not in library_release_ids)
     artists.sort(key=lambda a: a.id not in library_artist_ids)
-    return [r.id for r in releases[:limit]], [a.id for a in artists[:limit]]
+    return [r.id for r in releases[:limit]], [a.id for a in artists[:limit]], banner_ids
 
 
 artwork_progress: dict[str, int | bool] = {"running": False, "filled": 0, "checked": 0, "embedded": 0}
@@ -305,19 +307,23 @@ async def artwork_backfill_loop(idle_interval_s: float = 300.0, pause_s: float =
         logger.exception("artwork: průchod vloženými obaly selhal")
     while True:
         try:
-            release_ids, artist_ids = await asyncio.to_thread(_pending, 40)
-            if not release_ids and not artist_ids:
+            release_ids, artist_ids, banner_ids = await asyncio.to_thread(_pending, 40)
+            if not release_ids and not artist_ids and not banner_ids:
                 artwork_progress["running"] = False
                 await asyncio.sleep(idle_interval_s)
                 continue
             artwork_progress["running"] = True
-            for i in range(max(len(release_ids), len(artist_ids))):
+            for i in range(max(len(release_ids), len(artist_ids), len(banner_ids))):
                 if i < len(release_ids):
                     artwork_progress["filled"] = int(artwork_progress["filled"]) + int(await fill_release(release_ids[i]))
                     artwork_progress["checked"] = int(artwork_progress["checked"]) + 1
                 if i < len(artist_ids):
                     artwork_progress["filled"] = int(artwork_progress["filled"]) + int(await fill_artist(artist_ids[i]))
                     artwork_progress["checked"] = int(artwork_progress["checked"]) + 1
+                if i < len(banner_ids):
+                    artwork_progress["banners"] = int(artwork_progress.get("banners", 0)) + int(
+                        await fill_artist_banner(banner_ids[i])
+                    )
                 await asyncio.sleep(pause_s)
         except asyncio.CancelledError:
             raise
