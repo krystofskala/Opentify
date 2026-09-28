@@ -133,7 +133,7 @@ async def _wikidata_image(artist_mbid: str) -> str | None:
     return str(img.url) if img.status_code == 200 else None
 
 
-async def resolve_artist_image(name: str, artist_mbid: str | None) -> str | None:
+async def resolve_artist_image(name: str, artist_mbid: str | None, *, allow_musicbrainz: bool = True) -> str | None:
     wanted = primary_artist_name(name)
     try:
         artists = await get_deezer_client().search_artist(wanted)
@@ -143,7 +143,10 @@ async def resolve_artist_image(name: str, artist_mbid: str | None) -> str | None
         picture = candidate.get("picture_xl") or candidate.get("picture_big")
         if _names_match(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture):
             return picture
-    if artist_mbid:
+    # Wikidata fallback potřebuje MusicBrainz (1 req/s sdílený s hledáním) --
+    # jen na vyžádání (otevřený detail), nikdy z backfill smyčky, jinak ta
+    # smyčka zabere MB frontu a uživatelské požadavky čekají.
+    if artist_mbid and allow_musicbrainz:
         return await _wikidata_image(artist_mbid)
     return None
 
@@ -198,7 +201,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
             return False
         name, mbid = artist.name, artist.mbid
 
-    picture = await resolve_artist_image(name, mbid)
+    picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force)
 
     with Session(engine) as session:
         artist = session.get(Artist, artist_id)

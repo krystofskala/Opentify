@@ -7,7 +7,10 @@ from sqlmodel import Session, SQLModel, create_engine
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:////data/db/vault.db")
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+# Výchozí pool 5+10 nestačil: async katalogové endpointy drží session po dobu
+# čekání na MusicBrainz (1 req/s), takže pár souběžných hledání ho vyčerpalo
+# a zasekla se celá appka (živě). Kratší timeout = rychlé selhání místo 30 s.
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_size=20, max_overflow=20, pool_timeout=10)
 
 
 def init_db() -> None:

@@ -10,16 +10,30 @@ import asyncio
 import time
 
 
+class RateLimitBusy(Exception):
+    """Ve frontě už čeká příliš mnoho volání -- volající má selhat hned,
+    místo aby desítky vteřin držel DB spojení (živě: psaní do hledání
+    vyčerpalo pool 5+10 spojení a celá appka přestala načítat)."""
+
+
 class AsyncRateLimiter:
-    def __init__(self, min_interval_seconds: float) -> None:
+    def __init__(self, min_interval_seconds: float, max_waiters: int | None = None) -> None:
         self._min_interval = min_interval_seconds
         self._lock = asyncio.Lock()
         self._last_call = 0.0
+        self._max_waiters = max_waiters
+        self._waiters = 0
 
     async def wait(self) -> None:
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_call
-            if elapsed < self._min_interval:
-                await asyncio.sleep(self._min_interval - elapsed)
-            self._last_call = time.monotonic()
+        if self._max_waiters is not None and self._waiters >= self._max_waiters:
+            raise RateLimitBusy()
+        self._waiters += 1
+        try:
+            async with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last_call
+                if elapsed < self._min_interval:
+                    await asyncio.sleep(self._min_interval - elapsed)
+                self._last_call = time.monotonic()
+        finally:
+            self._waiters -= 1

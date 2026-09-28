@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 from app.catalog.cache import cached_json
-from app.catalog.rate_limit import AsyncRateLimiter
+from app.catalog.rate_limit import AsyncRateLimiter, RateLimitBusy
 
 MB_BASE_URL = os.environ.get("MUSICBRAINZ_BASE_URL", "https://musicbrainz.org/ws/2")
 MB_USER_AGENT = os.environ.get(
@@ -30,7 +30,9 @@ SEARCH_TTL_SECONDS = 60 * 60          # 1h — vyhledávání se může časem d
 LOOKUP_TTL_SECONDS = 24 * 60 * 60     # 24h — detail/diskografie jsou téměř statické
 
 # Anonymní přístup: max 1 request/s, jinak MB dočasně banuje IP (503).
-_rate_limiter = AsyncRateLimiter(min_interval_seconds=1.0)
+# `max_waiters`: víc čekajících = odpověď za >6 s, to už uživatel nepočká a
+# jen by držel DB spojení -- selže hned (-> 503 "zkus znovu"), viz RateLimitBusy.
+_rate_limiter = AsyncRateLimiter(min_interval_seconds=1.0, max_waiters=6)
 
 
 class MusicBrainzError(RuntimeError):
@@ -57,7 +59,10 @@ class MusicBrainzClient:
         for attempt in range(3):
             if attempt > 0:
                 await asyncio.sleep(1.0 * attempt)
-            await _rate_limiter.wait()
+            try:
+                await _rate_limiter.wait()
+            except RateLimitBusy as exc:
+                raise MusicBrainzError("MusicBrainz fronta je plná -- zkus to za chvíli znovu") from exc
             try:
                 resp = await self._client.get(path, params={**params, "fmt": "json"})
             except httpx.TransportError as exc:
