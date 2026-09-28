@@ -128,17 +128,20 @@ class MusicBrainzClient:
         release dané release-group a jeho media/tracks použijeme jako
         reprezentativní tracklist — pro osobní katalog stačí jedna kanonická
         verze, ne řešit rozdíly mezi edicemi."""
-        cache_key = f"mb:release-group-tracks:{rgid}"
+        cache_key = f"mb:release-group-tracks:v2:{rgid}"
+
+        def has_tracks(data: dict[str, Any]) -> bool:
+            return any(m.get("tracks") for r in data.get("releases") or [] for m in r.get("media") or [])
 
         async def fetch() -> dict[str, Any]:
-            return await self._get(
-                "/release",
-                {
-                    "release-group": rgid,
-                    "inc": "recordings+artist-credits+isrcs",
-                    "status": "official",
-                },
-            )
+            params = {"release-group": rgid, "inc": "recordings+artist-credits+isrcs"}
+            official = await self._get("/release", {**params, "status": "official"})
+            if has_tracks(official):
+                return official
+            # Žádná "official" edice (bootlegy, promo, edice bez vyplněného
+            # statusu) -- dřív tracklist zůstal prázdný, i když MB skladby má
+            # (živě: "The Beatles Unpublished", 19 skladeb, status nevyplněn).
+            return await self._get("/release", params)
 
         return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
 

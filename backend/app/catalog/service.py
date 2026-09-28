@@ -515,10 +515,14 @@ class CatalogService:
         except MusicBrainzError:
             return await self._deezer_release_tracks(release)
 
-        mb_releases = data.get("releases") or []
+        # Jedna kanonická edice stačí pro osobní katalog -- první, která
+        # skladby opravdu má (některé edice v MB mají prázdná média).
+        mb_releases = [
+            r for r in data.get("releases") or [] if any(m.get("tracks") for m in r.get("media") or [])
+        ]
         if not mb_releases:
             return await self._deezer_release_tracks(release)
-        chosen = mb_releases[0]  # jedna kanonická edice stačí pro osobní katalog
+        chosen = mb_releases[0]
 
         recordings: list[Recording] = []
         for medium in chosen.get("media", []):
