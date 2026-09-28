@@ -65,6 +65,50 @@ Color? pickAccent(PaletteGenerator palette) {
   return raw == null ? null : normalizeAccent(raw);
 }
 
+/// Podpůrné tóny pro gradient pozadí -- z obalu, ale jen blízké hlavní
+/// barvě (±[supportHueRange]°), ať se zachová harmonický "jedna barva s
+/// nádechy" efekt; kontrastní barvy obalu (modrý obal s oranžovým
+/// nápisem) se ignorují a pozadí si pro ně dopočítá vlastní posun odstínu.
+/// Černobílé obaly podpůrné tóny nemají (neutrální paleta).
+const supportHueRange = 40.0;
+
+Future<List<Color>> extractSupportTones(String imageUrl) {
+  return _supportFutures.putIfAbsent(imageUrl, () async {
+    try {
+      final palette = await PaletteGenerator.fromImageProvider(
+        CachedNetworkImageProvider(imageUrl),
+        size: const Size(120, 120),
+        maximumColorCount: 16,
+      );
+      final main = pickAccent(palette);
+      if (main == null || isAchromatic(main)) return const <Color>[];
+      final mainHue = HSLColor.fromColor(main).hue;
+      final total = palette.paletteColors.fold<int>(0, (sum, c) => sum + c.population);
+      final tones = <Color>[];
+      for (final swatch in [...palette.paletteColors]..sort((a, b) => b.population.compareTo(a.population))) {
+        final hsl = HSLColor.fromColor(swatch.color);
+        if (hsl.saturation < achromaticSaturation) continue;
+        if (total > 0 && swatch.population < total * 0.02) continue; // drobné detaily ne
+        final diff = ((hsl.hue - mainHue + 540) % 360) - 180;
+        if (diff.abs() < 6 || diff.abs() > supportHueRange) continue; // stejná nebo moc vzdálená
+        if (tones.any((t) => (HSLColor.fromColor(t).hue - hsl.hue).abs() < 8)) continue;
+        tones.add(normalizeAccent(swatch.color));
+        if (tones.length == 2) break;
+      }
+      return tones;
+    } catch (_) {
+      _supportFutures.remove(imageUrl);
+      return const <Color>[];
+    }
+  });
+}
+
+final Map<String, Future<List<Color>>> _supportFutures = {};
+
+final supportTonesProvider = FutureProvider.autoDispose.family<List<Color>, String>((ref, imageUrl) {
+  return extractSupportTones(imageUrl);
+});
+
 /// Pod touhle sytostí je barva prakticky šedá/černobílá -- nemá odstín.
 const achromaticSaturation = 0.12;
 
