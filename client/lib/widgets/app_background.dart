@@ -74,7 +74,6 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   double _boostTarget = 0;
   double _bloom = 0;
   double _lastPaintAt = 0;
-  double _lastActivityAt = 0;
   double _lastScrollAt = 0;
   double _pixelRatio = 1;
   bool _reducedMotion = false;
@@ -142,7 +141,6 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   }
 
   void _wake() {
-    _lastActivityAt = _now;
     if (widget.hidden) {
       if (_ticker.isActive) _ticker.stop();
       return;
@@ -176,7 +174,6 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
 
     // Animuje se nepřetržitě (30 fps strop výš); zastaví se jen při
     // systémovém "omezit pohyb" nebo když je pozadí skryté.
-    _lastActivityAt = now;
     if (_reducedMotion && !_tweening(now)) _ticker.stop();
   }
 
