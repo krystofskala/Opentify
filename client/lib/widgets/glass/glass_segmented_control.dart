@@ -264,9 +264,9 @@ Alignment slideAlignment(int index, int count) =>
 /// Vybraná kapsle v segmentech/tab baru -- "čočka" z tónovaného skla po
 /// vzoru iOS 26: převážně průhledná (pod ní dál prosvítá stopa), jemně
 /// tónovaná barvou ze seedu, s ostrou světelnou hranou (nahoře jasná,
-/// dole téměř neviditelná), tenkou tmavší linkou u spodní hrany a
-/// měkkým dvojitým stínem, který ji "zvedne" nad stopu. Žádný plastový
-/// lesklý pruh přes polovinu výšky -- to působilo levně.
+/// uprostřed slábne, dole slabý odražený lesk). Žádný vržený stín ani
+/// tmavá linka (působilo to falešně) a žádný plastový lesklý pruh přes
+/// polovinu výšky (působilo levně).
 class SelectedCapsule extends StatelessWidget {
   const SelectedCapsule({super.key, this.tint});
 
@@ -283,14 +283,9 @@ class SelectedCapsule extends StatelessWidget {
     return AnimatedContainer(
       duration: Motion.state.duration,
       curve: Motion.state,
-      decoration: ShapeDecoration(
-        shape: shape,
-        color: fill,
-        shadows: [
-          BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.10), blurRadius: 14, offset: const Offset(0, 4)),
-          BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.12 : 0.06), blurRadius: 2, offset: const Offset(0, 1)),
-        ],
-      ),
+      // Bez vrženého stínu: tmavý "halo" pod kapslí působil na skle
+      // falešně (živě nahlášeno) -- iOS vybranou kapsli stínem nezvedá.
+      decoration: ShapeDecoration(shape: shape, color: fill),
       child: CustomPaint(
         foregroundPainter: _LensRimPainter(shape: shape, isDark: isDark),
         child: const SizedBox.expand(),
@@ -320,9 +315,9 @@ class _LensRimPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.white.withValues(alpha: isDark ? 0.55 : 0.9),
-            Colors.white.withValues(alpha: isDark ? 0.10 : 0.35),
-            Colors.black.withValues(alpha: isDark ? 0.18 : 0.06),
+            Colors.white.withValues(alpha: isDark ? 0.40 : 0.9),
+            Colors.white.withValues(alpha: isDark ? 0.06 : 0.35),
+            Colors.white.withValues(alpha: isDark ? 0.14 : 0.5),
           ],
           stops: const [0, 0.55, 1],
         ).createShader(rect),

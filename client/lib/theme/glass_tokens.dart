@@ -51,7 +51,8 @@ import 'package:flutter/physics.dart';
 ///   "čočka" `SelectedCapsule` po vzoru iOS 26 -- převážně průhledná,
 ///   v segmentech jemně tónovaná `primary` (tab bar neutrální), ostrá
 ///   gradientní světelná hrana (nahoře jasná, dole slábne), jemný odlesk
-///   jen v horních 40 %, měkký dvojitý stín; text/ikona `onSurface` w700.
+///   jen v horních 40 %, BEZ vrženého stínu a tmavé hrany (působilo
+///   falešně); text/ikona `onSurface` w700.
 ///   NIKDY plná barevná pilulka s lesklým pruhem přes půl výšky -- působilo
 ///   to levně (zpětná vazba uživatele).
 /// - **Barvy textu na skle**: primární `onSurface`, sekundární
