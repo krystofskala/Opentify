@@ -120,6 +120,10 @@ class MediaAsset(SQLModel, table=True):
     # Hlasitostní korekce v dB k cíli -14 LUFS (viz app/loudness.py) -- `None`
     # = ještě neanalyzováno, klient pak hraje bez korekce.
     loudness_gain_db: float | None = None
+    # Obrys hlasitosti pro vlnovku (app/loudness.py): base64 z
+    # `WAVEFORM_BUCKETS` bajtů 0..255; `None` = neměřeno, "" = nejde změřit.
+    waveform: str | None = None
+    waveform_duration_ms: int | None = None
     # "Odebrat z knihovny" u skladby z uživatelovy vlastní složky (ta je
     # připojená jen pro čtení a soubory nemažeme) -- skladba zůstává
     # přehratelná, jen se neukazuje v knihovně.

@@ -4,19 +4,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import time
 from pathlib import Path
 from typing import AsyncIterator, BinaryIO
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.auth import get_current_user
 from app.db import engine, get_session
-from app.loudness import gain_for_client
+from app.loudness import WAVEFORM_BUCKETS, decode_waveform, gain_for_client
 from app.models import MediaAsset, MediaAssetStatus, ProvisioningJob
 from app.provisioning_service import enqueue, escalate, get_or_create_job, stream_url_for
 
@@ -86,6 +87,7 @@ async def provision_track(
             "streamUrl": stream_url_for(recording_id),
             "job": None,
             "loudnessGainDb": gain_for_client(asset.loudness_gain_db),
+            "waveform": decode_waveform(asset.waveform),
         }
 
     if created:
@@ -119,6 +121,36 @@ def track_loudness(recording_id: str, session: Session = Depends(get_session)):
         "recordingId": recording_id,
         "loudnessGainDb": gain_for_client(asset.loudness_gain_db) if asset else None,
     }
+
+
+@tracks_router.get("/{recording_id}/waveform")
+def track_waveform(
+    recording_id: str,
+    if_none_match: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+):
+    """Obrys hlasitosti skladby pro vlnovku v přehrávači: `buckets` =
+    `bucketCount` hodnot 0..255 (vnímaná hlasitost stejně dlouhých úseků od
+    začátku do konce skladby), `durationMs` = délka změřeného souboru. 404,
+    dokud se neměřilo (počítá se hned po obstarání a na pozadí) nebo když
+    soubor změřit nejde -- klient pak kreslí obyčejnou vlnovku."""
+    asset = session.get(MediaAsset, recording_id)
+    buckets = decode_waveform(asset.waveform) if asset else None
+    if not buckets:
+        raise HTTPException(status_code=404, detail="obrys hlasitosti zatím není spočítaný")
+    etag = '"' + hashlib.sha1(asset.waveform.encode()).hexdigest()[:16] + '"'
+    headers = {"ETag": etag, "Cache-Control": "public, max-age=86400"}
+    if if_none_match == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(
+        {
+            "recordingId": recording_id,
+            "bucketCount": WAVEFORM_BUCKETS,
+            "buckets": buckets,
+            "durationMs": asset.waveform_duration_ms,
+        },
+        headers=headers,
+    )
 
 
 @jobs_router.get("/{job_id}")

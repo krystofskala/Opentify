@@ -429,6 +429,8 @@ def _remove_from_library(session: Session, recording_id: str, dry_run: bool = Fa
     asset.filesize_bytes = None
     asset.checksum_sha256 = None
     asset.loudness_gain_db = None
+    asset.waveform = None
+    asset.waveform_duration_ms = None
     asset.hidden_from_library = None
     session.add(asset)
     session.commit()

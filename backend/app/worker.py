@@ -103,7 +103,7 @@ def _schedule_loudness(recording_id: str) -> None:
     async def run() -> None:
         try:
             gain = await asyncio.to_thread(analyze_and_store, recording_id)
-            logger.info("loudness %s: %s dB", recording_id, gain)
+            logger.info("analýza %s: korekce %s dB + obrys hlasitosti", recording_id, gain)
         except Exception:  # noqa: BLE001 - normalizace je jen bonus, nikdy nesmí shodit worker
             logger.exception("loudness analýza %s selhala", recording_id)
 
@@ -212,6 +212,8 @@ def _finish_success(
         asset.format = audio_format
         asset.bitrate_kbps = bitrate_kbps
         asset.loudness_gain_db = None  # nový soubor -> stará korekce už neplatí
+        asset.waveform = None  # ...stejně tak obrys hlasitosti
+        asset.waveform_duration_ms = None
         asset.last_error = None
         asset.updated_at = utcnow()
 
@@ -280,6 +282,8 @@ def _apply_upgrade(recording_id: str, new_path: str, replaces: str, source: str,
         asset.format = audio_format
         asset.bitrate_kbps = bitrate
         asset.loudness_gain_db = None
+        asset.waveform = None
+        asset.waveform_duration_ms = None
         asset.updated_at = utcnow()
         session.add(asset)
         session.commit()

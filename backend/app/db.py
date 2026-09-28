@@ -30,7 +30,12 @@ def _ensure_columns() -> None:
     migrations: dict[str, list[tuple[str, str]]] = {
         "artist": [("country", "VARCHAR")],
         "release": [("genres", "JSON"), ("deezer_id", "VARCHAR")],
-        "mediaasset": [("loudness_gain_db", "FLOAT"), ("hidden_from_library", "BOOLEAN")],
+        "mediaasset": [
+            ("loudness_gain_db", "FLOAT"),
+            ("hidden_from_library", "BOOLEAN"),
+            ("waveform", "VARCHAR"),
+            ("waveform_duration_ms", "INTEGER"),
+        ],
         "recording": [("deezer_id", "VARCHAR")],
         "playlist": [
             ("description", "VARCHAR"),
