@@ -13,6 +13,7 @@ import '../data/lyrics_repository.dart';
 import '../data/playlists_repository.dart';
 import '../data/provisioning_repository.dart';
 import '../data/recommendations_repository.dart';
+import 'audio_player_controller.dart';
 
 /// Sdílený `ApiClient` -- jedna instance pro celou appku (connection reuse),
 /// zavřená při dispose containeru (hot-restart v devu, ne v produkci).
@@ -45,6 +46,13 @@ final homeRepositoryProvider = Provider<HomeRepository>((ref) {
 /// Celá obrazovka Domů jedním voláním (`GET /home`, snapshoty v DB).
 final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
   return ref.watch(homeRepositoryProvider).home();
+});
+
+/// "Pokračovat v poslechu" -- načte se znovu při každé změně skladby (poslech
+/// předchozí je tou dobou uložený).
+final recentContextsProvider = FutureProvider.autoDispose<List<RecentContext>>((ref) {
+  ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying?.recordingId));
+  return ref.watch(homeRepositoryProvider).recent();
 });
 
 /// Oblíbené skladby -- sdílené Knihovnou (karta + detail); dřív žily v Profilu.

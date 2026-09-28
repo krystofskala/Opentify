@@ -6,13 +6,13 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../data/home_repository.dart';
 import '../../models/recording_model.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
-import '../../state/audio_player_controller.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../theme/glass_tokens.dart';
+import '../../theme/shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/playlist_card.dart';
-import '../../widgets/recently_played_pill.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
@@ -34,7 +34,7 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final home = ref.watch(homeProvider);
-    final recentlyPlayed = ref.watch(audioPlayerControllerProvider.select((s) => s.recentlyPlayed));
+    final recent = ref.watch(recentContextsProvider).valueOrNull ?? const <RecentContext>[];
 
     return Scaffold(
       appBar: SectionAppBar(_greeting()),
@@ -54,12 +54,9 @@ class HomeScreen extends ConsumerWidget {
                   icon: Symbols.home_rounded,
                   message: 'Domů se zatím připravuje -- žebříčky a mixy se generují na pozadí, zkus to za pár minut.',
                 ),
-              for (final section in sections) ...[
-                _HomeSectionView(section: section),
-                // Naposledy přehrané hned pod rychlým výběrem.
-                if (section.type == HomeSectionType.quickPicks && recentlyPlayed.length >= 3)
-                  _RecentlyPlayed(recentlyPlayed: recentlyPlayed),
-              ],
+              // Úplně nahoře: na co navázat (poslední poslouchaná alba).
+              if (recent.isNotEmpty) _ContinueListening(items: recent),
+              for (final section in sections) _HomeSectionView(section: section),
             ],
           ),
           loading: () => const _HomeSkeleton(),
@@ -78,29 +75,98 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _RecentlyPlayed extends StatelessWidget {
-  const _RecentlyPlayed({required this.recentlyPlayed});
-  final List<NowPlayingInfo> recentlyPlayed;
+/// "Pokračovat v poslechu" -- mřížka kompaktních dlaždic (obal + název +
+/// interpret) jako Spotify nahoře na Domů. Ze serveru (`/home/recent`),
+/// takže přežije obnovení stránky i jiné zařízení.
+class _ContinueListening extends StatelessWidget {
+  const _ContinueListening({required this.items});
+  final List<RecentContext> items;
 
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SectionHeader('Naposledy přehráno'),
-          SizedBox(
-            height: 66,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-              itemCount: recentlyPlayed.length,
-              itemBuilder: (context, index) => Padding(
-                padding: const EdgeInsets.only(right: AppSpacing.sm),
-                child: RecentlyPlayedPill(info: recentlyPlayed[index], queue: recentlyPlayed),
-              ),
-            ),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Pokračovat v poslechu'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const gap = AppSpacing.xs;
+              final columns = constraints.maxWidth >= 720 ? 4 : 2;
+              final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+              final shape = AppShapes.of(Expressive.cornerMedium);
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (final item in items.take(columns == 4 ? 8 : 6))
+                    SizedBox(
+                      width: width,
+                      height: 56,
+                      child: GlassPressable(
+                        shape: shape,
+                        minSize: Size.zero,
+                        onPressed: () => item.kind == 'album'
+                            ? context.push('/releases/${item.id}')
+                            : (item.artistId != null ? context.push('/artists/${item.artistId}') : null),
+                        child: DecoratedBox(
+                          decoration: ShapeDecoration(
+                            shape: shape,
+                            color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.72),
+                          ),
+                          child: ClipPath(
+                            clipper: ShapeBorderClipper(shape: shape),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 56,
+                                  height: 56,
+                                  child: ArtworkImage(url: item.imageUrl, icon: Symbols.album_rounded),
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          color: theme.colorScheme.onSecondaryContainer,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      if (item.artistName != null)
+                                        Text(
+                                          item.artistName!,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: theme.colorScheme.onSecondaryContainer.withValues(alpha: 0.75),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: AppSpacing.xs),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
-        ],
-      );
+        ),
+      ],
+    );
+  }
 }
 
 class _HomeSectionView extends StatelessWidget {

@@ -128,10 +128,44 @@ class HomeSection {
   }
 }
 
+/// Položka "Pokračovat v poslechu" (`GET /home/recent`) -- album, nebo
+/// skladba bez alba.
+class RecentContext {
+  const RecentContext({
+    required this.kind,
+    required this.id,
+    required this.title,
+    this.artistName,
+    this.artistId,
+    this.imageUrl,
+  });
+
+  final String kind; // album | track
+  final String id;
+  final String title;
+  final String? artistName;
+  final String? artistId;
+  final String? imageUrl;
+
+  factory RecentContext.fromJson(Map<String, dynamic> json) => RecentContext(
+        kind: json['kind'] as String,
+        id: json['id'] as String,
+        title: json['title'] as String,
+        artistName: json['artistName'] as String?,
+        artistId: json['artistId'] as String?,
+        imageUrl: resolveMediaUrl(json['imageUrl'] as String?),
+      );
+}
+
 class HomeRepository {
   HomeRepository(this._api);
 
   final ApiClient _api;
+
+  Future<List<RecentContext>> recent() async {
+    final json = await _api.getJsonList('/home/recent');
+    return json.map((e) => RecentContext.fromJson(e as Map<String, dynamic>)).toList();
+  }
 
   Future<List<HomeSection>> home() async {
     final json = await _api.getJson('/home');
