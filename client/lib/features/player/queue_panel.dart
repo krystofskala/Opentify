@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../state/artwork_provider.dart';
 import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../theme/glass_tokens.dart';
@@ -151,7 +152,7 @@ class _SectionLabel extends StatelessWidget {
       );
 }
 
-class _QueueRow extends StatelessWidget {
+class _QueueRow extends ConsumerWidget {
   const _QueueRow({super.key, required this.info, required this.isCurrent, required this.onTap, this.dragIndex});
 
   final NowPlayingInfo info;
@@ -160,7 +161,11 @@ class _QueueRow extends StatelessWidget {
   final int? dragIndex;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Skladby ve frontě obal nenesou (dohledá se až při přehrání) -- líně
+    // přes album/interpreta, jen pro řádky, které se opravdu vykreslí.
+    final artUrl = info.artworkUrl ??
+        ref.watch(recordingArtworkProvider((releaseId: info.releaseId, artistId: info.artistId))).valueOrNull;
     return Material(
       color: isCurrent ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
       borderRadius: BorderRadius.circular(AppRadii.md),
@@ -176,8 +181,8 @@ class _QueueRow extends StatelessWidget {
                 child: SizedBox(
                   width: 44,
                   height: 44,
-                  child: info.artworkUrl != null
-                      ? NetImage(url: info.artworkUrl!)
+                  child: artUrl != null
+                      ? NetImage(url: artUrl)
                       : Container(
                           color: Colors.white.withValues(alpha: 0.15),
                           child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 18),

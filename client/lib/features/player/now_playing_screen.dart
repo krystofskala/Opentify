@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/physics.dart';
+import 'package:flutter/rendering.dart';
 // Flutter má od 3.47 vlastní `RepeatMode` (`RepeatingAnimationBuilder`) --
 // skrytý, ať nekoliduje s naším (`AudioPlayerState.repeatMode`).
 import 'package:flutter/material.dart' hide RepeatMode;
@@ -43,6 +44,35 @@ const _sideColumnMinWidth = 1100.0;
 
 enum _SidePanel { lyrics, queue }
 
+/// Nahlásí velikost potomka po layoutu (jen při změně).
+class _MeasureSize extends SingleChildRenderObjectWidget {
+  const _MeasureSize({required this.onChange, required super.child});
+
+  final ValueChanged<Size> onChange;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderMeasureSize(onChange);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasureSize renderObject) => renderObject.onChange = onChange;
+}
+
+class _RenderMeasureSize extends RenderProxyBox {
+  _RenderMeasureSize(this.onChange);
+
+  ValueChanged<Size> onChange;
+  Size? _last;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size == _last) return;
+    _last = size;
+    final reported = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onChange(reported));
+  }
+}
+
 class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with SingleTickerProviderStateMixin {
   NowPlayingSheetController? _sheet;
 
@@ -51,6 +81,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
 
   /// Co sloupec ukazuje i během zavírací animace.
   _SidePanel _lastSide = _SidePanel.lyrics;
+
+  /// Změřená výška skupiny obal + název + ovládání (výška druhého sloupce).
+  double? _playerHeight;
   // Tear-off metody je `==` sama se sebou -- `detach` tak pozná svou trasu.
   void _pop() {
     if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
@@ -296,8 +329,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Flexible(child: player),
-                                      _sideColumn(nowPlaying.recordingId, math.min(constraints.maxHeight, 780)),
+                                      // Sloupec má přesně výšku skupiny vlevo
+                                      // (obal + název + ovládání).
+                                      Flexible(
+                                        child: _MeasureSize(
+                                          onChange: (size) {
+                                            if (_playerHeight != size.height) {
+                                              setState(() => _playerHeight = size.height);
+                                            }
+                                          },
+                                          child: player,
+                                        ),
+                                      ),
+                                      _sideColumn(
+                                        nowPlaying.recordingId,
+                                        _playerHeight ?? math.min(constraints.maxHeight, 780),
+                                      ),
                                     ],
                                   ),
                                 );

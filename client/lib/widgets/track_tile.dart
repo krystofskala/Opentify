@@ -13,6 +13,7 @@ import '../state/provisioning_controller.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'media_card.dart' show ArtworkImage;
+import 'queue_swipe.dart';
 import 'track_actions.dart';
 import 'glass/expressive_shapes.dart';
 
@@ -147,7 +148,23 @@ class TrackTile extends ConsumerWidget {
       );
     }
 
-    return switch (layout) {
+    void enqueue({required bool next}) {
+      final controller = ref.read(audioPlayerControllerProvider.notifier);
+      final info = nowPlayingInfoFor(recording, artworkUrl: resolvedArtUrl, artistNameFallback: artistName);
+      if (next) {
+        controller.playNext(info);
+      } else {
+        controller.addToQueue(info);
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(next ? '„${recording.title}“ hraje jako další' : '„${recording.title}“ na konci fronty'),
+          duration: const Duration(seconds: 2),
+        ));
+    }
+
+    final row = switch (layout) {
       TrackTileLayout.row => _RowTile(
           recording: recording,
           leadingIndex: leadingIndex,
@@ -189,6 +206,14 @@ class TrackTile extends ConsumerWidget {
           animationIndex: animationIndex,
         ),
     };
+    // Swipe doprava/doleva = začátek/konec fronty (Apple Music) -- jen řádky
+    // mimo hromadný výběr; karty v rozjetých řadách se táhnou vodorovně.
+    if (layout != TrackTileLayout.row || selectionMode) return row;
+    return QueueSwipe(
+      onPlayNext: () => enqueue(next: true),
+      onPlayLast: () => enqueue(next: false),
+      child: row,
+    );
   }
 
   void _play(WidgetRef ref, String? resolvedArtUrl) {
