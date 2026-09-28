@@ -12,12 +12,14 @@ class ListensRepository {
     required DateTime playedAt,
     required Duration played,
     String? source,
+    String? context,
   }) async {
     await _api.postJson('/listens', body: {
       'recordingId': recordingId,
       'playedAt': playedAt.toUtc().toIso8601String(),
       'durationPlayedMs': played.inMilliseconds,
       if (source != null) 'source': source,
+      if (context != null) 'context': context,
     });
   }
 

@@ -37,6 +37,7 @@ def _ensure_columns() -> None:
             ("waveform_duration_ms", "INTEGER"),
         ],
         "recording": [("deezer_id", "VARCHAR")],
+        "listen": [("context", "VARCHAR")],
         "playlist": [
             ("description", "VARCHAR"),
             ("cover_urls", "JSON"),

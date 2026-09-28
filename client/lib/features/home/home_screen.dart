@@ -108,9 +108,13 @@ class _ContinueListening extends StatelessWidget {
                       child: GlassPressable(
                         shape: shape,
                         minSize: Size.zero,
-                        onPressed: () => item.kind == 'album'
-                            ? context.push('/releases/${item.id}')
-                            : (item.artistId != null ? context.push('/artists/${item.artistId}') : null),
+                        onPressed: () => switch (item.kind) {
+                          'album' => context.push('/releases/${item.id}'),
+                          'playlist' => context.push('/playlists/${item.id}'),
+                          'liked' => context.push('/library/liked'),
+                          'artist' => context.push('/artists/${item.id}'),
+                          _ => item.artistId != null ? context.push('/artists/${item.artistId}') : null,
+                        },
                         child: DecoratedBox(
                           decoration: ShapeDecoration(
                             shape: shape,
@@ -120,11 +124,7 @@ class _ContinueListening extends StatelessWidget {
                             clipper: ShapeBorderClipper(shape: shape),
                             child: Row(
                               children: [
-                                SizedBox(
-                                  width: 56,
-                                  height: 56,
-                                  child: ArtworkImage(url: item.imageUrl, icon: Symbols.album_rounded),
-                                ),
+                                SizedBox(width: 56, height: 56, child: _recentArtwork(context, item)),
                                 const SizedBox(width: AppSpacing.sm),
                                 Expanded(
                                   child: Column(
@@ -166,6 +166,31 @@ class _ContinueListening extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+Widget _recentArtwork(BuildContext context, RecentContext item) {
+  switch (item.kind) {
+    case 'playlist':
+      return PlaylistArtwork(
+        title: item.title,
+        coverUrls: item.imageUrls,
+        showTitle: false,
+        dailyMixNumber: item.dailyMixNumber,
+      );
+    case 'liked':
+      final scheme = Theme.of(context).colorScheme;
+      return ColoredBox(
+        color: scheme.primaryContainer,
+        child: Icon(Symbols.favorite_rounded, fill: 1, color: scheme.onPrimaryContainer),
+      );
+    case 'artist':
+      return Padding(
+        padding: const EdgeInsets.all(4),
+        child: ClipOval(child: ArtworkImage(url: item.imageUrl, icon: Symbols.person_rounded)),
+      );
+    default:
+      return ArtworkImage(url: item.imageUrl, icon: Symbols.album_rounded);
   }
 }
 

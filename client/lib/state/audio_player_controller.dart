@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/media_session.dart';
 import '../core/ws_client.dart';
 import '../models/playback_model.dart' show RepeatMode;
+import '../routing/app_router.dart';
 import '../theme/accent_color.dart';
 import 'artwork_provider.dart';
 import 'provisioning_controller.dart';
@@ -397,6 +398,19 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// jeden prvek, takže Předchozí/Další v `NowPlayingScreen` zůstanou
   /// neaktivní. Volající, co mají po ruce celý seznam (tracklist alba,
   /// knihovna...), by měli volat `playQueue` místo tohohle.
+  /// Stránka, ze které se aktuální fronta spustila ("/playlists/<id>",
+  /// "/library/liked", ...) -- jde s poslechem na server, "Pokračovat v
+  /// poslechu" na Domů pak ukáže i playlist, ne jen album skladby.
+  String? _queueContext;
+
+  String? _currentRoute() {
+    try {
+      return _ref.read(appRouterProvider).routerDelegate.currentConfiguration.uri.path;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> playTrack(NowPlayingInfo info, {String? sourceLabel}) => playQueue([info], 0, sourceLabel: sourceLabel);
 
   /// Přehraje `items[startIndex]` a zbytek seznamu si uloží jako frontu pro
@@ -419,6 +433,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
+    _queueContext = _currentRoute();
     _primeAudioElement(items[index].recordingId);
     state = AudioPlayerState(
       nowPlaying: items[index],
@@ -1179,6 +1194,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
           playedAt: _scrobbleStartedAt ?? DateTime.now(),
           played: _scrobbleAccum,
           source: state.queueSourceLabel,
+          context: _queueContext,
         )
         .catchError((Object e) => debugPrint('AudioPlayerController: poslech se nepodařilo nahlásit: $e')));
   }

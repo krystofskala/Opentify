@@ -43,6 +43,7 @@ def record_listen(
     played_at: datetime | None = None,
     duration_played_ms: int | None = None,
     source: str | None = None,
+    context: str | None = None,
 ) -> str | None:
     """Sync -- vrátí id poslechu, `None` když nahrávka neexistuje."""
     with Session(engine) as session:
@@ -54,6 +55,7 @@ def record_listen(
             played_at=played_at or utcnow(),
             duration_played_ms=duration_played_ms,
             source=source,
+            context=context,
         )
         session.add(listen)
         session.commit()

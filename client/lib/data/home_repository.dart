@@ -138,14 +138,29 @@ class RecentContext {
     this.artistName,
     this.artistId,
     this.imageUrl,
+    this.imageUrls = const [],
+    this.source,
   });
 
-  final String kind; // album | track
+  final String kind; // album | track | playlist | liked | artist
   final String id;
   final String title;
   final String? artistName;
   final String? artistId;
   final String? imageUrl;
+
+  /// Mozaika playlistu (až 4 obaly).
+  final List<String> imageUrls;
+
+  /// `Playlist.source` -- podle něj Denní mix dostane svůj obal.
+  final String? source;
+
+  int? get dailyMixNumber {
+    const prefix = 'personal:daily-mix:';
+    final s = source;
+    if (s == null || !s.startsWith(prefix)) return null;
+    return int.tryParse(s.substring(prefix.length));
+  }
 
   factory RecentContext.fromJson(Map<String, dynamic> json) => RecentContext(
         kind: json['kind'] as String,
@@ -154,6 +169,8 @@ class RecentContext {
         artistName: json['artistName'] as String?,
         artistId: json['artistId'] as String?,
         imageUrl: resolveMediaUrl(json['imageUrl'] as String?),
+        imageUrls: resolveMediaUrls((json['imageUrls'] as List<dynamic>? ?? const []).cast<String>()),
+        source: json['source'] as String?,
       );
 }
 

@@ -22,6 +22,7 @@ class ListenIn(CamelModel):
     played_at: datetime | None = None
     duration_played_ms: int | None = None
     source: str | None = None
+    context: str | None = None
 
 
 class PlayingNowIn(CamelModel):
@@ -38,6 +39,7 @@ async def create_listen(body: ListenIn, current: tuple[str, str] = Depends(get_c
         played_at=body.played_at,
         duration_played_ms=body.duration_played_ms,
         source=body.source,
+        context=body.context,
     )
     if listen_id is None:
         raise HTTPException(status_code=404, detail="nahrávka nenalezena")

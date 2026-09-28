@@ -189,6 +189,10 @@ class Listen(SQLModel, table=True):
     played_at: datetime = Field(default_factory=utcnow, index=True)
     duration_played_ms: int | None = None
     source: str | None = None
+    # Odkud se přehrávání spustilo (cesta v appce: "/playlists/<id>",
+    # "/library/liked", "/artists/<id>", "/releases/<id>") -- "Pokračovat v
+    # poslechu" podle ní ukazuje i playlisty, ne jen alba.
+    context: str | None = None
     lb_submitted_at: datetime | None = Field(default=None, index=True)
     lb_attempts: int = 0
     lb_error: str | None = None
