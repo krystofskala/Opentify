@@ -117,6 +117,10 @@ class MediaAsset(SQLModel, table=True):
     # Hlasitostní korekce v dB k cíli -14 LUFS (viz app/loudness.py) -- `None`
     # = ještě neanalyzováno, klient pak hraje bez korekce.
     loudness_gain_db: float | None = None
+    # "Odebrat z knihovny" u skladby z uživatelovy vlastní složky (ta je
+    # připojená jen pro čtení a soubory nemažeme) -- skladba zůstává
+    # přehratelná, jen se neukazuje v knihovně.
+    hidden_from_library: bool | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 

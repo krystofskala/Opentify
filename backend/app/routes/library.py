@@ -28,12 +28,12 @@ import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
 from app.catalog.availability import compute_availability, resolve_artist_name
-from app.catalog.schemas import RecordingOut
+from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
 from app.library.spotify_import import (
@@ -50,6 +50,17 @@ library_router = APIRouter(prefix="/library", tags=["library"])
 # mění mezi Windows vývojem a Linux serverem, je jen `MUSIC_DIR` (hostitelská
 # strana mountu), kód se nedotkne.
 LOCAL_MUSIC_ROOT = Path(os.environ.get("LOCAL_MUSIC_ROOT", "/data/local-music"))
+
+# Jen soubory pod tímhle kořenem appka sama stáhla a smí je smazat
+# ("Odebrat z knihovny"); cokoliv jinde (uživatelova složka, slskd sdílená
+# složka připojená jen pro čtení) se jen skryje.
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/data/media"))
+
+# "Je v knihovně" = přehratelné na disku A uživatel ho neodebral.
+_IN_LIBRARY = and_(
+    MediaAsset.status == MediaAssetStatus.AVAILABLE,
+    or_(MediaAsset.hidden_from_library.is_(None), MediaAsset.hidden_from_library.is_(False)),  # type: ignore[union-attr]
+)
 
 
 def _progress_dict(p: ScanProgress) -> dict:
@@ -105,7 +116,7 @@ def local_tracks(
     `source_provider in (local, musicbrainz-local)`, takže stažené/obstarané
     skladby v knihovně nikdy neskončily, i když je appka měla reálně na
     disku a šly rovnou přehrát -- odsud "proč to nemám v knihovně"."""
-    base_query = select(MediaAsset).where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+    base_query = select(MediaAsset).where(_IN_LIBRARY)
     total = len(session.exec(base_query).all())
     assets = session.exec(
         base_query.order_by(MediaAsset.updated_at.desc()).offset(offset).limit(limit)
@@ -155,7 +166,7 @@ def local_albums(
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Release.artist_id)
-        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+        .where(_IN_LIBRARY)
         .group_by(Release.id)
         .order_by(Artist.name, Release.title)
     ).all()
@@ -184,7 +195,7 @@ def local_artists(
         select(Artist.id, Artist.name, Artist.images, func.count(func.distinct(Recording.id)))
         .join(Recording, Recording.artist_id == Artist.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+        .where(_IN_LIBRARY)
         .group_by(Artist.id)
         .order_by(Artist.name)
     ).all()
@@ -246,7 +257,7 @@ def search_library(
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Recording.artist_id, isouter=True)
         .join(Release, Release.id == Recording.release_id, isouter=True)
-        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+        .where(_IN_LIBRARY)
     ).all()
     # Skóre bere lepší z "název je hlavní pole" a "interpret je hlavní pole"
     # -- dotaz "radiohead" jinak řadil skladbu *pojmenovanou* "Radiohead" od
@@ -321,7 +332,7 @@ def local_genres(
         select(Release.genres, func.count(func.distinct(Recording.id)))
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+        .where(_IN_LIBRARY)
         .group_by(Release.id)
     ).all()
 
@@ -352,7 +363,7 @@ def local_by_genre(
         select(Recording)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .where(
-            MediaAsset.status == MediaAssetStatus.AVAILABLE,
+            _IN_LIBRARY,
             Recording.release_id.in_(matching_release_ids),
         )
     ).all()
@@ -372,10 +383,73 @@ def local_czech(
         select(Recording)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Recording.artist_id)
-        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE, Artist.country == "CZ")
+        .where(_IN_LIBRARY, Artist.country == "CZ")
     ).all()
     items = [_local_recording_out(session, r) for r in recordings]
     return {"total": len(items), "items": [i.model_dump(by_alias=True) for i in items]}
+
+
+class RemoveTracksBody(CamelModel):
+    recording_ids: list[str]
+
+
+def _remove_from_library(session: Session, recording_id: str) -> dict:
+    """Stažený soubor (pod MEDIA_ROOT) se smaže a skladba se vrátí do stavu
+    "nestaženo" -- při dalším přehrání se prostě stáhne znovu. Soubor mimo
+    MEDIA_ROOT (uživatelova hudební složka, jen pro čtení) se nemaže, jen
+    skryje z knihovny."""
+    asset = session.get(MediaAsset, recording_id)
+    if asset is None or asset.status != MediaAssetStatus.AVAILABLE or asset.hidden_from_library:
+        return {"recordingId": recording_id, "result": "not_in_library", "freedBytes": 0}
+
+    path = Path(asset.storage_path) if asset.storage_path else None
+    owned = path is not None and path.resolve().is_relative_to(MEDIA_ROOT.resolve())
+    if not owned:
+        asset.hidden_from_library = True
+        session.add(asset)
+        session.commit()
+        return {"recordingId": recording_id, "result": "hidden", "freedBytes": 0}
+
+    freed = 0
+    try:
+        freed = path.stat().st_size
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    asset.status = MediaAssetStatus.MISSING
+    asset.storage_path = None
+    asset.filesize_bytes = None
+    asset.checksum_sha256 = None
+    asset.loudness_gain_db = None
+    asset.hidden_from_library = None
+    session.add(asset)
+    session.commit()
+    return {"recordingId": recording_id, "result": "deleted", "freedBytes": freed}
+
+
+@library_router.delete("/tracks/{recording_id}")
+def remove_track(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """"Odebrat z knihovny" -- neodebírá z Oblíbených ani z playlistů (to
+    jsou samostatné akce), jen z "Moje knihovna"."""
+    return _remove_from_library(session, recording_id)
+
+
+@library_router.post("/tracks/remove")
+def remove_tracks(
+    body: RemoveTracksBody,
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    results = [_remove_from_library(session, rid) for rid in body.recording_ids[:500]]
+    return {
+        "removed": sum(1 for r in results if r["result"] != "not_in_library"),
+        "freedBytes": sum(r["freedBytes"] for r in results),
+        "results": results,
+    }
 
 
 @library_router.post("/import/spotify")
