@@ -202,6 +202,16 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
                                     ? () => ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlaying)
                                     : () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
                           ),
+                          // Na širokém displeji (desktop) chybí swipe prstem --
+                          // přeskočení tlačítkem. Mobil má swipe, tam ne.
+                          if (MediaQuery.sizeOf(context).width >= 600)
+                            IconButton(
+                              icon: Icon(Symbols.skip_next_rounded, color: fg, size: 26),
+                              tooltip: 'Další skladba',
+                              onPressed: playback.nextIndex == null
+                                  ? null
+                                  : () => ref.read(audioPlayerControllerProvider.notifier).next(),
+                            ),
                         ],
                       ),
                     ),

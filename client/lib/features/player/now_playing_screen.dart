@@ -262,6 +262,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                                     Flexible(child: _carouselView(playback)),
                                     const SizedBox(height: 28),
                                     _titleBlock(context, playback, isProvisioning, provisioningState),
+                                    const SizedBox(height: 24),
+                                    // Ovládání drží u obalu a názvu (jedna
+                                    // skupina uprostřed), ne přilepené ke
+                                    // spodní hraně (živě nahlášeno). Panel se
+                                    // sklem si kreslí `_controls` sám.
+                                    _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
                                   ],
                                 ),
                               ),
@@ -270,13 +276,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: isWide ? 480 : double.infinity),
-                    // Panel se sklem si kreslí `_controls` sám -- druhý obal
-                    // tady dělal viditelně zdvojený rámeček (živě nahlášeno).
-                    child: _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
                   ),
                   const SizedBox(height: 16),
                 ],
