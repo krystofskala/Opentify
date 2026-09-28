@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'accent_color.dart' show isAchromatic;
 import 'design_tokens.dart';
 import 'shapes.dart';
 
@@ -11,7 +12,16 @@ import 'shapes.dart';
 /// + player feature parity"). Používá se stejně pro `theme`/`darkTheme` v
 /// `app.dart`, jen s jiným `brightness`.
 ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
-  final base = ThemeData(colorSchemeSeed: seed, brightness: brightness, useMaterial3: true);
+  // Černobílý/šedý seed: `tonalSpot` by mu přidal sytost v odstínu šedé
+  // (≈ červená) -- neutrální monochromatické schéma místo toho.
+  final base = ThemeData(
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: seed,
+      brightness: brightness,
+      dynamicSchemeVariant: isAchromatic(seed) ? DynamicSchemeVariant.monochrome : DynamicSchemeVariant.tonalSpot,
+    ),
+    useMaterial3: true,
+  );
   final colorScheme = base.colorScheme;
 
   // Skutečné pozadí appky teď kreslí `AppBackground` (gradient + zrno) pod

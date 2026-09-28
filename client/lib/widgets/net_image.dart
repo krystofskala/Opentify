@@ -44,6 +44,15 @@ class NetImage extends StatelessWidget {
         if (wasSyncLoaded) return child;
         return AnimatedSwitcher(
           duration: fadeIn,
+          // `passthrough` -- výchozí layout AnimatedSwitcheru (Stack) dává
+          // dětem VOLNÁ omezení, takže obrázek načtený asynchronně ignoroval
+          // `fit: cover` a kreslil se v přirozeném poměru (živě: široká
+          // fotka interpreta jen pruhem uprostřed vysoké hlavičky).
+          layoutBuilder: (current, previous) => Stack(
+            fit: StackFit.passthrough,
+            alignment: Alignment.center,
+            children: [...previous, if (current != null) current],
+          ),
           child: frame == null ? KeyedSubtree(key: const ValueKey('placeholder'), child: fallback) : child,
         );
       },

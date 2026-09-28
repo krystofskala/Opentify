@@ -19,15 +19,13 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
 
-final discographyProvider =
-    FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
+final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getDiscography(artistId);
 });
 
 /// Životopis/podobní interpreti chodí z Wikidata/Wikipedie -- samostatně,
 /// ať na ně nečeká tracklist/diskografie z lokální DB.
-final artistBioProvider =
-    FutureProvider.autoDispose.family<ArtistBioModel, String>((ref, artistId) {
+final artistBioProvider = FutureProvider.autoDispose.family<ArtistBioModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getArtistBio(artistId);
 });
 
@@ -42,6 +40,18 @@ const _releaseTypeLabels = {
   'single': 'Singly',
   'compilation': 'Kompilace',
 };
+
+/// "1963–2023" z dat vydání (jen rok, jedno vydání -> jen ten rok).
+String? _activeYears(List<ReleaseModel> releases) {
+  final years = releases
+      .map((r) =>
+          r.releaseDate == null || r.releaseDate!.length < 4 ? null : int.tryParse(r.releaseDate!.substring(0, 4)))
+      .whereType<int>()
+      .toList();
+  if (years.isEmpty) return null;
+  years.sort();
+  return years.first == years.last ? '${years.first}' : '${years.first}–${years.last}';
+}
 
 /// Profil interpreta: hlavička, skladby z nejnovějšího vydání, životopis,
 /// podobní interpreti a diskografie rozdělená podle typu vydání.
@@ -94,85 +104,103 @@ class _ArtistBody extends ConsumerWidget {
               imageUrl: artist.coverImageUrl,
               accent: accent,
               eyebrow: 'Interpret',
-              circleImage: true,
+              eyebrowIcon: Symbols.person_rounded,
               placeholderIcon: Symbols.person_rounded,
-              banner: true,
               bannerImageUrl: artist.bannerUrl,
-              expandedHeight: 320,
-              bannerFallbackUrl: sortedReleases
-                  .map((r) => r.coverImageUrl)
-                  .firstWhere((url) => url != null, orElse: () => null),
-              subtitle: [HeroMeta('${discography.releases.length} vydání')],
+              bannerFallbackUrl:
+                  sortedReleases.map((r) => r.coverImageUrl).firstWhere((url) => url != null, orElse: () => null),
+              // Pozadím je široký banner (nebo rozostřený obal) -- vlastní
+              // portrét jako kulatý avatar vedle jména, ať je jasné, kdo to je.
+              thumbnailUrl: artist.bannerUrl != null ? artist.coverImageUrl : null,
+              thumbnailCircle: true,
+              meta: [
+                if (grouped['album']?.length case final albums? when albums > 0)
+                  HeroMetaItem(
+                      Symbols.album_rounded,
+                      '$albums ${albums == 1 ? 'album' : albums <= 4 ? 'alba' : 'alb'}'),
+                HeroMetaItem(Symbols.library_music_rounded, '${discography.releases.length} vydání'),
+                if (_activeYears(discography.releases) case final years?)
+                  HeroMetaItem(Symbols.calendar_today_rounded, years),
+              ],
             ),
-            if (topTracks != null)
+            ...detailContentSlivers(context, [
               SliverToBoxAdapter(
-                child: topTracks.when(
-                  data: (recordings) {
-                    final top = recordings.take(5).toList();
-                    if (top.isEmpty) return const SizedBox.shrink();
-                    // Nejnovější vydání často nemá obal (čerstvý singl) --
-                    // pak fotka interpreta, ne notová ikonka u všech řádků.
-                    final rowArt = topRelease!.coverImageUrl ?? artist.coverImageUrl;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SectionHeader(
-                          'Z nejnovějšího vydání',
-                          onSeeAll: () => context.push('/releases/${topRelease.id}'),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xxs, AppSpacing.md, AppSpacing.xs),
-                          child: QueueActionBar(
-                            tracks: top,
-                            sourceLabel: artist.name,
-                            artistName: artist.name,
-                            albumArtUrl: rowArt,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                          child: Column(
-                            children: [
-                              for (final recording in top)
-                                TrackTile(
-                                  recording: recording,
-                                  queueRecordings: top,
-                                  albumArtUrl: rowArt,
-                                  artistName: artist.name,
-                                  sourceLabel: artist.name,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                  loading: () => const Padding(
-                    padding: EdgeInsets.only(top: AppSpacing.md),
-                    child: SkeletonTrackList(count: 5),
-                  ),
-                  error: (_, __) => const SizedBox.shrink(),
+                child: bio.maybeWhen(
+                  data: (data) => data.bio == null ? const SizedBox.shrink() : HeroTeaser(text: data.bio!),
+                  orElse: () => const SizedBox.shrink(),
                 ),
               ),
-            SliverToBoxAdapter(
-              child: bio.maybeWhen(
-                data: (data) => _ArtistBioSection(bio: data),
-                orElse: () => const SizedBox.shrink(),
+              if (topTracks != null)
+                SliverToBoxAdapter(
+                  child: topTracks.when(
+                    data: (recordings) {
+                      final top = recordings.take(5).toList();
+                      if (top.isEmpty) return const SizedBox.shrink();
+                      // Nejnovější vydání často nemá obal (čerstvý singl) --
+                      // pak fotka interpreta, ne notová ikonka u všech řádků.
+                      final rowArt = topRelease!.coverImageUrl ?? artist.coverImageUrl;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SectionHeader(
+                            'Z nejnovějšího vydání',
+                            onSeeAll: () => context.push('/releases/${topRelease.id}'),
+                          ),
+                          Padding(
+                            padding:
+                                const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xxs, AppSpacing.md, AppSpacing.xs),
+                            child: QueueActionBar(
+                              tracks: top,
+                              sourceLabel: artist.name,
+                              artistName: artist.name,
+                              albumArtUrl: rowArt,
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                            child: Column(
+                              children: [
+                                for (final recording in top)
+                                  TrackTile(
+                                    recording: recording,
+                                    queueRecordings: top,
+                                    albumArtUrl: rowArt,
+                                    artistName: artist.name,
+                                    sourceLabel: artist.name,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                    loading: () => const Padding(
+                      padding: EdgeInsets.only(top: AppSpacing.md),
+                      child: SkeletonTrackList(count: 5),
+                    ),
+                    error: (_, __) => const SizedBox.shrink(),
+                  ),
+                ),
+              SliverToBoxAdapter(
+                child: bio.maybeWhen(
+                  data: (data) => _RelatedArtistsSection(bio: data),
+                  orElse: () => const SizedBox.shrink(),
+                ),
               ),
-            ),
-            if (grouped.isEmpty)
-              const SliverToBoxAdapter(
-                child: EmptyState(compact: true, message: 'Pro tohoto interpreta zatím nemáme žádná vydání.'),
-              )
-            else
-              for (final entry in grouped.entries) ...[
-                SliverToBoxAdapter(child: SectionHeader(_releaseTypeLabels[entry.key] ?? entry.key)),
-                SliverToBoxAdapter(child: _ReleaseRail(releases: entry.value)),
-              ],
-            // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru
-            // slučuje do kanonického interpreta s MBID.
-            SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id)),
-            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+              if (grouped.isEmpty)
+                const SliverToBoxAdapter(
+                  child: EmptyState(compact: true, message: 'Pro tohoto interpreta zatím nemáme žádná vydání.'),
+                )
+              else
+                for (final entry in grouped.entries) ...[
+                  SliverToBoxAdapter(child: SectionHeader(_releaseTypeLabels[entry.key] ?? entry.key)),
+                  SliverToBoxAdapter(child: _ReleaseRail(releases: entry.value)),
+                ],
+              // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru
+              // slučuje do kanonického interpreta s MBID.
+              SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id)),
+              const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+            ]),
           ],
         ),
       ),
@@ -180,51 +208,20 @@ class _ArtistBody extends ConsumerWidget {
   }
 }
 
-/// Životopis (sbalený na pár řádků) + "Podobní interpreti".
-class _ArtistBioSection extends StatefulWidget {
-  const _ArtistBioSection({required this.bio});
+/// "Podobní interpreti" (životopis je jako upoutávka hned pod hlavičkou).
+class _RelatedArtistsSection extends StatelessWidget {
+  const _RelatedArtistsSection({required this.bio});
   final ArtistBioModel bio;
 
   @override
-  State<_ArtistBioSection> createState() => _ArtistBioSectionState();
-}
-
-class _ArtistBioSectionState extends State<_ArtistBioSection> {
-  bool _expanded = false;
-
-  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bioText = widget.bio.bio;
-    final related = widget.bio.relatedArtists;
-    if (bioText == null && related.isEmpty) return const SizedBox.shrink();
+    final related = bio.relatedArtists;
+    if (related.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (bioText != null) ...[
-          const SectionHeader('O interpretovi'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  bioText,
-                  maxLines: _expanded ? null : 4,
-                  overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium,
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 32)),
-                  child: Text(_expanded ? 'Zobrazit méně' : 'Zobrazit více'),
-                ),
-              ],
-            ),
-          ),
-        ],
-        if (related.isNotEmpty) ...[
+        ...[
           const SectionHeader('Podobní interpreti'),
           SizedBox(
             height: 180,
@@ -291,7 +288,6 @@ class _ReleaseRail extends StatelessWidget {
   }
 }
 
-
 const _rarityLabels = {'demo': 'Dema', 'live': 'Živě', 'bootleg': 'Bootlegy'};
 const _rarityBadges = {'demo': 'DEMO', 'live': 'ŽIVĚ', 'bootleg': 'BOOTLEG'};
 
@@ -320,7 +316,10 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
       error: (_, __) => const SizedBox.shrink(),
       data: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
-        final kinds = [for (final k in _rarityLabels.keys) if (items.any((i) => i.rarity == k)) k];
+        final kinds = [
+          for (final k in _rarityLabels.keys)
+            if (items.any((i) => i.rarity == k)) k
+        ];
         final selected = kinds.contains(_selected) ? _selected! : kinds.first;
         final visible = items.where((i) => i.rarity == selected).toList();
         return Column(
@@ -333,7 +332,8 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
                 child: GlassSegmentedControl<String>(
                   segments: [
                     for (final k in kinds)
-                      GlassSegment(value: k, label: '${_rarityLabels[k]} · ${items.where((i) => i.rarity == k).length}'),
+                      GlassSegment(
+                          value: k, label: '${_rarityLabels[k]} · ${items.where((i) => i.rarity == k).length}'),
                   ],
                   selected: selected,
                   onChanged: (k) => setState(() => _selected = k),

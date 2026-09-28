@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -6,15 +7,14 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
-import '../theme/shapes.dart';
+import '../theme/glass_tokens.dart' show Expressive;
+import '../theme/selected_accent.dart';
 import 'glass_container.dart';
-import 'media_card.dart' show ArtworkImage;
 import 'net_image.dart';
 
 /// Dopočítá barvu nálady obrázku detailové obrazovky a zapíše ji do
 /// `screenAccentStackProvider` (globální seed + gradient pozadí) po dobu, co
-/// je obrazovka otevřená. Sdílené pro Album/Interpret/Skladbu/Playlist --
-/// dřív to Release a Artist měly každý po svém (a jen tyhle dva).
+/// je obrazovka otevřená. Sdílené pro Album/Interpret/Playlist.
 class ScreenAccent extends ConsumerStatefulWidget {
   const ScreenAccent({super.key, required this.imageUrl, required this.builder});
 
@@ -28,12 +28,14 @@ class ScreenAccent extends ConsumerStatefulWidget {
 class _ScreenAccentState extends ConsumerState<ScreenAccent> {
   final Object _owner = Object();
   late final ScreenAccentStack _stack;
+  late final ScreenImageStack _images;
 
   @override
   void initState() {
     super.initState();
     // Tady, ne líně až v `dispose` -- tam už `ref` použít nejde.
     _stack = ref.read(screenAccentStackProvider.notifier);
+    _images = ref.read(screenImageStackProvider.notifier);
   }
 
   @override
@@ -41,8 +43,12 @@ class _ScreenAccentState extends ConsumerState<ScreenAccent> {
     // Až po snímku -- `dispose` běží uprostřed stavby stromu a změna
     // providera, který `app.dart` sleduje, by v ní vyhodila výjimku.
     final stack = _stack;
+    final images = _images;
     final owner = _owner;
-    Future.microtask(() => stack.remove(owner));
+    Future.microtask(() {
+      images.remove(owner);
+      stack.remove(owner);
+    });
     super.dispose();
   }
 
@@ -53,21 +59,55 @@ class _ScreenAccentState extends ConsumerState<ScreenAccent> {
         ? null
         : (ref.watch(screenAccentColorProvider(url)).valueOrNull ?? cachedAccentColor(url));
     // Zapisuje se, až když je barva známá -- do té doby zůstává platná
-    // barva předchozí obrazovky (žádné probliknutí přes výchozí fialovou,
-    // přechod pak jen plynule doanimuje z předchozí barvy na novou).
+    // barva předchozí obrazovky (žádné probliknutí přes výchozí fialovou).
     if (accent != null) {
       Future.microtask(() {
-        if (mounted) _stack.set(_owner, accent);
+        if (!mounted) return;
+        // Obrázek dřív než barva -- `EffectiveAccent` pak přečte dvojici
+        // barva + obrázek stejné obrazovky (doplňkové tóny obalu).
+        _images.set(_owner, url!);
+        _stack.set(_owner, accent);
       });
     }
-    return widget.builder(context, accent);
+    // Hraje-li skladba, tónuje hlavičku její barva (vyhrává všude, viz
+    // `effectiveAccentProvider`); vlastní barva obrazovky jen bez přehrávání.
+    final playing = ref.watch(trackIsPlayingProvider);
+    return widget.builder(context, playing ? (ref.watch(effectiveAccentProvider) ?? accent) : accent);
   }
 }
 
-/// Sjednocená hlavička detailu (Album, Interpret, Skladba, Playlist):
-/// rozostřený obrázek na pozadí tónovaný barvou nálady, skleněná karta s
-/// obalem/fotkou, "eyebrow" typem, názvem a podtitulkem. Po sbalení zůstane
-/// úzký rozostřený pruh s názvem.
+/// Akce v pravém horním rohu hlavičky (skleněný kroužek).
+class HeroAction {
+  const HeroAction({required this.icon, required this.tooltip, required this.onPressed});
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+}
+
+/// Jednotná hlavička VŠECH detailů (Interpret, Album, Playlist, Oblíbené):
+/// obrázek přes celou šířku až pod status bar, dole plynule prolnutý do
+/// pozadí appky, velký název + podtitulek dole vlevo. Jediný zdroj pravdy
+/// pro rozměry, typografii i chování při scrollu:
+///
+///   * přetažení dolů (iOS bounce) -> obrázek se roztáhne, ukotvený nahoře;
+///   * scroll nahoru -> obrázek jede ~0.45× rychlostí (parallax) a tmavne,
+///     velký název odjede a zmizí;
+///   * u horního okraje se teprve objeví skleněná lišta s malým názvem
+///     (glass_tokens: sklo jen pro plovoucí navigaci) -- do té doby jen
+///     plovoucí kroužky zpět/akcí;
+///   * vše oříznuté na obdélník hlavičky, nic nepřetéká pod obsah.
+///
+/// Obrázek: `bannerImageUrl` (široká fotka interpreta) > `mosaicUrls` (2×2,
+/// playlisty) > `imageUrl` (obal/fotka) > rozostřený `bannerFallbackUrl` >
+/// tónovaný gradient s `placeholderIcon`.
+///
+/// Informační blok dole (stejná skladba na všech detailech):
+///   typový štítek (`eyebrow` + `eyebrowIcon`, sjednocená "vybraná" pilulka)
+///   -> velký název (max 2 řádky, sám se zmenší) -> `subtitle` (odkaz na
+///   interpreta, popis mixu...) -> řádek `meta` s ikonkami. Volitelně
+///   `thumbnailUrl` vlevo od názvu (avatar interpreta nad jeho bannerem),
+///   ten se při sbalení objeví i malý v liště vedle názvu.
 class DetailHeroAppBar extends StatelessWidget {
   const DetailHeroAppBar({
     super.key,
@@ -75,216 +115,497 @@ class DetailHeroAppBar extends StatelessWidget {
     this.imageUrl,
     this.accent,
     this.eyebrow,
+    this.eyebrowIcon,
     this.subtitle = const [],
-    this.circleImage = false,
+    this.meta = const [],
+    this.thumbnailUrl,
+    this.thumbnailCircle = false,
     this.placeholderIcon = Symbols.album_rounded,
-    this.actions,
-    this.expandedHeight = 300,
-    this.banner = false,
-    this.bannerFallbackUrl,
+    this.actions = const [],
     this.bannerImageUrl,
+    this.bannerFallbackUrl,
+    this.mosaicUrls = const [],
   });
 
   final String title;
   final String? imageUrl;
   final Color? accent;
   final String? eyebrow;
+  final IconData? eyebrowIcon;
   final List<Widget> subtitle;
-  final bool circleImage;
+  final List<HeroMetaItem> meta;
+  final String? thumbnailUrl;
+  final bool thumbnailCircle;
   final IconData placeholderIcon;
-  final List<Widget>? actions;
-  final double expandedHeight;
-
-  /// Interpret: fotka přes celou šířku (ne rozostřené pozadí + karta),
-  /// dole plynule prolnutá do `AppBackground`, jméno velkým písmem přes ni.
-  final bool banner;
-
-  /// Když interpret fotku nemá -- rozostřený, přiblížený obal jeho alba,
-  /// ať hlavička nikdy není prázdný šedý obdélník.
-  final String? bannerFallbackUrl;
-
-  /// Skutečně široká fotka (fanart.tv `artistbackground`) -- má přednost
-  /// před čtvercovou `imageUrl`, přes celou šířku bez ořezu hlav.
+  final List<HeroAction> actions;
   final String? bannerImageUrl;
+  final String? bannerFallbackUrl;
+  final List<String> mosaicUrls;
+
+  /// Výška roztažené hlavičky bez status baru -- stejná na všech detailech.
+  static double expandedHeightFor(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (isWide(context)) return _wideCoverSize(width) + 2 * _wideBoxPadding + kToolbarHeight + AppSpacing.lg;
+    return (width * 0.9).clamp(330.0, 460.0);
+  }
+
+  /// Široké okno (desktop/tablet na šířku): místo fotky přes celou šířku
+  /// (roztažená fotka na 2000 px nikdy nevypadá dobře) rozostřený tónovaný
+  /// pás + plovoucí skleněný box s velkým obalem a informačním blokem,
+  /// vše v obsahovém sloupci [kDetailMaxWidth].
+  static bool isWide(BuildContext context) => MediaQuery.sizeOf(context).width >= 840;
+
+  static double _wideCoverSize(double width) => width >= 1200 ? 260 : 220;
+  static const double _wideBoxPadding = 24;
+
+  /// Malý obrázek do sbalené lišty.
+  String? get _barThumb =>
+      thumbnailUrl ?? imageUrl ?? (mosaicUrls.isNotEmpty ? mosaicUrls.first : null) ?? bannerFallbackUrl;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final topPadding = MediaQuery.paddingOf(context).top;
-    final collapsedHeight = kToolbarHeight + topPadding;
-    final blurSource = bannerImageUrl ?? imageUrl ?? bannerFallbackUrl;
-
+    final expanded = expandedHeightFor(context);
+    final canPop = Navigator.of(context).canPop();
+    final wide = isWide(context);
+    // Na širokém okně i ovládání lišty drží okraje obsahového sloupce.
+    final side = wide ? detailSideInset(context) : 0.0;
     return SliverAppBar(
-      expandedHeight: expandedHeight,
       pinned: true,
-      foregroundColor: Colors.white,
-      iconTheme: const IconThemeData(color: Colors.white),
-      actions: actions,
+      stretch: true,
+      expandedHeight: expanded,
+      automaticallyImplyLeading: false,
+      forceMaterialTransparency: true,
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      leadingWidth: kToolbarHeight + side,
+      leading: canPop
+          ? Padding(
+              padding: EdgeInsets.only(left: side),
+              child: Center(
+                child: _HeroCircleButton(
+                  icon: Symbols.arrow_back_rounded,
+                  tooltip: 'Zpět',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+              ),
+            )
+          : null,
+      actions: [
+        for (final action in actions)
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.xs),
+            child: _HeroCircleButton(icon: action.icon, tooltip: action.tooltip, onPressed: action.onPressed),
+          ),
+        SizedBox(width: AppSpacing.xs + side),
+      ],
       flexibleSpace: LayoutBuilder(
-        builder: (context, constraints) {
-          final range = (expandedHeight + topPadding) - collapsedHeight;
-          final t = range <= 0 ? 0.0 : ((constraints.maxHeight - collapsedHeight) / range).clamp(0.0, 1.0);
-          // Oříznout CELOU hlavičku na její obdélník -- rozostřené/zvětšené
-          // vrstvy (Transform.scale, boční výplň na širokém okně) jinak
-          // přetékaly pod hlavičku přes obsah pod ní (živě na iPhonu).
-          return ClipRect(child: banner ? _buildBanner(context, t, blurSource) : _buildStandard(context, t, theme));
-        },
+        builder: (context, constraints) => _HeroFlexible(
+          hero: this,
+          height: constraints.maxHeight,
+          expanded: expanded,
+          leadingWidth: (canPop ? kToolbarHeight : AppSpacing.md) + side,
+          trailingInset: AppSpacing.md + actions.length * 48.0 + side,
+          wide: wide,
+          side: side,
+        ),
       ),
     );
   }
 }
 
-extension on DetailHeroAppBar {
-  /// Sbalená hlavička = čistá skleněná lišta (Liquid Glass "clear" varianta s
-  /// ztmavením, HIG Materials: nad médii 35 % ztmavení) -- obsah pod ní je
-  /// vidět rozmazaný, bílý název a šipka zpět zůstávají čitelné ve světlém
-  /// i tmavém režimu. Obrázkové vrstvy nad ní se při sbalování plynule
-  /// ztrácí, takže se nic nepřekrývá a nic nepřetéká.
-  Widget _collapsedGlass(double t) {
-    if (t >= 0.98) return const SizedBox.shrink();
-    return Opacity(
-      opacity: (1 - t).clamp(0.0, 1.0),
-      child: GlassContainer(
-        borderRadius: BorderRadius.zero,
-        tint: Color.lerp(accent ?? Colors.black, Colors.black, 0.6),
-        tintOpacity: 0.55,
-        showEdgeHighlight: false,
-        fit: StackFit.expand,
-        child: const SizedBox.expand(),
-      ),
-    );
-  }
+/// Max. šířka obsahového sloupce detailů na širokém okně (hlavička i seznamy).
+const kDetailMaxWidth = 1160.0;
 
-  Widget _collapsedTitle(BuildContext context, double t) {
+/// Boční odsazení, které sloupec [kDetailMaxWidth] vycentruje (na telefonu 0).
+double detailSideInset(BuildContext context) =>
+    math.max(0.0, (MediaQuery.sizeOf(context).width - kDetailMaxWidth) / 2);
+
+/// Obalí slivery obsahu detailu (vše pod hlavičkou) tak, aby na širokém
+/// okně ležely ve vycentrovaném sloupci [kDetailMaxWidth] -- scrolluje se
+/// ale pořád celou šířkou okna (kolečko myši funguje i nad okraji).
+List<Widget> detailContentSlivers(BuildContext context, List<Widget> slivers) {
+  final side = detailSideInset(context);
+  if (side == 0) return slivers;
+  return [
+    for (final sliver in slivers) SliverPadding(padding: EdgeInsets.symmetric(horizontal: side), sliver: sliver),
+  ];
+}
+
+class _HeroFlexible extends StatelessWidget {
+  const _HeroFlexible({
+    required this.hero,
+    required this.height,
+    required this.expanded,
+    required this.leadingWidth,
+    required this.trailingInset,
+    required this.wide,
+    required this.side,
+  });
+
+  final DetailHeroAppBar hero;
+  final double height;
+  final double expanded;
+  final double leadingWidth;
+  final double trailingInset;
+  final bool wide;
+  final double side;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Positioned(
-      left: 56,
-      right: (actions?.length ?? 0) * 48.0 + AppSpacing.md,
-      bottom: 0,
-      height: kToolbarHeight,
-      child: Opacity(
-        opacity: (1 - t / 0.4).clamp(0.0, 1.0),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleLarge?.copyWith(color: Colors.white),
-          ),
-        ),
-      ),
-    );
-  }
+    final top = MediaQuery.paddingOf(context).top;
+    final maxH = expanded + top;
+    final minH = kToolbarHeight + top;
 
-  Widget _buildStandard(BuildContext context, double t, ThemeData theme) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _collapsedGlass(t),
-        if (t > 0.02)
-          Opacity(
-            opacity: t,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (imageUrl != null)
-                  NetImage(url: imageUrl!)
-                else
-                  DecoratedBox(
+    final stretch = math.max(0.0, height - maxH);
+    // 0 = roztaženo, 1 = sbaleno.
+    final collapse = ((maxH - height) / (maxH - minH)).clamp(0.0, 1.0);
+    // Parallax: obrázek se posouvá pomaleji než obsah; při přetažení dolů
+    // naopak roste a zůstává ukotvený nahoře.
+    final imageTop = stretch > 0 ? 0.0 : -(maxH - height) * 0.45;
+    final imageHeight = stretch > 0 ? height : maxH;
+
+    // Velký název mizí v první ~polovině sbalování, lišta se skleněným
+    // pozadím a malým názvem se objeví až u horního okraje.
+    final titleT = (1 - collapse / 0.55).clamp(0.0, 1.0);
+    final barT = ((collapse - 0.72) / 0.28).clamp(0.0, 1.0);
+
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (wide)
+            Positioned(top: imageTop, left: 0, right: 0, height: imageHeight, child: _WideBackdrop(hero: hero))
+          else
+            // Prolnutí do pozadí vždy k AKTUÁLNÍ spodní hraně hlavičky -- při
+            // částečném sbalení jinak obrázek končil ostrou hranou nad seznamem.
+            Positioned.fill(
+              child: ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black, Colors.black, Color(0x00000000)],
+                  stops: [0, 0.42, 0.97],
+                ).createShader(rect),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned(
+                      top: imageTop,
+                      left: 0,
+                      right: 0,
+                      height: imageHeight,
+                      child: _FadedMedia(hero: hero, darken: collapse * 0.45),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          // Ztmavení pod status barem a kroužky -- čitelnost na světlých fotkách.
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: top + kToolbarHeight + 24,
+            child: const IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x66000000), Color(0x00000000)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // Závoj pod informačním blokem v barvě plochy -- text `onSurface`
+          // je čitelný nad jakoukoliv fotkou, v tmavém i světlém režimu.
+          if (titleT > 0 && !wide)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: height * 0.62,
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: titleT,
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [theme.colorScheme.primaryContainer, theme.colorScheme.tertiaryContainer],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        // Dole zase do nuly -- jinak by na hraně hlavičky
+                        // vznikl ostrý tmavý předěl proti pozadí seznamu.
+                        colors: [
+                          theme.colorScheme.surface.withValues(alpha: 0),
+                          theme.colorScheme.surface.withValues(alpha: 0.45),
+                          theme.colorScheme.surface.withValues(alpha: 0.4),
+                          theme.colorScheme.surface.withValues(alpha: 0),
+                        ],
+                        stops: const [0, 0.42, 0.78, 1],
                       ),
                     ),
                   ),
-                ClipRect(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                    child: ColoredBox(color: (accent ?? Colors.black).withValues(alpha: 0.4)),
-                  ),
-                ),
-                // Jemné ztmavení dole, ať bílý text vždy čitelně stojí na
-                // světlých obalech.
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black26, Colors.transparent, Colors.black38],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if (t > 0.05)
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Opacity(
-              opacity: t,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
-                child: _HeroCard(
-                  title: title,
-                  imageUrl: imageUrl,
-                  eyebrow: eyebrow,
-                  subtitle: subtitle,
-                  circleImage: circleImage,
-                  placeholderIcon: placeholderIcon,
                 ),
               ),
             ),
-          ),
-        if (t < 0.4) _collapsedTitle(context, t),
-      ],
+          if (barT > 0)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: height,
+              child: Opacity(
+                opacity: barT,
+                child: const GlassContainer(
+                  borderRadius: BorderRadius.zero,
+                  showEdgeHighlight: false,
+                  fit: StackFit.expand,
+                  child: SizedBox.expand(),
+                ),
+              ),
+            ),
+          if (titleT > 0 && !wide)
+            Positioned(
+              left: AppSpacing.md,
+              right: AppSpacing.md,
+              bottom: AppSpacing.sm,
+              child: Opacity(
+                opacity: titleT,
+                child: Transform.translate(
+                  offset: Offset(0, collapse * 28),
+                  child: _HeroTitleBlock(hero: hero),
+                ),
+              ),
+            ),
+          if (titleT > 0 && wide)
+            Positioned(
+              left: side + AppSpacing.md,
+              right: side + AppSpacing.md,
+              bottom: AppSpacing.lg,
+              child: Opacity(
+                opacity: titleT,
+                child: Transform.translate(
+                  offset: Offset(0, collapse * 28),
+                  child: _WideHeroBox(hero: hero),
+                ),
+              ),
+            ),
+          if (barT > 0)
+            Positioned(
+              top: top,
+              left: leadingWidth + AppSpacing.xs,
+              right: trailingInset,
+              height: kToolbarHeight,
+              child: Opacity(
+                opacity: barT,
+                child: Transform.translate(
+                  offset: Offset(0, (1 - barT) * 10),
+                  child: Row(
+                    children: [
+                      if (hero._barThumb != null) ...[
+                        _Thumb(url: hero._barThumb!, size: 30, circle: hero.thumbnailCircle, icon: hero.placeholderIcon),
+                        const SizedBox(width: AppSpacing.sm),
+                      ],
+                      Expanded(
+                        child: Text(
+                          hero.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
+}
 
-  Widget _blurred(BuildContext context, String? url, {double sigma = 40, double dim = 0.4}) {
-    final theme = Theme.of(context);
+/// Obrázek hlavičky, dole maskou prolnutý do průhledna (prosvítá pozadí
+/// appky) a volitelně ztmavený (při sbalování).
+class _FadedMedia extends StatelessWidget {
+  const _FadedMedia({required this.hero, required this.darken});
+
+  final DetailHeroAppBar hero;
+  final double darken;
+
+  @override
+  Widget build(BuildContext context) {
+    // Maska prolnutí je o úroveň výš (`_HeroFlexible`) -- podle viditelné výšky.
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (url != null)
-          Transform.scale(scale: 1.3, child: NetImage(url: url))
-        else
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [theme.colorScheme.primaryContainer, theme.colorScheme.tertiaryContainer],
-              ),
-            ),
-          ),
-        ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-            child: ColoredBox(color: (accent ?? Colors.black).withValues(alpha: dim)),
-          ),
-        ),
+        _media(context),
+        if (darken > 0.001) IgnorePointer(child: ColoredBox(color: Colors.black.withValues(alpha: darken))),
       ],
     );
   }
 
-  /// Fotky interpretů jsou většinou čtvercové -- přes celou šířku širokého
-  /// okna by `BoxFit.cover` ukázal jen úzký vodorovný pruh a uřízl hlavy.
-  /// Nad poměrem ~1.8:1 proto fotka zůstane na středu v rozumném poměru a
-  /// boky vyplní její rozostřená verze (na telefonu se nic nemění).
-  Widget _bannerPhoto(BuildContext context, String url) {
-    const maxAspect = 1.8;
+  Widget _media(BuildContext context) {
+    final mosaic = hero.mosaicUrls.toSet().toList();
+    if (hero.bannerImageUrl != null) {
+      return _WideAware(
+        url: hero.bannerImageUrl!,
+        alignment: const Alignment(0, -0.3),
+        accent: hero.accent,
+        icon: hero.placeholderIcon,
+      );
+    }
+    if (mosaic.length >= 4) return _Mosaic(urls: mosaic.take(4).toList());
+    final single = hero.imageUrl ?? (mosaic.isNotEmpty ? mosaic.first : null);
+    if (single != null) {
+      return _WideAware(url: single, alignment: const Alignment(0, -0.4), accent: hero.accent, icon: hero.placeholderIcon);
+    }
+    if (hero.bannerFallbackUrl != null) return _Blurred(url: hero.bannerFallbackUrl!, accent: hero.accent);
+    return _GradientArt(icon: hero.placeholderIcon, accent: hero.accent);
+  }
+}
+
+/// Široké okno: pás za hlavičkou -- jen silně rozostřený a barvou tónovaný
+/// obrázek (nikdy ostrá roztažená fotka), dole prolnutý do pozadí appky.
+class _WideBackdrop extends StatelessWidget {
+  const _WideBackdrop({required this.hero});
+
+  final DetailHeroAppBar hero;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = hero.bannerImageUrl ??
+        hero.imageUrl ??
+        (hero.mosaicUrls.isNotEmpty ? hero.mosaicUrls.first : null) ??
+        hero.bannerFallbackUrl;
+    final tint = hero.accent ?? Theme.of(context).colorScheme.primary;
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Colors.black, Color(0xB3000000), Color(0x00000000)],
+        stops: [0, 0.55, 1],
+      ).createShader(rect),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (url != null)
+            ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60, tileMode: TileMode.mirror),
+              child: NetImage(url: url, placeholder: ColoredBox(color: tint)),
+            )
+          else
+            ColoredBox(color: tint),
+          AnimatedAccent(
+            color: tint,
+            builder: (context, c) => DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [c.withValues(alpha: 0.45), c.withValues(alpha: 0.15)],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Široké okno: plovoucí skleněný box -- velký obal/fotka vlevo (kruh u
+/// interpreta), informační blok vpravo.
+class _WideHeroBox extends StatelessWidget {
+  const _WideHeroBox({required this.hero});
+
+  final DetailHeroAppBar hero;
+
+  @override
+  Widget build(BuildContext context) {
+    final cover = DetailHeroAppBar._wideCoverSize(MediaQuery.sizeOf(context).width);
+    return GlassContainer(
+      borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
+      child: Padding(
+        padding: const EdgeInsets.all(DetailHeroAppBar._wideBoxPadding),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _WideCover(hero: hero, size: cover),
+            const SizedBox(width: AppSpacing.xl),
+            Expanded(child: _HeroTitleBlock(hero: hero, showThumb: false)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WideCover extends StatelessWidget {
+  const _WideCover({required this.hero, required this.size});
+
+  final DetailHeroAppBar hero;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final mosaic = hero.mosaicUrls.toSet().toList();
+    final url = hero.thumbnailUrl ?? hero.imageUrl ?? (mosaic.isNotEmpty ? mosaic.first : null);
+    final circle = hero.thumbnailCircle;
+    // O stupeň menší poloměr než box kolem (glass_tokens: vnořený obrázek).
+    final radius = BorderRadius.circular(circle ? size / 2 : Expressive.cornerLargeIncreased);
+    final Widget child;
+    if (hero.thumbnailUrl == null && hero.imageUrl == null && mosaic.length >= 4) {
+      child = _Mosaic(urls: mosaic.take(4).toList());
+    } else if (url != null) {
+      child = NetImage(url: url, placeholder: _GradientArt(icon: hero.placeholderIcon, accent: hero.accent));
+    } else {
+      child = _GradientArt(icon: hero.placeholderIcon, accent: hero.accent);
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 28, offset: const Offset(0, 10))],
+      ),
+      child: ClipRRect(borderRadius: radius, child: child),
+    );
+  }
+}
+
+/// Na telefonu přes celou šířku; na širokém okně (poměr nad ~1.8:1) by
+/// `BoxFit.cover` ze čtvercového obalu/fotky ukázal jen úzký pruh a uřízl
+/// hlavy -- tam zůstane obrázek uprostřed v rozumném poměru a boky vyplní
+/// jeho rozostřená verze.
+class _WideAware extends StatelessWidget {
+  const _WideAware({required this.url, required this.alignment, required this.accent, required this.icon});
+
+  final String url;
+  final Alignment alignment;
+  final Color? accent;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final photo = NetImage(url: url, alignment: const Alignment(0, -0.6));
-        if (constraints.maxWidth <= constraints.maxHeight * maxAspect) return photo;
+        // Než se obrázek stáhne (Cover Art Archive trvá i sekundy) nebo když
+        // selže: tónovaný gradient, ne prázdná díra nahoře.
+        final image = NetImage(url: url, alignment: alignment, placeholder: _GradientArt(icon: icon, accent: accent));
+        const maxAspect = 1.8;
+        if (constraints.maxWidth <= constraints.maxHeight * maxAspect) return image;
         return Stack(
           fit: StackFit.expand,
           children: [
-            // `_blurred` zvětšuje obrázek 1.3× -- bez ořezu by přetekl pod hlavičku.
-            ClipRect(child: _blurred(context, url, sigma: 24, dim: 0.25)),
+            _Blurred(url: url, accent: accent),
             Center(
               child: SizedBox(
                 width: constraints.maxHeight * maxAspect,
@@ -292,10 +613,10 @@ extension on DetailHeroAppBar {
                 child: ShaderMask(
                   blendMode: BlendMode.dstIn,
                   shaderCallback: (rect) => const LinearGradient(
-                    colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+                    colors: [Color(0x00000000), Colors.black, Colors.black, Color(0x00000000)],
                     stops: [0, 0.12, 0.88, 1],
                   ).createShader(rect),
-                  child: photo,
+                  child: image,
                 ),
               ),
             ),
@@ -304,173 +625,404 @@ extension on DetailHeroAppBar {
       },
     );
   }
+}
 
-  Widget _buildBanner(BuildContext context, double t, String? blurSource) {
-    final theme = Theme.of(context);
-    // Maska: nahoře plná fotka, od ~45 % výšky plynule do průhledna --
-    // pod ní prosvítá `AppBackground`, hlavička tak "vtéká" do stránky.
-    Widget faded(Widget child) => ShaderMask(
-          blendMode: BlendMode.dstIn,
-          shaderCallback: (rect) => const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.black, Colors.black, Colors.transparent],
-            stops: [0, 0.45, 1],
-          ).createShader(rect),
-          child: child,
-        );
+class _Blurred extends StatelessWidget {
+  const _Blurred({required this.url, required this.accent});
 
-    return Stack(
-      fit: StackFit.expand,
+  final String url;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 28, sigmaY: 28, tileMode: TileMode.mirror),
+            child: NetImage(url: url),
+          ),
+          AnimatedAccent(
+            color: accent ?? Colors.black,
+            builder: (context, c) => ColoredBox(color: c.withValues(alpha: 0.25)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Mosaic extends StatelessWidget {
+  const _Mosaic({required this.urls});
+
+  final List<String> urls;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget cell(String url) => Expanded(child: NetImage(url: url));
+    return Column(
       children: [
-        _collapsedGlass(t),
-        // Fotka + horní ztmavení v JEDNÉ vrstvě se stejnou průhledností --
-        // při sbalování se hýbou a mizí spolu, nic se nerozjede.
-        if (t > 0.02)
-          Opacity(
-            opacity: t,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                faded(
-                  bannerImageUrl != null
-                      ? NetImage(url: bannerImageUrl!, alignment: const Alignment(0, -0.3))
-                      : imageUrl != null
-                          ? _bannerPhoto(context, imageUrl!)
-                          : _blurred(context, bannerFallbackUrl, sigma: 24, dim: 0.25),
-                ),
-                // Ztmavení nahoře kvůli šipce zpět/akcím na světlých fotkách.
-                const IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.center,
-                        colors: [Colors.black45, Colors.transparent],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if (t > 0.05)
-          Positioned(
-            left: AppSpacing.md,
-            right: AppSpacing.md,
-            bottom: AppSpacing.md,
-            child: Opacity(
-              opacity: t,
-              child: DefaultTextStyle.merge(
-                style: TextStyle(color: theme.colorScheme.onSurface),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (eyebrow != null)
-                      Text(
-                        eyebrow!.toUpperCase(),
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
-                          letterSpacing: 1.4,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.displaySmall?.copyWith(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                        shadows: [Shadow(color: theme.colorScheme.surface.withValues(alpha: 0.6), blurRadius: 16)],
-                      ),
-                    ),
-                    if (subtitle.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.xxs),
-                      ...subtitle,
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        if (t < 0.4) _collapsedTitle(context, t),
+        Expanded(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [cell(urls[0]), cell(urls[1])])),
+        Expanded(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [cell(urls[2]), cell(urls[3])])),
       ],
     );
   }
 }
 
-class _HeroCard extends StatelessWidget {
-  const _HeroCard({
-    required this.title,
-    required this.imageUrl,
-    required this.eyebrow,
-    required this.subtitle,
-    required this.circleImage,
-    required this.placeholderIcon,
-  });
+/// Bez obrázku (Oblíbené, prázdný playlist): tónovaný gradient s velkou
+/// ikonou -- navržená plocha, ne šedý placeholder.
+class _GradientArt extends StatelessWidget {
+  const _GradientArt({required this.icon, required this.accent});
 
-  final String title;
-  final String? imageUrl;
-  final String? eyebrow;
-  final List<Widget> subtitle;
-  final bool circleImage;
-  final IconData placeholderIcon;
+  final IconData icon;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final base = accent ?? scheme.primary;
+    final hsl = HSLColor.fromColor(base);
+    final deep = hsl.withLightness((hsl.lightness * 0.55).clamp(0.12, 0.4)).toColor();
+    // Šedý seed bez odstínu nechat šedý (odstín 0° = červená).
+    final bright = isAchromatic(base)
+        ? hsl.withLightness(0.62).toColor()
+        : hsl.withHue((hsl.hue + 35) % 360).withLightness(0.62).withSaturation(0.7).toColor();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [bright, base, deep],
+          stops: const [0, 0.45, 1],
+        ),
+      ),
+      child: Align(
+        alignment: const Alignment(0.55, -0.15),
+        child: Icon(icon, size: 132, fill: 1, color: Colors.white.withValues(alpha: 0.9)),
+      ),
+    );
+  }
+}
+
+class _HeroTitleBlock extends StatelessWidget {
+  const _HeroTitleBlock({required this.hero, this.showThumb = true});
+
+  final DetailHeroAppBar hero;
+
+  /// `false` ve širokém boxu -- velký obal tam stojí samostatně vlevo.
+  final bool showThumb;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final shape = AppShapes.of(circleImage ? AppRadii.pill : AppRadii.sm);
-    return GlassContainer(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      tint: Colors.black,
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      child: DefaultTextStyle.merge(
-        style: const TextStyle(color: Colors.white),
-        child: IconTheme.merge(
-          data: const IconThemeData(color: Colors.white),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              ClipPath(
-                clipper: ShapeBorderClipper(shape: shape),
-                child: SizedBox(
-                  width: 96,
-                  height: 96,
-                  child: ArtworkImage(url: imageUrl, icon: placeholderIcon, iconSize: 40),
-                ),
+    final fg = theme.colorScheme.onSurface;
+    final glow = [Shadow(color: theme.colorScheme.surface.withValues(alpha: 0.6), blurRadius: 16)];
+    final titleColumn = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hero.eyebrow != null) ...[
+          _TypeChip(label: hero.eyebrow!, icon: hero.eyebrowIcon),
+          const SizedBox(height: AppSpacing.xs),
+        ],
+        _AutoShrinkTitle(
+          text: hero.title,
+          style: theme.textTheme.displaySmall!.copyWith(
+            color: fg,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.8,
+            height: 1.02,
+            shadows: glow,
+          ),
+        ),
+      ],
+    );
+    return DefaultTextStyle.merge(
+      style: TextStyle(color: fg, shadows: glow),
+      child: IconTheme.merge(
+        data: IconThemeData(color: fg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (showThumb && hero.thumbnailUrl != null)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _Thumb(
+                    url: hero.thumbnailUrl!,
+                    size: 84,
+                    circle: hero.thumbnailCircle,
+                    icon: hero.placeholderIcon,
+                    elevated: true,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(child: titleColumn),
+                ],
+              )
+            else
+              titleColumn,
+            if (hero.subtitle.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xs),
+              ...hero.subtitle,
+            ],
+            if (hero.meta.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xs),
+              HeroMetaRow(items: hero.meta),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Typový štítek (ALBUM, INTERPRET, DENNÍ MIX...) -- sjednocená "vybraná"
+/// pilulka z glass_tokens: `primaryContainer` + vnitřní horní lesk, text a
+/// ikona `onPrimaryContainer`.
+class _TypeChip extends StatelessWidget {
+  const _TypeChip({required this.label, this.icon});
+
+  final String label;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = scheme.onPrimaryContainer;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.center,
+          colors: [
+            Color.alphaBlend(
+              Colors.white.withValues(alpha: Expressive.selectedPillHighlightAlpha),
+              scheme.primaryContainer,
+            ),
+            scheme.primaryContainer,
+          ],
+        ),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 10, offset: const Offset(0, 2))],
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(icon != null ? 8 : 10, 4, 10, 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, fill: 1, color: fg),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label.toUpperCase(),
+              style: TextStyle(
+                color: fg,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+                height: 1.2,
+                shadows: const [],
               ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Column(
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Velký název: max 2 řádky; když se nevejde, postupně se zmenšuje
+/// (displaySmall -> ~28 px), teprve pak trojtečka.
+class _AutoShrinkTitle extends StatelessWidget {
+  const _AutoShrinkTitle({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scaler = MediaQuery.textScalerOf(context);
+        final base = style.fontSize ?? 36;
+        var size = base + 6;
+        for (; size > 26; size -= 2) {
+          final painter = TextPainter(
+            text: TextSpan(text: text, style: style.copyWith(fontSize: size)),
+            maxLines: 2,
+            textDirection: Directionality.of(context),
+            textScaler: scaler,
+          )..layout(maxWidth: constraints.maxWidth);
+          final fits = !painter.didExceedMaxLines && (painter.computeLineMetrics().length <= 1 || size <= base);
+          painter.dispose();
+          if (fits) break;
+        }
+        return Text(
+          text,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: style.copyWith(fontSize: size),
+        );
+      },
+    );
+  }
+}
+
+/// Náhled (obal/avatar) vedle názvu a ve sbalené liště.
+class _Thumb extends StatelessWidget {
+  const _Thumb({required this.url, required this.size, required this.circle, required this.icon, this.elevated = false});
+
+  final String url;
+  final double size;
+  final bool circle;
+  final IconData icon;
+  final bool elevated;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final radius = circle ? BorderRadius.circular(size / 2) : BorderRadius.circular(size >= 64 ? AppRadii.md : 8);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        color: scheme.surfaceContainerHigh,
+        border: elevated ? Border.all(color: Colors.white.withValues(alpha: 0.22), width: 1.5) : null,
+        boxShadow: elevated
+            ? [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 18, offset: const Offset(0, 6))]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: NetImage(
+          url: url,
+          placeholder: Icon(icon, size: size * 0.45, color: scheme.onSurfaceVariant),
+        ),
+      ),
+    );
+  }
+}
+
+/// Jedna položka řádku metadat pod názvem (ikonka + text). `emphasized`
+/// = tónová pilulka (pořadí/odznak žebříčku).
+class HeroMetaItem {
+  const HeroMetaItem(this.icon, this.text, {this.emphasized = false});
+
+  final IconData icon;
+  final String text;
+  final bool emphasized;
+}
+
+/// Řádek metadat s ikonkami (rok · skladby · délka · aktualizace...) --
+/// zalamuje se, nic se neořízne.
+class HeroMetaRow extends StatelessWidget {
+  const HeroMetaRow({super.key, required this.items});
+
+  final List<HeroMetaItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final base = DefaultTextStyle.of(context).style.color ?? scheme.onSurface;
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final item in items)
+          if (item.emphasized)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.secondaryContainer.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(6, 2, 8, 2),
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (eyebrow != null)
-                      Text(
-                        eyebrow!.toUpperCase(),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                    Icon(item.icon, size: 14, fill: 1, color: scheme.onSecondaryContainer),
+                    const SizedBox(width: 3),
                     Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+                      item.text,
+                      style: TextStyle(
+                        color: scheme.onSecondaryContainer,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        shadows: const [],
+                      ),
                     ),
-                    if (subtitle.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.xxs),
-                      ...subtitle,
-                    ],
                   ],
                 ),
               ),
-            ],
+            )
+          else
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(item.icon, size: 15, color: base.withValues(alpha: 0.7)),
+                const SizedBox(width: 4),
+                Text(
+                  item.text,
+                  style: TextStyle(color: base.withValues(alpha: 0.82), fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+      ],
+    );
+  }
+}
+
+/// Krátká upoutávka (životopis interpreta) hned pod hlavičkou: 2 řádky,
+/// klepnutím se plynule rozbalí celá.
+class HeroTeaser extends StatefulWidget {
+  const HeroTeaser({super.key, required this.text});
+
+  final String text;
+
+  @override
+  State<HeroTeaser> createState() => _HeroTeaserState();
+}
+
+class _HeroTeaserState extends State<HeroTeaser> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.text,
+                  maxLines: _expanded ? null : 2,
+                  overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant, height: 1.4),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _expanded ? 'Méně' : 'Více',
+                  style: theme.textTheme.labelLarge?.copyWith(color: scheme.primary, fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -478,13 +1030,68 @@ class _HeroCard extends StatelessWidget {
   }
 }
 
-/// Klikatelný řádek v hlavičce (interpret, album) -- bílý podtržený text.
+/// "42 min" / "5 h 25 min" -- jen když je délka známá aspoň u ~90 % skladeb
+/// (jinak by součet lhal); jinak `null`.
+String? heroTotalDuration(Iterable<int?> durationsMs) {
+  final list = durationsMs.toList();
+  if (list.isEmpty) return null;
+  final known = list.whereType<int>().toList();
+  if (known.length < list.length * 0.9) return null;
+  final minutes = (known.fold<int>(0, (a, b) => a + b) / 60000).round();
+  if (minutes <= 0) return null;
+  return minutes < 60 ? '$minutes min' : '${minutes ~/ 60} h ${minutes % 60} min';
+}
+
+/// "Aktualizováno dnes / včera / 28. 9."
+String heroUpdatedLabel(DateTime at) {
+  final local = at.toLocal();
+  final now = DateTime.now();
+  final days = DateTime(now.year, now.month, now.day).difference(DateTime(local.year, local.month, local.day)).inDays;
+  if (days <= 0) return 'Aktualizováno dnes';
+  if (days == 1) return 'Aktualizováno včera';
+  return 'Aktualizováno ${local.day}. ${local.month}.';
+}
+
+/// "1 skladba / 3 skladby / 40 skladeb".
+String heroTrackCount(int n) => '$n ${n == 1 ? 'skladba' : (n >= 2 && n <= 4) ? 'skladby' : 'skladeb'}';
+
+/// Plovoucí tlačítko nad obrázkem -- tmavý průsvitný kroužek (čitelný na
+/// světlé fotce i na skleněné liště). Bez vlastního rozmazání: leží nad
+/// jinou skleněnou vrstvou, dvojitý BackdropFilter by byl drahý.
+class _HeroCircleButton extends StatelessWidget {
+  const _HeroCircleButton({required this.icon, required this.tooltip, required this.onPressed});
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.32),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox.square(dimension: 40, child: Icon(icon, color: Colors.white, size: 22)),
+        ),
+      ),
+    );
+  }
+}
+
+/// Klikatelný řádek v hlavičce (interpret, album).
 class HeroLink extends StatelessWidget {
-  const HeroLink({super.key, required this.text, this.onTap, this.icon});
+  const HeroLink({super.key, required this.text, this.onTap, this.icon, this.avatarUrl});
 
   final String text;
   final VoidCallback? onTap;
   final IconData? icon;
+
+  /// Malý kulatý avatar místo ikonky (fotka interpreta u alba).
+  final String? avatarUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -492,7 +1099,13 @@ class HeroLink extends StatelessWidget {
     final child = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (icon != null) ...[Icon(icon, size: 16, color: base.withValues(alpha: 0.7)), const SizedBox(width: AppSpacing.xxs)],
+        if (avatarUrl != null) ...[
+          _Thumb(url: avatarUrl!, size: 24, circle: true, icon: icon ?? Symbols.person_rounded),
+          const SizedBox(width: AppSpacing.xs),
+        ] else if (icon != null) ...[
+          Icon(icon, size: 16, color: base.withValues(alpha: 0.7)),
+          const SizedBox(width: AppSpacing.xxs),
+        ],
         Flexible(
           child: Text(
             text,
@@ -500,12 +1113,12 @@ class HeroLink extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: base.withValues(alpha: 0.9),
-              fontWeight: FontWeight.w600,
-              decoration: onTap != null ? TextDecoration.underline : null,
-              decorationColor: base.withValues(alpha: 0.4),
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
             ),
           ),
         ),
+        if (onTap != null) Icon(Symbols.chevron_right_rounded, size: 20, color: base.withValues(alpha: 0.6)),
       ],
     );
     if (onTap == null) return child;
@@ -513,7 +1126,8 @@ class HeroLink extends StatelessWidget {
   }
 }
 
-/// Doplňkový šedý řádek v hlavičce (rok, počet skladeb...).
+/// Textový řádek pod názvem (popis mixu/žebříčku: "The Doors, The Beatles
+/// a další") -- metadata s ikonkami patří do `DetailHeroAppBar.meta`.
 class HeroMeta extends StatelessWidget {
   const HeroMeta(this.text, {super.key});
 
@@ -522,6 +1136,14 @@ class HeroMeta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style.color ?? Colors.white;
-    return Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: base.withValues(alpha: 0.7), fontSize: 12));
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: base.withValues(alpha: 0.88), fontSize: 15, fontWeight: FontWeight.w600, height: 1.3),
+      ),
+    );
   }
 }

@@ -4,10 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'routing/app_router.dart';
 import 'state/audio_player_controller.dart';
 import 'state/theme_mode_controller.dart';
-import 'theme/accent_color.dart';
+import 'theme/accent_color.dart' show accentTransitionCurve, accentTransitionDuration;
 import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
+import 'widgets/now_playing_sheet.dart';
 
 const _defaultSeed = Colors.deepPurple;
 
@@ -17,13 +18,11 @@ class OpentifyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
-    // Seed M3 tématu: barva právě prohlížené obrazovky (album/interpret),
-    // jinak naposledy vybraná barva relace (poslední otevřené album nebo
-    // hrající skladba) -- stejná, jakou má pozadí, takže se téma a pozadí
-    // po návratu na Domů nerozejdou. Výchozí fialová jen úplně na začátku.
-    final screenAccent = ref.watch(activeScreenAccentProvider);
-    final selectedAccent = ref.watch(selectedAccentProvider);
-    final seed = screenAccent ?? selectedAccent ?? _defaultSeed;
+    // Seed M3 tématu i barva pozadí z JEDNOHO zdroje (`effectiveAccentProvider`):
+    // hrající skladba > otevřené album/interpret > naposledy platná barva.
+    // Výchozí fialová jen úplně na začátku.
+    final accent = ref.watch(effectiveAccentProvider);
+    final seed = accent ?? _defaultSeed;
     final isPlaying = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
 
     return MaterialApp.router(
@@ -43,11 +42,15 @@ class OpentifyApp extends ConsumerWidget {
       // (`buildAppTheme`), takže prosvítá skrz. I přehrávač je teď průhledný
       // (pozadí appky pod hustě namrzlým sklem), takže se nikdy nezastavuje.
       builder: (context, child) => _maybeSimulatedInsets(context, AppBackground(
-        selectedAccent: screenAccent ?? selectedAccent,
+        selectedAccent: accent,
+        supportTones: ref.watch(effectiveSupportTonesProvider),
+        character: ref.watch(effectiveCoverCharacterProvider),
         brightness: Theme.of(context).brightness,
         isPlaying: isPlaying,
         hidden: false,
-        child: child ?? const SizedBox.shrink(),
+        // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
+        // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
+        child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
       )),
     );
   }

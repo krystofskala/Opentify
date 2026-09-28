@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -12,7 +11,6 @@ import '../features/profile/profile_screen.dart';
 import '../features/profile/year_in_review_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
-import '../features/track/track_screen.dart';
 import 'home_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -42,7 +40,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/releases/:releaseId',
-        builder: (context, state) => ReleaseScreen(releaseId: state.pathParameters['releaseId']!),
+        builder: (context, state) => ReleaseScreen(
+          releaseId: state.pathParameters['releaseId']!,
+          highlightTrackId: state.uri.queryParameters['track'],
+        ),
       ),
       GoRoute(
         path: '/library/liked',
@@ -53,24 +54,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => PlaylistDetailScreen(playlistId: state.pathParameters['playlistId']!),
       ),
       GoRoute(
-        path: '/tracks/:recordingId',
-        builder: (context, state) => TrackScreen(recordingId: state.pathParameters['recordingId']!),
-      ),
-      GoRoute(
         path: '/year-in-review',
         builder: (context, state) => const YearInReviewScreen(),
       ),
       GoRoute(
         path: '/now-playing',
+        // Bez vlastní animace a průhledná -- polohu přehrávače řídí
+        // `NowPlayingSheetController` (interaktivní tažení z mini
+        // přehrávače), stránka pod ním zůstává vidět během vysouvání.
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
+          opaque: false,
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
           child: const NowPlayingScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) => SlideTransition(
-            position: Tween(begin: const Offset(0, 1), end: Offset.zero)
-                .chain(CurveTween(curve: Curves.easeOutCubic))
-                .animate(animation),
-            child: child,
-          ),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) => child,
         ),
       ),
     ],

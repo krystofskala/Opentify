@@ -29,21 +29,30 @@ class HomeShell extends StatelessWidget {
     return Scaffold(
       extendBody: true,
       body: navigationShell,
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Jeden stín na skupinu (má ho tab bar) -- žádné vrstvené stíny.
-          MediaQuery.removePadding(
-            context: context,
-            removeBottom: true,
-            child: const PlayerBar(shadow: false),
+      // Na širokém okně plovoucí skupina (přehrávač + tab bar) uprostřed s
+      // omezenou šířkou -- ne pruh přes celých 2000 px.
+      bottomNavigationBar: Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: kFloatingBarMaxWidth),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Jeden stín na skupinu (má ho tab bar) -- žádné vrstvené stíny.
+              MediaQuery.removePadding(
+                context: context,
+                removeBottom: true,
+                child: const PlayerBar(shadow: false),
+              ),
+              GlassTabBar(
+                items: _tabs,
+                selectedIndex: navigationShell.currentIndex,
+                onSelected: navigationShell.goBranch,
+              ),
+            ],
           ),
-          GlassTabBar(
-            items: _tabs,
-            selectedIndex: navigationShell.currentIndex,
-            onSelected: navigationShell.goBranch,
-          ),
-        ],
+        ),
       ),
     );
   }

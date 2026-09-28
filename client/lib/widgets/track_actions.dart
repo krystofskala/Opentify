@@ -46,7 +46,6 @@ Future<void> showTrackActionsSheet(
   String? artworkUrl,
   String? artistNameFallback,
   List<TrackMenuAction> extraActions = const [],
-  bool showDetailLink = true,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -58,7 +57,6 @@ Future<void> showTrackActionsSheet(
       artworkUrl: artworkUrl,
       artistNameFallback: artistNameFallback,
       extraActions: extraActions,
-      showDetailLink: showDetailLink,
       // Router/messenger z VOLAJÍCÍHO contextu -- sheet se po výběru zavře,
       // navigace musí jít přes stránku pod ním.
       hostContext: context,
@@ -72,7 +70,6 @@ class _TrackActionsSheet extends ConsumerWidget {
     required this.artworkUrl,
     required this.artistNameFallback,
     required this.extraActions,
-    required this.showDetailLink,
     required this.hostContext,
   });
 
@@ -80,7 +77,6 @@ class _TrackActionsSheet extends ConsumerWidget {
   final String? artworkUrl;
   final String? artistNameFallback;
   final List<TrackMenuAction> extraActions;
-  final bool showDetailLink;
   final BuildContext hostContext;
 
   @override
@@ -175,19 +171,13 @@ class _TrackActionsSheet extends ConsumerWidget {
                   _Item(
                     icon: Symbols.album_rounded,
                     label: 'Přejít na album',
-                    onTap: () => run(() => hostContext.push('/releases/${recording.releaseId}')),
+                    onTap: () => run(() => hostContext.push('/releases/${recording.releaseId}?track=${recording.id}')),
                   ),
                 if (recording.artistId != null)
                   _Item(
                     icon: Symbols.person_rounded,
                     label: 'Přejít na interpreta',
                     onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
-                  ),
-                if (showDetailLink)
-                  _Item(
-                    icon: Symbols.info_rounded,
-                    label: 'Detail skladby',
-                    onTap: () => run(() => hostContext.push('/tracks/${recording.id}')),
                   ),
                 if (inLibrary)
                   _Item(

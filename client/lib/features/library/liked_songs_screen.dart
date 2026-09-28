@@ -139,8 +139,6 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
       ),
       data: (playlist) {
         final items = _liveItems(ref, playlist.items);
-        final totalMs = items.fold<int>(0, (sum, r) => sum + (r.durationMs ?? 0));
-        final minutes = (totalMs / 60000).round();
         return Scaffold(
           bottomNavigationBar: const PlayerBar(),
           body: RefreshIndicator(
@@ -150,53 +148,60 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                 DetailHeroAppBar(
                   title: _title,
                   eyebrow: 'Playlist',
+                  eyebrowIcon: Symbols.favorite_rounded,
+                  accent: const Color(0xFFE0245E),
                   placeholderIcon: Symbols.favorite_rounded,
-                  subtitle: [
-                    HeroMeta(['${items.length} skladeb', if (minutes > 0 && items.where((r) => r.durationMs != null).length >= items.length * 0.9) '$minutes min'].join(' · '))
+                  subtitle: const [HeroMeta('Všechno, co má u tebe srdíčko')],
+                  meta: [
+                    HeroMetaItem(Symbols.queue_music_rounded, heroTrackCount(items.length)),
+                    if (heroTotalDuration(items.map((r) => r.durationMs)) case final total?)
+                      HeroMetaItem(Symbols.schedule_rounded, total),
                   ],
                 ),
-                if (items.isEmpty)
-                  const SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: EmptyState(
-                      icon: Symbols.favorite_rounded,
-                      message:
-                          'Zatím nic -- klepni na srdíčko u skladby, nebo naimportuj Liked Songs ze Spotify v Profilu.',
-                    ),
-                  )
-                else
-                  ListenableBuilder(
-                    listenable: _collection,
-                    builder: (context, _) {
-                      final visible = _collection.apply(items);
-                      return SliverList.list(
-                        children: [
-                          TrackCollectionToolbar(
-                            controller: _collection,
-                            allTracks: items,
-                            visibleTracks: visible,
-                            sourceLabel: _title,
-                            onRemoveSelected: _unlike,
-                            removeLabel: 'Odebrat z oblíbených',
-                          ),
-                          if (visible.isEmpty) const EmptyState(compact: true, message: 'Filtru nic neodpovídá.'),
-                          for (final r in visible)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                              child: TrackTile(
-                                recording: r,
-                                queueRecordings: visible,
-                                sourceLabel: _title,
-                                selectionMode: _collection.selecting,
-                                selected: _collection.isSelected(r.id),
-                                onSelectedChanged: (value) => _collection.toggle(r.id, value),
-                              ),
+                ...detailContentSlivers(context, [
+                  if (items.isEmpty)
+                    const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: EmptyState(
+                        icon: Symbols.favorite_rounded,
+                        message:
+                            'Zatím nic -- klepni na srdíčko u skladby, nebo naimportuj Liked Songs ze Spotify v Profilu.',
+                      ),
+                    )
+                  else
+                    ListenableBuilder(
+                      listenable: _collection,
+                      builder: (context, _) {
+                        final visible = _collection.apply(items);
+                        return SliverList.list(
+                          children: [
+                            TrackCollectionToolbar(
+                              controller: _collection,
+                              allTracks: items,
+                              visibleTracks: visible,
+                              sourceLabel: _title,
+                              onRemoveSelected: _unlike,
+                              removeLabel: 'Odebrat z oblíbených',
                             ),
-                        ],
-                      );
-                    },
-                  ),
-                SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg + MediaQuery.paddingOf(context).bottom)),
+                            if (visible.isEmpty) const EmptyState(compact: true, message: 'Filtru nic neodpovídá.'),
+                            for (final r in visible)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                                child: TrackTile(
+                                  recording: r,
+                                  queueRecordings: visible,
+                                  sourceLabel: _title,
+                                  selectionMode: _collection.selecting,
+                                  selected: _collection.isSelected(r.id),
+                                  onSelectedChanged: (value) => _collection.toggle(r.id, value),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg + MediaQuery.paddingOf(context).bottom)),
+                ]),
               ],
             ),
           ),

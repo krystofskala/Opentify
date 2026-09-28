@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../core/reduced_motion.dart';
+import '../theme/accent_color.dart' show CoverCharacter, isAchromatic;
 
 /// Globální pozadí appky -- tekuté zrnité gradienty (reference: "50 Grainy
 /// Gradients", generativní Figma gradienty) v jednom fragment shaderu
@@ -22,6 +23,8 @@ class AppBackground extends StatefulWidget {
   const AppBackground({
     super.key,
     required this.selectedAccent,
+    this.supportTones = const [],
+    this.character,
     required this.brightness,
     required this.isPlaying,
     required this.hidden,
@@ -29,6 +32,14 @@ class AppBackground extends StatefulWidget {
   });
 
   final Color? selectedAccent;
+
+  /// Doplňkové tóny z obalu (`effectiveSupportTonesProvider`) -- odstíny
+  /// vedlejších slotů monochromatické palety; prázdné = syntetický posun.
+  final List<Color> supportTones;
+
+  /// Charakter obalu (průměrná sytost/světlost) -- pastelový obal = jemná
+  /// světlá paleta, temný = hluboká, sytý = sytá. `null` = jen z barvy.
+  final CoverCharacter? character;
   final Brightness brightness;
   final bool isPlaying;
   final bool hidden;
@@ -64,6 +75,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   late List<_Lab> _from;
   late List<_Lab> _to;
   double _tweenStart = -10;
+  Curve _tweenCurve = Curves.easeInOutCubic;
 
   double _phase = 0;
   // Posun tekutého pole (jednotky šumu). Perioda 256 = perioda mřížky šumu,
@@ -86,7 +98,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    final palette = _paletteFor(widget.selectedAccent, widget.brightness).map(_Lab.fromColor).toList();
+    final palette = _paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character).map(_Lab.fromColor).toList();
     _from = palette;
     _to = palette;
     _ticker = createTicker(_onTick);
@@ -115,18 +127,32 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   @override
   void didUpdateWidget(AppBackground old) {
     super.didUpdateWidget(old);
-    if (old.selectedAccent != widget.selectedAccent || old.brightness != widget.brightness) {
-      _startTween(_paletteFor(widget.selectedAccent, widget.brightness));
-      if (old.selectedAccent != null && widget.selectedAccent != null && !_reducedMotion) _bloom = 1;
+    if (old.selectedAccent != widget.selectedAccent ||
+        old.brightness != widget.brightness ||
+        !listEquals(old.supportTones, widget.supportTones) ||
+        old.character != widget.character) {
+      // "Záblesk" jen u samostatné změny -- při rychlém přeskakování skladeb
+      // by jinak pozadí pulzovalo s každým klepnutím.
+      final retarget = _tweening(_now);
+      _startTween(_paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character));
+      if (!retarget && old.selectedAccent != null && widget.selectedAccent != null && !_reducedMotion) _bloom = 1;
     }
     if (old.hidden != widget.hidden || old.isPlaying != widget.isPlaying) _wake();
   }
 
+  /// Přechod vždy začíná z AKTUÁLNĚ vykreslené (rozpracované) barvy každého
+  /// slotu -- nová cílová barva uprostřed přechodu ho jen přesměruje, nikdy
+  /// neskočí zpátky na starou výchozí barvu. Přesměrování navíc jede
+  /// `easeOutCubic` (rozjeté hned od začátku), ne znovu od nulové rychlosti
+  /// `easeInOutCubic` -- jinak by rychlé přepínání skladeb barvu "brzdilo"
+  /// a přechod by působil trhaně.
   void _startTween(List<Color> palette) {
     final now = _now;
+    final retarget = _tweening(now);
     _from = List.generate(6, (i) => _slotAt(i, now));
     _to = palette.map(_Lab.fromColor).toList();
     _tweenStart = now;
+    _tweenCurve = retarget ? Curves.easeOutCubic : Curves.easeInOutCubic;
     _wake();
   }
 
@@ -136,7 +162,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
 
   _Lab _slotAt(int i, double now) {
     final raw = ((now - _tweenStart - i * _stagger) / _tweenDuration).clamp(0.0, 1.0);
-    final t = Curves.easeInOutCubic.transform(raw);
+    final t = _tweenCurve.transform(raw);
     return _Lab.lerp(_from[i], _to[i], t);
   }
 
@@ -205,7 +231,9 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
         : _FallbackPainter(state: this, repaint: _frame);
     return NotificationListener<ScrollNotification>(
       onNotification: _onScroll,
-      child: Stack(
+      child: _BackgroundScope(
+        state: this,
+        child: Stack(
         fit: StackFit.expand,
         children: [
           // Každá vrstva přímé dítě `Stack`u -- `Positioned` uvnitř
@@ -213,8 +241,37 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
           RepaintBoundary(child: IgnorePointer(child: CustomPaint(painter: painter))),
           widget.child,
         ],
+        ),
       ),
     );
+  }
+}
+
+class _BackgroundScope extends InheritedWidget {
+  const _BackgroundScope({required this.state, required super.child});
+
+  final _AppBackgroundState state;
+
+  @override
+  bool updateShouldNotify(_BackgroundScope oldWidget) => state != oldWidget.state;
+}
+
+/// Kopie živého pozadí appky (stejná paleta, fáze i zrno ve stejném
+/// snímku) -- pro skleněný panel přehrávače, který obsah stránky pod sebou
+/// úplně zakryje, ale gradient v barvě skladby má prosvítat. Musí mít
+/// velikost celé obrazovky a ležet na jejím počátku (volající ji posune
+/// o polohu panelu), jinak by nenavazovala na pozadí kolem.
+class AppBackgroundMirror extends StatelessWidget {
+  const AppBackgroundMirror({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.dependOnInheritedWidgetOfExactType<_BackgroundScope>()?.state;
+    if (state == null) return const SizedBox.expand();
+    final painter = state._programReady != null
+        ? _ShaderPainter(state: state, repaint: state._frame)
+        : _FallbackPainter(state: state, repaint: state._frame);
+    return RepaintBoundary(child: IgnorePointer(child: CustomPaint(painter: painter, size: Size.infinite)));
   }
 }
 
@@ -274,6 +331,9 @@ class _FallbackPainter extends CustomPainter {
   static ui.Image? _grain;
   static String? _grainKey;
   static final _FlowMesh _mesh = _FlowMesh();
+  static ui.Vertices? _cachedVertices;
+  static int _cachedFrame = -1;
+  static Size? _cachedSize;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -282,14 +342,22 @@ class _FallbackPainter extends CustomPainter {
     final dark = state.widget.brightness == Brightness.dark;
     final palette = List.generate(6, (i) => state._slotAt(i, now));
 
-    final vertices = _mesh.build(
-      size,
-      palette,
-      flow: state._flow,
-      warp: 3.2 * (1 + 0.3 * state._boost) + 0.6 * state._bloom,
-      lift: 0.05 * state._bloom,
-      dark: dark,
-    );
+    // Stejný snímek kreslí i `AppBackgroundMirror` (panel přehrávače) --
+    // síť se počítá jen jednou za snímek.
+    final frame = state._frame.value;
+    if (_cachedFrame != frame || _cachedSize != size || _cachedVertices == null) {
+      _cachedVertices = _mesh.build(
+        size,
+        palette,
+        flow: state._flow,
+        warp: 3.2 * (1 + 0.3 * state._boost) + 0.6 * state._bloom,
+        lift: 0.05 * state._bloom,
+        dark: dark,
+      );
+      _cachedFrame = frame;
+      _cachedSize = size;
+    }
+    final vertices = _cachedVertices!;
     canvas.drawVertices(vertices, BlendMode.dst, Paint());
 
     if (dark) {
@@ -495,56 +563,145 @@ class _FlowMesh {
 }
 
 /// Paleta 6 slotů: [základ, stín, jádro, střed, highlight, doplněk].
-List<Color> _paletteFor(Color? accent, Brightness brightness) {
+List<Color> _paletteFor(
+  Color? accent,
+  Brightness brightness, [
+  List<Color> supportTones = const [],
+  CoverCharacter? character,
+]) {
   final dark = brightness == Brightness.dark;
-  if (accent == null) {
-    // Pestrá paleta jen dokud nic není vybrané -- magenta/azurová/oranžová/
-    // fialová/zelená jako v referencích.
+  if (accent == null) return dark ? _startDark : _startLight;
+  if (isAchromatic(accent)) {
+    // Černobílý/šedý obal: šedá má v HSL odstín 0° (= červená), takže
+    // zvednutí sytosti níž by z ní udělalo červenou appku. Neutrální
+    // monochrom bez odstínu -- grafit/stříbro v tmavém, teplá šeď/papír ve
+    // světlém režimu (L ≥ 0.72 kvůli kontrastu textu, viz níž).
+    Color grey(double l, {double hue = 0, double s = 0}) => HSLColor.fromAHSL(1, hue, s, l).toColor();
     return dark
-        ? const [
-            // Nejtmavší tón je sytá indigová, ne skoro černá -- žádná "podlaha".
-            Color(0xFF2A1060),
-            Color(0xFF7B2CFF),
-            Color(0xFFE0359A),
-            Color(0xFF12B5CB),
-            Color(0xFFFF8A3D),
-            Color(0xFF2BD67B),
-          ]
-        : const [
-            Color(0xFFFFF4FA),
-            Color(0xFFB794FF),
-            Color(0xFFFF7EC3),
-            Color(0xFF6FE3F0),
-            Color(0xFFFFC08A),
-            Color(0xFF8CF0B5),
+        ? [grey(0.10), grey(0.18), grey(0.30), grey(0.40), grey(0.56), grey(0.24)]
+        : [
+            grey(0.95, hue: 40, s: 0.06),
+            grey(0.86, hue: 40, s: 0.05),
+            grey(0.77, hue: 40, s: 0.04),
+            grey(0.73, hue: 40, s: 0.04),
+            grey(0.92, hue: 40, s: 0.06),
+            grey(0.81, hue: 40, s: 0.05),
           ];
   }
   final hsl = HSLColor.fromColor(accent);
   final h = hsl.hue;
-  final s = hsl.saturation.clamp(0.45, 0.9);
+  // Charakter obalu, ne jen odstín: sytost palety ŠKÁLUJE průměrnou sytost
+  // obalu (pastelový/prachový obal -> jemná paleta, sytý -> sytá; dřív se
+  // všechno zvedlo na ≥ 0.45 a krémový obal vypadal stejně jako sytě
+  // červený). Malá podlaha jen proto, že šedé obaly řeší větev výš.
+  final coverSat = (character?.saturation ?? hsl.saturation).clamp(0.0, 1.0);
+  final coverLight = (character?.lightness ?? 0.5).clamp(0.0, 1.0);
+  final s = math.max(0.18, ui.lerpDouble(0.15, 0.85, coverSat)!);
+  // Světlost sleduje světlost obalu: světlý pastel posune paletu výš a
+  // stáhne kontrast mezi sloty (měkčí), temný obal ji posune do hloubky.
+  // Tmavý režim zůstává tmavý a světlý světlý (L ≥ 0.72 kvůli textu).
+  final brightness01 = coverLight - 0.5;
+  final spread = 1 - math.max(0.0, brightness01) * 0.5;
+  double lit(double base) => dark
+      ? (0.40 + (base - 0.40) * spread + brightness01 * 0.3).clamp(0.05, 0.8)
+      : (0.84 + (base - 0.84) * spread + brightness01 * 0.12).clamp(0.72, 0.97);
   Color tone(double dh, double sf, double l) =>
-      HSLColor.fromAHSL(1, (h + dh) % 360, (s * sf).clamp(0.0, 1.0), l).toColor();
+      HSLColor.fromAHSL(1, (h + dh) % 360, (s * sf).clamp(0.0, 1.0), lit(l)).toColor();
+
+  // Známe skutečné převládající barvy obalu -> paleta z nich: odstín a
+  // sytost každého slotu z reálné barvy obalu (převládající barva na
+  // největší plochy, nejtmavší na hloubku, nejsvětlejší na světla),
+  // světlost ze struktury výš (čitelnost). Krémový obal s vínovou kresbou
+  // tak dá krémovo-pískové pozadí s vínovými akcenty, ne červené pole.
+  final tones = character?.tones ?? const <Color>[];
+  if (tones.length >= 2) {
+    final byLight = [...tones]..sort((a, b) => HSLColor.fromColor(a).lightness.compareTo(HSLColor.fromColor(b).lightness));
+    final darkest = byLight.first;
+    final lightest = byLight.last;
+    final t0 = tones[0];
+    final t1 = tones[1];
+    final t2 = tones.length > 2 ? tones[2] : t1;
+    Color from(Color c, double l) {
+      final src = HSLColor.fromColor(c);
+      final target = lit(l);
+      // Zachovat CHROMU (skutečnou barevnost), ne HSL sytost: bledý krém má
+      // HSL sytost klidně 0.6, ale chromu ~0.1 -- přenesená sytost by z něj
+      // v tmavé světlosti udělala syté okrové pole.
+      final chroma = (1 - (2 * src.lightness - 1).abs()) * src.saturation;
+      final room = math.max(0.05, 1 - (2 * target - 1).abs());
+      // Papír/šeď zůstane skoro neutrální (ne červená z odstínu 0°).
+      final sat = chroma < 0.04 ? 0.04 : math.min(0.85, chroma * 0.95 / room);
+      return HSLColor.fromAHSL(1, src.hue, sat, target).toColor();
+    }
+
+    return dark
+        ? [from(darkest, 0.13), from(t0, 0.24), from(t0, 0.42), from(t1, 0.55), from(lightest, 0.72), from(t2, 0.32)]
+        : [from(lightest, 0.95), from(t0, 0.86), from(t0, 0.76), from(t1, 0.72), from(t1, 0.93), from(t2, 0.8)];
+  }
+  // Doplňkové tóny obalu dávají vedlejším slotům (stín, střed) skutečné
+  // odstíny z obalu místo syntetického posunu -- sytost a světlost slotů
+  // zůstávají ze struktury výš, mění se jen odstínové nuance.
+  double offsetTo(Color c) => ((HSLColor.fromColor(c).hue - h + 540) % 360) - 180;
+  final dA = supportTones.isNotEmpty ? offsetTo(supportTones[0]) : null;
+  final dB = supportTones.length > 1 ? offsetTo(supportTones[1]) : null;
   return dark
       ? [
           tone(10, 0.9, 0.13),
-          tone(-14, 1.0, 0.24),
+          tone(dA ?? -14, 1.0, 0.24),
           tone(0, 1.0, 0.42),
-          tone(16, 0.9, 0.55),
+          tone(dB ?? 16, 0.9, 0.55),
           tone(-6, 0.7, 0.72),
-          tone(6, 1.0, 0.32),
+          tone(dA != null ? dA / 2 : 6, 1.0, 0.32),
         ]
       // Světlý režim: nejtmavší tón L≥0.72 -- tmavý text (`onSurface`) musí
       // mít na kterémkoliv místě pole kontrast ≥ 4.5:1 (HIG Accessibility).
       // Dřív L 0.56/0.66 → nadpisy a odkazy tmavé na tmavém.
       : [
           tone(0, 0.35, 0.95),
-          tone(-12, 0.8, 0.86),
+          tone(dA ?? -12, 0.8, 0.86),
           tone(0, 1.0, 0.76),
-          tone(14, 0.9, 0.72),
+          tone(dB ?? 14, 0.9, 0.72),
           tone(-6, 0.5, 0.93),
-          tone(4, 1.0, 0.8),
+          tone(dA != null ? dA / 2 : 4, 1.0, 0.8),
         ];
 }
+
+/// Pestrá úvodní paleta (dokud nic není vybrané) -- stejné odstíny, jak je
+/// má uživatel rád, ale ztlumené: sytost −20 % a světlosti slotů o ~22 %
+/// blíž k sobě, ať "nebije do očí" víc než monochromatické stavy.
+final List<Color> _startDark = _soften(_startDarkRaw);
+final List<Color> _startLight = _soften(_startLightRaw);
+
+List<Color> _soften(List<Color> raw) {
+  final hsl = raw.map(HSLColor.fromColor).toList();
+  final meanL = hsl.fold<double>(0, (a, c) => a + c.lightness) / hsl.length;
+  return [
+    for (final c in hsl)
+      c
+          .withSaturation((c.saturation * 0.8).clamp(0.0, 1.0))
+          .withLightness((meanL + (c.lightness - meanL) * 0.78).clamp(0.0, 1.0))
+          .toColor(),
+  ];
+}
+
+// Magenta/azurová/oranžová/fialová/zelená jako v referencích.
+const List<Color> _startDarkRaw = [
+  // Nejtmavší tón je sytá indigová, ne skoro černá -- žádná "podlaha".
+  Color(0xFF2A1060),
+  Color(0xFF7B2CFF),
+  Color(0xFFE0359A),
+  Color(0xFF12B5CB),
+  Color(0xFFFF8A3D),
+  Color(0xFF2BD67B),
+];
+const List<Color> _startLightRaw = [
+  Color(0xFFFFF4FA),
+  Color(0xFFB794FF),
+  Color(0xFFFF7EC3),
+  Color(0xFF6FE3F0),
+  Color(0xFFFFC08A),
+  Color(0xFF8CF0B5),
+];
 
 /// OKLab barva -- míchání v něm nekalí přechody do šeda/hněda jako sRGB.
 class _Lab {

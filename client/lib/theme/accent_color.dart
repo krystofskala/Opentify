@@ -109,6 +109,55 @@ final supportTonesProvider = FutureProvider.autoDispose.family<List<Color>, Stri
   return extractSupportTones(imageUrl);
 });
 
+/// "Charakter" obalu -- průměrná barevnost (chroma, 0..1) a světlost celé plochy (vážená
+/// zastoupením barev), ne jen odstín hlavní barvy. Pastelový krémový obal
+/// a sytě červený obal můžou mít podobný odstín, ale úplně jinou náladu;
+/// pozadí podle tohohle ladí sytost a světlost své palety.
+///
+/// `tones` = skutečné převládající barvy obalu (nenormalizované), seřazené
+/// podle zastoupení (≥ 3 % plochy, max 5) -- krémový papír s vínovou
+/// kresbou má dát krémovo-pískové pozadí s tmavě vínovými akcenty, ne
+/// červené pole podle jediné "živé" barvy.
+typedef CoverCharacter = ({double saturation, double lightness, List<Color> tones});
+
+Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
+  return _characterFutures.putIfAbsent(imageUrl, () async {
+    try {
+      final palette = await PaletteGenerator.fromImageProvider(
+        CachedNetworkImageProvider(imageUrl),
+        size: const Size(120, 120),
+        maximumColorCount: 16,
+      );
+      var total = 0;
+      var sat = 0.0;
+      var light = 0.0;
+      for (final swatch in palette.paletteColors) {
+        final hsl = HSLColor.fromColor(swatch.color);
+        total += swatch.population;
+        // Chroma (skutečná barevnost), ne HSL sytost -- bledý krém má HSL
+        // sytost vysokou, ale barevně je skoro neutrální.
+        sat += (1 - (2 * hsl.lightness - 1).abs()) * hsl.saturation * swatch.population;
+        light += hsl.lightness * swatch.population;
+      }
+      if (total == 0) return null;
+      final tones = [
+        for (final swatch in [...palette.paletteColors]..sort((a, b) => b.population.compareTo(a.population)))
+          if (swatch.population >= total * 0.03) swatch.color,
+      ].take(5).toList();
+      return (saturation: sat / total, lightness: light / total, tones: tones);
+    } catch (_) {
+      _characterFutures.remove(imageUrl);
+      return null;
+    }
+  });
+}
+
+final Map<String, Future<CoverCharacter?>> _characterFutures = {};
+
+final coverCharacterProvider = FutureProvider.autoDispose.family<CoverCharacter?, String>((ref, imageUrl) {
+  return extractCoverCharacter(imageUrl);
+});
+
 /// Pod touhle sytostí je barva prakticky šedá/černobílá -- nemá odstín.
 const achromaticSaturation = 0.12;
 

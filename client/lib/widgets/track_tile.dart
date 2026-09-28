@@ -161,7 +161,15 @@ class TrackTile extends ConsumerWidget {
           onLongPress: onLongPress,
           onRetry: () => _play(ref, resolvedArtUrl),
           onToggleLike: () => ref.read(likedSongsControllerProvider.notifier).toggle(recording.id),
-          onOpenDetail: selectionMode ? null : () => context.push('/tracks/${recording.id}'),
+          // Skladba nemá vlastní stránku -- název vede na její album (a tam
+          // ji zvýrazní), bez alba na interpreta.
+          onOpenDetail: selectionMode
+              ? null
+              : recording.releaseId != null
+                  ? () => context.push('/releases/${recording.releaseId}?track=${recording.id}')
+                  : recording.artistId != null
+                      ? () => context.push('/artists/${recording.artistId}')
+                      : null,
           onArtistTap: selectionMode ? null : artistTap,
           selectionMode: selectionMode,
           selected: selected,

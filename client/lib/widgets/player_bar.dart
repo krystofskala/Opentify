@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -8,17 +9,24 @@ import '../state/liked_songs_controller.dart';
 import '../state/provisioning_controller.dart';
 import '../theme/accent_color.dart';
 import '../theme/glass_tokens.dart';
+import '../theme/selected_accent.dart';
 import 'glass/expressive_shapes.dart';
 import 'glass_container.dart';
-import 'wavy_seek_bar.dart';
 import 'net_image.dart';
+import 'now_playing_sheet.dart';
+import 'wavy_seek_bar.dart';
 
-/// Perzistentní "Liquid Glass" lišta přehrávače -- rozostřený obal alba na
-/// pozadí, přes něj poloprůhledná skleněná vrstva (`BackdropFilter`). Vkládá
-/// se do `bottomNavigationBar` slotu na každé obrazovce, kde má být vidět
-/// (viz `HomeShell`, `ReleaseScreen`, `ArtistScreen`). Když nic nehraje,
-/// nezabírá žádné místo.
-class PlayerBar extends ConsumerWidget {
+/// Max. šířka plovoucí spodní skupiny (mini přehrávač, tab bar) na širokém
+/// okně -- zarovnaná na střed jako obsahový sloupec detailů.
+const kFloatingBarMaxWidth = 760.0;
+
+/// Perzistentní mini přehrávač -- plovoucí kapsle z hustě namrzlého skla
+/// tónovaného barvou skladby. Gesta (jako Apple Music):
+///   * klepnutí / tažení nahoru -> interaktivně vysune velký přehrávač
+///     (`NowPlayingSheetController`, sheet jde přesně za prstem);
+///   * tažení do stran -> další/předchozí skladba, obsah jede s prstem a
+///     sousední skladba vykukuje z boku, puštění dokončí pružinou.
+class PlayerBar extends ConsumerStatefulWidget {
   const PlayerBar({super.key, this.shadow = true});
 
   /// `false` v `HomeShell` -- lišta leží těsně nad skleněnou navigací, dva
@@ -26,193 +34,142 @@ class PlayerBar extends ConsumerWidget {
   final bool shadow;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PlayerBar> createState() => _PlayerBarState();
+}
+
+class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProviderStateMixin {
+  late final AnimationController _swipe = AnimationController.unbounded(vsync: this);
+  double _swipeWidth = 1;
+
+  static const _spring = SpringDescription(mass: 1, stiffness: 420, damping: 38);
+
+  @override
+  void dispose() {
+    _swipe.dispose();
+    super.dispose();
+  }
+
+  NowPlayingSheetController get _sheet => NowPlayingSheetController.of(context);
+
+  void _onSwipeUpdate(DragUpdateDetails d, AudioPlayerState playback) {
+    var next = _swipe.value + d.delta.dx;
+    if ((next < 0 && !playback.hasNext) || (next > 0 && playback.previousIndex == null)) {
+      next = _swipe.value + d.delta.dx * 0.3; // gumička na kraji fronty
+    }
+    _swipe.value = next;
+  }
+
+  Future<void> _onSwipeEnd(DragEndDetails d, AudioPlayerState playback) async {
+    final v = d.velocity.pixelsPerSecond.dx;
+    final dx = _swipe.value;
+    final w = _swipeWidth;
+    final goNext = playback.hasNext && (dx < -w * 0.3 || v < -650);
+    final goPrev = playback.previousIndex != null && (dx > w * 0.3 || v > 650);
+    final controller = ref.read(audioPlayerControllerProvider.notifier);
+    if (goNext || goPrev) {
+      await _swipe.animateWith(SpringSimulation(_spring, dx, goNext ? -w : w, v));
+      if (!mounted) return;
+      if (goNext) {
+        await controller.next();
+      } else {
+        await controller.skipToIndex(playback.previousIndex!);
+      }
+      // Sousední skladba je teď aktuální -- na střed bez skoku.
+      _swipe.value = 0;
+    } else {
+      await _swipe.animateWith(SpringSimulation(_spring, dx, 0, v));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final playback = ref.watch(audioPlayerControllerProvider);
     final nowPlaying = playback.nowPlaying;
     if (nowPlaying == null) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-    final targetAccent = playback.accentColor ?? theme.colorScheme.primary;
+    // Barva nové skladby ještě není spočítaná -> drží se předchozí (ne
+    // okamžik přes `primary`, které se zrovna samo animuje).
+    final targetAccent = playback.accentColor ?? ref.watch(effectiveAccentProvider) ?? theme.colorScheme.primary;
     final duration = playback.duration ?? Duration.zero;
-    final positionMs = playback.position.inMilliseconds
-        .clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
+    final positionMs =
+        playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
     final hasError = playback.error != null;
     final isLiked = ref.watch(
       likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(nowPlaying.recordingId) ?? false),
     );
-
-    // Odliší "čekám na dokončení obstarání" od obyčejného síťového bufferingu
-    // už staženého souboru -- jen ten první má smysl popisovat textem/procenty,
-    // viz `TrackProvisioningState.statusLabel`.
     final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
     final isProvisioning = provisioningState?.isInFlight ?? false;
     final provisioningPct = provisioningState?.pct;
-
-    void retry() {
-      ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlaying);
-    }
+    final screenHeight = MediaQuery.sizeOf(context).height;
 
     return AnimatedAccent(
       color: targetAccent,
       builder: (context, accent) {
-      // Popředí dle režimu -- na světlém namrzlém skle tmavé, na tmavém bílé
-      // (HIG Accessibility: kontrast min. 4.5:1).
-      final fg = Theme.of(context).colorScheme.onSurface;
-      return Padding(
-      // Stejné okraje jako tab bar pod ní (`GlassTokens.floatingMargin`).
-      // Samostatně (detaily) nad home indikátorem; v `HomeShell` pod ní je
-      // tab bar, který inset řeší sám (shell ho tady odebírá).
-      padding: EdgeInsets.fromLTRB(
-        GlassTokens.floatingMargin,
-        0,
-        GlassTokens.floatingMargin,
-        8 + MediaQuery.paddingOf(context).bottom,
-      ),
-      // Pozadí appky pod hustě namrzlým sklem, jemně tónovaným barvou
-      // skladby -- obal už NENÍ pozadím lišty (jen náhled vlevo).
-      child: GlassContainer.frosted(
+        // Popředí dle režimu -- na světlém namrzlém skle tmavé, na tmavém
+        // bílé (HIG Accessibility: kontrast min. 4.5:1).
+        final fg = Theme.of(context).colorScheme.onSurface;
+        final bar = Padding(
+          // Stejné okraje jako tab bar pod ní (`GlassTokens.floatingMargin`).
+          padding: EdgeInsets.fromLTRB(
+            GlassTokens.floatingMargin,
+            0,
+            GlassTokens.floatingMargin,
+            8 + MediaQuery.paddingOf(context).bottom,
+          ),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _sheet.open(context),
+            onVerticalDragStart: (_) => _sheet.dragStart(context),
+            onVerticalDragUpdate: (d) => _sheet.dragUpdate(d.delta.dy, screenHeight),
+            onVerticalDragEnd: (d) => _sheet.dragEnd(d.velocity.pixelsPerSecond.dy, screenHeight),
+            child: GlassContainer.frosted(
               borderRadius: BorderRadius.circular(26),
               tint: accent,
-              shadow: shadow,
-              // Inset je VNĚ kapsle (odsazení níž), ne uvnitř.
+              shadow: widget.shadow,
               child: MediaQuery.removePadding(
                 context: context,
                 removeBottom: true,
                 child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Neinteraktivní ukazatel -- jen "at a glance" průběh, žádný
-                  // Slider. Flutterí Slider si i přes vizuálně tenký track
-                  // (trackHeight: 2) drží dotykovou plochu ~40dp vysokou, což
-                  // v týhle 8px liště kradlo tapy určené pro rozbalení Now
-                  // Playing pod ním -- klik na řádek dole místo expandu
-                  // omylem seekoval skladbu. Reálný interaktivní seek slider
-                  // zůstává jen v `NowPlayingScreen` (`interactive: false` tady
-                  // gesta úplně vypne), vlnovka je ale stejná v obou -- viz
-                  // `WavySeekBar` (port PixelPlayerova `WavySliderExpressive`).
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                    child: duration.inMilliseconds == 0
-                        ? (playback.isBuffering
-                            ? SizedBox(
-                                height: 8,
-                                child: LinearProgressIndicator(
-                                  minHeight: 2,
-                                  backgroundColor: Colors.transparent,
-                                  value: isProvisioning && provisioningPct != null ? provisioningPct / 100 : null,
-                                ),
-                              )
-                            : const SizedBox(height: 8))
-                        : WavySeekBar(
-                            progress: positionMs / duration.inMilliseconds,
-                            isPlaying: playback.isPlaying,
-                            interactive: false,
-                            height: 12,
-                            strokeWidth: 2.5,
-                            waveAmplitude: 2.5,
-                            activeColor: fg,
-                            inactiveColor: fg.withValues(alpha: 0.3),
-                          ),
-                  ),
-                  GestureDetector(
-                    // Švih nahoru rozbalí přehrávač stejně jako tap -- gesto
-                    // z Musify's `MiniPlayer` (github.com/gokadzev/Musify,
-                    // GPL-3.0). Jen `onVerticalDragUpdate`, žádný `onTap` tady
-                    // -- ten nechává vnořenému `InkWell` níž, ať gesto
-                    // neuloupí jeho ripple/tap.
-                    onVerticalDragUpdate: (details) {
-                      if ((details.primaryDelta ?? 0) < -10) context.push('/now-playing');
-                    },
-                    child: InkWell(
-                    // Klik kdekoliv na řádek (mimo samotné tlačítko play/pause
-                    // vpravo, které si tap vezme samo) rozbalí celoobrazovkový
-                    // přehrávač -- "nejde zvětšit" byl reálný nedostatek dřívější
-                    // verze, PixelPlayer to řeší přesně takhle (mini bar -> Now Playing).
-                    onTap: () => context.push('/now-playing'),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Průběh jako neinteraktivní vlnovka -- s vlastním místem
+                    // nahoře i po stranách, ať nesedí nalepená na hraně kapsle.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(22, 10, 22, 2),
+                      child: SizedBox(
+                        height: 14,
+                        child: duration.inMilliseconds == 0
+                            ? (playback.isBuffering
+                                ? Center(
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(2),
+                                      child: LinearProgressIndicator(
+                                        minHeight: 3,
+                                        color: fg,
+                                        backgroundColor: fg.withValues(alpha: 0.15),
+                                        value: isProvisioning && provisioningPct != null ? provisioningPct / 100 : null,
+                                      ),
+                                    ),
+                                  )
+                                : const SizedBox.shrink())
+                            : WavySeekBar(
+                                progress: positionMs / duration.inMilliseconds,
+                                isPlaying: playback.isPlaying,
+                                interactive: false,
+                                height: 14,
+                                strokeWidth: 2.5,
+                                waveAmplitude: 2.5,
+                                activeColor: fg,
+                                inactiveColor: fg.withValues(alpha: 0.3),
+                              ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 4, 6, 10),
                       child: Row(
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: nowPlaying.artworkUrl != null
-                                  ? NetImage(url: nowPlaying.artworkUrl!)
-                                  : Container(
-                                      color:
-                                          fg.withValues(alpha: 0.15),
-                                      child: Icon(Symbols.music_note_rounded,
-                                          color: fg, size: 20),
-                                    ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                GestureDetector(
-                                  // Stejná disambiguace jako u jména interpreta
-                                  // níž -- vnořený tap cíl uvnitř vnějšího
-                                  // `InkWell` (rozbaluje Now Playing).
-                                  onTap: nowPlaying.releaseId == null
-                                      ? null
-                                      : () => context.push('/releases/${nowPlaying.releaseId}'),
-                                  child: Text(
-                                    nowPlaying.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: fg,
-                                        fontWeight: FontWeight.w600),
-                                  ),
-                                ),
-                                if (hasError)
-                                  const Text(
-                                    'Nepodařilo se přehrát -- klepni pro nový pokus',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: Colors.redAccent, fontSize: 12),
-                                  )
-                                else if (isProvisioning)
-                                  Text(
-                                    provisioningState!.statusLabel,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: fg.withValues(alpha: 0.75), fontSize: 12),
-                                  )
-                                else if (nowPlaying.artistName != null || nowPlaying.artistId != null)
-                                  GestureDetector(
-                                    // Vnořený tap cíl uvnitř vnějšího `InkWell`
-                                    // (rozbaluje Now Playing) -- Flutter gesto
-                                    // disambiguuje samo, tap přesně na jméno
-                                    // interpreta jde na jeho profil, tap kdekoliv
-                                    // jinde v řádku pořád rozbaluje přehrávač.
-                                    // I bez jména (`artistId` bez `artistName`,
-                                    // starší data) jde aspoň prokliknout.
-                                    onTap: nowPlaying.artistId == null
-                                        ? null
-                                        : () => context.push('/artists/${nowPlaying.artistId}'),
-                                    child: Text(
-                                    nowPlaying.artistName ?? 'Zobrazit interpreta',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: fg
-                                            .withValues(alpha: 0.75),
-                                        fontSize: 12,
-                                        decoration: nowPlaying.artistId != null
-                                            ? TextDecoration.underline
-                                            : null,
-                                        decorationColor: fg.withValues(alpha: 0.4)),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
+                          Expanded(child: _swipeArea(playback, fg, hasError, isProvisioning, provisioningState)),
                           IconButton(
                             icon: Icon(
                               isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
@@ -220,9 +177,7 @@ class PlayerBar extends ConsumerWidget {
                               size: 22,
                             ),
                             tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                            onPressed: () => ref
-                                .read(likedSongsControllerProvider.notifier)
-                                .toggle(nowPlaying.recordingId),
+                            onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
                           ),
                           IconButton(
                             icon: playback.isBuffering
@@ -236,9 +191,7 @@ class PlayerBar extends ConsumerWidget {
                                 : hasError
                                     ? const Icon(Symbols.refresh_rounded, color: Colors.redAccent, size: 32)
                                     : Icon(
-                                        playback.isPlaying
-                                            ? Symbols.pause_circle_rounded
-                                            : Symbols.play_circle_rounded,
+                                        playback.isPlaying ? Symbols.pause_circle_rounded : Symbols.play_circle_rounded,
                                         color: fg,
                                         size: 38,
                                       ),
@@ -246,22 +199,144 @@ class PlayerBar extends ConsumerWidget {
                             onPressed: playback.isBuffering
                                 ? null
                                 : hasError
-                                    ? retry
-                                    : () => ref
-                                        .read(audioPlayerControllerProvider.notifier)
-                                        .togglePlayPause(),
+                                    ? () => ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlaying)
+                                    : () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
                           ),
                         ],
                       ),
                     ),
-                  ),
-                  ),
-                ],
-                  ),
+                  ],
                 ),
               ),
-    );
+            ),
+          ),
+        );
+        // Široké okno: kapsle uprostřed s omezenou šířkou (stejně jako tab bar).
+        return Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: 1,
+          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: kFloatingBarMaxWidth), child: bar),
+        );
       },
+    );
+  }
+
+  /// Obal + název + interpret -- jede s prstem do stran, sousední skladba
+  /// vykukuje z boku (klip na šířku oblasti, tlačítka vpravo stojí).
+  Widget _swipeArea(
+    AudioPlayerState playback,
+    Color fg,
+    bool hasError,
+    bool isProvisioning,
+    TrackProvisioningState? provisioningState,
+  ) {
+    final prev = playback.previousIndex == null ? null : playback.queue[playback.previousIndex!];
+    final next = playback.nextIndex == null ? null : playback.queue[playback.nextIndex!];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _swipeWidth = constraints.maxWidth;
+        return GestureDetector(
+          onHorizontalDragStart: (_) => _swipe.stop(),
+          onHorizontalDragUpdate: (d) => _onSwipeUpdate(d, playback),
+          onHorizontalDragEnd: (d) => _onSwipeEnd(d, playback),
+          child: ClipRect(
+            child: AnimatedBuilder(
+              animation: _swipe,
+              builder: (context, _) {
+                final dx = _swipe.value;
+                final w = _swipeWidth;
+                String? status;
+                Color? statusColor;
+                if (hasError) {
+                  status = 'Nepodařilo se přehrát -- klepni pro nový pokus';
+                  statusColor = Colors.redAccent;
+                } else if (isProvisioning) {
+                  status = provisioningState!.statusLabel;
+                }
+                return Stack(
+                  children: [
+                    if (prev != null && dx > 0)
+                      Transform.translate(offset: Offset(dx - w, 0), child: _TrackInfo(info: prev, fg: fg)),
+                    if (next != null && dx < 0)
+                      Transform.translate(offset: Offset(dx + w, 0), child: _TrackInfo(info: next, fg: fg)),
+                    Transform.translate(
+                      offset: Offset(dx, 0),
+                      child: _TrackInfo(
+                        info: playback.nowPlaying!,
+                        fg: fg,
+                        status: status,
+                        statusColor: statusColor,
+                        linkable: true,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TrackInfo extends StatelessWidget {
+  const _TrackInfo({required this.info, required this.fg, this.status, this.statusColor, this.linkable = false});
+
+  final NowPlayingInfo info;
+  final Color fg;
+  final String? status;
+  final Color? statusColor;
+  final bool linkable;
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = status ?? info.artistName;
+    return Row(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: info.artworkUrl != null
+                ? NetImage(url: info.artworkUrl!)
+                : ColoredBox(
+                    color: fg.withValues(alpha: 0.15),
+                    child: Icon(Symbols.music_note_rounded, color: fg, size: 20),
+                  ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                info.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: fg, fontWeight: FontWeight.w700),
+              ),
+              if (subtitle != null)
+                GestureDetector(
+                  // Jméno interpreta = odkaz (jen u aktuální skladby, ne u
+                  // vykukující sousední); klepnutí jinam rozbalí přehrávač.
+                  onTap: linkable && status == null && info.artistId != null
+                      ? () => context.push('/artists/${info.artistId}')
+                      : null,
+                  child: Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: statusColor ?? fg.withValues(alpha: 0.75), fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

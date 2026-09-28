@@ -79,8 +79,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         : first == null
             ? null
             : ref.watch(recordingArtworkProvider((releaseId: first.releaseId, artistId: first.artistId))).valueOrNull;
-    final totalMs = items.fold<int>(0, (sum, r) => sum + (r.durationMs ?? 0));
-    final minutes = (totalMs / 60000).round();
 
     return ScreenAccent(
       imageUrl: cover,
@@ -93,60 +91,69 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               imageUrl: cover,
               accent: accent,
               eyebrow: _eyebrowFor(detail.kind),
-              placeholderIcon: Symbols.queue_music_rounded,
+              eyebrowIcon: _eyebrowIconFor(detail.kind),
+              placeholderIcon: _eyebrowIconFor(detail.kind),
               subtitle: [
-                if (detail.description != null) HeroMeta(detail.description!),
-                HeroMeta([
-                  '${items.length} skladeb',
-                  if (minutes > 0 && items.where((r) => r.durationMs != null).length >= items.length * 0.9) '$minutes min',
-                ].join(' · ')),
+                if ((detail.description ?? _artistsLine(items)) case final line?) HeroMeta(line),
               ],
+              meta: [
+                if (detail.kind == 'CHART')
+                  HeroMetaItem(Symbols.trophy_rounded, 'Top ${detail.itemCount}', emphasized: true),
+                if (detail.isReadOnly && detail.generatedAt != null)
+                  HeroMetaItem(Symbols.update_rounded, heroUpdatedLabel(detail.generatedAt!)),
+                HeroMetaItem(Symbols.queue_music_rounded, heroTrackCount(items.length)),
+                if (heroTotalDuration(items.map((r) => r.durationMs)) case final total?)
+                  HeroMetaItem(Symbols.schedule_rounded, total),
+              ],
+              mosaicUrls: detail.coverUrls,
               actions: [
                 if (readOnly)
-                  IconButton(
-                    icon: const Icon(Symbols.library_add_rounded),
+                  HeroAction(
+                    icon: Symbols.library_add_rounded,
                     tooltip: 'Přidat do knihovny',
                     onPressed: () => _copyToLibrary(context, detail),
                   )
                 else
-                  IconButton(
-                    icon: const Icon(Symbols.delete_outline_rounded),
+                  HeroAction(
+                    icon: Symbols.delete_outline_rounded,
                     tooltip: 'Smazat playlist',
                     onPressed: () => _confirmDelete(context),
                   ),
               ],
             ),
-            if (items.isEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: EmptyState(
-                  icon: Symbols.queue_music_rounded,
-                  message: 'Playlist je zatím prázdný -- přidej skladby přes „Přidat do playlistu“ '
-                      'v nabídce u skladby (dlouhý stisk nebo ⋯).',
-                ),
-              )
-            else ...[
-              SliverToBoxAdapter(
-                child: ListenableBuilder(
-                  listenable: _collection,
-                  builder: (context, _) => TrackCollectionToolbar(
-                    controller: _collection,
-                    allTracks: items,
-                    visibleTracks: _collection.apply(items),
-                    sourceLabel: detail.title,
-                    onRemoveSelected: readOnly ? null : (selected) => _removeTracks(selected),
-                    // Vlastní playlist: stáhnout celý na pozadí (žebříček ne --
-                    // 100 skladeb najednou by zahltilo stahování).
-                    downloadWholeList: !readOnly,
+            ...detailContentSlivers(context, [
+              if (items.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Symbols.queue_music_rounded,
+                    message: 'Playlist je zatím prázdný -- přidej skladby přes „Přidat do playlistu“ '
+                        'v nabídce u skladby (dlouhý stisk nebo ⋯).',
+                  ),
+                )
+              else ...[
+                SliverToBoxAdapter(
+                  child: ListenableBuilder(
+                    listenable: _collection,
+                    builder: (context, _) => TrackCollectionToolbar(
+                      controller: _collection,
+                      allTracks: items,
+                      visibleTracks: _collection.apply(items),
+                      sourceLabel: detail.title,
+                      onRemoveSelected: readOnly ? null : (selected) => _removeTracks(selected),
+                      // Vlastní playlist: stáhnout celý na pozadí (žebříček ne --
+                      // 100 skladeb najednou by zahltilo stahování).
+                      downloadWholeList: !readOnly,
+                    ),
                   ),
                 ),
-              ),
-              ListenableBuilder(
-                listenable: _collection,
-                builder: (context, _) => _trackList(detail, items),
-              ),
-            ],
-            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+                ListenableBuilder(
+                  listenable: _collection,
+                  builder: (context, _) => _trackList(detail, items),
+                ),
+              ],
+              const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+            ]),
           ],
         ),
       ),
@@ -247,9 +254,32 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         'CHART' => 'Žebříček',
         'GENRE' => 'Žánr',
         'EDITORIAL' => 'Výběr',
+        'PERSONAL_MIX' => 'Denní mix',
         'GENERATED_RECOMMENDATION' => 'Mix',
         _ => 'Playlist',
       };
+
+  IconData _eyebrowIconFor(String kind) => switch (kind) {
+        'CHART' => Symbols.trending_up_rounded,
+        'GENRE' => Symbols.category_rounded,
+        'EDITORIAL' => Symbols.star_rounded,
+        'PERSONAL_MIX' || 'GENERATED_RECOMMENDATION' => Symbols.auto_awesome_rounded,
+        _ => Symbols.queue_music_rounded,
+      };
+
+  /// Bez popisu: "Interpret A, Interpret B a další" podle nejčastějších
+  /// interpretů v playlistu (jako popisky mixů na Domů).
+  String? _artistsLine(List<RecordingModel> items) {
+    final counts = <String, int>{};
+    for (final r in items) {
+      final name = r.artistName;
+      if (name != null && name.isNotEmpty) counts[name] = (counts[name] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return null;
+    final top =
+        (counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).map((e) => e.key).take(2).toList();
+    return counts.length > top.length ? '${top.join(', ')} a další' : top.join(' a ');
+  }
 
   Future<void> _copyToLibrary(BuildContext context, PlaylistDetailModel detail) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
