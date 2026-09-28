@@ -17,6 +17,7 @@ from app.db import init_db
 from app.loudness import backfill_loop
 from app.realtime import redis_listener, websocket_endpoint
 from app.recommendations.listenbrainz import close_listenbrainz_client, close_listenbrainz_public_client
+from app.routes.artwork import artwork_router
 from app.routes.catalog import catalog_router
 from app.routes.library import library_router
 from app.routes.lyrics import lyrics_router
@@ -49,6 +50,7 @@ app.include_router(recommendations_router, prefix="/api/v1")
 app.include_router(library_router, prefix="/api/v1")
 app.include_router(lyrics_router, prefix="/api/v1")
 app.include_router(playlists_router, prefix="/api/v1")
+app.include_router(artwork_router, prefix="/api/v1")
 
 
 @app.on_event("startup")

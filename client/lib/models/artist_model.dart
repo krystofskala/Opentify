@@ -1,3 +1,5 @@
+import '../core/media_url.dart';
+
 /// 1:1 s `components.schemas.Artist` v docs/openapi.yaml.
 class ArtistModel {
   const ArtistModel({
@@ -24,6 +26,6 @@ class ArtistModel {
         deezerId: json['deezerId'] as String?,
         name: json['name'] as String,
         sortName: json['sortName'] as String?,
-        images: (json['images'] as List<dynamic>? ?? const []).cast<String>(),
+        images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
       );
 }

@@ -225,6 +225,41 @@ extension on DetailHeroAppBar {
     );
   }
 
+  /// Fotky interpretů jsou většinou čtvercové -- přes celou šířku širokého
+  /// okna by `BoxFit.cover` ukázal jen úzký vodorovný pruh a uřízl hlavy.
+  /// Nad poměrem ~1.8:1 proto fotka zůstane na středu v rozumném poměru a
+  /// boky vyplní její rozostřená verze (na telefonu se nic nemění).
+  Widget _bannerPhoto(BuildContext context, String url) {
+    const maxAspect = 1.8;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final photo = CachedNetworkImage(imageUrl: url, fit: BoxFit.cover, alignment: const Alignment(0, -0.6));
+        if (constraints.maxWidth <= constraints.maxHeight * maxAspect) return photo;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // `_blurred` zvětšuje obrázek 1.3× -- bez ořezu by přetekl pod hlavičku.
+            ClipRect(child: _blurred(context, url, sigma: 24, dim: 0.25)),
+            Center(
+              child: SizedBox(
+                width: constraints.maxHeight * maxAspect,
+                height: constraints.maxHeight,
+                child: ShaderMask(
+                  blendMode: BlendMode.dstIn,
+                  shaderCallback: (rect) => const LinearGradient(
+                    colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+                    stops: [0, 0.12, 0.88, 1],
+                  ).createShader(rect),
+                  child: photo,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildBanner(BuildContext context, double t, String? blurSource) {
     final theme = Theme.of(context);
     // Maska: nahoře plná fotka, od ~45 % výšky plynule do průhledna --
@@ -250,7 +285,7 @@ extension on DetailHeroAppBar {
           opacity: t,
           child: faded(
             imageUrl != null
-                ? CachedNetworkImage(imageUrl: imageUrl!, fit: BoxFit.cover, alignment: const Alignment(0, -0.7))
+                ? _bannerPhoto(context, imageUrl!)
                 : _blurred(context, bannerFallbackUrl, sigma: 24, dim: 0.25),
           ),
         ),

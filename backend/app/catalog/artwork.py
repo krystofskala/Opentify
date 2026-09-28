@@ -30,6 +30,7 @@ import httpx
 from sqlmodel import Session, select
 
 from app.catalog.deezer import get_deezer_client
+from app.catalog.embedded_art import extract_release_art
 from app.catalog.musicbrainz import get_musicbrainz_client
 from app.catalog.wikimedia import WIKIMEDIA_USER_AGENT
 from app.db import engine
@@ -170,6 +171,10 @@ async def fill_release(release_id: str, *, force: bool = False) -> bool:
         mbid, title, artist_name = release.mbid, release.title, artist.name if artist else ""
 
     cover = await resolve_release_cover(mbid, artist_name, title)
+    if cover is None:
+        # Poslední záchrana jen pro alba z knihovny: obal vložený v lokálních
+        # souborech (u alb bez lokálních souborů vrátí rovnou `None`).
+        cover = await asyncio.to_thread(extract_release_art, release_id)
 
     with Session(engine) as session:
         release = session.get(Release, release_id)
@@ -243,7 +248,46 @@ def _pending(limit: int) -> tuple[list[str], list[str]]:
     return [r.id for r in releases[:limit]], [a.id for a in artists[:limit]]
 
 
-artwork_progress: dict[str, int | bool] = {"running": False, "filled": 0, "checked": 0}
+artwork_progress: dict[str, int | bool] = {"running": False, "filled": 0, "checked": 0, "embedded": 0}
+
+_EMBEDDED_CHECKED_KEY = "embeddedArtCheckedAt"
+
+
+def _embedded_pass() -> int:
+    """Jednorázový průchod přes alba z knihovny, která online zdroje už
+    dřív zkontrolovaly bez výsledku (vložené obaly tehdy ještě nebyly
+    fallback) -- zkusí vytáhnout obal z lokálních souborů. Značka v
+    `external_refs` zajistí, že se album zkouší jen jednou."""
+    with Session(engine) as session:
+        library_release_ids = set(
+            session.exec(
+                select(Recording.release_id)
+                .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+                .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+            ).all()
+        )
+        candidates = [
+            r.id
+            for r in session.exec(select(Release)).all()
+            if r.id in library_release_ids and not r.images and not (r.external_refs or {}).get(_EMBEDDED_CHECKED_KEY)
+        ]
+    filled = 0
+    for release_id in candidates:
+        url = extract_release_art(release_id)
+        with Session(engine) as session:
+            release = session.get(Release, release_id)
+            if release is None:
+                continue
+            if url and not release.images:
+                release.images = [url]
+                filled += 1
+            release.external_refs = {
+                **(release.external_refs or {}),
+                _EMBEDDED_CHECKED_KEY: datetime.now(timezone.utc).isoformat(),
+            }
+            session.add(release)
+            session.commit()
+    return filled
 
 
 async def artwork_backfill_loop(idle_interval_s: float = 300.0, pause_s: float = 0.3) -> None:
@@ -251,6 +295,11 @@ async def artwork_backfill_loop(idle_interval_s: float = 300.0, pause_s: float =
     pauzou) doplní obrázky všem albům a interpretům, co je nemají -- knihovna
     přednostně. Střídá alba a interprety, ať se obojí plní souběžně."""
     await asyncio.sleep(5)
+    try:
+        artwork_progress["embedded"] = await asyncio.to_thread(_embedded_pass)
+        logger.info("artwork: vložené obaly doplněny u %s alb", artwork_progress["embedded"])
+    except Exception:  # noqa: BLE001
+        logger.exception("artwork: průchod vloženými obaly selhal")
     while True:
         try:
             release_ids, artist_ids = await asyncio.to_thread(_pending, 40)

@@ -1,3 +1,5 @@
+import '../core/media_url.dart';
+
 /// 1:1 s `components.schemas.Release` v docs/openapi.yaml.
 class ReleaseModel {
   const ReleaseModel({
@@ -33,6 +35,6 @@ class ReleaseModel {
         title: json['title'] as String,
         releaseDate: json['releaseDate'] as String?,
         releaseType: json['releaseType'] as String? ?? 'album',
-        images: (json['images'] as List<dynamic>? ?? const []).cast<String>(),
+        images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
       );
 }

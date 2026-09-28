@@ -102,16 +102,24 @@ class _ArtistBody extends ConsumerWidget {
                   data: (recordings) {
                     final top = recordings.take(5).toList();
                     if (top.isEmpty) return const SizedBox.shrink();
+                    // Nejnovější vydání často nemá obal (čerstvý singl) --
+                    // pak fotka interpreta, ne notová ikonka u všech řádků.
+                    final rowArt = topRelease!.coverImageUrl ?? artist.coverImageUrl;
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         SectionHeader(
                           'Z nejnovějšího vydání',
-                          onSeeAll: () => context.push('/releases/${topRelease!.id}'),
+                          onSeeAll: () => context.push('/releases/${topRelease.id}'),
                         ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xxs, AppSpacing.md, AppSpacing.xs),
-                          child: QueueActionBar(tracks: top, sourceLabel: artist.name, artistName: artist.name),
+                          child: QueueActionBar(
+                            tracks: top,
+                            sourceLabel: artist.name,
+                            artistName: artist.name,
+                            albumArtUrl: rowArt,
+                          ),
                         ),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
@@ -121,6 +129,7 @@ class _ArtistBody extends ConsumerWidget {
                                 TrackTile(
                                   recording: recording,
                                   queueRecordings: top,
+                                  albumArtUrl: rowArt,
                                   artistName: artist.name,
                                   sourceLabel: artist.name,
                                 ),

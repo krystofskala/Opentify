@@ -1,4 +1,5 @@
 import '../core/api_client.dart';
+import '../core/media_url.dart';
 import '../models/playlist_model.dart';
 import '../models/recording_model.dart';
 import 'playlists_repository.dart' show PlaylistSummaryModel;
@@ -39,7 +40,7 @@ class LocalAlbum {
   factory LocalAlbum.fromJson(Map<String, dynamic> json) => LocalAlbum(
         id: json['id'] as String,
         title: json['title'] as String,
-        coverImageUrl: json['coverImageUrl'] as String?,
+        coverImageUrl: resolveMediaUrl(json['coverImageUrl'] as String?),
         artistId: json['artistId'] as String,
         artistName: json['artistName'] as String,
         trackCount: json['trackCount'] as int,
@@ -58,7 +59,7 @@ class LocalArtist {
   factory LocalArtist.fromJson(Map<String, dynamic> json) => LocalArtist(
         id: json['id'] as String,
         name: json['name'] as String,
-        imageUrl: json['imageUrl'] as String?,
+        imageUrl: resolveMediaUrl(json['imageUrl'] as String?),
         trackCount: json['trackCount'] as int,
       );
 }

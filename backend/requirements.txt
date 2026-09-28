@@ -4,6 +4,8 @@ sqlmodel==0.0.22
 redis==5.1.*
 httpx==0.27.*
 mutagen==1.47.*
+# Zmenšení vložených obalů z lokálních souborů (catalog/embedded_art.py).
+Pillow>=11.0
 python-multipart==0.0.*
 # yt-dlp bez horního stropu -- extraktory se rozbíjí s YouTube změnami
 # často, novější verze > pinned, viz app/providers.py:YoutubeProvider

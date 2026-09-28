@@ -1,3 +1,4 @@
+import '../core/media_url.dart';
 import 'availability.dart';
 import 'recording_model.dart';
 
@@ -64,7 +65,7 @@ class SearchResultItem {
     final rawType = json['entityType'] as String;
     switch (rawType) {
       case 'artist':
-        final images = (json['images'] as List<dynamic>? ?? const []).cast<String>();
+        final images = resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>());
         return SearchResultItem(
           entityType: SearchEntityType.artist,
           id: json['id'] as String,
@@ -74,7 +75,7 @@ class SearchResultItem {
           imageUrl: images.isEmpty ? null : images.first,
         );
       case 'release':
-        final images = (json['images'] as List<dynamic>? ?? const []).cast<String>();
+        final images = resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>());
         final year = (json['releaseDate'] as String?);
         return SearchResultItem(
           entityType: SearchEntityType.release,
