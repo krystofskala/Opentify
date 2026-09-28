@@ -7,4 +7,6 @@ mutagen==1.47.*
 python-multipart==0.0.*
 # yt-dlp bez horního stropu -- extraktory se rozbíjí s YouTube změnami
 # často, novější verze > pinned, viz app/providers.py:YoutubeProvider
-yt-dlp>=2024.11.0
+yt-dlp>=2026.8.19
+# JS runtime pro YouTube "n"-challenge -- bez něj yt-dlp u části videí selhává.
+deno>=2.0

@@ -67,6 +67,13 @@ services:
       # nést stejnou hodnotu `SLSKD_API_KEY_SECRET` z .env.
       SLSKD_API_KEY: "${SLSKD_API_KEY_SECRET:?vygeneruj: openssl rand -base64 32}"
       SLSKD_DOWNLOADS_DIR: /data/slskd-downloads
+      # YouTube jde standardně napřímo (tvoje volba -- jen Google vidí IP).
+      # `YTDLP_PROXY=http://gluetun:8888` v .env ho pošle přes Mullvad; pak
+      # se zapne i automatické přepnutí VPN
+      # serveru, když YouTube konkrétní IP zablokuje (viz providers.py).
+      YTDLP_PROXY: ${YTDLP_PROXY:-}
+      GLUETUN_CONTROL_URL: http://gluetun:8000
+      GLUETUN_CONTROL_API_KEY: "${GLUETUN_CONTROL_API_KEY:?chybí v .env}"
     volumes:
       - vault-db:/data/db
       - media-library:/data/media
@@ -113,12 +120,21 @@ services:
       VPN_TYPE: wireguard
       WIREGUARD_PRIVATE_KEY: ${MULLVAD_WIREGUARD_PRIVATE_KEY:?vygeneruj WireGuard konfiguraci v Mullvad účtu, viz komentář výš}
       WIREGUARD_ADDRESSES: ${MULLVAD_WIREGUARD_ADDRESSES:?ze stejné WireGuard konfigurace, pole "Address"}
-      SERVER_CITIES: ${MULLVAD_SERVER_CITIES:-Amsterdam}
+      SERVER_CITIES: ${MULLVAD_SERVER_CITIES:-Prague}
       # Bez tohohle by gluetunův firewall blokoval i lokální docker síť
       # (`worker`/`api` -> `gluetun:5030`, ve skutečnosti slskd) -- MUSÍ
       # sedět s podsítí v `networks.default.ipam` na konci souboru a NESMÍ
       # se překrývat s rozsahem VPN tunelu (gluetun to sám hlídá/odmítne).
       FIREWALL_OUTBOUND_SUBNETS: 172.28.0.0/16
+      # HTTP proxy pro yt-dlp ve `worker`u -- YouTube stahování tak jde přes
+      # stejný tunel jako slskd, ne z tvojí skutečné IP. Port 8888 NENÍ
+      # publikovaný na hostitele (viz `ports:` níž), dosažitelný jen z Docker
+      # sítě. Spadne-li tunel, proxy nemá kudy ven -> stahování selže, ne leak.
+      HTTPPROXY: "on"
+      HTTPPROXY_LISTENING_ADDRESS: ":8888"
+      # Control API (port 8000, jen uvnitř Docker sítě) chráněné API klíčem --
+      # worker ho volá jen pro přepnutí serveru (PUT /v1/vpn/status).
+      HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE: '{"auth":"apikey","apikey":"${GLUETUN_CONTROL_API_KEY:?chybí v .env}"}'
     ports:
       # Přesunuto sem ze `slskd` -- container se svým vlastním
       # `network_mode: service:X` nesmí mít vlastní `ports:`, publikuje se

@@ -538,6 +538,67 @@ class SlskdProvider:
         return match
 
 
+def _ytdlp_proxy_opts() -> dict:
+    """YouTube přes Mullvad: gluetunův HTTP proxy (jen uvnitř Docker sítě).
+    Když tunel spadne, proxy nemá kudy ven a stahování selže -- nikdy
+    nepropadne na přímé spojení z tvojí skutečné IP."""
+    proxy = os.environ.get("YTDLP_PROXY")
+    return {"proxy": proxy} if proxy else {}
+
+
+_BOT_BLOCK_MARKERS = ("not a bot", "HTTP Error 403")
+_VPN_ROTATION_KEY = "vpn:rotation"
+_VPN_ROTATION_COOLDOWN_S = 300
+
+
+def _is_bot_block(exc: BaseException) -> bool:
+    return any(marker in str(exc) for marker in _BOT_BLOCK_MARKERS)
+
+
+async def _rotate_vpn_server() -> None:
+    """YouTube blokuje jednotlivé Mullvad IP (živě ověřeno: jeden pražský
+    server "Sign in to confirm you're not a bot", jiný ze stejného /24 v
+    pořádku) -- místo návratu na skutečnou IP přepne gluetun na jiný náhodný
+    server z `SERVER_CITIES`. Redis zámek: přepíná jen jeden worker naráz a
+    nejvýš jednou za 5 minut, ostatní jen počkají na nové spojení."""
+    url = os.environ.get("GLUETUN_CONTROL_URL")
+    key = os.environ.get("GLUETUN_CONTROL_API_KEY")
+    if not (url and key and os.environ.get("YTDLP_PROXY")):
+        return
+    from app.redis_bus import get_redis
+
+    if not await get_redis().set(_VPN_ROTATION_KEY, "1", nx=True, ex=_VPN_ROTATION_COOLDOWN_S):
+        await asyncio.sleep(10)
+        return
+    logger.warning("YouTube blokuje aktuální VPN IP -- přepínám Mullvad server")
+    async with httpx.AsyncClient(timeout=10, headers={"X-API-Key": key}) as client:
+
+        async def public_ip() -> str | None:
+            for _ in range(25):
+                try:
+                    ip = (await client.get(f"{url}/v1/publicip/ip")).json().get("public_ip")
+                except (httpx.HTTPError, ValueError):
+                    ip = None
+                if ip:
+                    return ip
+                await asyncio.sleep(1)
+            return None
+
+        blocked_ip = await public_ip()
+        # Gluetun vybírá server náhodně a občas se trefí do stejného --
+        # opakujeme, dokud nedostaneme jinou výstupní IP.
+        for _ in range(4):
+            await client.put(f"{url}/v1/vpn/status", json={"status": "stopped"})
+            await asyncio.sleep(1)
+            await client.put(f"{url}/v1/vpn/status", json={"status": "running"})
+            await asyncio.sleep(2)
+            new_ip = await public_ip()
+            if new_ip and new_ip != blocked_ip:
+                logger.warning("VPN přepnuta: %s -> %s", blocked_ip, new_ip)
+                return
+        logger.warning("VPN: nepodařilo se získat jinou výstupní IP než %s", blocked_ip)
+
+
 class YoutubeProvider:
     """Záložní/rychlý provider přes yt-dlp. Stahuje NATIVNÍ m4a (AAC, itag
     140) bez překódování -- ~3 s na skladbu místo ~5 s s převodem do MP3
@@ -571,6 +632,7 @@ class YoutubeProvider:
             "socket_timeout": 15,
             "retries": 2,
             "progress_hooks": [progress_hook],
+            **_ytdlp_proxy_opts(),
         }
 
     async def fetch(
@@ -622,7 +684,8 @@ class YoutubeProvider:
             u některých dotazů (diakritika/rozbité kódování) vůbec nehledal,
             a první výsledek býval hodinový mix (živě: 112 MB "2 Hour
             Mashups Mix" místo skladby). Ploché hledání trvá ~1 s."""
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 15}) as ydl:
+            search_opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 15}
+            with yt_dlp.YoutubeDL({**search_opts, **_ytdlp_proxy_opts()}) as ydl:
                 info = ydl.extract_info(f"ytsearch5:{query}", download=False)
             entries = [e for e in (info or {}).get("entries") or [] if e and e.get("id")]
             if not entries:
@@ -663,7 +726,13 @@ class YoutubeProvider:
                 ydl.download([url])
             return dest_stem.with_suffix(".mp3"), self.preferred_bitrate_kbps
 
-        dest_path, bitrate = await asyncio.to_thread(run_download)
+        try:
+            dest_path, bitrate = await asyncio.to_thread(run_download)
+        except Exception as exc:  # noqa: BLE001 - jen bot-blok přes VPN zkoušíme znovu
+            if not _is_bot_block(exc) or not os.environ.get("YTDLP_PROXY"):
+                raise
+            await _rotate_vpn_server()
+            dest_path, bitrate = await asyncio.to_thread(run_download)
         if not dest_path.exists():
             raise RuntimeError(f"yt-dlp nevytvořil očekávaný soubor {dest_path}")
 
