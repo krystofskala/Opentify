@@ -421,7 +421,32 @@ class CatalogService:
         self._session.add(canonical)
         return canonical
 
+    async def _resolve_deezer_id_lazily(self, artist: Artist) -> None:
+        """Interpret bez MBID i bez Deezer id (přišel z ListenBrainz/lokální
+        knihovny a MusicBrainz ho nezná) neměl odkud vzít diskografii --
+        stránka ukazovala "0 vydání" (živě: Hector Gachan). Deezer id se
+        dohledá podle přesného jména (nejvíc fanoušků při shodě)."""
+        if artist.deezer_id:
+            return
+        try:
+            candidates = await self._dz.search_artist(artist.name, limit=5)
+        except Exception:  # noqa: BLE001 - best-effort
+            return
+        wanted = norm(artist.name)
+        matches = [c for c in candidates if norm(c.get("name")) == wanted and c.get("id")]
+        if not matches:
+            return
+        best = max(matches, key=lambda c: c.get("nb_fan") or 0)
+        deezer_id = str(best["id"])
+        owner = self._session.exec(select(Artist).where(Artist.deezer_id == deezer_id)).first()
+        if owner is not None and owner.id != artist.id:
+            return  # jiný řádek už tohle id má -- nesahat, sloučení řeší MBID cesta
+        artist.deezer_id = deezer_id
+        self._session.add(artist)
+        self._session.commit()
+
     async def _deezer_discography(self, artist: Artist) -> list[Release]:
+        await self._resolve_deezer_id_lazily(artist)
         albums = await self._dz.artist_albums(artist.deezer_id) if artist.deezer_id else None
         releases = [r for r in (ingest_album(self._session, a, artist) for a in albums or []) if r is not None]
         self._session.commit()
