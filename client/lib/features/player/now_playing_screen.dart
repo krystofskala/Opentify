@@ -273,16 +273,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                   const SizedBox(height: 20),
                   ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: isWide ? 480 : double.infinity),
-                    // Ovládání na o stupeň světlejším skle (bez dalšího
-                    // rozmazání -- sklo na skle bez dvojitého blur).
-                    child: GlassContainer(
-                      blur: false,
-                      baseFill: false,
-                      emphasis: 0.07,
-                      borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-                      child: _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
-                    ),
+                    // Panel se sklem si kreslí `_controls` sám -- druhý obal
+                    // tady dělal viditelně zdvojený rámeček (živě nahlášeno).
+                    child: _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -482,8 +475,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       blur: false,
       baseFill: false,
       emphasis: GlassTokens.emphasis,
-      borderRadius: BorderRadius.circular(28),
-      padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+      borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
