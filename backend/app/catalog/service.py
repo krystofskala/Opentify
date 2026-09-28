@@ -344,10 +344,10 @@ class CatalogService:
         return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
 
     async def get_artist(self, artist_id: str) -> ArtistOut | None:
-        artist = self._session.get(Artist, artist_id)
+        artist = self._get_artist_row(artist_id)
         if artist is None:
             return None
-        await self._resolve_artist_mbid_lazily(artist)
+        artist = await self._resolve_artist_mbid_lazily(artist)
         await self._enrich_artist_images(artist)
         await self._enrich_artist_country(artist)
         self._session.commit()
@@ -355,33 +355,71 @@ class CatalogService:
             self._session.refresh(artist)
         return self._to_artist_out(artist)
 
-    _MB_LOOKUP_KEY = "mbLookupAt"
+    # v2: řádky zkontrolované dřívější verzí (která při kolizi MBID jen
+    # skončila) se tak jednou projdou znovu a sloučí.
+    _MB_LOOKUP_KEY = "mbLookupAt2"
+    _MERGED_INTO_KEY = "mergedInto"
 
-    async def _resolve_artist_mbid_lazily(self, artist: Artist) -> None:
+    def _get_artist_row(self, artist_id: str) -> Artist | None:
+        """Řádek interpreta, sledující sloučení (Deezer duplikát -> kanonický
+        řádek s MBID). Klient mohl mít otevřené staré id -- dál funguje."""
+        artist = self._session.get(Artist, artist_id)
+        for _ in range(3):
+            target = (artist.external_refs or {}).get(self._MERGED_INTO_KEY) if artist else None
+            if not target:
+                break
+            artist = self._session.get(Artist, target) or artist
+        return artist
+
+    async def _resolve_artist_mbid_lazily(self, artist: Artist) -> Artist:
         """Interpret založený z Deezer hledání nemá MBID -- ten je potřeba
-        pro životopis, podobné interprety a fanart.tv banner. Dohledá se
-        jednou, až při otevření detailu (1 MusicBrainz dotaz), ne při
-        hledání. Jen jistá shoda (přesné jméno, skóre >= 90) a jen když
-        stejné MBID nemá jiný řádek (ten by byl duplicita k sloučení)."""
+        pro životopis, nevydaný materiál, podobné interprety a fanart.tv
+        banner. Dohledá se jednou, při otevření detailu (1 MusicBrainz dotaz).
+        Jen jistá shoda (přesné jméno, skóre >= 90). Když už stejné MBID má
+        jiný řádek (typicky interpret z knihovny), je to duplicita -- tenhle
+        řádek se do něj sloučí (Deezer id, alba, skladby) a vrátí se ten
+        kanonický; dřív tu hledání jen skončilo a Deezer verze interpreta
+        zůstala navždy bez MBID (živě: The Beatles bez životopisu/rarit)."""
         if artist.mbid is not None or (artist.external_refs or {}).get(self._MB_LOOKUP_KEY):
-            return
+            return artist
         artist.external_refs = {**(artist.external_refs or {}), self._MB_LOOKUP_KEY: utcnow().isoformat()}
         self._session.add(artist)
         try:
             data = await self._mb.search("artist", f'artist:"{artist.name}"', 5, 0)
         except MusicBrainzError:
             self._session.commit()
-            return
+            return artist
         wanted = norm(artist.name)
         for candidate in data.get("artists", []):
             if norm(candidate.get("name")) != wanted or int(candidate.get("score") or 0) < 90:
                 continue
             mbid = candidate.get("id")
-            if mbid and self._session.exec(select(Artist).where(Artist.mbid == mbid)).first() is None:
+            if not mbid:
+                break
+            existing = self._session.exec(select(Artist).where(Artist.mbid == mbid)).first()
+            if existing is None:
                 artist.mbid = mbid
                 artist.sort_name = candidate.get("sort-name") or artist.sort_name
+            elif existing.id != artist.id:
+                artist = self._merge_artist_into(artist, existing)
             break
         self._session.commit()
+        return artist
+
+    def _merge_artist_into(self, duplicate: Artist, canonical: Artist) -> Artist:
+        for model in (Release, Recording):
+            for row in self._session.exec(select(model).where(model.artist_id == duplicate.id)).all():
+                row.artist_id = canonical.id
+                self._session.add(row)
+        if not canonical.deezer_id:
+            canonical.deezer_id = duplicate.deezer_id
+        if not canonical.images and duplicate.images:
+            canonical.images = duplicate.images
+        duplicate.deezer_id = None
+        duplicate.external_refs = {**(duplicate.external_refs or {}), self._MERGED_INTO_KEY: canonical.id}
+        self._session.add(duplicate)
+        self._session.add(canonical)
+        return canonical
 
     async def _deezer_discography(self, artist: Artist) -> list[Release]:
         albums = await self._dz.artist_albums(artist.deezer_id) if artist.deezer_id else None
@@ -392,7 +430,7 @@ class CatalogService:
     async def get_discography(
         self, artist_id: str, release_type: str | None
     ) -> DiscographyOut | None:
-        artist = self._session.get(Artist, artist_id)
+        artist = self._get_artist_row(artist_id)
         if artist is None:
             return None
         if artist.mbid is None:
@@ -403,15 +441,21 @@ class CatalogService:
             releases.sort(key=lambda r: r.release_date or "9999")
             return DiscographyOut(artist=self._to_artist_out(artist), releases=[self._to_release_out(r) for r in releases])
 
-        try:
-            data = await self._mb.browse_release_groups(
-                artist.mbid, release_type, limit=100, offset=0
-            )
-        except MusicBrainzError:
-            data = {}
+        # Jen skupiny s aspoň jedním OFICIÁLNÍM vydáním (MB search `status:`).
+        # Dřív browse vracel prvních 100 skupin bez ohledu na status -- u velkých
+        # interpretů (The Beatles: ~2000 skupin, stovky bootlegů) tak bootlegy
+        # vytlačily oficiální alba. Neoficiální materiál má vlastní sekci,
+        # viz `get_rarities`.
+        groups = await self._search_release_groups(artist.mbid, self._official_query(artist.mbid, release_type), 300)
+        if groups is None:
+            try:
+                data = await self._mb.browse_release_groups(artist.mbid, release_type, limit=100, offset=0)
+            except MusicBrainzError:
+                data = {}
+            groups = data.get("release-groups", [])
 
         releases: list[Release] = []
-        for rg in data.get("release-groups", []):
+        for rg in groups:
             # Browse (na rozdíl od search) nevrací `artist-credit` -- interpret
             # je jistý z kontextu dotazu, doplníme ho manuálně.
             rg_with_artist = {
@@ -428,6 +472,73 @@ class CatalogService:
             releases=[self._to_release_out(r) for r in releases],
         )
 
+    @staticmethod
+    def _official_query(artist_mbid: str, release_type: str | None) -> str:
+        query = f"arid:{artist_mbid} AND status:official"
+        if release_type == "compilation":
+            query += " AND secondarytype:compilation"
+        elif release_type:
+            query += f" AND primarytype:{release_type}"
+        return query
+
+    async def _search_release_groups(self, artist_mbid: str, query: str, max_items: int) -> list[dict[str, Any]] | None:
+        """MB release-group search po stránkách po 100; `None` při chybě MB
+        (volající pak spadne na starší browse)."""
+        groups: list[dict[str, Any]] = []
+        offset = 0
+        try:
+            while offset < max_items:
+                data = await self._mb.search("release-group", query, 100, offset)
+                page = data.get("release-groups") or []
+                groups.extend(page)
+                if len(page) < 100 or len(groups) >= (data.get("count") or 0):
+                    break
+                offset += 100
+        except MusicBrainzError:
+            return None if not groups else groups
+        # Search na rozdíl od browse vrací i skupiny, kde je interpret jen
+        # jedním z více -- necháme jen ty, kde ho MB uvádí jako interpreta.
+        return [
+            g for g in groups
+            if any((c.get("artist") or {}).get("id") == artist_mbid for c in g.get("artist-credit") or [])
+        ]
+
+    _RARITY_ORDER = {"demo": 0, "live": 1, "bootleg": 2}
+
+    async def get_rarities(self, artist_id: str) -> list[ReleaseOut] | None:
+        """Nevydaný/vzácný materiál: dema, živáky a bootlegy -- skupiny z
+        MusicBrainz, které NEMAJÍ žádné oficiální vydání. Přehrávají se stejně
+        jako cokoliv jiného (obstarání přes Soulseek/YouTube na požádání),
+        takže se ukáže jen to, co MB zná; jestli je skladba reálně k sehnání,
+        se ukáže až při přehrání."""
+        artist = self._get_artist_row(artist_id)
+        if artist is None:
+            return None
+        if artist.mbid is None:
+            return []
+        query = (
+            f"arid:{artist.mbid} AND (secondarytype:demo OR secondarytype:live OR "
+            'status:bootleg OR status:promotion OR status:"pseudo-release")'
+        )
+        groups = await self._search_release_groups(artist.mbid, query, 300) or []
+
+        out: list[ReleaseOut] = []
+        for rg in groups:
+            statuses = {(r.get("status") or "").lower() for r in rg.get("releases") or []}
+            if "official" in statuses:
+                continue  # oficiálně vydané -- patří do běžné diskografie
+            secondary = {t.lower() for t in rg.get("secondary-types") or []}
+            if secondary & {"interview", "spokenword", "audiobook", "audio drama"}:
+                continue
+            rarity = "demo" if "demo" in secondary else "live" if "live" in secondary else "bootleg"
+            release = self._ingest_release_group_json(
+                {**rg, "artist-credit": [{"artist": {"id": artist.mbid, "name": artist.name, "sort-name": artist.sort_name}}]}
+            )
+            if release is not None:
+                out.append(self._to_release_out(release).model_copy(update={"rarity": rarity}))
+        out.sort(key=lambda r: (self._RARITY_ORDER[r.rarity or "bootleg"], r.release_date or "9999"))
+        return out[:150]
+
     async def get_artist_bio(self, artist_id: str) -> ArtistBioOut | None:
         """Životopis + "Podobní interpreti" pro `ArtistScreen` -- MusicBrainz
         strukturu nemá přímo, jen odkazy (`relations`, viz rozšířený `inc` v
@@ -435,7 +546,7 @@ class CatalogService:
         best-effort stejně jako Deezer enrichment výš -- chybějící životopis
         nebo přerušené externí API nikdy nesmí shodit celou obrazovku
         interpreta, jen se `bio` vrátí `None`."""
-        artist = self._session.get(Artist, artist_id)
+        artist = self._get_artist_row(artist_id)
         if artist is None:
             return None
         if artist.mbid is None:

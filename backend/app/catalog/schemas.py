@@ -44,6 +44,9 @@ class ReleaseOut(CamelModel):
     release_date: str | None = None
     release_type: str
     images: list[str] = []
+    # Jen u `/artists/{id}/rarities`: "demo" | "live" | "bootleg" -- materiál
+    # bez oficiálního vydání (viz CatalogService.get_rarities).
+    rarity: str | None = None
 
 
 class RecordingOut(CamelModel):

@@ -61,6 +61,23 @@ async def get_artist(
     return artist.model_dump(by_alias=True)
 
 
+@catalog_router.get("/artists/{artist_id}/rarities")
+async def get_rarities(
+    artist_id: str,
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    """Dema, živáky a bootlegy bez oficiálního vydání (sekce "Nevydané a
+    vzácné" na stránce interpreta)."""
+    try:
+        items = await service.get_rarities(artist_id)
+    except MusicBrainzError:
+        raise HTTPException(status_code=503, detail="MusicBrainz momentálně nedostupný, zkus to za chvíli znovu")
+    if items is None:
+        raise HTTPException(status_code=404, detail="interpret nenalezen")
+    return {"items": [i.model_dump(by_alias=True) for i in items]}
+
+
 @catalog_router.get("/artists/{artist_id}/discography")
 async def get_discography(
     artist_id: str,
