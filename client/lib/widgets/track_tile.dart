@@ -107,7 +107,9 @@ class TrackTile extends ConsumerWidget {
     // search výsledky).
     final resolvedArtUrl = albumArtUrl ??
         (recording.releaseId != null || recording.artistId != null
-            ? ref.watch(recordingArtworkProvider((releaseId: recording.releaseId, artistId: recording.artistId))).valueOrNull
+            ? ref
+                .watch(recordingArtworkProvider((releaseId: recording.releaseId, artistId: recording.artistId)))
+                .valueOrNull
             : null);
 
     // Volající většinou žádný `subtitle` nepošle (Domů, Knihovna, Oblíbené,
@@ -307,6 +309,7 @@ class _RowTileState extends State<_RowTile> {
     } else {
       background = Colors.transparent;
     }
+    final onTinted = (w.selected || w.isPlaying) ? theme.colorScheme.onPrimaryContainer : null;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
@@ -324,63 +327,75 @@ class _RowTileState extends State<_RowTile> {
             onSecondaryTap: w.onLongPress,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-              child: Row(
-                children: [
-                  leading,
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Název vede na detail skladby, zbytek řádku přehrává
-                        // -- stejný vzor jako Spotube/Spotify desktop.
-                        _LinkText(
-                          text: w.recording.title,
-                          onTap: w.onOpenDetail,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: w.isPlaying ? theme.colorScheme.primary : null,
+              child: IconTheme.merge(
+                data: IconThemeData(color: onTinted),
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(color: onTinted),
+                  child: Row(
+                    children: [
+                      leading,
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Název vede na detail skladby, zbytek řádku přehrává
+                            // -- stejný vzor jako Spotube/Spotify desktop.
+                            _LinkText(
+                              text: w.recording.title,
+                              onTap: w.onOpenDetail,
+                              // Na podbarveném řádku `onPrimaryContainer`, ne
+                              // `primary` -- u černobílých obalů (monochromní
+                              // schéma) byly obě skoro bílé a text zmizel.
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: onTinted,
+                                fontWeight: w.isPlaying ? FontWeight.w600 : null,
+                              ),
+                            ),
+                            _LinkText(
+                              text: w.subtitle ?? w.recording.durationLabel,
+                              onTap: w.onArtistTap,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: onTinted?.withValues(alpha: 0.75) ?? theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!w.selectionMode) ...[
+                        if (wide && w.recording.durationMs != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                            child: Text(w.recording.durationLabel, style: theme.textTheme.bodySmall),
                           ),
+                        IconButton(
+                          icon: Icon(
+                            w.isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
+                            fill: w.isLiked ? 1 : 0,
+                            color: w.isLiked ? Colors.redAccent : null,
+                          ),
+                          tooltip: w.isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
+                          onPressed: w.onToggleLike,
                         ),
-                        _LinkText(
-                          text: w.subtitle ?? w.recording.durationLabel,
-                          onTap: w.onArtistTap,
-                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        _Trailing(
+                          isAvailable: w.isAvailable,
+                          isInFlight: w.isInFlight,
+                          isFailed: w.isFailed,
+                          pct: w.pct,
+                          onTap: w.onTap,
+                          onRetry: w.onRetry,
                         ),
+                        if (wide)
+                          IconButton(
+                            icon: const Icon(Symbols.more_horiz_rounded),
+                            tooltip: 'Další možnosti',
+                            onPressed: w.onLongPress,
+                          ),
                       ],
-                    ),
+                    ],
                   ),
-                  if (!w.selectionMode) ...[
-                    if (wide && w.recording.durationMs != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                        child: Text(w.recording.durationLabel, style: theme.textTheme.bodySmall),
-                      ),
-                    IconButton(
-                      icon: Icon(
-                        w.isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-                        fill: w.isLiked ? 1 : 0,
-                        color: w.isLiked ? Colors.redAccent : null,
-                      ),
-                      tooltip: w.isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                      onPressed: w.onToggleLike,
-                    ),
-                    _Trailing(
-                      isAvailable: w.isAvailable,
-                      isInFlight: w.isInFlight,
-                      isFailed: w.isFailed,
-                      pct: w.pct,
-                      onTap: w.onTap,
-                      onRetry: w.onRetry,
-                    ),
-                    if (wide)
-                      IconButton(
-                        icon: const Icon(Symbols.more_horiz_rounded),
-                        tooltip: 'Další možnosti',
-                        onPressed: w.onLongPress,
-                      ),
-                  ],
-                ],
+                ),
               ),
             ),
           ),
@@ -498,7 +513,8 @@ class _CardTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(recording.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
+                    Text(recording.title,
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
                     _LinkText(
                       text: subtitle ?? recording.durationLabel,
                       onTap: onArtistTap,

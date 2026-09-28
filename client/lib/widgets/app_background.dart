@@ -98,7 +98,9 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    final palette = _paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character).map(_Lab.fromColor).toList();
+    final palette = _paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character)
+        .map(_Lab.fromColor)
+        .toList();
     _from = palette;
     _to = palette;
     _ticker = createTicker(_onTick);
@@ -106,9 +108,8 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
       if (!mounted) return;
       if (!_loggedPath) {
         _loggedPath = true;
-        debugPrint(program != null
-            ? 'AppBackground: fragment shader aktivní'
-            : 'AppBackground: canvas gradient + zrno');
+        debugPrint(
+            program != null ? 'AppBackground: fragment shader aktivní' : 'AppBackground: canvas gradient + zrno');
       }
       if (program != null) {
         setState(() => _programReady = program);
@@ -234,13 +235,13 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
       child: _BackgroundScope(
         state: this,
         child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Každá vrstva přímé dítě `Stack`u -- `Positioned` uvnitř
-          // `RepaintBoundary` dřív shazoval release build.
-          RepaintBoundary(child: IgnorePointer(child: CustomPaint(painter: painter))),
-          widget.child,
-        ],
+          fit: StackFit.expand,
+          children: [
+            // Každá vrstva přímé dítě `Stack`u -- `Positioned` uvnitř
+            // `RepaintBoundary` dřív shazoval release build.
+            RepaintBoundary(child: IgnorePointer(child: CustomPaint(painter: painter))),
+            widget.child,
+          ],
         ),
       ),
     );
@@ -504,8 +505,7 @@ class _FlowMesh {
     return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
   }
 
-  static double _fbm(double x, double y) =>
-      (_noise(x, y) + 0.5 * _noise(2 * x + 17.3, 2 * y + 5.1)) / 1.5;
+  static double _fbm(double x, double y) => (_noise(x, y) + 0.5 * _noise(2 * x + 17.3, 2 * y + 5.1)) / 1.5;
 
   static double _smooth(double t) {
     final c = t.clamp(0.0, 1.0);
@@ -614,8 +614,17 @@ List<Color> _paletteFor(
   // světlost ze struktury výš (čitelnost). Krémový obal s vínovou kresbou
   // tak dá krémovo-pískové pozadí s vínovými akcenty, ne červené pole.
   final tones = character?.tones ?? const <Color>[];
-  if (tones.length >= 2) {
-    final byLight = [...tones]..sort((a, b) => HSLColor.fromColor(a).lightness.compareTo(HSLColor.fromColor(b).lightness));
+  double toneChroma(Color c) {
+    final t = HSLColor.fromColor(c);
+    return (1 - (2 * t.lightness - 1).abs()) * t.saturation;
+  }
+
+  // Paleta z tónů obalu jen když aspoň dva z nich mají barvu -- u vybledlého
+  // obalu by z šedých tónů vyšlo zase šedé pozadí; tam radši tlumený
+  // monochrom v odstínu akcentu (větev níž).
+  if (tones.where((c) => toneChroma(c) >= 0.04).length >= 2) {
+    final byLight = [...tones]
+      ..sort((a, b) => HSLColor.fromColor(a).lightness.compareTo(HSLColor.fromColor(b).lightness));
     final darkest = byLight.first;
     final lightest = byLight.last;
     final t0 = tones[0];
@@ -714,8 +723,7 @@ class _Lab {
   final double b;
 
   static double _toLinear(double c) => c <= 0.04045 ? c / 12.92 : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
-  static double _toSrgb(double c) =>
-      c <= 0.0031308 ? 12.92 * c : 1.055 * math.pow(c, 1 / 2.4).toDouble() - 0.055;
+  static double _toSrgb(double c) => c <= 0.0031308 ? 12.92 * c : 1.055 * math.pow(c, 1 / 2.4).toDouble() - 0.055;
 
   factory _Lab.fromColor(Color color) {
     final r = _toLinear(color.r), g = _toLinear(color.g), bl = _toLinear(color.b);

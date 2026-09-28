@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,16 +15,18 @@ Future<Color?> extractAccentColor(String imageUrl, {Size size = const Size(120, 
   // Jedna analýza na URL za běh appky -- návrat na už viděné album/interpreta
   // pak barvu má okamžitě (žádné probliknutí přes výchozí barvu, než se
   // obal znovu stáhne a zanalyzuje).
-  return _accentFutures.putIfAbsent(imageUrl, () => _extract(imageUrl, size).then((color) {
-        if (color == null) {
-          // Neúspěch necachovat natrvalo -- backend obrázky doplňuje
-          // průběžně, příští pokus už může uspět.
-          _accentFutures.remove(imageUrl);
-        } else {
-          _accentCache[imageUrl] = color;
-        }
-        return color;
-      }));
+  return _accentFutures.putIfAbsent(
+      imageUrl,
+      () => _extract(imageUrl, size).then((color) {
+            if (color == null) {
+              // Neúspěch necachovat natrvalo -- backend obrázky doplňuje
+              // průběžně, příští pokus už může uspět.
+              _accentFutures.remove(imageUrl);
+            } else {
+              _accentCache[imageUrl] = color;
+            }
+            return color;
+          }));
 }
 
 final Map<String, Future<Color?>> _accentFutures = {};
@@ -58,10 +62,7 @@ Color? pickAccent(PaletteGenerator palette) {
   final vibrant = palette.vibrantColor;
   final base = dominant?.population ?? 0;
   final vibrantMatters = vibrant != null && base > 0 && vibrant.population >= base * 0.06;
-  var raw = (vibrantMatters ? vibrant.color : null) ??
-      dominant?.color ??
-      palette.mutedColor?.color ??
-      vibrant?.color;
+  var raw = (vibrantMatters ? vibrant.color : null) ?? dominant?.color ?? palette.mutedColor?.color ?? vibrant?.color;
   if (raw != null && isAchromatic(raw)) {
     // Šedá převládající barva, ale obal jinak barevný (tlumená růžovo-béžová
     // fotka) -- dřív z toho byla čistě šedá appka, i když obal šedý není
@@ -74,13 +75,31 @@ Color? pickAccent(PaletteGenerator palette) {
     }
 
     final total = palette.paletteColors.fold<int>(0, (sum, c) => sum + c.population);
-    final colored = palette.paletteColors
-        .where((c) => !isAchromatic(c.color) && chroma(c.color) >= 0.06)
-        .toList();
+    final colored = palette.paletteColors.where((c) => !isAchromatic(c.color) && chroma(c.color) >= 0.06).toList();
     final coloredShare = colored.fold<int>(0, (sum, c) => sum + c.population);
     if (total > 0 && coloredShare >= total * 0.2) {
       colored.sort((a, b) => (b.population * chroma(b.color)).compareTo(a.population * chroma(a.color)));
       raw = colored.first.color;
+    } else if (total > 0) {
+      // Vybledlý obal (šedé město v oparu s pletí a fialovým trikem): žádná
+      // plocha není "barevná", ale dohromady mají nádech. Průměrný odstín
+      // vážený plochou × chromou -> tlumený tón (sytost těsně nad hranicí
+      // černobílé), ne čistý grafit (živě nahlášeno). Opravdu černobílé
+      // obaly mají průměrnou chromu ~0 a zůstanou šedé.
+      var x = 0.0, y = 0.0, weight = 0.0;
+      for (final c in palette.paletteColors) {
+        final ch = chroma(c.color);
+        if (ch < 0.04) continue;
+        final w = c.population * ch;
+        final hue = HSLColor.fromColor(c.color).hue * math.pi / 180;
+        x += math.cos(hue) * w;
+        y += math.sin(hue) * w;
+        weight += w;
+      }
+      if (weight / total >= 0.02) {
+        final hue = (math.atan2(y, x) * 180 / math.pi + 360) % 360;
+        return HSLColor.fromAHSL(1, hue, 0.2, 0.45).toColor();
+      }
     }
   }
   return raw == null ? null : normalizeAccent(raw);

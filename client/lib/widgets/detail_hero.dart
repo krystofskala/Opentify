@@ -55,9 +55,8 @@ class _ScreenAccentState extends ConsumerState<ScreenAccent> {
   @override
   Widget build(BuildContext context) {
     final url = widget.imageUrl;
-    final accent = url == null
-        ? null
-        : (ref.watch(screenAccentColorProvider(url)).valueOrNull ?? cachedAccentColor(url));
+    final accent =
+        url == null ? null : (ref.watch(screenAccentColorProvider(url)).valueOrNull ?? cachedAccentColor(url));
     // Zapisuje se, až když je barva známá -- do té doby zůstává platná
     // barva předchozí obrazovky (žádné probliknutí přes výchozí fialovou).
     if (accent != null) {
@@ -217,8 +216,7 @@ class DetailHeroAppBar extends StatelessWidget {
 const kDetailMaxWidth = 1160.0;
 
 /// Boční odsazení, které sloupec [kDetailMaxWidth] vycentruje (na telefonu 0).
-double detailSideInset(BuildContext context) =>
-    math.max(0.0, (MediaQuery.sizeOf(context).width - kDetailMaxWidth) / 2);
+double detailSideInset(BuildContext context) => math.max(0.0, (MediaQuery.sizeOf(context).width - kDetailMaxWidth) / 2);
 
 /// Obalí slivery obsahu detailu (vše pod hlavičkou) tak, aby na širokém
 /// okně ležely ve vycentrovaném sloupci [kDetailMaxWidth] -- scrolluje se
@@ -274,9 +272,10 @@ class _HeroFlexible extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (wide)
-            Positioned(top: imageTop, left: 0, right: 0, height: imageHeight, child: _WideBackdrop(hero: hero))
-          else
+          // Široké okno: žádný pás s rozmazanou fotkou -- jeho barvy se bily
+          // s pozadím v barvě hrající skladby (živě nahlášeno). Skleněný box
+          // leží přímo na živém pozadí appky.
+          if (!wide)
             // Prolnutí do pozadí vždy k AKTUÁLNÍ spodní hraně hlavičky -- při
             // částečném sbalení jinak obrázek končil ostrou hranou nad seznamem.
             Positioned.fill(
@@ -406,7 +405,8 @@ class _HeroFlexible extends StatelessWidget {
                   child: Row(
                     children: [
                       if (hero._barThumb != null) ...[
-                        _Thumb(url: hero._barThumb!, size: 30, circle: hero.thumbnailCircle, icon: hero.placeholderIcon),
+                        _Thumb(
+                            url: hero._barThumb!, size: 30, circle: hero.thumbnailCircle, icon: hero.placeholderIcon),
                         const SizedBox(width: AppSpacing.sm),
                       ],
                       Expanded(
@@ -464,60 +464,11 @@ class _FadedMedia extends StatelessWidget {
     if (mosaic.length >= 4) return _Mosaic(urls: mosaic.take(4).toList());
     final single = hero.imageUrl ?? (mosaic.isNotEmpty ? mosaic.first : null);
     if (single != null) {
-      return _WideAware(url: single, alignment: const Alignment(0, -0.4), accent: hero.accent, icon: hero.placeholderIcon);
+      return _WideAware(
+          url: single, alignment: const Alignment(0, -0.4), accent: hero.accent, icon: hero.placeholderIcon);
     }
     if (hero.bannerFallbackUrl != null) return _Blurred(url: hero.bannerFallbackUrl!, accent: hero.accent);
     return _GradientArt(icon: hero.placeholderIcon, accent: hero.accent);
-  }
-}
-
-/// Široké okno: pás za hlavičkou -- jen silně rozostřený a barvou tónovaný
-/// obrázek (nikdy ostrá roztažená fotka), dole prolnutý do pozadí appky.
-class _WideBackdrop extends StatelessWidget {
-  const _WideBackdrop({required this.hero});
-
-  final DetailHeroAppBar hero;
-
-  @override
-  Widget build(BuildContext context) {
-    final url = hero.bannerImageUrl ??
-        hero.imageUrl ??
-        (hero.mosaicUrls.isNotEmpty ? hero.mosaicUrls.first : null) ??
-        hero.bannerFallbackUrl;
-    final tint = hero.accent ?? Theme.of(context).colorScheme.primary;
-    return ShaderMask(
-      blendMode: BlendMode.dstIn,
-      shaderCallback: (rect) => const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Colors.black, Color(0xB3000000), Color(0x00000000)],
-        stops: [0, 0.55, 1],
-      ).createShader(rect),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (url != null)
-            ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60, tileMode: TileMode.mirror),
-              child: NetImage(url: url, placeholder: ColoredBox(color: tint)),
-            )
-          else
-            ColoredBox(color: tint),
-          AnimatedAccent(
-            color: tint,
-            builder: (context, c) => DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [c.withValues(alpha: 0.45), c.withValues(alpha: 0.15)],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -574,7 +525,9 @@ class _WideCover extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: radius,
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 28, offset: const Offset(0, 10))],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 28, offset: const Offset(0, 10))
+        ],
       ),
       child: ClipRRect(borderRadius: radius, child: child),
     );
@@ -874,7 +827,8 @@ class _AutoShrinkTitle extends StatelessWidget {
 
 /// Náhled (obal/avatar) vedle názvu a ve sbalené liště.
 class _Thumb extends StatelessWidget {
-  const _Thumb({required this.url, required this.size, required this.circle, required this.icon, this.elevated = false});
+  const _Thumb(
+      {required this.url, required this.size, required this.circle, required this.icon, this.elevated = false});
 
   final String url;
   final double size;
