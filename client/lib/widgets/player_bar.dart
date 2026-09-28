@@ -51,16 +51,60 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
 
   NowPlayingSheetController get _sheet => NowPlayingSheetController.of(context);
 
-  void _onSwipeUpdate(DragUpdateDetails d, AudioPlayerState playback) {
-    var next = _swipe.value + d.delta.dx;
+  // Jeden rozpoznávač tahu pro celý mini přehrávač se ZÁMKEM SMĚRU: dřív
+  // soupeřil vodorovný (přeskočit) se svislým (vytáhnout) a šikmý tah
+  // nahoru často přeskočil skladbu (živě nahlášeno). Po `_lockDistance` px
+  // se rozhodne podle převládající osy; vodorovně jen jasně vodorovný tah,
+  // jinak má přednost vytažení.
+  static const _lockDistance = 12.0;
+  Offset _panTotal = Offset.zero;
+  Axis? _panAxis;
+
+  void _onPanStart(DragStartDetails _) {
+    _panTotal = Offset.zero;
+    _panAxis = null;
+    _swipe.stop();
+  }
+
+  void _onPanUpdate(DragUpdateDetails d, AudioPlayerState playback, double screenHeight) {
+    switch (_panAxis) {
+      case Axis.horizontal:
+        _onSwipeUpdate(d.delta.dx, playback);
+      case Axis.vertical:
+        _sheet.dragUpdate(d.delta.dy, screenHeight);
+      case null:
+        _panTotal += d.delta;
+        if (_panTotal.distance < _lockDistance) return;
+        if (_panTotal.dx.abs() > _panTotal.dy.abs() * 1.5) {
+          _panAxis = Axis.horizontal;
+          _onSwipeUpdate(_panTotal.dx, playback);
+        } else {
+          _panAxis = Axis.vertical;
+          _sheet.dragStart(context);
+          _sheet.dragUpdate(_panTotal.dy, screenHeight);
+        }
+    }
+  }
+
+  void _onPanEnd(DragEndDetails d, AudioPlayerState playback, double screenHeight) {
+    final axis = _panAxis;
+    _panAxis = null;
+    if (axis == Axis.horizontal) {
+      _onSwipeEnd(d.velocity.pixelsPerSecond.dx, playback);
+    } else if (axis == Axis.vertical) {
+      _sheet.dragEnd(d.velocity.pixelsPerSecond.dy, screenHeight);
+    }
+  }
+
+  void _onSwipeUpdate(double deltaX, AudioPlayerState playback) {
+    var next = _swipe.value + deltaX;
     if ((next < 0 && !playback.hasNext) || (next > 0 && playback.previousIndex == null)) {
-      next = _swipe.value + d.delta.dx * 0.3; // gumička na kraji fronty
+      next = _swipe.value + deltaX * 0.3; // gumička na kraji fronty
     }
     _swipe.value = next;
   }
 
-  Future<void> _onSwipeEnd(DragEndDetails d, AudioPlayerState playback) async {
-    final v = d.velocity.pixelsPerSecond.dx;
+  Future<void> _onSwipeEnd(double v, AudioPlayerState playback) async {
     final dx = _swipe.value;
     final w = _swipeWidth;
     final goNext = playback.hasNext && (dx < -w * 0.3 || v < -650);
@@ -120,9 +164,9 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => _sheet.open(context),
-            onVerticalDragStart: (_) => _sheet.dragStart(context),
-            onVerticalDragUpdate: (d) => _sheet.dragUpdate(d.delta.dy, screenHeight),
-            onVerticalDragEnd: (d) => _sheet.dragEnd(d.velocity.pixelsPerSecond.dy, screenHeight),
+            onPanStart: _onPanStart,
+            onPanUpdate: (d) => _onPanUpdate(d, playback, screenHeight),
+            onPanEnd: (d) => _onPanEnd(d, playback, screenHeight),
             child: GlassContainer.frosted(
               borderRadius: BorderRadius.circular(26),
               tint: accent,
@@ -177,7 +221,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
                               size: 22,
                             ),
                             tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                            onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
+                            onPressed: () =>
+                                ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
                           ),
                           IconButton(
                             icon: playback.isBuffering
@@ -185,7 +230,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
                                     width: 24,
                                     height: 24,
                                     child: isProvisioning && provisioningPct != null
-                                        ? CircularProgressIndicator(strokeWidth: 2, color: fg, value: provisioningPct / 100)
+                                        ? CircularProgressIndicator(
+                                            strokeWidth: 2, color: fg, value: provisioningPct / 100)
                                         : ExpressiveLoadingIndicator(size: 24, color: fg),
                                   )
                                 : hasError
@@ -245,44 +291,40 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
     return LayoutBuilder(
       builder: (context, constraints) {
         _swipeWidth = constraints.maxWidth;
-        return GestureDetector(
-          onHorizontalDragStart: (_) => _swipe.stop(),
-          onHorizontalDragUpdate: (d) => _onSwipeUpdate(d, playback),
-          onHorizontalDragEnd: (d) => _onSwipeEnd(d, playback),
-          child: ClipRect(
-            child: AnimatedBuilder(
-              animation: _swipe,
-              builder: (context, _) {
-                final dx = _swipe.value;
-                final w = _swipeWidth;
-                String? status;
-                Color? statusColor;
-                if (hasError) {
-                  status = 'Nepodařilo se přehrát -- klepni pro nový pokus';
-                  statusColor = Colors.redAccent;
-                } else if (isProvisioning) {
-                  status = provisioningState!.statusLabel;
-                }
-                return Stack(
-                  children: [
-                    if (prev != null && dx > 0)
-                      Transform.translate(offset: Offset(dx - w, 0), child: _TrackInfo(info: prev, fg: fg)),
-                    if (next != null && dx < 0)
-                      Transform.translate(offset: Offset(dx + w, 0), child: _TrackInfo(info: next, fg: fg)),
-                    Transform.translate(
-                      offset: Offset(dx, 0),
-                      child: _TrackInfo(
-                        info: playback.nowPlaying!,
-                        fg: fg,
-                        status: status,
-                        statusColor: statusColor,
-                        linkable: true,
-                      ),
+        // Tah (přeskočit i vytáhnout) řeší jeden rozpoznávač na celé liště.
+        return ClipRect(
+          child: AnimatedBuilder(
+            animation: _swipe,
+            builder: (context, _) {
+              final dx = _swipe.value;
+              final w = _swipeWidth;
+              String? status;
+              Color? statusColor;
+              if (hasError) {
+                status = 'Nepodařilo se přehrát -- klepni pro nový pokus';
+                statusColor = Colors.redAccent;
+              } else if (isProvisioning) {
+                status = provisioningState!.statusLabel;
+              }
+              return Stack(
+                children: [
+                  if (prev != null && dx > 0)
+                    Transform.translate(offset: Offset(dx - w, 0), child: _TrackInfo(info: prev, fg: fg)),
+                  if (next != null && dx < 0)
+                    Transform.translate(offset: Offset(dx + w, 0), child: _TrackInfo(info: next, fg: fg)),
+                  Transform.translate(
+                    offset: Offset(dx, 0),
+                    child: _TrackInfo(
+                      info: playback.nowPlaying!,
+                      fg: fg,
+                      status: status,
+                      statusColor: statusColor,
+                      linkable: true,
                     ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                ],
+              );
+            },
           ),
         );
       },

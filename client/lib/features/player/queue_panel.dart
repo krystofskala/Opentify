@@ -78,10 +78,24 @@ class _QueuePanel extends ConsumerWidget {
   }
 }
 
-class _QueueList extends ConsumerWidget {
-  const _QueueList({required this.scrollController, required this.queue, required this.currentIndex});
+/// Fronta bez obalu -- druhý sloupec velkého přehrávače na PC.
+class QueueView extends ConsumerWidget {
+  const QueueView({super.key});
 
-  final ScrollController scrollController;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playback = ref.watch(audioPlayerControllerProvider);
+    if (playback.queue.isEmpty) {
+      return const Center(child: Text('Fronta je prázdná.', style: TextStyle(color: Colors.white70)));
+    }
+    return _QueueList(queue: playback.queue, currentIndex: playback.queueIndex);
+  }
+}
+
+class _QueueList extends ConsumerWidget {
+  const _QueueList({this.scrollController, required this.queue, required this.currentIndex});
+
+  final ScrollController? scrollController;
   final List<NowPlayingInfo> queue;
   final int currentIndex;
 

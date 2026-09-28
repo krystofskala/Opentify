@@ -24,6 +24,7 @@ import '../../widgets/now_playing_sheet.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/wavy_seek_bar.dart';
 import 'player_more_sheet.dart';
+import 'queue_panel.dart';
 
 /// Celoobrazovkový přehrávač -- interaktivní "sheet" nad aktuální stránkou
 /// (poloha z `NowPlayingSheetController`: tažení z mini přehrávače nahoru,
@@ -37,14 +38,19 @@ class NowPlayingScreen extends ConsumerStatefulWidget {
   ConsumerState<NowPlayingScreen> createState() => _NowPlayingScreenState();
 }
 
-/// Od téhle šířky je text skladby sloupec vedle přehrávače (PC), ne sheet.
-const _lyricsColumnMinWidth = 1100.0;
+/// Od téhle šířky jsou text/fronta sloupec vedle přehrávače (PC), ne sheet.
+const _sideColumnMinWidth = 1100.0;
+
+enum _SidePanel { lyrics, queue }
 
 class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with SingleTickerProviderStateMixin {
   NowPlayingSheetController? _sheet;
 
-  /// Sloupec s textem na PC -- tlačítko textu v liště ho skryje/zobrazí.
-  bool _lyricsColumn = true;
+  /// Otevřený druhý sloupec (PC); `null` = zavřený (výchozí).
+  _SidePanel? _side;
+
+  /// Co sloupec ukazuje i během zavírací animace.
+  _SidePanel _lastSide = _SidePanel.lyrics;
   // Tear-off metody je `==` sama se sebou -- `detach` tak pozná svou trasu.
   void _pop() {
     if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
@@ -197,7 +203,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
     final positionMs =
         playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
     final isWide = MediaQuery.sizeOf(context).width >= 720;
-    final showLyricsColumn = MediaQuery.sizeOf(context).width >= _lyricsColumnMinWidth && _lyricsColumn;
+    final sideColumnFits = MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
 
     final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
     final isProvisioning = provisioningState?.isInFlight ?? false;
@@ -282,28 +288,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                                     ],
                                   ),
                                 );
-                                if (!showLyricsColumn) return Center(child: player);
-                                // PC: text skladby jako druhý sloupec vedle
-                                // obalu a ovládání (stejné světlejší sklo).
+                                if (!sideColumnFits) return Center(child: player);
+                                // PC: text/fronta jako druhý sloupec vedle
+                                // obalu a ovládání (stejné světlejší sklo),
+                                // jen když ho uživatel otevře.
                                 return Center(
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Flexible(child: player),
-                                      const SizedBox(width: 40),
-                                      SizedBox(
-                                        width: 460,
-                                        height: math.min(constraints.maxHeight, 780),
-                                        child: GlassContainer(
-                                          blur: false,
-                                          baseFill: false,
-                                          emphasis: GlassTokens.emphasis,
-                                          borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
-                                          padding: const EdgeInsets.only(top: 8),
-                                          fit: StackFit.expand,
-                                          child: LyricsView(recordingId: nowPlaying.recordingId),
-                                        ),
-                                      ),
+                                      _sideColumn(nowPlaying.recordingId, math.min(constraints.maxHeight, 780)),
                                     ],
                                   ),
                                 );
@@ -339,9 +333,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(nowPlaying.recordingId) ?? false),
     );
     final sourceLabel = ref.watch(audioPlayerControllerProvider.select((s) => s.queueSourceLabel));
-    // Vlevo 1 tlačítko, vpravo 3 -- obě strany stejně široké, jinak titulek
+    // Vlevo 1 tlačítko, vpravo 2 -- obě strany stejně široké, jinak titulek
     // "Přehrává se" není opticky uprostřed (živě nahlášeno).
-    const sideWidth = 3 * kMinInteractiveDimension;
+    const sideWidth = 2 * kMinInteractiveDimension;
     return Row(
       children: [
         SizedBox(
@@ -387,14 +381,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                 ),
                 tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
                 onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
-              ),
-              IconButton(
-                icon: const Icon(Symbols.lyrics_rounded, color: Colors.white, size: 24),
-                tooltip: 'Text skladby',
-                // PC: přepíná sloupec s textem; mobil: sheet.
-                onPressed: () => MediaQuery.sizeOf(context).width >= _lyricsColumnMinWidth
-                    ? setState(() => _lyricsColumn = !_lyricsColumn)
-                    : showLyricsPanel(context, recordingId: nowPlaying.recordingId, accentColor: accent),
               ),
               IconButton(
                 icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
@@ -611,7 +597,104 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               ),
             ],
           ),
+          // Text a fronta vždy na dosah pod ovládáním (jako Apple Music);
+          // na PC otevírají druhý sloupec, na mobilu sheet.
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback),
+              _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {
+    final active = _side == panel && MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
+    return TextButton.icon(
+      style: TextButton.styleFrom(
+        foregroundColor: active ? Colors.white : Colors.white70,
+        backgroundColor: active ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
+        shape: const StadiumBorder(),
+        visualDensity: VisualDensity.compact,
+      ),
+      icon: Icon(icon, size: 20, fill: active ? 1 : 0),
+      label: Text(label),
+      onPressed: () {
+        if (MediaQuery.sizeOf(context).width >= _sideColumnMinWidth) {
+          setState(() {
+            if (_side == panel) {
+              _side = null;
+            } else {
+              _side = panel;
+              _lastSide = panel;
+            }
+          });
+        } else if (panel == _SidePanel.lyrics) {
+          showLyricsPanel(context, recordingId: playback.nowPlaying!.recordingId, accentColor: accent);
+        } else {
+          showQueuePanel(context, accentColor: accent);
+        }
+      },
+    );
+  }
+
+  /// Druhý sloupec (PC): rozjede se do šířky s prolnutím a posunem, obsah
+  /// (text/fronta) se mezi sebou prolíná. Zavřený = nulová šířka.
+  Widget _sideColumn(String recordingId, double height) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: _side == null ? 0 : 1),
+      duration: Motion.enter.duration,
+      curve: Motion.enter,
+      builder: (context, raw, child) {
+        final t = raw.clamp(0.0, 1.0);
+        if (t == 0) return const SizedBox.shrink();
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            widthFactor: t,
+            child: Opacity(
+              opacity: t,
+              child: Transform.translate(offset: Offset((1 - raw) * 48, 0), child: child),
+            ),
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(left: 40),
+        child: SizedBox(
+          width: 460,
+          height: height,
+          child: GlassContainer(
+            blur: false,
+            baseFill: false,
+            emphasis: GlassTokens.emphasis,
+            borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
+            padding: const EdgeInsets.only(top: 8),
+            fit: StackFit.expand,
+            child: AnimatedSwitcher(
+              duration: Motion.state.duration,
+              switchInCurve: Motion.state,
+              child: _lastSide == _SidePanel.queue
+                  ? const Column(
+                      key: ValueKey('queue'),
+                      children: [
+                        SizedBox(
+                          height: 40,
+                          child: Center(
+                            child:
+                                Text('FRONTA', style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2)),
+                          ),
+                        ),
+                        Expanded(child: QueueView()),
+                      ],
+                    )
+                  : LyricsView(key: const ValueKey('lyrics'), recordingId: recordingId),
+            ),
+          ),
+        ),
       ),
     );
   }
