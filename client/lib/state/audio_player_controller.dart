@@ -398,7 +398,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// speed/volume z předchozí fronty přetrvávají (jsou to nastavení
   /// přehrávače, ne téhle konkrétní fronty), jen se pro novou frontu
   /// přepočítá `shuffleOrder`.
-  Future<void> playQueue(List<NowPlayingInfo> items, int startIndex, {String? sourceLabel}) async {
+  ///
+  /// `prefetchWholeQueue`: jen explicitní "Přehrát/Zamíchat" alba/playlistu
+  /// (uživatel chtěl, ať se stáhne celé album). Jinde -- výsledky hledání,
+  /// řady na Domů, klepnutí na jednu skladbu -- se předem stahuje jen další
+  /// skladba; dřív se stahoval celý seznam a jedno přehrání z hledání tak
+  /// stáhlo všechny výsledky (zbytečná zátěž a místo na disku).
+  Future<void> playQueue(
+    List<NowPlayingInfo> items,
+    int startIndex, {
+    String? sourceLabel,
+    bool prefetchWholeQueue = false,
+  }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
     state = AudioPlayerState(
@@ -430,7 +441,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // nechat skladbu, na kterou uživatel čeká, stát ve frontě ZA deseti
     // dalšími z prefetche, místo aby ji tři workery zpracovaly jako první.
     await _playCurrent();
-    _prefetchQueue(items, except: items[index].recordingId);
+    if (prefetchWholeQueue) {
+      _prefetchQueue(items, except: items[index].recordingId);
+    } else {
+      // Další skladbu až ve 80 % té aktuální řeší `_maybeWarmUpNext`; tady
+      // jen ta úplně první následující, ať přeskočení hned na začátku nečeká.
+      final next = state.nextIndex;
+      if (next != null && next != index) {
+        unawaited(_ref.read(provisioningControllerProvider.notifier).provision(items[next].recordingId));
+      }
+    }
   }
 
   /// Spustí obstarávání zbytku fronty na pozadí, souběžně s přehráváním
