@@ -869,6 +869,24 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _awaitingProvisioning = false;
 
     final provisioning = _ref.read(provisioningControllerProvider.notifier);
+
+    // Rychlá cesta bez síťového čekání: skladbu už známe jako stáhnutou
+    // (typicky další ve frontě, připravená v 80 % předchozí -- viz
+    // `_maybeWarmUpNext`). Na zamčeném iPhonu iOS nechá stránku běžet jen
+    // dokud hraje zvuk; `await provision()` mezi koncem skladby a `play()`
+    // udělal pauzu, iOS stránku uspal a další skladba se nespustila, i když
+    // appka ukazovala, že hraje (živě nahlášeno). `setUrl`+`play()` proto
+    // musí proběhnout hned v obsluze konce skladby; server se zeptá až potom.
+    final known = _ref.read(provisioningControllerProvider)[info.recordingId];
+    if (known != null && known.status == 'AVAILABLE' && known.streamUrl != null) {
+      unawaited(_startStream(
+        info,
+        _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+        isProgressive: false,
+      ));
+      return;
+    }
+
     // `interactive` -- tuhle skladbu uživatel chce slyšet TEĎ (prioritní
     // fronta + závod slskd/YouTube na backendu), na rozdíl od prefetche.
     await provisioning.provision(info.recordingId, interactive: true);
