@@ -27,3 +27,14 @@ async def publish_track_available(user_id: str, recording_id: str, stream_url: s
     await publish_event(
         user_id, "track.available", {"recordingId": recording_id, "streamUrl": stream_url}
     )
+
+
+async def publish_track_streaming(user_id: str, recording_id: str, stream_url: str) -> None:
+    """Na rozdíl od `track.available` (soubor je HOTOVÝ) tohle říká "soubor
+    se sice ještě stahuje, ale `streamUrl` už je servírovatelný" -- viz
+    `OnFileLocated` v app/providers.py a progresivní stream v
+    `routes/provisioning.py`. Klient na oba eventy reaguje stejně (cokoliv
+    s neprázdným `streamUrl` znamená "můžeš spustit `setUrl`")."""
+    await publish_event(
+        user_id, "track.streaming", {"recordingId": recording_id, "streamUrl": stream_url}
+    )

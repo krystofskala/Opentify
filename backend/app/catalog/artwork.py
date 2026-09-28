@@ -1,0 +1,274 @@
+"""Obaly alb a fotky interpretů -- jedno místo pro jejich dohledání.
+
+Dřív se obrázky doplňovaly jen líně při otevření detailu alba/interpreta
+(`CatalogService._enrich_*_images`), a to jen prvním výsledkem obecného
+Deezer `/search` (skladby), bez kontroly, že jde o správného interpreta. Po
+naskenování knihovny tak ~80 % alb i interpretů nemělo obrázek vůbec (Domů,
+Knihovna i hlavičky byly samé placeholdery).
+
+Zdroje v pořadí spolehlivosti:
+  - alba: Cover Art Archive podle MusicBrainz ID (release-group, pak release)
+    -> Deezer `/search/album` s kontrolou jména interpreta i alba.
+  - interpreti: Deezer `/search/artist` s kontrolou jména (bez Deezer
+    placeholderu `/artist//`) -> Wikidata P18 (fotka z Wikimedia Commons)
+    přes MusicBrainz url-rels.
+
+Neúspěšné pokusy se zapisují do `external_refs["artworkCheckedAt"]`, aby
+backfill smyčka tytéž položky nezkoušela při každém průchodu znovu.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import unicodedata
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import httpx
+from sqlmodel import Session, select
+
+from app.catalog.deezer import get_deezer_client
+from app.catalog.musicbrainz import get_musicbrainz_client
+from app.catalog.wikimedia import WIKIMEDIA_USER_AGENT
+from app.db import engine
+from app.models import Artist, MediaAsset, MediaAssetStatus, Recording, Release
+
+logger = logging.getLogger(__name__)
+
+CAA_BASE = "https://coverartarchive.org"
+RECHECK_AFTER = timedelta(days=14)
+_CHECKED_KEY = "artworkCheckedAt"
+
+_http = httpx.AsyncClient(timeout=12.0, headers={"User-Agent": WIKIMEDIA_USER_AGENT})
+
+
+def _normalize(name: str) -> str:
+    text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().casefold()
+    text = re.sub(r"\(.*?\)|\[.*?\]", " ", text)
+    text = re.sub(r"^the\s+", "", text)
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def primary_artist_name(name: str) -> str:
+    """"AURORA;Pomme" / "A feat. B" / "A & B" -> "AURORA"/"A" -- lokální tagy
+    často nesou víc interpretů v jednom poli a hledání celého řetězce pak nic
+    nenajde."""
+    return re.split(r"\s*(?:;|/|,|&|\bfeat\.?|\bft\.?|\bx\b)\s*", name, maxsplit=1, flags=re.IGNORECASE)[0].strip() or name
+
+
+def _names_match(a: str, b: str) -> bool:
+    na, nb = _normalize(a), _normalize(b)
+    return bool(na) and bool(nb) and (na == nb or na.startswith(nb) or nb.startswith(na))
+
+
+async def _caa_front(kind: str, mbid: str) -> str | None:
+    url = f"{CAA_BASE}/{kind}/{mbid}/front-500"
+    try:
+        resp = await _http.head(url, follow_redirects=False)
+    except httpx.HTTPError:
+        return None
+    # CAA odpovídá 307 přesměrováním na archive.org, když obal existuje (a
+    # posílá `Access-Control-Allow-Origin: *`, takže ho Flutter web načte).
+    return url if resp.status_code in (301, 302, 307, 308) else None
+
+
+async def resolve_release_cover(release_mbid: str | None, artist_name: str, title: str) -> str | None:
+    if release_mbid:
+        for kind in ("release-group", "release"):
+            cover = await _caa_front(kind, release_mbid)
+            if cover:
+                return cover
+    try:
+        albums = await get_deezer_client().search_album(primary_artist_name(artist_name), title)
+    except Exception:  # noqa: BLE001 - best-effort
+        return None
+    for album in albums:
+        if _names_match(album.get("title", ""), title) and _names_match(
+            (album.get("artist") or {}).get("name", ""), primary_artist_name(artist_name)
+        ):
+            return album.get("cover_xl") or album.get("cover_big")
+    return None
+
+
+def _is_deezer_placeholder(url: str | None) -> bool:
+    return not url or "/artist//" in url or "/images/artist/" not in url
+
+
+async def _wikidata_image(artist_mbid: str) -> str | None:
+    try:
+        mb_artist = await get_musicbrainz_client().get_artist(artist_mbid)
+    except Exception:  # noqa: BLE001
+        return None
+    qid = None
+    for rel in mb_artist.get("relations") or []:
+        if rel.get("type") == "wikidata":
+            candidate = ((rel.get("url") or {}).get("resource") or "").rsplit("/", 1)[-1]
+            if candidate.startswith("Q"):
+                qid = candidate
+                break
+    if qid is None:
+        return None
+    try:
+        resp = await _http.get(
+            "https://www.wikidata.org/w/api.php",
+            params={"action": "wbgetentities", "ids": qid, "props": "claims", "format": "json"},
+        )
+        claims = resp.json()["entities"][qid]["claims"]
+        filename = claims["P18"][0]["mainsnak"]["datavalue"]["value"]
+    except Exception:  # noqa: BLE001 - P18 chybí/neočekávaný tvar
+        return None
+    try:
+        # `Special:FilePath` jen přesměrovává -- uložíme finální
+        # upload.wikimedia.org URL, která posílá CORS hlavičky.
+        img = await _http.head(
+            f"https://commons.wikimedia.org/wiki/Special:FilePath/{filename}",
+            params={"width": 1200},
+            follow_redirects=True,
+        )
+    except httpx.HTTPError:
+        return None
+    return str(img.url) if img.status_code == 200 else None
+
+
+async def resolve_artist_image(name: str, artist_mbid: str | None) -> str | None:
+    wanted = primary_artist_name(name)
+    try:
+        artists = await get_deezer_client().search_artist(wanted)
+    except Exception:  # noqa: BLE001
+        artists = []
+    for candidate in artists:
+        picture = candidate.get("picture_xl") or candidate.get("picture_big")
+        if _names_match(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture):
+            return picture
+    if artist_mbid:
+        return await _wikidata_image(artist_mbid)
+    return None
+
+
+def _recently_checked(refs: dict[str, Any]) -> bool:
+    stamp = refs.get(_CHECKED_KEY)
+    if not stamp:
+        return False
+    try:
+        return datetime.now(timezone.utc) - datetime.fromisoformat(stamp) < RECHECK_AFTER
+    except ValueError:
+        return False
+
+
+def _mark_checked(refs: dict[str, Any]) -> dict[str, Any]:
+    return {**refs, _CHECKED_KEY: datetime.now(timezone.utc).isoformat()}
+
+
+async def fill_release(release_id: str, *, force: bool = False) -> bool:
+    with Session(engine) as session:
+        release = session.get(Release, release_id)
+        if release is None or release.images or (not force and _recently_checked(release.external_refs)):
+            return False
+        artist = session.get(Artist, release.artist_id)
+        mbid, title, artist_name = release.mbid, release.title, artist.name if artist else ""
+
+    cover = await resolve_release_cover(mbid, artist_name, title)
+
+    with Session(engine) as session:
+        release = session.get(Release, release_id)
+        if release is None or release.images:
+            return False
+        if cover:
+            release.images = [cover]
+        release.external_refs = _mark_checked(release.external_refs or {})
+        session.add(release)
+        session.commit()
+    return cover is not None
+
+
+async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        if artist is None:
+            return False
+        has_real_image = bool(artist.images) and not _is_deezer_placeholder(artist.images[0])
+        if has_real_image or (not force and _recently_checked(artist.external_refs)):
+            return False
+        name, mbid = artist.name, artist.mbid
+
+    picture = await resolve_artist_image(name, mbid)
+
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        if artist is None:
+            return False
+        if picture:
+            artist.images = [picture]
+        elif artist.images and _is_deezer_placeholder(artist.images[0]):
+            artist.images = []
+        artist.external_refs = _mark_checked(artist.external_refs or {})
+        session.add(artist)
+        session.commit()
+    return picture is not None
+
+
+def _pending(limit: int) -> tuple[list[str], list[str]]:
+    """Nejdřív to, co je v knihovně (má přehratelnou skladbu) -- to uživatel
+    vidí na Domů/Knihovně, zbytek katalogu (výsledky hledání, diskografie)
+    až potom."""
+    with Session(engine) as session:
+        library_release_ids = set(
+            session.exec(
+                select(Recording.release_id)
+                .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+                .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+            ).all()
+        )
+        library_artist_ids = set(
+            session.exec(
+                select(Recording.artist_id)
+                .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+                .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+            ).all()
+        )
+        releases = [
+            r
+            for r in session.exec(select(Release)).all()
+            if not r.images and not _recently_checked(r.external_refs or {})
+        ]
+        artists = [
+            a
+            for a in session.exec(select(Artist)).all()
+            if (not a.images or _is_deezer_placeholder(a.images[0])) and not _recently_checked(a.external_refs or {})
+        ]
+    releases.sort(key=lambda r: r.id not in library_release_ids)
+    artists.sort(key=lambda a: a.id not in library_artist_ids)
+    return [r.id for r in releases[:limit]], [a.id for a in artists[:limit]]
+
+
+artwork_progress: dict[str, int | bool] = {"running": False, "filled": 0, "checked": 0}
+
+
+async def artwork_backfill_loop(idle_interval_s: float = 300.0, pause_s: float = 0.3) -> None:
+    """Na pozadí po celou dobu běhu API: postupně (jedna položka naráz, s
+    pauzou) doplní obrázky všem albům a interpretům, co je nemají -- knihovna
+    přednostně. Střídá alba a interprety, ať se obojí plní souběžně."""
+    await asyncio.sleep(5)
+    while True:
+        try:
+            release_ids, artist_ids = await asyncio.to_thread(_pending, 40)
+            if not release_ids and not artist_ids:
+                artwork_progress["running"] = False
+                await asyncio.sleep(idle_interval_s)
+                continue
+            artwork_progress["running"] = True
+            for i in range(max(len(release_ids), len(artist_ids))):
+                if i < len(release_ids):
+                    artwork_progress["filled"] = int(artwork_progress["filled"]) + int(await fill_release(release_ids[i]))
+                    artwork_progress["checked"] = int(artwork_progress["checked"]) + 1
+                if i < len(artist_ids):
+                    artwork_progress["filled"] = int(artwork_progress["filled"]) + int(await fill_artist(artist_ids[i]))
+                    artwork_progress["checked"] = int(artwork_progress["checked"]) + 1
+                await asyncio.sleep(pause_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - smyčka nesmí umřít kvůli jedné položce
+            logger.exception("artwork backfill: chyba v dávce, zkusím za chvíli znovu")
+            await asyncio.sleep(60)

@@ -21,23 +21,24 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from app.catalog.availability import compute_availability
+from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.cache import cached_json
-from app.catalog.schemas import RecordingOut
+from app.catalog.schemas import ArtistOut, RecordingOut
 from app.catalog.upsert import upsert_artist, upsert_recording
 from app.library.spotify_import import LIKED_SONGS_SOURCE
-from app.models import Playlist, PlaylistItem, PlaylistKind, Recording
+from app.models import Artist, Playlist, PlaylistItem, PlaylistKind, Recording
 from app.recommendations.anti_ai_filter import AntiAIFilter
 from app.recommendations.listenbrainz import (
     ListenBrainzClient,
     ListenBrainzError,
     ListenBrainzPublicClient,
 )
-from app.recommendations.schemas import PlaylistDetailOut
+from app.recommendations.schemas import PlaylistDetailOut, YearInReviewOut
 from app.utils import utcnow
 
 TRENDING_RESOLVED_TTL_SECONDS = 60 * 60
 COMMUNITY_RESOLVED_TTL_SECONDS = 60 * 60
+YEAR_IN_REVIEW_RESOLVED_TTL_SECONDS = 60 * 60
 PERSONAL_DAILY_JAMS_SOURCE = "personal:daily-jams"
 PERSONAL_DAILY_JAMS_LIMIT = 20
 
@@ -105,6 +106,7 @@ class RecommendationService:
             mbid=recording.mbid,
             release_id=recording.release_id,
             artist_id=recording.artist_id,
+            artist_name=resolve_artist_name(self._session, recording.artist_id),
             title=recording.title,
             duration_ms=recording.duration_ms,
             isrc=recording.isrc,
@@ -146,6 +148,60 @@ class RecommendationService:
             isrc=None,
             track_number=None,
         )
+
+    def _to_artist_out(self, artist: Artist) -> ArtistOut:
+        return ArtistOut(
+            id=artist.id,
+            mbid=artist.mbid,
+            deezer_id=artist.deezer_id,
+            name=artist.name,
+            sort_name=artist.sort_name,
+            images=artist.images,
+        )
+
+    def _resolve_artist_stats_entry(self, entry: dict[str, Any]) -> Artist | None:
+        """`entry` je jedna položka z `/1/stats/user/{name}/artists` -- LB
+        nese buď `artist_mbid` (singulár), nebo `artist_mbids` (list, starší
+        tvar odpovědi), takže zkoušíme obojí."""
+        name = entry.get("artist_name")
+        if not name:
+            return None
+        mbid = entry.get("artist_mbid")
+        if not mbid:
+            mbids = entry.get("artist_mbids") or []
+            mbid = mbids[0] if mbids else None
+        return upsert_artist(self._session, mbid=mbid, name=name, sort_name=None)
+
+    async def _resolve_artist_stats_entries_cached(
+        self, cache_key: str, limit: int, fetch_entries: Any
+    ) -> list[ArtistOut]:
+        """Stejný cache-by-resolved-id vzor jako `_resolve_stats_entries_cached`
+        níž, jen pro interprety místo nahrávek (`year_in_review`'s top
+        artists)."""
+
+        async def resolve_and_cache() -> list[str]:
+            entries = await fetch_entries()
+            resolved: list[str] = []
+            seen: set[str] = set()
+            for entry in entries:
+                if len(resolved) >= limit:
+                    break
+                artist = self._resolve_artist_stats_entry(entry)
+                if artist is None or artist.id in seen:
+                    continue
+                seen.add(artist.id)
+                resolved.append(artist.id)
+            return resolved
+
+        artist_ids = await cached_json(cache_key, YEAR_IN_REVIEW_RESOLVED_TTL_SECONDS, resolve_and_cache)
+
+        results: list[ArtistOut] = []
+        for artist_id in artist_ids:
+            artist = self._session.get(Artist, artist_id)
+            if artist is None:
+                continue
+            results.append(self._to_artist_out(artist))
+        return results
 
     async def _resolve_stats_entries_cached(
         self, cache_key: str, limit: int, fetch_entries: Any
@@ -352,3 +408,40 @@ class RecommendationService:
             return entries
 
         return await self._resolve_stats_entries_cached(f"community:{user_name}:{limit}", limit, fetch_entries)
+
+    async def year_in_review(self, user_name: str, top_limit: int = 10) -> YearInReviewOut:
+        """"Rok v hudbě" -- `range_="year"` je ListenBrainzovo nejširší okno
+        (posledních 12 měsíců, ne přesně kalendářní rok -- LB jiné dělení
+        nenabízí), ale pro shrnutí "co jsem poslouchal" je to nejbližší
+        rozumná aproximace. Prázdné/nulové hodnoty, dokud účet nemá dost
+        poslechů na spočtenou statistiku -- stejný "chybějící je jen jiný
+        stav" přístup jako zbytek téhle třídy, ne chyba."""
+        if self._lb_public is None:
+            return YearInReviewOut(range="year", total_listens=0, top_tracks=[], top_artists=[])
+
+        async def fetch_track_entries() -> list[dict[str, Any]]:
+            try:
+                return await self._lb_public.user_top_recordings(user_name, "year", top_limit)
+            except ListenBrainzError:
+                return []
+
+        async def fetch_artist_entries() -> list[dict[str, Any]]:
+            try:
+                return await self._lb_public.user_top_artists(user_name, "year", top_limit)
+            except ListenBrainzError:
+                return []
+
+        try:
+            total_listens = await self._lb_public.user_listen_count(user_name, "year")
+        except ListenBrainzError:
+            total_listens = 0
+
+        top_tracks = await self._resolve_stats_entries_cached(
+            f"year-in-review-tracks:{user_name}:{top_limit}", top_limit, fetch_track_entries
+        )
+        top_artists = await self._resolve_artist_stats_entries_cached(
+            f"year-in-review-artists:{user_name}:{top_limit}", top_limit, fetch_artist_entries
+        )
+        return YearInReviewOut(
+            range="year", total_listens=total_listens, top_tracks=top_tracks, top_artists=top_artists
+        )

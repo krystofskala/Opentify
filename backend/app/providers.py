@@ -1,52 +1,165 @@
-"""MediaProvider rozhraní — jediné místo, kde by měla sedět znalost o tom,
+"""MediaProvider konektory — jediné místo, kde by měla sedět znalost o tom,
 odkud se soubor fyzicky bere. Worker (app/worker.py) na konkrétním
-provideru nezávisí, jen na tomto protokolu.
+provideru nezávisí, jen na `MediaProvider` protokolu.
 
-`PlaceholderProvider` je čistě vývojová náhrada: nesahá nikam ven, jen
-simuluje zpoždění a zapíše syntetická data, aby šel celý pipeline
-(PENDING -> RUNNING -> AVAILABLE, progress eventy, checksum) end-to-end
-odzkoušet bez závislosti na reálném zdroji. Konkrétní produkční
-implementace (vlastní mirror, licencovaný zdroj apod.) je mimo scope
-tohoto sketche.
+Providery:
+  - `SlskdProvider`   -- primární zdroj, REST konektor na lokální slskd
+                         (Soulseek daemon), preferuje lossless (FLAC).
+  - `YoutubeProvider` -- fallback přes yt-dlp, použije se jen když slskd
+                         nic nenajde nebo stahování selže; po stažení
+                         dotáhne MBID/interpreta/název do tagů (mutagen),
+                         protože YouTube o MBID nic neví.
+  - `CompositeProvider` -- zkouší providery v zadaném pořadí, padá na
+                         dalšího jak při prázdném `resolve()`, tak při
+                         výjimce ve `fetch()` (viz jeho docstring).
+  - `PlaceholderProvider` -- čistě vývojová náhrada beze změny, pro
+                         end-to-end test pipeline bez závislosti na
+                         slskd/yt-dlp (`MEDIA_PROVIDER=placeholder`).
+
+Přesné REST tvary slskd (cesty, JSON pole) se mezi verzemi mění -- ověř si
+je proti `/swagger` běžící instance, než tohle nasadíš na jinou verzi než
+tu, se kterou se to psalo (slskd ~0.20.x).
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import logging
+import os
+import re
+import shutil
+import time
+import unicodedata
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Protocol, Sequence
+
+import httpx
+
+logger = logging.getLogger("vault.providers")
 
 ProgressCallback = Callable[[int], Awaitable[None]]
+
+# Zavolá se (nejvýš jednou za `fetch()`) hned, jak provider najde/vytvoří
+# soubor na disku -- i uprostřed stahování, ne až na konci. Umožňuje
+# `GET /tracks/{id}/stream` začít servírovat ještě rostoucí soubor (viz
+# `routes/provisioning.py:_tail_growing_file`), místo čekání na úplné
+# dokončení. Jen `SlskdProvider` ho reálně volá -- stahuje rovnou ve
+# finálním formátu (FLAC/MP3), takže růst souboru je bezpečně streamovatelný.
+# `YoutubeProvider` ho nevolá: nativní m4a z YouTube je hotové za ~3 s, dřív
+# než by se progresivní stream vůbec vyplatil.
+OnFileLocated = Callable[[Path], Awaitable[None]]
+
+
+def _normalize(text: str) -> str:
+    """Bez diakritiky, malá písmena, jen alfanumerické tokeny oddělené
+    mezerou -- pro porovnání názvu skladby s názvem souboru na Soulseeku."""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+# Slova, co v názvech složek/souborů často chybí nebo se píšou jinak.
+_SOULSEEK_STOPWORDS = {"the", "feat", "ft", "featuring", "and", "a"}
+
+
+def _title_tokens(title: str) -> set[str]:
+    # Závorky/hranaté závorky ("(Remastered 2011)", "[Live]") v názvech
+    # souborů často chybí nebo se liší -- do shody se nepočítají.
+    core = re.sub(r"[\(\[].*?[\)\]]", " ", title)
+    return {t for t in _normalize(core).split() if len(t) >= 2}
+
+
+@dataclass
+class TrackMetadata:
+    """To, co worker o skladbě ví z DB (`app/worker.py:_start_job`) a co
+    providery potřebují jak k vyhledání (`title`/`artist_name`), tak
+    k dotažení tagů po stažení ze zdroje, který o MBID nic neví (`mbid`)."""
+
+    recording_id: str
+    title: str
+    artist_name: str | None = None
+    mbid: str | None = None
+    duration_ms: int | None = None
+
+    @property
+    def search_query(self) -> str:
+        return f"{self.artist_name} {self.title}".strip() if self.artist_name else self.title.strip()
+
+    @property
+    def soulseek_query(self) -> str:
+        """Soulseek hledá podřetězce CELÉ cesty a musí sedět KAŽDÉ slovo --
+        interpunkce/"&"/apostrofy ("I’d") nebo text v závorkách tak dřív
+        shodily hledání na nulu. Jen slova z písmen/číslic, bez závorek,
+        bez jednoznakových zbytků po apostrofech."""
+        title = re.sub(r"[\(\[].*?[\)\]]", " ", self.title)
+        # "AURORA;Pomme", "X & Y", "X feat. Y" -> jen hlavní interpret (méně
+        # povinných slov = víc zásahů; skladbu stejně ověří `_rank`).
+        artist = re.split(r"\s*(?:;|,|/|&|\bfeat\b\.?|\bft\b\.?)\s*", self.artist_name or "", flags=re.I)[0]
+        text = f"{artist} {title}"
+        words = [w for w in re.findall(r"\w+", text) if len(w) >= 2 and w.lower() not in _SOULSEEK_STOPWORDS]
+        return " ".join(words) or self.search_query
 
 
 @dataclass
 class ProviderCandidate:
     source_provider: str
     source_ref: str
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
+class FetchResult:
+    """Výsledek `MediaProvider.fetch()` -- `source_provider`/`format`/
+    `bitrate_kbps` sem patří (ne na `ProviderCandidate`), protože
+    `CompositeProvider` může fakticky stáhnout jiným providerem, než který
+    našel první `candidate` (fallback při chybě `fetch()`, viz jeho
+    docstring) -- výsledná metadata musí odpovídat tomu, kdo soubor OPRAVDU
+    stáhl."""
+
+    path: Path
+    format: str
+    source_provider: str
+    bitrate_kbps: int | None = None
 
 
 class MediaProvider(Protocol):
-    async def resolve(self, recording_id: str, title: str) -> ProviderCandidate | None: ...
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None: ...
 
     async def fetch(
         self,
+        track: TrackMetadata,
         candidate: ProviderCandidate,
-        dest_path: Path,
+        dest_stem: Path,
         on_progress: ProgressCallback,
-    ) -> None: ...
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        """`dest_stem` je cílová cesta BEZ přípony (worker nezná formát
+        předem) -- provider si připojí tu svou (`.flac`, `.mp3`, ...) a
+        vrátí skutečnou cestu ve `FetchResult.path`. `on_file_located` viz
+        jeho docstring výš -- volitelné zavolat, ne všechny providery to
+        umí/dává smysl."""
+        ...
 
 
 class PlaceholderProvider:
-    async def resolve(self, recording_id: str, title: str) -> ProviderCandidate | None:
-        return ProviderCandidate(source_provider="placeholder", source_ref=recording_id)
+    """Čistě vývojová náhrada: nesahá nikam ven, jen simuluje zpoždění a
+    zapíše syntetická data, aby šel celý pipeline (PENDING -> RUNNING ->
+    AVAILABLE, progress eventy, checksum) end-to-end odzkoušet bez závislosti
+    na reálném zdroji."""
+
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        return ProviderCandidate(source_provider="placeholder", source_ref=track.recording_id)
 
     async def fetch(
         self,
+        track: TrackMetadata,
         candidate: ProviderCandidate,
-        dest_path: Path,
+        dest_stem: Path,
         on_progress: ProgressCallback,
-    ) -> None:
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        dest_path = dest_stem.with_suffix(".audio")
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         steps = 5
         tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
@@ -56,3 +169,636 @@ class PlaceholderProvider:
                 f.write(b"\x00" * 4096)  # syntetická data, ne validní audio
                 await on_progress(int((i + 1) / steps * 100))
         tmp_path.replace(dest_path)
+        return FetchResult(path=dest_path, format="audio", source_provider="placeholder")
+
+
+class _PeerFailed(Exception):
+    """Jeden konkrétní Soulseek peer nevyšel (odmítl, frontí, zasekl se) --
+    `SlskdProvider.fetch()` pak zkusí dalšího kandidáta z téhož hledání."""
+
+
+@dataclass(frozen=True)
+class _SlskdProfile:
+    # Tvrdý strop hledání -- slskd sám pošle odpovědi obvykle do 1.5-3.5 s,
+    # "dokončení" hledání ale trvá ~20 s (živě změřeno). Čekat na dokončení
+    # bylo hlavní zdržení prvního přehrání.
+    search_cap_s: float
+    # Jak dlouho ještě sbírat odpovědi po prvním "dobrém" kandidátovi.
+    settle_s: float
+    # Peer, který do tohohle času nepošle ani bajt (typicky "Queued,
+    # Remotely"), se zruší a jde se na dalšího.
+    start_timeout_s: float
+    # Rozběhnutý přenos, co tak dlouho nepřibyl ani bajt.
+    stall_timeout_s: float
+    max_peers: int
+
+
+class SlskdProvider:
+    """Konektor na slskd (https://github.com/slskd/slskd) REST API.
+
+    Dva profily:
+      - `interactive` (uživatel zmáčkl Přehrát a čeká): krátké hledání
+        s early-exitem, peer vybraný hlavně podle toho, jak rychle soubor
+        pošle (volný upload slot, rychlost, fronta), rychlé vzdání se
+        nerozběhnutého peeru.
+      - background (prefetch/fronta): delší hledání, kvalita (FLAC) má
+        přednost, trpělivější timeouty.
+
+    Auth: `X-API-Key` header. Soubory po dokončení transferu leží někde pod
+    `downloads_dir` (slskd strukturu zplošťuje podle vzdálené cesty, ne podle
+    uživatele) -- hledá se rekurzivně podle jména, viz `_locate_downloaded_file`.
+    """
+
+    PREFERRED_EXTENSIONS = (".flac", ".mp3", ".m4a", ".ogg")
+
+    INTERACTIVE = _SlskdProfile(search_cap_s=8.0, settle_s=1.0, start_timeout_s=8.0, stall_timeout_s=10.0, max_peers=3)
+    BACKGROUND = _SlskdProfile(search_cap_s=15.0, settle_s=3.0, start_timeout_s=45.0, stall_timeout_s=30.0, max_peers=3)
+
+    # Peer, co nedávno odmítl/zaseknul přenos, se chvíli vůbec nezkouší.
+    _BLOCKLIST_S = 30 * 60
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        downloads_dir: Path | None = None,
+        *,
+        download_timeout_s: float = 300.0,
+        poll_interval_s: float = 0.5,
+    ) -> None:
+        self.base_url = (base_url or os.environ.get("SLSKD_URL", "http://slskd:5030")).rstrip("/")
+        self.api_key = api_key or os.environ.get("SLSKD_API_KEY", "")
+        self.downloads_dir = downloads_dir or Path(
+            os.environ.get("SLSKD_DOWNLOADS_DIR", "/data/slskd-downloads")
+        )
+        self.download_timeout_s = download_timeout_s
+        self.poll_interval_s = poll_interval_s
+        self._blocked_until: dict[str, float] = {}
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-API-Key": self.api_key} if self.api_key else {}
+
+    def _block(self, username: str) -> None:
+        self._blocked_until[username] = time.monotonic() + self._BLOCKLIST_S
+
+    def _is_blocked(self, username: str) -> bool:
+        until = self._blocked_until.get(username)
+        return until is not None and until > time.monotonic()
+
+    # ------------------------------------------------------------------
+    # Hledání
+    # ------------------------------------------------------------------
+
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        query = track.soulseek_query
+        if not query:
+            return None
+        profile = self.INTERACTIVE if interactive else self.BACKGROUND
+        async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
+            created = await client.post(
+                "/api/v0/searches",
+                # slskd ať hledá jen tak dlouho, jak my čekáme -- jinak by
+                # zbytečně držel otevřené hledání dalších ~15 s.
+                json={"searchText": query, "searchTimeout": int(profile.search_cap_s * 1000)},
+            )
+            created.raise_for_status()
+            search_id = created.json()["id"]
+
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            first_good_at: float | None = None
+            ranked: list[tuple[float, str, dict]] = []
+            seen_responses = -1
+            try:
+                while True:
+                    now = loop.time()
+                    status_resp = await client.get(f"/api/v0/searches/{search_id}")
+                    status_resp.raise_for_status()
+                    payload = status_resp.json()
+                    count = int(payload.get("responseCount") or 0)
+                    complete = bool(payload.get("isComplete")) or str(payload.get("state", "")).lower().startswith(
+                        "completed"
+                    )
+                    if count != seen_responses and (count > 0 or complete):
+                        seen_responses = count
+                        responses = await client.get(f"/api/v0/searches/{search_id}/responses")
+                        responses.raise_for_status()
+                        ranked = self._rank(responses.json(), track, interactive=interactive)
+                        if first_good_at is None and ranked and self._is_good(ranked[0], interactive):
+                            first_good_at = now
+                    if complete:
+                        break
+                    if first_good_at is not None and now - first_good_at >= profile.settle_s:
+                        break
+                    if now - started >= profile.search_cap_s:
+                        break
+                    await asyncio.sleep(self.poll_interval_s)
+            finally:
+                # Úklid -- slskd si jinak hromadí stovky starých hledání.
+                try:
+                    await client.delete(f"/api/v0/searches/{search_id}")
+                except httpx.HTTPError:
+                    pass
+
+        logger.info(
+            "slskd hledání '%s' (%s): %d kandidátů za %.1f s",
+            query,
+            "interactive" if interactive else "background",
+            len(ranked),
+            loop.time() - started,
+        )
+        if not ranked:
+            return None
+        peers = [
+            {
+                "username": username,
+                "filename": f["filename"],
+                "size": f.get("size", 0),
+                "bitrate_kbps": f.get("bitRate"),
+            }
+            for _score, username, f in ranked[: profile.max_peers]
+        ]
+        best = peers[0]
+        return ProviderCandidate(
+            source_provider="slskd",
+            source_ref=f"{best['username']}/{best['filename']}",
+            extra={**best, "alternates": peers[1:], "interactive": interactive},
+        )
+
+    def _rank(self, search_responses: list[dict], track: TrackMetadata, *, interactive: bool) -> list[tuple[float, str, dict]]:
+        """Seřadí soubory ze všech odpovědí -- dřív se bral první FLAC bez
+        ohledu na to, jestli má peer volný slot nebo frontu stovek souborů,
+        takže "nejlepší" kandidát často visel v "Queued, Remotely" až do
+        300s timeoutu, než se spadlo na YouTube."""
+        wanted = _title_tokens(track.title)
+        out: list[tuple[float, str, dict]] = []
+        seen: set[tuple[str, str]] = set()
+        for response in search_responses:
+            username = response.get("username")
+            if not username or self._is_blocked(username):
+                continue
+            free = bool(response.get("hasFreeUploadSlot"))
+            queue = int(response.get("queueLength") or 0)
+            speed = int(response.get("uploadSpeed") or 0)  # B/s
+            for f in response.get("files", []):
+                filename = f.get("filename", "")
+                ext = Path(filename.replace("\\", "/")).suffix.lower()
+                if ext not in self.PREFERRED_EXTENSIONS:
+                    continue
+                if (username, filename) in seen:
+                    continue
+                seen.add((username, filename))
+                if wanted:
+                    have = set(_normalize(filename.rsplit("\\", 1)[-1]).split())
+                    if len(wanted & have) < max(1, round(len(wanted) * 0.8)):
+                        continue  # jiná skladba ze stejného alba/interpreta
+                size = int(f.get("size") or 0)
+                bitrate = f.get("bitRate")
+                if ext == ".flac":
+                    quality = 3.0
+                elif ext == ".mp3":
+                    quality = 2.0 if (bitrate is None or bitrate >= 256) else (1.2 if bitrate >= 192 else 0.4)
+                else:
+                    quality = 1.5
+                est_s = size / max(speed, 50_000) if size else 30.0
+                if interactive:
+                    score = (1000 if free else 0) - est_s * 10 - queue * 50 + quality * 25
+                else:
+                    score = (500 if free else 0) - queue * 20 + quality * 200 - est_s
+                f = {**f, "_free": free, "_speed": speed, "_est_s": est_s, "_quality": quality}
+                out.append((score, username, f))
+        out.sort(key=lambda c: c[0], reverse=True)
+        return out
+
+    @staticmethod
+    def _is_good(candidate: tuple[float, str, dict], interactive: bool) -> bool:
+        _score, _user, f = candidate
+        if interactive:
+            return f["_free"] and f["_speed"] >= 300_000 and f["_est_s"] <= 15
+        return f["_free"] and f["_quality"] >= 2.0
+
+    # ------------------------------------------------------------------
+    # Stahování
+    # ------------------------------------------------------------------
+
+    async def fetch(
+        self,
+        track: TrackMetadata,
+        candidate: ProviderCandidate,
+        dest_stem: Path,
+        on_progress: ProgressCallback,
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        interactive = bool(candidate.extra.get("interactive"))
+        profile = self.INTERACTIVE if interactive else self.BACKGROUND
+        peers = [candidate.extra, *candidate.extra.get("alternates", [])]
+        located = False
+
+        async def located_once(path: Path) -> None:
+            nonlocal located
+            located = True
+            await on_file_located(path)
+
+        last_error: Exception | None = None
+        for peer in peers:
+            try:
+                return await self._fetch_from_peer(peer, profile, dest_stem, on_progress, located_once)
+            except _PeerFailed as exc:
+                last_error = exc
+                self._block(peer["username"])
+                logger.info("slskd peer %s nevyšel: %s", peer["username"], exc)
+                if located:
+                    # Klient už přehrává rostoucí soubor OD TOHOHLE peeru --
+                    # jiný peer = jiný soubor, plynule na něj navázat nejde.
+                    break
+        raise RuntimeError(f"slskd: žádný peer soubor nedodal ({last_error})")
+
+    async def _fetch_from_peer(
+        self,
+        peer: dict,
+        profile: _SlskdProfile,
+        dest_stem: Path,
+        on_progress: ProgressCallback,
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        username = peer["username"]
+        filename = peer["filename"]
+        # Soulseek cesty mají zpětná lomítka i na Linuxu -- basename ručně.
+        basename = filename.rsplit("\\", 1)[-1]
+        source_path: Path | None = None
+
+        async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
+            queued = await client.post(
+                f"/api/v0/transfers/downloads/{username}",
+                json=[{"filename": filename, "size": peer.get("size", 0)}],
+            )
+            queued.raise_for_status()
+
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            last_bytes = 0
+            last_change = started
+            transfer: dict | None = None
+            try:
+                while True:
+                    now = loop.time()
+                    if now - started > self.download_timeout_s:
+                        await self._cancel(client, username, transfer)
+                        raise _PeerFailed(f"nedokončeno do {self.download_timeout_s:.0f} s")
+
+                    transfers_resp = await client.get(f"/api/v0/transfers/downloads/{username}")
+                    transfers_resp.raise_for_status()
+                    transfer = self._find_transfer(transfers_resp.json(), filename)
+                    if transfer is not None:
+                        transferred = int(transfer.get("bytesTransferred", 0))
+                        await on_progress(min(int(transfer.get("percentComplete", 0)), 99))
+
+                        if transferred > last_bytes:
+                            last_bytes = transferred
+                            last_change = now
+                        if source_path is None and transferred > 0:
+                            found = await asyncio.to_thread(self._locate_downloaded_file, basename)
+                            if found is not None:
+                                source_path = found
+                                await on_file_located(found)
+
+                        state = str(transfer.get("state", "")).lower()
+                        if "completed" in state:
+                            if "succeeded" in state:
+                                break
+                            # Rejected / TimedOut / Errored / Cancelled / Aborted --
+                            # dřív se chytaly jen Errored/Cancelled a zbytek se
+                            # točil až do 300s timeoutu.
+                            raise _PeerFailed(f"stav {transfer.get('state')}")
+
+                    if last_bytes == 0 and now - started > profile.start_timeout_s:
+                        await self._cancel(client, username, transfer)
+                        state = transfer.get("state") if transfer else "nezafrontěno"
+                        raise _PeerFailed(f"nezačal posílat do {profile.start_timeout_s:.0f} s ({state})")
+                    if last_bytes > 0 and now - last_change > profile.stall_timeout_s:
+                        await self._cancel(client, username, transfer)
+                        raise _PeerFailed(f"přenos se zasekl na {last_bytes} B")
+
+                    await asyncio.sleep(self.poll_interval_s)
+            except asyncio.CancelledError:
+                # Závod skončil jinak (YouTube vyhrál / job zrušen) -- ať transfer
+                # nezůstane viset ve frontě peeru a později nestáhne sirotka.
+                await asyncio.shield(self._cancel(client, username, transfer))
+                raise
+
+        if source_path is None:
+            source_path = await asyncio.to_thread(self._locate_downloaded_file, basename)
+        if source_path is None:
+            raise _PeerFailed(f"dokončený transfer '{basename}' se nenašel pod {self.downloads_dir}")
+
+        dest_path = dest_stem.with_suffix(source_path.suffix.lower())
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        # `shutil.move` mezi Docker volumes = kopie + smazání; otevřený handle
+        # progresivního streamu (`_tail_growing_file`) přežije díky POSIX inode.
+        await asyncio.to_thread(shutil.move, str(source_path), str(dest_path))
+        await on_progress(100)
+
+        return FetchResult(
+            path=dest_path,
+            format=dest_path.suffix.lstrip("."),
+            source_provider="slskd",
+            bitrate_kbps=peer.get("bitrate_kbps"),
+        )
+
+    @staticmethod
+    async def _cancel(client: httpx.AsyncClient, username: str, transfer: dict | None) -> None:
+        if not transfer or not transfer.get("id"):
+            return
+        try:
+            await client.delete(
+                f"/api/v0/transfers/downloads/{username}/{transfer['id']}", params={"remove": "true"}
+            )
+        except httpx.HTTPError:
+            pass
+
+    def _locate_downloaded_file(self, basename: str) -> Path | None:
+        """Nejnovější soubor s tímhle jménem kdekoliv pod `downloads_dir` --
+        `rglob` místo pevné cesty, slskd strukturu zplošťuje po svém."""
+        candidates = list(self.downloads_dir.rglob(basename))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+
+    @staticmethod
+    def _find_transfer(payload: dict, filename: str) -> dict | None:
+        # `{"username": ..., "directories": [{"directory": ..., "files": [...]}]}`
+        # -- hledá se podle jména, pořadí neodpovídá pořadí zafrontění. Při
+        # opakovaném stažení téhož souboru bere nejnovější záznam.
+        match: dict | None = None
+        for directory in payload.get("directories", []):
+            for f in directory.get("files", []):
+                if f.get("filename") == filename:
+                    if match is None or str(f.get("requestedAt", "")) > str(match.get("requestedAt", "")):
+                        match = f
+        return match
+
+
+class YoutubeProvider:
+    """Záložní/rychlý provider přes yt-dlp. Stahuje NATIVNÍ m4a (AAC, itag
+    140) bez překódování -- ~3 s na skladbu místo ~5 s s převodem do MP3
+    (živě změřeno), a bez druhé ztrátové generace. Jen když m4a není
+    k dispozici, spadne na starý převod `bestaudio -> mp3`.
+
+    `resolve()` je čisté textové vyhledávání (`ytsearch1:`) -- YouTube o MBID
+    nic neví, takže po stažení `fetch()` dopíše MBID/interpreta/název do tagů.
+    """
+
+    def __init__(self, *, preferred_bitrate_kbps: int = 320) -> None:
+        self.preferred_bitrate_kbps = preferred_bitrate_kbps
+
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        query = track.search_query
+        if not query:
+            return None
+        return ProviderCandidate(source_provider="youtube", source_ref=query, extra={"query": query})
+
+    def _base_opts(self, outtmpl: str, progress_hook: Callable[[dict], None]) -> dict:
+        # BEZ `extractor_args.player_client` -- dřívější natvrdo nastavené
+        # ["android", "web"] s yt-dlp 2026.08 selhávalo ("Sign in to confirm
+        # you're not a bot" / "Requested format is not available", živě
+        # ověřeno), výchozí výběr klientů yt-dlp funguje za ~1.8 s.
+        return {
+            "outtmpl": outtmpl,
+            "noplaylist": True,
+            "default_search": "ytsearch1",
+            "quiet": True,
+            "no_warnings": True,
+            "socket_timeout": 15,
+            "retries": 2,
+            "progress_hooks": [progress_hook],
+        }
+
+    async def fetch(
+        self,
+        track: TrackMetadata,
+        candidate: ProviderCandidate,
+        dest_stem: Path,
+        on_progress: ProgressCallback,
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        import yt_dlp  # lazy -- potřeba jen když se tenhle provider opravdu použije
+
+        query = candidate.extra["query"]
+        dest_stem.parent.mkdir(parents=True, exist_ok=True)
+        outtmpl = f"{dest_stem}.%(ext)s"
+        loop = asyncio.get_running_loop()
+        last_reported = -1
+
+        def progress_hook(d: dict) -> None:
+            if d.get("status") != "downloading":
+                return
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            if not total:
+                return
+            nonlocal last_reported
+            pct = int(d.get("downloaded_bytes", 0) / total * 95)
+            if pct != last_reported:
+                last_reported = pct
+                asyncio.run_coroutine_threadsafe(on_progress(pct), loop)
+
+        m4a_opts = {**self._base_opts(outtmpl, progress_hook), "format": "bestaudio[ext=m4a]"}
+        mp3_opts = {
+            **self._base_opts(outtmpl, progress_hook),
+            "format": "bestaudio/best",
+            # `final_ext` -- bez něj yt-dlp u audia už v mp4 kontejneru spočítá
+            # stejnou zdrojovou i cílovou cestu a spadne na os.replace.
+            "final_ext": "mp3",
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": str(self.preferred_bitrate_kbps),
+                }
+            ],
+        }
+
+        def pick_video() -> str:
+            """Explicitní `ytsearch5:` + výběr podle délky -- `default_search`
+            u některých dotazů (diakritika/rozbité kódování) vůbec nehledal,
+            a první výsledek býval hodinový mix (živě: 112 MB "2 Hour
+            Mashups Mix" místo skladby). Ploché hledání trvá ~1 s."""
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 15}) as ydl:
+                info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            entries = [e for e in (info or {}).get("entries") or [] if e and e.get("id")]
+            if not entries:
+                raise RuntimeError(f"YouTube nic nenašel pro '{query}'")
+            target = track.duration_ms / 1000 if track.duration_ms else None
+
+            def acceptable(e: dict) -> bool:
+                d = e.get("duration")
+                if d is None:
+                    return e.get("live_status") not in ("is_live", "is_upcoming")
+                if target:
+                    return abs(d - target) <= max(20.0, target * 0.15)
+                return 30 <= d <= 15 * 60
+
+            chosen = next((e for e in entries if acceptable(e)), None)
+            if chosen is None:
+                # Nic délkou nesedí (katalog může mít jinou verzi) -- aspoň ne
+                # mixy/streamy: nejkratší rozumný výsledek.
+                sane = [e for e in entries if e.get("duration") and 30 <= e["duration"] <= 15 * 60]
+                if not sane:
+                    raise RuntimeError(f"YouTube: žádný výsledek pro '{query}' nemá délku skladby")
+                chosen = sane[0]
+            return f"https://www.youtube.com/watch?v={chosen['id']}"
+
+        def run_download() -> tuple[Path, int | None]:
+            url = pick_video()
+            try:
+                with yt_dlp.YoutubeDL(m4a_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                path = dest_stem.with_suffix(".m4a")
+                if path.exists():
+                    abr = (info or {}).get("abr")
+                    return path, int(abr) if abr else None
+            except yt_dlp.utils.DownloadError as exc:
+                if "format is not available" not in str(exc):
+                    raise
+            with yt_dlp.YoutubeDL(mp3_opts) as ydl:
+                ydl.download([url])
+            return dest_stem.with_suffix(".mp3"), self.preferred_bitrate_kbps
+
+        dest_path, bitrate = await asyncio.to_thread(run_download)
+        if not dest_path.exists():
+            raise RuntimeError(f"yt-dlp nevytvořil očekávaný soubor {dest_path}")
+
+        await asyncio.to_thread(_tag_file, dest_path, mbid=track.mbid, title=track.title, artist=track.artist_name)
+        await on_progress(100)
+
+        return FetchResult(
+            path=dest_path,
+            format=dest_path.suffix.lstrip("."),
+            source_provider="youtube",
+            bitrate_kbps=bitrate,
+        )
+
+
+def _tag_file(path: Path, *, mbid: str | None, title: str, artist: str | None) -> None:
+    if path.suffix.lower() == ".m4a":
+        _tag_m4a(path, mbid=mbid, title=title, artist=artist)
+    else:
+        _tag_mp3(path, mbid=mbid, title=title, artist=artist)
+
+
+def _tag_m4a(path: Path, *, mbid: str | None, title: str, artist: str | None) -> None:
+    from mutagen.mp4 import MP4, MP4FreeForm
+
+    audio = MP4(path)
+    audio["\xa9nam"] = [title]
+    if artist:
+        audio["\xa9ART"] = [artist]
+    if mbid:
+        audio["----:com.apple.iTunes:MusicBrainz Track Id"] = [MP4FreeForm(mbid.encode())]
+    audio.save()
+
+
+def _tag_mp3(path: Path, *, mbid: str | None, title: str, artist: str | None) -> None:
+    """Dopíše katalogové metadata do staženého MP3 -- `EasyID3` pro
+    title/artist, syrový `ID3`/`UFID` pro MBID (`EasyID3` nemá bez ruční
+    registrace klíč pro MusicBrainz)."""
+    from mutagen.easyid3 import EasyID3
+    from mutagen.id3 import ID3, ID3NoHeaderError, TXXX, UFID
+
+    try:
+        easy = EasyID3(path)
+    except ID3NoHeaderError:
+        easy = EasyID3()
+        easy.save(path)
+        easy = EasyID3(path)
+    easy["title"] = title
+    if artist:
+        easy["artist"] = artist
+    easy.save(path)
+
+    if mbid:
+        id3 = ID3(path)
+        id3.setall("UFID", [UFID(owner="http://musicbrainz.org", data=mbid.encode())])
+        id3.setall(
+            "TXXX:MusicBrainz Track Id",
+            [TXXX(encoding=3, desc="MusicBrainz Track Id", text=[mbid])],
+        )
+        id3.save(path)
+
+
+class CompositeProvider:
+    """Zkouší providery v zadaném pořadí. `resolve()` vrátí první nabídku,
+    kterou nějaký provider najde (a zapamatuje si, který to byl). `fetch()`
+    zkusí toho providera; pokud selže výjimkou, padá na DALŠÍHO v pořadí
+    (a pro něj si nejdřív zavolá jeho vlastní `resolve()`, protože candidate
+    z jiného providera pro něj nedává smysl) -- to je "fallback i při
+    selhání stahování", ne jen při prázdném hledání.
+    """
+
+    def __init__(self, providers: Sequence[MediaProvider]) -> None:
+        if not providers:
+            raise ValueError("CompositeProvider potřebuje aspoň jeden provider")
+        self._providers = list(providers)
+
+    @property
+    def providers(self) -> list[MediaProvider]:
+        return list(self._providers)
+
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        for index, provider in enumerate(self._providers):
+            try:
+                candidate = await provider.resolve(track, interactive=interactive)
+            except Exception:
+                logger.exception(
+                    "%s.resolve() selhal pro %s, zkouším dalšího providera",
+                    type(provider).__name__,
+                    track.recording_id,
+                )
+                continue
+            if candidate is not None:
+                candidate.extra["_provider_index"] = index
+                return candidate
+        return None
+
+    async def fetch(
+        self,
+        track: TrackMetadata,
+        candidate: ProviderCandidate,
+        dest_stem: Path,
+        on_progress: ProgressCallback,
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        start_index = candidate.extra.get("_provider_index", 0)
+        last_error: Exception | None = None
+        for index in range(start_index, len(self._providers)):
+            provider = self._providers[index]
+            try:
+                current = (
+                    candidate
+                    if index == start_index
+                    else await provider.resolve(track, interactive=bool(candidate.extra.get("interactive")))
+                )
+                if current is None:
+                    continue
+                return await provider.fetch(track, current, dest_stem, on_progress, on_file_located)
+            except Exception as exc:
+                last_error = exc
+                logger.exception(
+                    "%s.fetch() selhal pro %s, zkouším dalšího providera v pořadí",
+                    type(provider).__name__,
+                    track.recording_id,
+                )
+                continue
+        raise last_error or RuntimeError(f"žádný provider nedokázal stáhnout zdroj pro {track.recording_id}")
+
+
+def build_provider() -> MediaProvider:
+    """`MEDIA_PROVIDER` env: `composite` (výchozí, slskd -> youtube fallback),
+    `slskd`, `youtube`, nebo `placeholder` pro dev bez závislosti na obojím."""
+    kind = os.environ.get("MEDIA_PROVIDER", "composite").lower()
+    if kind == "placeholder":
+        return PlaceholderProvider()
+    if kind == "slskd":
+        return SlskdProvider()
+    if kind == "youtube":
+        return YoutubeProvider()
+    return CompositeProvider([SlskdProvider(), YoutubeProvider()])

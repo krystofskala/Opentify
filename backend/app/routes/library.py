@@ -5,6 +5,9 @@
   - `GET  /library/local-tracks`   -- naskenované lokální soubory, rovnou přehratelné.
   - `GET  /library/local-albums`   -- ta samá knihovna seskupená po albech.
   - `GET  /library/local-artists`  -- ta samá knihovna seskupená po interpretech.
+  - `GET  /library/genres`         -- ta samá knihovna seskupená po MusicBrainz žánrech.
+  - `GET  /library/by-genre/{g}`   -- skladby daného žánru.
+  - `GET  /library/czech`          -- skladby interpretů s MusicBrainz `country == "CZ"`.
   - `POST /library/import/spotify` -- naimportuje Spotify export (ZIP/JSON).
   - `GET  /library/liked-songs`    -- vrátí naimportované/lokální "Liked Songs".
 
@@ -27,14 +30,17 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
-from app.catalog.availability import compute_availability
+from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
-from app.library.spotify_import import LIKED_SONGS_SOURCE, LIKED_SONGS_TITLE, import_spotify_library
-from app.models import Artist, MediaAsset, Playlist, PlaylistItem, PlaylistKind, Recording, Release
-
-_LOCAL_SOURCE_PROVIDERS = ["local", "musicbrainz-local"]
+from app.library.spotify_import import (
+    LIKED_SONGS_SOURCE,
+    LIKED_SONGS_TITLE,
+    get_or_create_liked_songs_playlist,
+    import_spotify_library,
+)
+from app.models import Artist, MediaAsset, MediaAssetStatus, Playlist, PlaylistItem, PlaylistKind, Recording, Release
 
 library_router = APIRouter(prefix="/library", tags=["library"])
 
@@ -91,10 +97,13 @@ def local_tracks(
     session: Session = Depends(get_session),
     _current: tuple[str, str] = Depends(get_current_user),
 ):
-    """Nahrávky naskenované z lokální knihovny (`POST /library/scan`) --
-    `MediaAsset.status` je u nich vždy `AVAILABLE` bez provisioningu, takže
-    jde v klientu o obrazovku "přehraj rovnou"."""
-    base_query = select(MediaAsset).where(MediaAsset.source_provider.in_(_LOCAL_SOURCE_PROVIDERS))
+    """"Moje knihovna" -- cokoliv `AVAILABLE` na disku, ať už z lokálního
+    skenu (`POST /library/scan`), nebo dřív obstarané přes
+    `POST /tracks/{id}/provision` (slskd/YouTube). Dřív filtrovalo jen podle
+    `source_provider in (local, musicbrainz-local)`, takže stažené/obstarané
+    skladby v knihovně nikdy neskončily, i když je appka měla reálně na
+    disku a šly rovnou přehrát -- odsud "proč to nemám v knihovně"."""
+    base_query = select(MediaAsset).where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
     total = len(session.exec(base_query).all())
     assets = session.exec(
         base_query.order_by(MediaAsset.updated_at.desc()).offset(offset).limit(limit)
@@ -111,6 +120,7 @@ def local_tracks(
                 mbid=recording.mbid,
                 release_id=recording.release_id,
                 artist_id=recording.artist_id,
+                artist_name=resolve_artist_name(session, recording.artist_id),
                 title=recording.title,
                 duration_ms=recording.duration_ms,
                 isrc=recording.isrc,
@@ -143,7 +153,7 @@ def local_albums(
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Release.artist_id)
-        .where(MediaAsset.source_provider.in_(_LOCAL_SOURCE_PROVIDERS))
+        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
         .group_by(Release.id)
         .order_by(Artist.name, Release.title)
     ).all()
@@ -172,7 +182,7 @@ def local_artists(
         select(Artist.id, Artist.name, Artist.images, func.count(func.distinct(Recording.id)))
         .join(Recording, Recording.artist_id == Artist.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .where(MediaAsset.source_provider.in_(_LOCAL_SOURCE_PROVIDERS))
+        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
         .group_by(Artist.id)
         .order_by(Artist.name)
     ).all()
@@ -186,6 +196,95 @@ def local_artists(
         }
         for artist_id, name, images, track_count in rows
     ]
+
+
+def _local_recording_out(session: Session, recording: Recording) -> RecordingOut:
+    return RecordingOut(
+        id=recording.id,
+        mbid=recording.mbid,
+        release_id=recording.release_id,
+        artist_id=recording.artist_id,
+        artist_name=resolve_artist_name(session, recording.artist_id),
+        title=recording.title,
+        duration_ms=recording.duration_ms,
+        isrc=recording.isrc,
+        track_number=recording.track_number,
+        availability=compute_availability(session, recording.id),
+        preview_url=recording.external_refs.get("previewUrl"),
+    )
+
+
+@library_router.get("/genres")
+def local_genres(
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """Žánry napříč lokální knihovnou (MusicBrainz genre tagy na albech, viz
+    `CatalogService._enrich_release_genres` -- doplňují se líně při otevření
+    alba, takže dokud se knihovna neprojde/nezobrazí, budou řídké) s počtem
+    skladeb -- pohání "Podle nálady a žánru" na Home. Agregace v Pythonu, ne
+    SQL GROUP BY přes JSON sloupec -- na stovkách alb zanedbatelný náklad,
+    vyhne se SQLite-specific JSON1 dotazům.
+    """
+    rows = session.exec(
+        select(Release.genres, func.count(func.distinct(Recording.id)))
+        .join(Recording, Recording.release_id == Release.id)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
+        .group_by(Release.id)
+    ).all()
+
+    counts: dict[str, int] = {}
+    for genres, track_count in rows:
+        for genre in genres or []:
+            counts[genre] = counts.get(genre, 0) + track_count
+
+    return [
+        {"genre": genre, "trackCount": count}
+        for genre, count in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+
+@library_router.get("/by-genre/{genre}")
+def local_by_genre(
+    genre: str,
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """Lokální skladby, jejichž album nese daný žánr -- `genre` je přesný
+    MusicBrainz genre název (viz `/library/genres`), ne fulltextové hledání."""
+    matching_release_ids = {r.id for r in session.exec(select(Release)).all() if genre in (r.genres or [])}
+    if not matching_release_ids:
+        return {"total": 0, "items": []}
+
+    recordings = session.exec(
+        select(Recording)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .where(
+            MediaAsset.status == MediaAssetStatus.AVAILABLE,
+            Recording.release_id.in_(matching_release_ids),
+        )
+    ).all()
+    items = [_local_recording_out(session, r) for r in recordings]
+    return {"total": len(items), "items": [i.model_dump(by_alias=True) for i in items]}
+
+
+@library_router.get("/czech")
+def local_czech(
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """Skladby interpretů s MusicBrainz `country == "CZ"` (viz
+    `CatalogService._enrich_artist_country`, líné doplnění při otevření
+    interpreta) -- pohání "Česká hudba" na Home."""
+    recordings = session.exec(
+        select(Recording)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .join(Artist, Artist.id == Recording.artist_id)
+        .where(MediaAsset.status == MediaAssetStatus.AVAILABLE, Artist.country == "CZ")
+    ).all()
+    items = [_local_recording_out(session, r) for r in recordings]
+    return {"total": len(items), "items": [i.model_dump(by_alias=True) for i in items]}
 
 
 @library_router.post("/import/spotify")
@@ -246,6 +345,7 @@ def liked_songs(
                 mbid=recording.mbid,
                 release_id=recording.release_id,
                 artist_id=recording.artist_id,
+                artist_name=resolve_artist_name(session, recording.artist_id),
                 title=recording.title,
                 duration_ms=recording.duration_ms,
                 isrc=recording.isrc,
@@ -264,3 +364,53 @@ def liked_songs(
         "itemCount": len(recordings),
         "items": [r.model_dump(by_alias=True) for r in recordings],
     }
+
+
+@library_router.post("/liked-songs/{recording_id}")
+def like_song(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Přidá nahrávku do "Liked Songs" -- stejný playlist jako Spotify import
+    (`get_or_create_liked_songs_playlist`), jen jednotlivě přes UI srdíčko
+    místo hromadného importu. Idempotentní -- opakované volání nic nezdvojí."""
+    user_id, _device_id = current
+    if session.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
+
+    playlist = get_or_create_liked_songs_playlist(session, user_id)
+    existing = session.exec(
+        select(PlaylistItem)
+        .where(PlaylistItem.playlist_id == playlist.id, PlaylistItem.recording_id == recording_id)
+    ).first()
+    if existing is None:
+        position = len(
+            session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all()
+        )
+        session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
+        session.commit()
+    return {"recordingId": recording_id, "liked": True}
+
+
+@library_router.delete("/liked-songs/{recording_id}")
+def unlike_song(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Opak `like_song` -- odebere z "Liked Songs", pokud tam je. Idempotentní
+    (odebrání něčeho, co tam není, není chyba)."""
+    user_id, _device_id = current
+    playlist = session.exec(
+        select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == LIKED_SONGS_SOURCE)
+    ).first()
+    if playlist is not None:
+        existing = session.exec(
+            select(PlaylistItem)
+            .where(PlaylistItem.playlist_id == playlist.id, PlaylistItem.recording_id == recording_id)
+        ).first()
+        if existing is not None:
+            session.delete(existing)
+            session.commit()
+    return {"recordingId": recording_id, "liked": False}

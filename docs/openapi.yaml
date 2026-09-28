@@ -501,6 +501,62 @@ paths:
                     imageUrl: { type: string, nullable: true }
                     trackCount: { type: integer }
 
+  /library/genres:
+    get:
+      tags: [library]
+      summary: Žánry napříč lokální knihovnou (MusicBrainz genre tagy), s počtem skladeb.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    genre: { type: string }
+                    trackCount: { type: integer }
+
+  /library/by-genre/{genre}:
+    get:
+      tags: [library]
+      summary: Lokální skladby daného MusicBrainz žánru (viz /library/genres).
+      parameters:
+        - name: genre
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Recording" }
+
+  /library/czech:
+    get:
+      tags: [library]
+      summary: Lokální skladby interpretů s MusicBrainz country == "CZ".
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Recording" }
+
   /library/import/spotify:
     post:
       tags: [library]
@@ -543,6 +599,20 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PlaylistDetail" }
+
+  /lyrics/{recordingId}:
+    get:
+      tags: [lyrics]
+      summary: Text skladby (LRCLIB proxy) -- synchronizovaný, pokud existuje, jinak prostý.
+      parameters:
+        - $ref: "#/components/parameters/RecordingId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lyrics" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:
@@ -731,3 +801,13 @@ components:
             items:
               type: array
               items: { $ref: "#/components/schemas/Recording" }
+
+    Lyrics:
+      type: object
+      properties:
+        plain: { type: string, nullable: true }
+        synced:
+          type: string
+          nullable: true
+          description: LRC formát ("[mm:ss.xx]text" na řádek), viz lrclib.net.
+        instrumental: { type: boolean }

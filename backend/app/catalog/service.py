@@ -19,16 +19,37 @@ vyvolaný explicitním otevřením obrazovky, ne psaním do vyhledávacího pole
 from __future__ import annotations
 
 import asyncio
+import re
+import unicodedata
 from typing import Any
 
 from sqlmodel import Session
 
-from app.catalog.availability import compute_availability
+from app.catalog.artwork import fill_artist, fill_release
+from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError
-from app.catalog.schemas import ArtistOut, DiscographyOut, ReleaseOut, RecordingOut
+from app.catalog.schemas import ArtistBioOut, ArtistOut, DiscographyOut, ReleaseOut, RecordingOut
 from app.catalog.upsert import upsert_artist, upsert_recording, upsert_release
+from app.catalog.wikimedia import get_wikimedia_client
 from app.models import Artist, Recording, Release
+
+_TRACKLIST_OVERLAP_THRESHOLD = 0.4
+_TRACKLIST_CANDIDATE_LIMIT = 3
+_PARENS_RE = re.compile(r"\(.*?\)|\[.*?\]")
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_title(title: str) -> str:
+    """Sundá diakritiku, závorkové dovětky ("(Remastered 2011)", "(feat. X)")
+    a interpunkci -- dost na porovnání "stejná skladba, jiný zápis", ne na
+    plnou fuzzy shodu překlepů (na to viz `_TRACKLIST_OVERLAP_THRESHOLD`,
+    který toleruje část tracklistu, co takhle stejně nesedne)."""
+    text = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii").lower()
+    text = _PARENS_RE.sub(" ", text)
+    text = _NON_ALNUM_RE.sub(" ", text)
+    return text.strip()
+
 
 _MB_ENTITY_FOR_TYPE = {
     "artist": "artist",
@@ -79,6 +100,11 @@ class CatalogService:
             mbid=primary.get("id"),
             name=primary["name"],
             sort_name=primary.get("sort-name"),
+            # Embedded artist-credit stub (search/browse výsledky) `country`
+            # typicky nenese vůbec -- `.get()` je tu jen pro tu vzácnou
+            # odpověď, co ho náhodou obsahuje. Spolehlivá cesta je
+            # `_enrich_artist_country` přes samostatný `/artist/{mbid}` lookup.
+            country=primary.get("country"),
         )
 
     def _ingest_release_group_json(self, rg: dict[str, Any]) -> Release | None:
@@ -98,6 +124,11 @@ class CatalogService:
             title=rg.get("title", "Untitled"),
             release_date=rg.get("first-release-date") or None,
             release_type=release_type,
+            # Jen search/browse odpovědi s `inc=genres` tohle pole vůbec
+            # nesou (viz `browse_release_groups`/`get_release_group`) --
+            # jinde `rg.get("genres")` prostě chybí a `upsert_release` starou
+            # hodnotu nepřepíše (viz jeho "nepřepisovat prázdným" komentář).
+            genres=[g["name"] for g in rg.get("genres", []) if g.get("name")],
         )
 
     def _ingest_recording_search_json(self, rec: dict[str, Any]) -> Recording | None:
@@ -156,6 +187,7 @@ class CatalogService:
             mbid=recording.mbid,
             release_id=recording.release_id,
             artist_id=recording.artist_id,
+            artist_name=resolve_artist_name(self._session, recording.artist_id),
             title=recording.title,
             duration_ms=recording.duration_ms,
             isrc=recording.isrc,
@@ -173,17 +205,36 @@ class CatalogService:
     ) -> dict[str, Any]:
         types_to_query = [entity_type] if entity_type else list(_MB_ENTITY_FOR_TYPE)
 
-        async def search_one(t: str) -> tuple[str, dict[str, Any]]:
+        async def search_one(t: str) -> tuple[str, dict[str, Any] | None]:
             try:
                 data = await self._mb.search(_MB_ENTITY_FOR_TYPE[t], query, limit, offset)
             except MusicBrainzError:
-                data = {}
+                # `None` (ne `{}`) -- ať to jde odlišit od "MB opravdu nic
+                # nenašel". Dřívější `data = {}` dělalo z dočasného výpadku/
+                # rate-limitu (503) tichých "0 výsledků", nerozeznatelných od
+                # skutečně neexistující skladby (viz živý test na 15 písničkách,
+                # kde přesně tohle způsobilo falešné "nenalezeno" u půlky z nich).
+                return t, None
             return t, data
 
         raw_results = await asyncio.gather(*(search_one(t) for t in types_to_query))
 
+        failed_types = [t for t, data in raw_results if data is None]
+        if failed_types and len(failed_types) == len(types_to_query):
+            # Všechny dotazované typy selhaly na chybu MusicBrainz -- routa
+            # tohle namapuje na 503, aby klient (a uživatel) věděl, že má
+            # zkusit znovu, místo aby to vypadalo jako "tahle skladba
+            # neexistuje". Částečné selhání (jen některý typ u multi-entity
+            # dotazu bez `type`) níž jen ten typ přeskočí -- zbytek výsledků
+            # má smysl vrátit.
+            raise MusicBrainzError(
+                f"MusicBrainz search selhal pro všechny dotazované typy ({failed_types}) u '{query}'"
+            )
+
         results: list[dict[str, Any]] = []
         for t, data in raw_results:
+            if data is None:
+                continue
             if t == "artist":
                 for a in data.get("artists", []):
                     artist = upsert_artist(
@@ -227,6 +278,7 @@ class CatalogService:
         if artist is None:
             return None
         await self._enrich_artist_images(artist)
+        await self._enrich_artist_country(artist)
         return self._to_artist_out(artist)
 
     async def get_discography(
@@ -261,11 +313,79 @@ class CatalogService:
             releases=[self._to_release_out(r) for r in releases],
         )
 
+    async def get_artist_bio(self, artist_id: str) -> ArtistBioOut | None:
+        """Životopis + "Podobní interpreti" pro `ArtistScreen` -- MusicBrainz
+        strukturu nemá přímo, jen odkazy (`relations`, viz rozšířený `inc` v
+        `MusicBrainzClient.get_artist`). Wikidata/Wikipedia dotaz je
+        best-effort stejně jako Deezer enrichment výš -- chybějící životopis
+        nebo přerušené externí API nikdy nesmí shodit celou obrazovku
+        interpreta, jen se `bio` vrátí `None`."""
+        artist = self._session.get(Artist, artist_id)
+        if artist is None:
+            return None
+        if artist.mbid is None:
+            return ArtistBioOut(bio=None, related_artists=[])
+
+        try:
+            data = await self._mb.get_artist(artist.mbid)
+        except MusicBrainzError:
+            return ArtistBioOut(bio=None, related_artists=[])
+
+        relations = data.get("relations") or []
+
+        bio: str | None = None
+        wikidata_qid = self._extract_wikidata_qid(relations)
+        if wikidata_qid is not None:
+            wiki = get_wikimedia_client()
+            bio = await wiki.get_bio_from_wikidata(wikidata_qid)
+
+        related = self._upsert_related_artists(relations)
+        return ArtistBioOut(bio=bio, related_artists=[self._to_artist_out(a) for a in related])
+
+    def _extract_wikidata_qid(self, relations: list[dict[str, Any]]) -> str | None:
+        for rel in relations:
+            if rel.get("type") != "wikidata":
+                continue
+            resource = (rel.get("url") or {}).get("resource", "")
+            # `https://www.wikidata.org/wiki/Q123` -> `Q123`.
+            qid = resource.rsplit("/", 1)[-1]
+            if qid.startswith("Q"):
+                return qid
+        return None
+
+    _RELATED_ARTIST_LIMIT = 8
+
+    def _upsert_related_artists(self, relations: list[dict[str, Any]]) -> list[Artist]:
+        """`artist-rels` pokrývá různé vztahy (člen kapely, spolupráce,
+        přejmenování...) -- appce jde jen o "je to nějaký propojený
+        interpret", ne o rozlišení druhu vztahu, takže bereme všechny
+        `target-type == artist`. Dedup podle MBID, limit ať "Podobní
+        interpreti" nezabere celou obrazovku u interpretů s desítkami vztahů
+        (např. velké kapely s mnoha bývalými členy)."""
+        seen_mbids: set[str] = set()
+        related: list[Artist] = []
+        for rel in relations:
+            if rel.get("target-type") != "artist":
+                continue
+            stub = rel.get("artist") or {}
+            mbid = stub.get("id")
+            name = stub.get("name")
+            if not mbid or not name or mbid in seen_mbids:
+                continue
+            seen_mbids.add(mbid)
+            related.append(
+                upsert_artist(self._session, mbid=mbid, name=name, sort_name=stub.get("sort-name"))
+            )
+            if len(related) >= self._RELATED_ARTIST_LIMIT:
+                break
+        return related
+
     async def get_release(self, release_id: str) -> ReleaseOut | None:
         release = self._session.get(Release, release_id)
         if release is None:
             return None
         await self._enrich_release_images(release)
+        await self._enrich_release_genres(release)
         return self._to_release_out(release)
 
     async def get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
@@ -326,42 +446,124 @@ class CatalogService:
             return None
         return self._ingest_recording_search_json(recordings[0])
 
+    async def match_release_by_tracklist(
+        self, artist_hint: str | None, album_hint: str, local_titles: list[str]
+    ) -> tuple[Release, list[Recording]] | None:
+        """Najde album podle překryvu CELÉHO tracklistu se složkou lokálních
+        souborů, ne jen vyhledáním jedné skladby (`match_recording_by_text`) --
+        ten je nespolehlivý pro krátké/nejednoznačné názvy a časté remaster
+        varianty, což byl hlavní důvod, proč "hodně alb nebylo rozpoznáno".
+        Používá `app/library/scanner.py` pro složky s víc soubory (pravděpodobně
+        celé album). Vrací `None`, pokud žádný kandidát nemá dost vysoký
+        překryv -- radši žádný match než špatný.
+        """
+        query = f"{artist_hint} {album_hint}".strip() if artist_hint else album_hint
+        if not query:
+            return None
+        try:
+            data = await self._mb.search("release-group", query, _TRACKLIST_CANDIDATE_LIMIT, 0)
+        except MusicBrainzError:
+            return None
+        candidates = data.get("release-groups", [])
+        if not candidates:
+            return None
+
+        normalized_local = {normalize_title(t) for t in local_titles if t}
+        if not normalized_local:
+            return None
+
+        best_overlap = 0.0
+        best_rg: dict[str, Any] | None = None
+        for rg in candidates:
+            rgid = rg.get("id")
+            if not rgid:
+                continue
+            try:
+                tracks_data = await self._mb.get_release_group_tracks(rgid)
+            except MusicBrainzError:
+                continue
+            mb_releases = tracks_data.get("releases") or []
+            if not mb_releases:
+                continue
+            titles = [
+                (track.get("recording") or {}).get("title") or track.get("title")
+                for medium in mb_releases[0].get("media", [])
+                for track in medium.get("tracks", [])
+            ]
+            normalized_mb = {normalize_title(t) for t in titles if t}
+            if not normalized_mb:
+                continue
+            overlap = len(normalized_local & normalized_mb) / len(normalized_local)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_rg = rg
+
+        if best_rg is None or best_overlap < _TRACKLIST_OVERLAP_THRESHOLD:
+            return None
+
+        release = self._ingest_release_group_json(best_rg)
+        if release is None:
+            return None
+        recording_dtos = await self.get_release_tracks(release.id)
+        if not recording_dtos:
+            return None
+        recordings = [r for r in (self._session.get(Recording, dto.id) for dto in recording_dtos) if r is not None]
+        if not recordings:
+            return None
+        return release, recordings
+
+    # ------------------------------------------------------------------
+    # MusicBrainz enrichment doplňovaná líně (jen když chybí) při otevření
+    # interpreta/alba, stejný best-effort vzor jako Deezer enrichment níž —
+    # pohání "Podle nálady a žánru"/"Česká hudba" domovské sekce.
+    # ------------------------------------------------------------------
+
+    async def _enrich_artist_country(self, artist: Artist) -> None:
+        if artist.country or not artist.mbid:
+            return
+        try:
+            data = await self._mb.get_artist(artist.mbid)
+        except MusicBrainzError:
+            return
+        country = data.get("country")
+        if country:
+            artist.country = country
+            self._session.add(artist)
+            self._session.commit()
+
+    async def _enrich_release_genres(self, release: Release) -> None:
+        if release.genres or not release.mbid:
+            return
+        try:
+            data = await self._mb.get_release_group(release.mbid)
+        except MusicBrainzError:
+            return
+        genres = [g["name"] for g in data.get("genres", []) if g.get("name")]
+        if genres:
+            release.genres = genres
+            self._session.add(release)
+            self._session.commit()
+
     # ------------------------------------------------------------------
     # Deezer enrichment — best-effort, nikdy nesmí shodit request na MB datech.
     # ------------------------------------------------------------------
 
+    # Otevření detailu = uživatel na obrázek právě čeká, proto `force=True`
+    # (ignoruje "nedávno zkontrolováno" z backfillu). Sdílená logika včetně
+    # CAA/Deezer/Wikidata zdrojů a kontroly jmen je v `catalog/artwork.py`.
     async def _enrich_artist_images(self, artist: Artist) -> None:
-        if artist.images:
+        if artist.images and "/artist//" not in artist.images[0]:
             return
-        try:
-            data = await self._dz.search(artist.name, limit=1)
-        except Exception:
-            return
-        if not data or not data.get("data"):
-            return
-        picture = data["data"][0].get("artist", {}).get("picture_xl")
-        if picture:
-            artist.images = [picture]
-            self._session.add(artist)
-            self._session.commit()
+        self._session.commit()
+        if await fill_artist(artist.id, force=True):
+            self._session.refresh(artist)
 
     async def _enrich_release_images(self, release: Release) -> None:
         if release.images:
             return
-        artist = self._session.get(Artist, release.artist_id)
-        if artist is None:
-            return
-        try:
-            data = await self._dz.search(f"{artist.name} {release.title}", limit=1)
-        except Exception:
-            return
-        if not data or not data.get("data"):
-            return
-        cover = data["data"][0].get("album", {}).get("cover_xl")
-        if cover:
-            release.images = [cover]
-            self._session.add(release)
-            self._session.commit()
+        self._session.commit()
+        if await fill_release(release.id, force=True):
+            self._session.refresh(release)
 
     async def _enrich_recording_previews(self, recordings: list[Recording]) -> None:
         """Zapíše Deezer `preview_url` do `external_refs["previewUrl"]` pro

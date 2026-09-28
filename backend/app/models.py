@@ -52,6 +52,10 @@ class Artist(SQLModel, table=True):
     deezer_id: str | None = Field(default=None, index=True)
     name: str
     sort_name: str | None = None
+    # ISO 3166-1 alpha-2 (např. "CZ") -- z MusicBrainz `/artist/{mbid}` lookupu
+    # (top-level `country` pole, žádný extra `inc=` navíc), viz
+    # `CatalogService._enrich_artist_country`. `None`, dokud se nedoplní.
+    country: str | None = Field(default=None, index=True)
     images: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     external_refs: dict = Field(default_factory=dict, sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=utcnow)
@@ -68,6 +72,10 @@ class Release(SQLModel, table=True):
     title: str
     release_date: str | None = None  # ISO string; MB má často jen rok nebo rok-měsíc
     release_type: str = "album"  # album|ep|single|compilation
+    # Jména MusicBrainz genre tagů (`inc=genres`, viz `CatalogService.
+    # _ingest_release_group_json`/`_enrich_release_genres`) -- jen `name`
+    # řetězce, ne celé `{id,name,count}` objekty, stejně jako `images`.
+    genres: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     images: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     external_refs: dict = Field(default_factory=dict, sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=utcnow)
@@ -98,6 +106,9 @@ class MediaAsset(SQLModel, table=True):
     checksum_sha256: str | None = None
     source_provider: str | None = None
     last_error: str | None = None
+    # Hlasitostní korekce v dB k cíli -14 LUFS (viz app/loudness.py) -- `None`
+    # = ještě neanalyzováno, klient pak hraje bez korekce.
+    loudness_gain_db: float | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 

@@ -15,7 +15,12 @@ from app.models import (
     ProvisioningJobStatus,
     Recording,
 )
-from app.redis_bus import PROVISIONING_STREAM, get_redis
+from app.redis_bus import (
+    PROVISIONING_PRIORITY_STREAM,
+    PROVISIONING_STREAM,
+    get_redis,
+    job_escalate_key,
+)
 
 ACTIVE_JOB_STATUSES = (ProvisioningJobStatus.PENDING, ProvisioningJobStatus.RUNNING)
 
@@ -73,7 +78,20 @@ def get_or_create_job(
     return asset, job, True
 
 
-async def enqueue(job: ProvisioningJob) -> None:
+async def enqueue(job: ProvisioningJob, *, interactive: bool = False) -> None:
     r = get_redis()
-    await r.xadd(PROVISIONING_STREAM, {"job_id": job.id})
+    stream = PROVISIONING_PRIORITY_STREAM if interactive else PROVISIONING_STREAM
+    await r.xadd(stream, {"job_id": job.id})
     await publish_job_progress(job.requested_by_user_id, job.id, ProvisioningJobStatus.PENDING.value)
+
+
+async def escalate(job: ProvisioningJob) -> None:
+    """Uživatel chce přehrát skladbu, jejíž job už existuje (typicky ho
+    založil prefetch alba). Job ještě ve frontě -> duplicitní zpráva do
+    prioritního streamu ho předběhne (worker duplicitu pozná podle zámku /
+    stavu jobu). Job už běží -> escalate flag, běžící worker přidá rychlou
+    cestu. Opakované volání je neškodné."""
+    r = get_redis()
+    await r.set(job_escalate_key(job.id), "1", ex=600)
+    if job.status == ProvisioningJobStatus.PENDING:
+        await r.xadd(PROVISIONING_PRIORITY_STREAM, {"job_id": job.id})

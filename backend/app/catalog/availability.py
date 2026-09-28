@@ -8,7 +8,7 @@ from __future__ import annotations
 from sqlmodel import Session
 
 from app.catalog.schemas import Availability
-from app.models import MediaAsset, MediaAssetStatus
+from app.models import Artist, MediaAsset, MediaAssetStatus
 
 
 def compute_availability(session: Session, recording_id: str) -> Availability:
@@ -28,3 +28,16 @@ def compute_availability(session: Session, recording_id: str) -> Availability:
     if asset is not None and asset.status == MediaAssetStatus.AVAILABLE:
         return Availability.AVAILABLE
     return Availability.PROVISIONABLE
+
+
+def resolve_artist_name(session: Session, artist_id: str | None) -> str | None:
+    """`RecordingOut.artist_name` -- denormalizovaný jméno interpreta přímo
+    v odpovědi. Bez tohohle by klient u smíšených seznamů (Domů, Knihovna,
+    Oblíbené, playlisty -- kdekoliv skladby NEJSOU ze stejného alba/interpreta)
+    neměl odkud jméno vzít, jen `artist_id` -- živě nahlášeno jako "všude
+    chybí interpret". Sdílené místo stejně jako `compute_availability` výš,
+    ze stejného důvodu (používá se na všech stejných endpointech)."""
+    if artist_id is None:
+        return None
+    artist = session.get(Artist, artist_id)
+    return artist.name if artist is not None else None

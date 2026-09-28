@@ -182,6 +182,30 @@ class ListenBrainzPublicClient:
 
         return await cached_json(cache_key, USER_STATS_TTL_SECONDS, fetch)
 
+    async def user_top_artists(self, user_name: str, range_: str, count: int) -> list[dict[str, Any]]:
+        cache_key = f"lb-public:user-artists:{user_name}:{range_}:{count}"
+
+        async def fetch() -> list[dict[str, Any]]:
+            data = await self._get(f"/1/stats/user/{user_name}/artists", {"range": range_, "count": count})
+            return data.get("payload", {}).get("artists", [])
+
+        return await cached_json(cache_key, USER_STATS_TTL_SECONDS, fetch)
+
+    async def user_listen_count(self, user_name: str, range_: str) -> int:
+        """Celkový počet poslechů za `range_` (`/1/stats/user/{name}/listening-activity`
+        vrací poslechy rozdělené po časových úsecích -- pro "Rok v hudbě"
+        stačí jejich součet, ne rozpad po týdnech/dnech). `0`, dokud LB
+        nemá pro účet/rozsah spočtenou statistiku (204), stejně jako ostatní
+        `user_*` metody výš."""
+        cache_key = f"lb-public:user-listening-activity:{user_name}:{range_}"
+
+        async def fetch() -> int:
+            data = await self._get(f"/1/stats/user/{user_name}/listening-activity", {"range": range_})
+            buckets = data.get("payload", {}).get("listening_activity", [])
+            return sum(int(b.get("listen_count") or 0) for b in buckets)
+
+        return await cached_json(cache_key, USER_STATS_TTL_SECONDS, fetch)
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

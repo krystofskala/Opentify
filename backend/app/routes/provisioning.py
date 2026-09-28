@@ -3,29 +3,56 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import time
 from pathlib import Path
+from typing import AsyncIterator, BinaryIO
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.auth import get_current_user
-from app.db import get_session
+from app.db import engine, get_session
+from app.loudness import gain_for_client
 from app.models import MediaAsset, MediaAssetStatus, ProvisioningJob
-from app.provisioning_service import enqueue, get_or_create_job, stream_url_for
+from app.provisioning_service import enqueue, escalate, get_or_create_job, stream_url_for
 
 tracks_router = APIRouter(prefix="/tracks", tags=["provisioning"])
 jobs_router = APIRouter(prefix="/jobs", tags=["provisioning"])
+
+# `mimetypes.guess_type` v defaultní registraci nezná `.flac`/`.opus` na
+# všech platformách -- explicitní mapa je jistější než spoléhat na to, co
+# se zrovna nahodí v systémovém `/etc/mime.types` uvnitř kontejneru.
+_MEDIA_TYPES = {
+    ".flac": "audio/flac",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".wav": "audio/wav",
+}
+
+
+class ProvisionRequest(BaseModel):
+    # "interactive" = uživatel právě zmáčkl Přehrát a čeká -> prioritní fronta
+    # + závod slskd vs. YouTube (viz worker). Bez těla (prefetch, starší
+    # klienti) = běžná fronta, kvalita má přednost před rychlostí.
+    priority: str | None = None
 
 
 @tracks_router.post("/{recording_id}/provision")
 async def provision_track(
     recording_id: str,
     response: Response,
+    body: ProvisionRequest | None = Body(default=None),
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
 ):
     user_id, device_id = current
+    interactive = body is not None and body.priority == "interactive"
     try:
         asset, job, created = get_or_create_job(session, recording_id, user_id, device_id)
     except LookupError:
@@ -39,13 +66,17 @@ async def provision_track(
             "status": asset.status.value,
             "streamUrl": stream_url_for(recording_id),
             "job": None,
+            "loudnessGainDb": gain_for_client(asset.loudness_gain_db),
         }
 
     if created:
         # Nově založený job -> publikuj na frontu. Při opakovaném volání
         # (created == False, job už PENDING/RUNNING) se nic nepublikuje
         # znovu — to je jádro idempotence tohoto endpointu.
-        await enqueue(job)
+        await enqueue(job, interactive=interactive)
+    elif interactive:
+        # Job už existuje (prefetch) -- ať ho uživatelův klik předběhne/zrychlí.
+        await escalate(job)
 
     response.status_code = 202
     return {
@@ -53,6 +84,21 @@ async def provision_track(
         "status": asset.status.value,
         "streamUrl": None,
         "job": job.model_dump(mode="json"),
+        "loudnessGainDb": None,
+    }
+
+
+@tracks_router.get("/{recording_id}/loudness")
+def track_loudness(recording_id: str, session: Session = Depends(get_session)):
+    """Korekce hlasitosti (dB) pro normalizaci na klientovi -- samostatně od
+    `/provision`, protože u čerstvě obstarané skladby se měří až PO
+    `track.available` (worker nechce zdržovat start přehrávání analýzou),
+    takže ji klient dotáhne dodatečně. `null` = ještě neměřeno / nelze
+    změřit."""
+    asset = session.get(MediaAsset, recording_id)
+    return {
+        "recordingId": recording_id,
+        "loudnessGainDb": gain_for_client(asset.loudness_gain_db) if asset else None,
     }
 
 
@@ -64,15 +110,97 @@ def get_job(job_id: str, session: Session = Depends(get_session)):
     return job.model_dump(mode="json")
 
 
+# Bezpečnostní pojistka pro `_tail_growing_file`: pokud soubor přestane růst
+# a stav se v DB nezmění na AVAILABLE/FAILED déle než tohle, stream se sám
+# ukončí -- jinak by uvízlý/spadlý worker nechal HTTP request viset navěky.
+_TAIL_MAX_IDLE_S = 30.0
+_TAIL_POLL_INTERVAL_S = 0.25
+
+
 @tracks_router.get("/{recording_id}/stream")
-def stream_track(recording_id: str, session: Session = Depends(get_session)):
+async def stream_track(recording_id: str, session: Session = Depends(get_session)):
     asset = session.get(MediaAsset, recording_id)
-    if asset is None or asset.status != MediaAssetStatus.AVAILABLE or not asset.storage_path:
+    if asset is None or not asset.storage_path:
         raise HTTPException(
             status_code=409,
-            detail="skladba zatím není AVAILABLE, zavolej nejdřív POST /provision",
+            detail="skladba zatím není k dispozici, zavolej nejdřív POST /provision",
         )
     path = Path(asset.storage_path)
-    if not path.exists():
-        raise HTTPException(status_code=409, detail="soubor chybí na disku i přes AVAILABLE stav")
-    return FileResponse(path)
+    media_type = _MEDIA_TYPES.get(path.suffix.lower())
+
+    if asset.status == MediaAssetStatus.AVAILABLE:
+        if not path.exists():
+            raise HTTPException(status_code=409, detail="soubor chybí na disku i přes AVAILABLE stav")
+        return FileResponse(path, media_type=media_type)
+
+    if asset.status == MediaAssetStatus.DOWNLOADING:
+        # Progresivní stream ještě rostoucího souboru -- viz `OnFileLocated`
+        # v app/providers.py (jen `SlskdProvider` ho posílá dřív, než job
+        # doběhne). Soubor v tuhle chvíli nemusí existovat ještě ani s
+        # nulovými bajty (worker mezitím zapisuje do DB), proto vlastní
+        # kontrola místo spoléhání na `FileResponse`.
+        if not await asyncio.to_thread(path.exists):
+            raise HTTPException(
+                status_code=409, detail="stahování ještě nezačalo zapisovat soubor, zkus to za chvíli"
+            )
+        return StreamingResponse(
+            _tail_growing_file(recording_id, path),
+            media_type=media_type or "application/octet-stream",
+        )
+
+    raise HTTPException(
+        status_code=409,
+        detail="skladba zatím není k dispozici, zavolej nejdřív POST /provision",
+    )
+
+
+def _current_asset_status(recording_id: str) -> MediaAssetStatus | None:
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, recording_id)
+        return asset.status if asset else None
+
+
+def _read_from(f: BinaryIO, offset: int, length: int) -> bytes:
+    f.seek(offset)
+    return f.read(length)
+
+
+async def _tail_growing_file(recording_id: str, path: Path) -> AsyncIterator[bytes]:
+    """Servíruje soubor, co se pod ním pořád ještě zvětšuje -- otevře ho
+    JEDNOU a dál čte přes stejný file handle (`os.fstat`, ne `path.stat()`),
+    protože `SlskdProvider.fetch()` na konci přesune hotový soubor jinam
+    (`shutil.move` mezi Docker volumes = kopie + smazání zdroje). Otevřený
+    handle zůstává čitelný přes POSIX inode i po smazání/přejmenování
+    zdrojové cesty, takže tenhle přesun stream nepřeruší -- klíčové pro
+    korektnost, ne jen optimalizace.
+    """
+    f = await asyncio.to_thread(open, path, "rb")
+    try:
+        position = 0
+        idle_since: float | None = None
+        while True:
+            size = await asyncio.to_thread(lambda: os.fstat(f.fileno()).st_size)
+            if size > position:
+                chunk = await asyncio.to_thread(_read_from, f, position, size - position)
+                position = size
+                idle_since = None
+                if chunk:
+                    yield chunk
+                continue
+
+            status = await asyncio.to_thread(_current_asset_status, recording_id)
+            if status in (MediaAssetStatus.AVAILABLE, MediaAssetStatus.FAILED, None):
+                # AVAILABLE: soubor je definitivně hotový (přesun proběhl AŽ
+                # po "Completed, Succeeded", takže `size` výš už je finální).
+                # FAILED/None: stahování selhalo/job zmizel -- ukončit stream,
+                # klient uvidí jen useknuté přehrávání, ne chybu appky.
+                return
+
+            now = time.monotonic()
+            if idle_since is None:
+                idle_since = now
+            elif now - idle_since > _TAIL_MAX_IDLE_S:
+                return
+            await asyncio.sleep(_TAIL_POLL_INTERVAL_S)
+    finally:
+        await asyncio.to_thread(f.close)

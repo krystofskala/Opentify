@@ -65,6 +65,25 @@ class DeezerClient:
 
         return await cached_json(cache_key, SEARCH_TTL_SECONDS, fetch)
 
+    async def search_artist(self, name: str, limit: int = 5) -> list[dict[str, Any]]:
+        cache_key = f"dz:search_artist:{name}:{limit}"
+
+        async def fetch() -> dict[str, Any] | None:
+            return await self._get("/search/artist", {"q": name, "limit": limit})
+
+        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        return (data or {}).get("data") or []
+
+    async def search_album(self, artist: str, title: str, limit: int = 5) -> list[dict[str, Any]]:
+        query = f'artist:"{artist}" album:"{title}"'
+        cache_key = f"dz:search_album:{query}:{limit}"
+
+        async def fetch() -> dict[str, Any] | None:
+            return await self._get("/search/album", {"q": query, "limit": limit})
+
+        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        return (data or {}).get("data") or []
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

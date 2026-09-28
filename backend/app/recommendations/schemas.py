@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.catalog.schemas import CamelModel, RecordingOut
+from app.catalog.schemas import ArtistOut, CamelModel, RecordingOut
 from app.models import PlaylistKind
 
 
@@ -22,3 +22,16 @@ class PlaylistOut(CamelModel):
 
 class PlaylistDetailOut(PlaylistOut):
     items: list[RecordingOut]
+
+
+class YearInReviewOut(CamelModel):
+    """`GET /recommendations/year-in-review` -- viz
+    `RecommendationService.year_in_review`. `range` říká klientovi, jaké
+    okno LB stats reálně pokrývají (`year` = posledních 12 měsíců, ne nutně
+    kalendářní rok -- ListenBrainz jiné dělení nenabízí), ať appka
+    neslibuje přesnost, kterou zdroj dat nemá."""
+
+    range: str
+    total_listens: int
+    top_tracks: list[RecordingOut]
+    top_artists: list[ArtistOut]

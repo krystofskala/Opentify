@@ -19,7 +19,21 @@ import redis.asyncio as redis
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 
 PROVISIONING_STREAM = "vault:provisioning:jobs"
+# Skladba, na kterou uživatel právě klikl "Přehrát" -- workery tenhle stream
+# čtou přednostně, ať nečeká za prefetchem celého alba v běžné frontě.
+PROVISIONING_PRIORITY_STREAM = "vault:provisioning:jobs:priority"
 PROVISIONING_GROUP = "vault:provisioning:workers"
+
+
+def job_lock_key(job_id: str) -> str:
+    return f"vault:provisioning:lock:{job_id}"
+
+
+def job_escalate_key(job_id: str) -> str:
+    """Nastavené, když uživatel chce skladbu HNED, ale její job už běží
+    v pomalém (prefetch) režimu -- běžící worker podle toho přidá rychlou
+    YouTube cestu."""
+    return f"vault:provisioning:escalate:{job_id}"
 
 _redis: redis.Redis | None = None
 _redis_loop: asyncio.AbstractEventLoop | None = None

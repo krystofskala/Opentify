@@ -11,10 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
 from app.auth import get_current_user
+from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient, get_deezer_client
-from app.catalog.musicbrainz import MusicBrainzClient, get_musicbrainz_client
+from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError, get_musicbrainz_client
 from app.catalog.service import CatalogService
+from app.catalog.schemas import RecordingOut
 from app.db import get_session
+from app.models import Recording
 
 catalog_router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -36,7 +39,14 @@ async def search_catalog(
     service: CatalogService = Depends(get_catalog_service),
     _current=Depends(get_current_user),
 ):
-    return await service.search(q, type, limit, offset)
+    try:
+        return await service.search(q, type, limit, offset)
+    except MusicBrainzError:
+        # Odlišuje "MusicBrainz momentálně nedostupný/rate-limit" od
+        # skutečného "nic takového neexistuje" (prázdný `results`) -- klient
+        # na 503 může nabídnout "zkus to znovu", místo aby to tiše vypadalo
+        # jako neúspěšné hledání.
+        raise HTTPException(status_code=503, detail="MusicBrainz momentálně nedostupný, zkus to znovu za chvíli")
 
 
 @catalog_router.get("/artists/{artist_id}")
@@ -66,6 +76,18 @@ async def get_discography(
     return discography.model_dump(by_alias=True)
 
 
+@catalog_router.get("/artists/{artist_id}/bio")
+async def get_artist_bio(
+    artist_id: str,
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    bio = await service.get_artist_bio(artist_id)
+    if bio is None:
+        raise HTTPException(status_code=404, detail="interpret nenalezen")
+    return bio.model_dump(by_alias=True)
+
+
 @catalog_router.get("/releases/{release_id}")
 async def get_release(
     release_id: str,
@@ -88,3 +110,30 @@ async def get_release_tracks(
     if tracks is None:
         raise HTTPException(status_code=404, detail="album nenalezen")
     return [t.model_dump(by_alias=True) for t in tracks]
+
+
+@catalog_router.get("/recordings/{recording_id}")
+def get_recording(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    _current=Depends(get_current_user),
+):
+    """Jedna nahrávka z lokálního katalogu -- pro samostatnou stránku detailu
+    skladby (`/tracks/:id` na klientu). Bez MB volání: nahrávka, na kterou
+    se dá prokliknout, už v katalogu je (upsertla ji search/tracklist/recs)."""
+    recording = session.get(Recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="skladba nenalezena")
+    return RecordingOut(
+        id=recording.id,
+        mbid=recording.mbid,
+        release_id=recording.release_id,
+        artist_id=recording.artist_id,
+        artist_name=resolve_artist_name(session, recording.artist_id),
+        title=recording.title,
+        duration_ms=recording.duration_ms,
+        isrc=recording.isrc,
+        track_number=recording.track_number,
+        availability=compute_availability(session, recording.id),
+        preview_url=recording.external_refs.get("previewUrl"),
+    ).model_dump(by_alias=True)

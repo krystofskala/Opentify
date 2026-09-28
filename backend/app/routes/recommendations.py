@@ -79,6 +79,16 @@ async def my_top(
     return [r.model_dump(by_alias=True) for r in recordings]
 
 
+@recommendations_router.get("/year-in-review")
+async def year_in_review(
+    limit: int = Query(default=10, ge=1, le=50),
+    service: RecommendationService = Depends(get_recommendation_service),
+    _current=Depends(get_current_user),
+):
+    result = await service.year_in_review(LISTENBRAINZ_USERNAME, limit)
+    return result.model_dump(by_alias=True)
+
+
 @recommendations_router.get("/community")
 async def community(
     limit: int = Query(default=20, ge=1, le=50),

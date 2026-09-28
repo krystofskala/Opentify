@@ -14,17 +14,21 @@ from app.utils import utcnow
 
 
 def upsert_artist(
-    session: Session, *, mbid: str | None, name: str, sort_name: str | None
+    session: Session, *, mbid: str | None, name: str, sort_name: str | None, country: str | None = None
 ) -> Artist:
     artist = None
     if mbid:
         artist = session.exec(select(Artist).where(Artist.mbid == mbid)).first()
     if artist is None:
-        artist = Artist(mbid=mbid, name=name, sort_name=sort_name or name)
+        artist = Artist(mbid=mbid, name=name, sort_name=sort_name or name, country=country)
         session.add(artist)
     else:
         artist.name = name
         artist.sort_name = sort_name or artist.sort_name
+        # Nepřepisovat `None`-em -- embedded artist-credit stub ze search
+        # výsledků `country` typicky vůbec nenese (viz `_ingest_artist_credit`),
+        # takže by jinak smazal hodnotu, co už doplnil `_enrich_artist_country`.
+        artist.country = country or artist.country
         artist.updated_at = utcnow()
         session.add(artist)
     session.commit()
@@ -40,6 +44,7 @@ def upsert_release(
     title: str,
     release_date: str | None,
     release_type: str,
+    genres: list[str] | None = None,
 ) -> Release:
     release = None
     if mbid:
@@ -51,12 +56,17 @@ def upsert_release(
             title=title,
             release_date=release_date,
             release_type=release_type,
+            genres=genres or [],
         )
         session.add(release)
     else:
         release.title = title
         release.release_date = release_date or release.release_date
         release.release_type = release_type
+        # Nepřepisovat prázdným seznamem -- volání bez `inc=genres` (většina
+        # cest sem) posílá `None`/`[]`, což by jinak smazalo, co už dřív
+        # doplnil `_enrich_release_genres`.
+        release.genres = genres or release.genres or []
         release.updated_at = utcnow()
         session.add(release)
     session.commit()

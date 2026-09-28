@@ -12,6 +12,7 @@ statická).
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -45,13 +46,29 @@ class MusicBrainzClient:
         )
 
     async def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        await _rate_limiter.wait()
-        try:
-            resp = await self._client.get(path, params={**params, "fmt": "json"})
-        except httpx.TransportError as exc:
-            raise MusicBrainzError(f"MusicBrainz nedostupný: {exc}") from exc
-        if resp.status_code == 503:
-            raise MusicBrainzError("MusicBrainz rate-limit (503) — zkus to za chvíli znovu")
+        # Pár opakování s krátkým odstupem na dočasné 503/výpadky -- bez
+        # tohohle jeden zaškobrtnutý request uprostřed dlouhého skenu knihovny
+        # (tisíce sekvenčních MB volání kvůli 1 req/s limitu, viz níž) tiše
+        # spadl na `MusicBrainzError`, kterou volající (`CatalogService.
+        # match_release_by_tracklist` apod.) bere jako "match se nenašel" --
+        # jedna náhodná 503 uprostřed skenu tak dokázala rozbít album-level
+        # match na per-track fallback pro celou složku (živě ověřeno).
+        last_exc: MusicBrainzError | None = None
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(1.0 * attempt)
+            await _rate_limiter.wait()
+            try:
+                resp = await self._client.get(path, params={**params, "fmt": "json"})
+            except httpx.TransportError as exc:
+                last_exc = MusicBrainzError(f"MusicBrainz nedostupný: {exc}")
+                continue
+            if resp.status_code == 503:
+                last_exc = MusicBrainzError("MusicBrainz rate-limit (503) — zkus to za chvíli znovu")
+                continue
+            break
+        else:
+            raise last_exc  # type: ignore[misc]  -- smyčka proběhla 3x, `last_exc` je vždy nastavené
         resp.raise_for_status()
         return resp.json()
 
@@ -67,10 +84,15 @@ class MusicBrainzClient:
         return await cached_json(cache_key, SEARCH_TTL_SECONDS, fetch)
 
     async def get_artist(self, mbid: str) -> dict[str, Any]:
+        # `url-rels` nese odkaz na Wikidata (`get_artist_bio` v service.py z
+        # něj dohledá životopis), `artist-rels` vztahy k dalším interpretům
+        # (člen kapely, spolupráce...) pro "Podobní interpreti". Oboje na
+        # stejném requestu jako `country` (`_enrich_artist_country`) -- žádný
+        # extra dotaz navíc.
         cache_key = f"mb:artist:{mbid}"
 
         async def fetch() -> dict[str, Any]:
-            return await self._get(f"/artist/{mbid}", {"inc": "aliases"})
+            return await self._get(f"/artist/{mbid}", {"inc": "aliases+url-rels+artist-rels"})
 
         return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
 
@@ -78,7 +100,7 @@ class MusicBrainzClient:
         self, artist_mbid: str, release_type: str | None, limit: int, offset: int
     ) -> dict[str, Any]:
         cache_key = f"mb:release-groups:{artist_mbid}:{release_type}:{limit}:{offset}"
-        params: dict[str, Any] = {"artist": artist_mbid, "limit": limit, "offset": offset}
+        params: dict[str, Any] = {"artist": artist_mbid, "limit": limit, "offset": offset, "inc": "genres"}
         if release_type:
             params["type"] = release_type
 
@@ -91,7 +113,7 @@ class MusicBrainzClient:
         cache_key = f"mb:release-group:{rgid}"
 
         async def fetch() -> dict[str, Any]:
-            return await self._get(f"/release-group/{rgid}", {"inc": "artist-credits"})
+            return await self._get(f"/release-group/{rgid}", {"inc": "artist-credits+genres"})
 
         return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
 

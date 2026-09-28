@@ -48,6 +48,11 @@ class RecordingOut(CamelModel):
     mbid: str | None = None
     release_id: str | None = None
     artist_id: str | None = None
+    # Denormalizované jméno interpreta -- bez tohohle nemá klient u smíšených
+    # seznamů (Domů, Knihovna, Oblíbené, playlisty) odkud vzít jméno k
+    # zobrazení, jen `artist_id`. Doplňkové pole mimo strict OpenAPI schéma,
+    # stejně jako `preview_url`/`listen_count` níž.
+    artist_name: str | None = None
     title: str
     duration_ms: int | None = None
     isrc: str | None = None
@@ -60,6 +65,11 @@ class RecordingOut(CamelModel):
 class DiscographyOut(CamelModel):
     artist: ArtistOut
     releases: list[ReleaseOut]
+
+
+class ArtistBioOut(CamelModel):
+    bio: str | None = None
+    related_artists: list[ArtistOut] = []
 
 
 class SearchResponse(CamelModel):
