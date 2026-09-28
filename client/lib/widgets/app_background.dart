@@ -161,8 +161,9 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
     final step = math.min(dt, 0.1);
 
     if (!_reducedMotion) {
-      // Klid ~60 s na smyčku, při přehrávání ~20 s (náběh ~1.5 s).
-      final targetSpeed = widget.isPlaying ? 3.0 : 1.0;
+      // Klid ~40 s na smyčku (pozadí se hýbe pořád -- uživatel si to
+      // přál místo statického klidu), při přehrávání ~20 s (náběh ~1.5 s).
+      final targetSpeed = widget.isPlaying ? 3.0 : 1.5;
       _speed += (targetSpeed - _speed) * (1 - math.exp(-step / 0.5));
       final tau = _boostTarget > _boost ? 0.12 : 0.8;
       _boost += (_boostTarget - _boost) * (1 - math.exp(-step / tau));
@@ -173,13 +174,9 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
     }
     _frame.value++;
 
-    final busy = widget.isPlaying || _boost > 0.01 || _boostTarget > 0.01 || _bloom > 0.01 || _tweening(now);
-    final animating = !_reducedMotion && busy;
-    if (animating || _tweening(now)) {
-      _lastActivityAt = now;
-    } else if (now - _lastActivityAt > 3) {
-      _ticker.stop();
-    }
+    // Animuje se nepřetržitě (30 fps strop výš); zastaví se jen při
+    // systémovém "omezit pohyb" nebo když je pozadí skryté.
+    _lastActivityAt = now;
     if (_reducedMotion && !_tweening(now)) _ticker.stop();
   }
 
