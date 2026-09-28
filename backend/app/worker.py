@@ -31,7 +31,9 @@ import socket
 import time
 from pathlib import Path
 
-from sqlmodel import Session
+from datetime import timedelta
+
+from sqlmodel import Session, select
 
 from app.db import engine, init_db
 from app.events import publish_job_progress, publish_track_available, publish_track_streaming
@@ -635,6 +637,39 @@ async def reclaim_stale(r) -> None:
                 _spawn(r, stream, message_id, fields)
 
 
+_ORPHAN_AFTER_S = 120
+_ORPHAN_SWEEP_KEY = "provisioning:orphan-sweep"
+
+
+async def requeue_orphaned_jobs(r) -> None:
+    """PENDING job, jehož zpráva se ztratila (worker zabitý dřív, než ji
+    převzal/potvrdil; výpadek DB/Redis mezi zápisem jobu a XADD), by jinak
+    visel navždy -- `/provision` pro stejnou skladbu vrací "už běží" a nic
+    znovu nepošle (živě: 5 jobů zaseklých přes hodinu). Jednou za minutu
+    (napříč replikami přes Redis zámek) je pošle do fronty znovu; duplicitu
+    worker pozná podle zámku/stavu jobu, takže je to neškodné."""
+    if not await r.set(_ORPHAN_SWEEP_KEY, CONSUMER_NAME, nx=True, ex=55):
+        return
+    cutoff = utcnow() - timedelta(seconds=_ORPHAN_AFTER_S)
+
+    def stale_pending() -> list[str]:
+        with Session(engine) as session:
+            return list(
+                session.exec(
+                    select(ProvisioningJob.id).where(
+                        ProvisioningJob.status == ProvisioningJobStatus.PENDING,
+                        ProvisioningJob.created_at < cutoff,
+                    )
+                ).all()
+            )
+
+    for job_id in await asyncio.to_thread(stale_pending):
+        if await r.exists(job_lock_key(job_id)):
+            continue
+        await r.xadd(PROVISIONING_STREAM, {"job_id": job_id})
+        logger.warning("job %s visel ve stavu PENDING, posílám znovu do fronty", job_id)
+
+
 async def main() -> None:
     init_db()
     r = get_redis()
@@ -654,6 +689,10 @@ async def main() -> None:
         if time.monotonic() - last_housekeeping > 15:
             last_housekeeping = time.monotonic()
             await reclaim_stale(r)
+            try:
+                await requeue_orphaned_jobs(r)
+            except Exception:  # noqa: BLE001
+                logger.exception("úklid zaseklých jobů selhal")
             try:
                 await _process_due_upgrades(r)
             except Exception:  # noqa: BLE001
