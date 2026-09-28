@@ -147,7 +147,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                   decoration: BoxDecoration(
                     borderRadius: radius,
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 30, offset: const Offset(0, -4)),
+                      BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.35), blurRadius: 30, offset: const Offset(0, -4)),
                     ],
                   ),
                   child: ClipRRect(
@@ -292,7 +293,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
         child: Container(
           width: 38,
           height: 5,
-          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
+          decoration:
+              BoxDecoration(color: Colors.white.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
         ),
       );
 
@@ -301,12 +303,21 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(nowPlaying.recordingId) ?? false),
     );
     final sourceLabel = ref.watch(audioPlayerControllerProvider.select((s) => s.queueSourceLabel));
+    // Vlevo 1 tlačítko, vpravo 3 -- obě strany stejně široké, jinak titulek
+    // "Přehrává se" není opticky uprostřed (živě nahlášeno).
+    const sideWidth = 3 * kMinInteractiveDimension;
     return Row(
       children: [
-        IconButton(
-          icon: const Icon(Symbols.keyboard_arrow_down_rounded, color: Colors.white, size: 32),
-          tooltip: 'Zasunout',
-          onPressed: () => _sheet?.close(),
+        SizedBox(
+          width: sideWidth,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              icon: const Icon(Symbols.keyboard_arrow_down_rounded, color: Colors.white, size: 32),
+              tooltip: 'Zasunout',
+              onPressed: () => _sheet?.close(),
+            ),
+          ),
         ),
         Expanded(
           child: Column(
@@ -327,24 +338,32 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
             ],
           ),
         ),
-        IconButton(
-          icon: Icon(
-            isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-            color: isLiked ? Colors.redAccent : Colors.white,
-            size: 24,
+        SizedBox(
+          width: sideWidth,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: Icon(
+                  isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
+                  color: isLiked ? Colors.redAccent : Colors.white,
+                  size: 24,
+                ),
+                tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
+                onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
+              ),
+              IconButton(
+                icon: const Icon(Symbols.lyrics_rounded, color: Colors.white, size: 24),
+                tooltip: 'Text skladby',
+                onPressed: () => showLyricsPanel(context, recordingId: nowPlaying.recordingId, accentColor: accent),
+              ),
+              IconButton(
+                icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
+                tooltip: 'Další možnosti',
+                onPressed: () => showPlayerMoreSheet(context),
+              ),
+            ],
           ),
-          tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-          onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
-        ),
-        IconButton(
-          icon: const Icon(Symbols.lyrics_rounded, color: Colors.white, size: 24),
-          tooltip: 'Text skladby',
-          onPressed: () => showLyricsPanel(context, recordingId: nowPlaying.recordingId, accentColor: accent),
-        ),
-        IconButton(
-          icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
-          tooltip: 'Další možnosti',
-          onPressed: () => showPlayerMoreSheet(context),
         ),
       ],
     );
@@ -508,9 +527,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               ),
               IconButton(
                 icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
-                onPressed: playback.hasPrevious || playback.position > const Duration(seconds: 3)
-                    ? controller.previous
-                    : null,
+                onPressed:
+                    playback.hasPrevious || playback.position > const Duration(seconds: 3) ? controller.previous : null,
               ),
               // M3 Expressive: play = "cookie" tvar, pauza = squircle --
               // tvar pružinou morfuje se stavem.
@@ -528,7 +546,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                       ? (isProvisioning && provisioningPct != null
                           ? SizedBox.square(
                               dimension: 40,
-                              child: CircularProgressIndicator(strokeWidth: 3, color: accent, value: provisioningPct / 100),
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 3, color: accent, value: provisioningPct / 100),
                             )
                           : ExpressiveLoadingIndicator(size: 40, color: accent))
                       : Icon(
