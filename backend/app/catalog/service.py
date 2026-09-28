@@ -62,6 +62,13 @@ _MB_ENTITY_FOR_TYPE = {
 }
 
 _DEEZER_KIND_FOR_TYPE = {"artist": "artist", "release": "album", "recording": "track"}
+
+
+def _normalize_query(text: str) -> str:
+    """Bez diakritiky, velikosti písmen a interpunkce -- "Vypsaná fiXa" ==
+    "vypsana fixa" pro porovnání přesné shody jména interpreta."""
+    folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
+    return re.sub(r"[^a-z0-9]+", "", folded)
 # Karaoke/"ve stylu"/tribute nahrávky zaplevelují hledání skladeb (živě:
 # "nirvana lake of fire" -> 2 karaoke verze v top 4). Pryč, pokud je uživatel
 # výslovně nehledá.
@@ -230,6 +237,15 @@ class CatalogService:
         # (souběžná hledání se tu nemůžou proložit a zdvojit řádky).
         results: list[dict[str, Any]] = []
         for t, data in zip(types_to_query, fetched):
+            if t == "artist" and data:
+                # Deezer řadí interprety zvláštně (živě: "nirvana" -> nejdřív
+                # "Nirvana (UK)" s 237 fanoušky, pak Nirvana s 10 miliony).
+                # Přesná shoda jména napřed, pak podle počtu fanoušků.
+                wanted = _normalize_query(query)
+                data = sorted(
+                    data,
+                    key=lambda a: (_normalize_query(a.get("name") or "") != wanted, -(a.get("nb_fan") or 0)),
+                )
             for item in data or []:
                 if t == "artist":
                     artist = ingest_artist(self._session, item)
