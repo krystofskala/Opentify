@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/recording_model.dart';
 import '../theme/design_tokens.dart';
-import 'glass_container.dart';
+import 'glass/glass.dart';
 import 'state_views.dart';
 import 'track_collection.dart';
 import 'track_tile.dart';
@@ -19,6 +19,7 @@ Future<void> showTrackListSheet(
 }) {
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => _TrackListSheet(title: title, recordings: recordings, load: load),
@@ -56,8 +57,9 @@ class _TrackListSheetState extends ConsumerState<_TrackListSheet> {
       minChildSize: 0.4,
       maxChildSize: 0.95,
       expand: false,
-      builder: (context, scrollController) => GlassContainer(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      builder: (context, scrollController) => GlassSheet(
+        expand: true,
+        showGrabber: false,
         child: FutureBuilder<List<RecordingModel>>(
           future: _future,
           builder: (context, snapshot) {

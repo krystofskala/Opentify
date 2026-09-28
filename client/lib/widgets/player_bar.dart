@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,10 +7,11 @@ import '../state/audio_player_controller.dart';
 import '../state/liked_songs_controller.dart';
 import '../state/provisioning_controller.dart';
 import '../theme/accent_color.dart';
-import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
+import 'glass/expressive_shapes.dart';
 import 'glass_container.dart';
 import 'wavy_seek_bar.dart';
+import 'net_image.dart';
 
 /// Perzistentní "Liquid Glass" lišta přehrávače -- rozostřený obal alba na
 /// pozadí, přes něj poloprůhledná skleněná vrstva (`BackdropFilter`). Vkládá
@@ -19,7 +19,11 @@ import 'wavy_seek_bar.dart';
 /// (viz `HomeShell`, `ReleaseScreen`, `ArtistScreen`). Když nic nehraje,
 /// nezabírá žádné místo.
 class PlayerBar extends ConsumerWidget {
-  const PlayerBar({super.key});
+  const PlayerBar({super.key, this.shadow = true});
+
+  /// `false` v `HomeShell` -- lišta leží těsně nad skleněnou navigací, dva
+  /// stíny nad sebou by vypadaly jako špinavý pruh.
+  final bool shadow;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -50,31 +54,30 @@ class PlayerBar extends ConsumerWidget {
 
     return AnimatedAccent(
       color: targetAccent,
-      builder: (context, accent) => Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: ClipRRect(
-        // Vnější `ClipRRect` zaobluje i obal na pozadí (`GlassContainer` sám
-        // zaobluje jen sebe, ne sourozence před sebou ve stejném `Stack`u) --
-        // `GlassContainer` samotný teď nese blur+sytost+okraj+highlight,
-        // stejné jako Release/Artist hlavičky a Profilovy karty, místo
-        // vlastní kopie stejné logiky jen s jiným gradientem.
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        child: Stack(
-          children: [
-            // Plná barva vždy vespod -- lišta nemá propouštět gradient
-            // pozadí appky, ani než se obal načte.
-            Positioned.fill(child: ColoredBox(color: accent)),
-            if (nowPlaying.artworkUrl != null)
-              Positioned.fill(
-                child: CachedNetworkImage(
-                    imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover),
-              ),
-            GlassContainer(
-              borderRadius: BorderRadius.circular(AppRadii.xl),
-              blurSigma: GlassTokens.blurLight,
+      builder: (context, accent) {
+      // Popředí dle režimu -- na světlém namrzlém skle tmavé, na tmavém bílé
+      // (HIG Accessibility: kontrast min. 4.5:1).
+      final fg = Theme.of(context).colorScheme.onSurface;
+      return Padding(
+      // Stejné okraje jako tab bar pod ní (`GlassTokens.floatingMargin`).
+      // Samostatně (detaily) nad home indikátorem; v `HomeShell` pod ní je
+      // tab bar, který inset řeší sám (shell ho tady odebírá).
+      padding: EdgeInsets.fromLTRB(
+        GlassTokens.floatingMargin,
+        0,
+        GlassTokens.floatingMargin,
+        8 + MediaQuery.paddingOf(context).bottom,
+      ),
+      // Pozadí appky pod hustě namrzlým sklem, jemně tónovaným barvou
+      // skladby -- obal už NENÍ pozadím lišty (jen náhled vlevo).
+      child: GlassContainer.frosted(
+              borderRadius: BorderRadius.circular(26),
               tint: accent,
-              child: SafeArea(
-                top: false,
+              shadow: shadow,
+              // Inset je VNĚ kapsle (odsazení níž), ne uvnitř.
+              child: MediaQuery.removePadding(
+                context: context,
+                removeBottom: true,
                 child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -88,7 +91,7 @@ class PlayerBar extends ConsumerWidget {
                   // gesta úplně vypne), vlnovka je ale stejná v obou -- viz
                   // `WavySeekBar` (port PixelPlayerova `WavySliderExpressive`).
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
                     child: duration.inMilliseconds == 0
                         ? (playback.isBuffering
                             ? SizedBox(
@@ -107,8 +110,8 @@ class PlayerBar extends ConsumerWidget {
                             height: 12,
                             strokeWidth: 2.5,
                             waveAmplitude: 2.5,
-                            activeColor: Colors.white,
-                            inactiveColor: Colors.white.withValues(alpha: 0.3),
+                            activeColor: fg,
+                            inactiveColor: fg.withValues(alpha: 0.3),
                           ),
                   ),
                   GestureDetector(
@@ -136,14 +139,12 @@ class PlayerBar extends ConsumerWidget {
                               width: 44,
                               height: 44,
                               child: nowPlaying.artworkUrl != null
-                                  ? CachedNetworkImage(
-                                      imageUrl: nowPlaying.artworkUrl!,
-                                      fit: BoxFit.cover)
+                                  ? NetImage(url: nowPlaying.artworkUrl!)
                                   : Container(
                                       color:
-                                          Colors.white.withValues(alpha: 0.15),
-                                      child: const Icon(Symbols.music_note_rounded,
-                                          color: Colors.white, size: 20),
+                                          fg.withValues(alpha: 0.15),
+                                      child: Icon(Symbols.music_note_rounded,
+                                          color: fg, size: 20),
                                     ),
                             ),
                           ),
@@ -164,8 +165,8 @@ class PlayerBar extends ConsumerWidget {
                                     nowPlaying.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        color: Colors.white,
+                                    style: TextStyle(
+                                        color: fg,
                                         fontWeight: FontWeight.w600),
                                   ),
                                 ),
@@ -181,7 +182,7 @@ class PlayerBar extends ConsumerWidget {
                                     provisioningState!.statusLabel,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
+                                    style: TextStyle(color: fg.withValues(alpha: 0.75), fontSize: 12),
                                   )
                                 else if (nowPlaying.artistName != null || nowPlaying.artistId != null)
                                   GestureDetector(
@@ -200,13 +201,13 @@ class PlayerBar extends ConsumerWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                        color: Colors.white
+                                        color: fg
                                             .withValues(alpha: 0.75),
                                         fontSize: 12,
                                         decoration: nowPlaying.artistId != null
                                             ? TextDecoration.underline
                                             : null,
-                                        decorationColor: Colors.white.withValues(alpha: 0.4)),
+                                        decorationColor: fg.withValues(alpha: 0.4)),
                                     ),
                                   ),
                               ],
@@ -215,7 +216,7 @@ class PlayerBar extends ConsumerWidget {
                           IconButton(
                             icon: Icon(
                               isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-                              color: isLiked ? Colors.redAccent : Colors.white,
+                              color: isLiked ? Colors.redAccent : fg,
                               size: 22,
                             ),
                             tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
@@ -226,14 +227,11 @@ class PlayerBar extends ConsumerWidget {
                           IconButton(
                             icon: playback.isBuffering
                                 ? SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                        value: isProvisioning && provisioningPct != null
-                                            ? provisioningPct / 100
-                                            : null),
+                                    width: 24,
+                                    height: 24,
+                                    child: isProvisioning && provisioningPct != null
+                                        ? CircularProgressIndicator(strokeWidth: 2, color: fg, value: provisioningPct / 100)
+                                        : ExpressiveLoadingIndicator(size: 24, color: fg),
                                   )
                                 : hasError
                                     ? const Icon(Symbols.refresh_rounded, color: Colors.redAccent, size: 32)
@@ -241,7 +239,7 @@ class PlayerBar extends ConsumerWidget {
                                         playback.isPlaying
                                             ? Symbols.pause_circle_rounded
                                             : Symbols.play_circle_rounded,
-                                        color: Colors.white,
+                                        color: fg,
                                         size: 38,
                                       ),
                             tooltip: hasError ? 'Zkusit znovu' : null,
@@ -262,10 +260,8 @@ class PlayerBar extends ConsumerWidget {
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
-    ),
+    );
+      },
     );
   }
 }

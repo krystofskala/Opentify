@@ -8,6 +8,9 @@ import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/add_to_playlist_sheet.dart';
 import 'queue_panel.dart';
+import '../../theme/glass_tokens.dart';
+import '../../widgets/glass/glass.dart';
+import '../../theme/app_theme.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -17,7 +20,9 @@ import 'queue_panel.dart';
 Future<void> showPlayerMoreSheet(BuildContext context) {
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
+    backgroundColor: Colors.transparent,
     builder: (context) => const _PlayerMoreSheet(),
   );
 }
@@ -55,9 +60,18 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     final theme = Theme.of(context);
     final accent = playback.accentColor ?? theme.colorScheme.primary;
 
-    return SafeArea(
+    // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač.
+    return GlassContainer.frosted(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+      tint: accent,
+      shadow: false,
+      // Obsah vždy světlý na barevném skle (jako přehrávač), nezávisle na
+      // světlém/tmavém režimu systému.
+      child: Theme(
+      data: buildAppTheme(seed: accent, brightness: Brightness.dark),
+      child: SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),
         // Scrollovatelné -- s dalšími řádky (normalizace, předvolby rychlosti)
         // by se sheet na nízkém displeji telefonu jinak přetekl.
         child: SingleChildScrollView(
@@ -108,17 +122,12 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
               // Pevné předvolby místo plynulého slideru (vzor z Finampova
               // `speed_menu.dart`) -- na mobilu se slider na přesnou hodnotu
               // trefuje špatně a mezihodnoty jako 1.1× nikdo nepoužívá.
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  for (final speed in const [0.75, 1.0, 1.25, 1.5, 2.0])
-                    ChoiceChip(
-                      label: Text('${_formatSpeed(speed)}×'),
-                      selected: (playback.speed - speed).abs() < 0.01,
-                      onSelected: (_) => controller.setSpeed(speed),
-                    ),
+              GlassSegmentedControl<double>(
+                segments: [
+                  for (final speed in _speeds) GlassSegment(value: speed, label: '${_formatSpeed(speed)}×'),
                 ],
+                selected: _speeds.firstWhere((v) => (playback.speed - v).abs() < 0.01, orElse: () => 1.0),
+                onChanged: controller.setSpeed,
               ),
               const SizedBox(height: AppSpacing.sm),
               Row(
@@ -129,11 +138,11 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                 ],
               ),
               Slider(value: playback.volume, onChanged: controller.setVolume),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                secondary: const Icon(Symbols.graphic_eq_rounded),
-                title: const Text('Normalizace hlasitosti'),
-                subtitle: const Text('Srovná hlasité a tiché skladby na podobnou úroveň'),
+              // Přepínač jen v řádku seznamu (HIG Toggles).
+              GlassSwitchRow(
+                leading: const Icon(Symbols.graphic_eq_rounded),
+                title: 'Normalizace hlasitosti',
+                subtitle: 'Srovná hlasité a tiché skladby na podobnou úroveň',
                 value: playback.normalizationEnabled,
                 onChanged: controller.setNormalizationEnabled,
               ),
@@ -149,7 +158,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           ? 'Ztlumuje se...'
                           : 'Zbývá ${_formatRemaining(playback.sleepTimerEndAt!)}'),
                       const Spacer(),
-                      TextButton(onPressed: controller.cancelSleepTimer, child: const Text('Zrušit')),
+                      GlassButton(label: 'Zrušit', style: GlassButtonStyle.plain, compact: true, onPressed: controller.cancelSleepTimer),
                     ],
                   ),
                 ),
@@ -158,12 +167,14 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                 runSpacing: AppSpacing.xs,
                 children: [
                   for (final minutes in [5, 15, 30, 45, 60])
-                    ActionChip(
-                      label: Text('$minutes min'),
+                    GlassButton(
+                      label: '$minutes min',
+                      compact: true,
                       onPressed: () => controller.startSleepTimer(Duration(minutes: minutes)),
                     ),
-                  ActionChip(
-                    label: const Text('Konec skladby'),
+                  GlassButton(
+                    label: 'Konec skladby',
+                    compact: true,
                     onPressed: playback.duration == null
                         ? null
                         : () => controller.startSleepTimer(playback.duration! - playback.position),
@@ -174,8 +185,12 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
           ),
         ),
       ),
+      ),
+      ),
     );
   }
+
+  static const _speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
 
   String _formatSpeed(double speed) => speed == speed.roundToDouble() ? speed.toStringAsFixed(1) : speed.toString();
 

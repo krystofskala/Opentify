@@ -1,6 +1,4 @@
-import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 // Flutter má od 3.47 vlastní `RepeatMode` (`RepeatingAnimationBuilder`) --
 // skrytý, ať nekoliduje s naším (`AudioPlayerState.repeatMode`).
@@ -14,10 +12,14 @@ import '../../state/liked_songs_controller.dart';
 import '../../state/provisioning_controller.dart';
 import '../../theme/accent_color.dart';
 import '../../theme/shapes.dart';
+import '../../theme/glass_tokens.dart';
+import '../../widgets/glass/expressive_shapes.dart';
+import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/wavy_seek_bar.dart';
 import 'player_more_sheet.dart';
+import '../../widgets/net_image.dart';
 
 /// Celoobrazovkový přehrávač po rozbalení `PlayerBar` -- inspirováno
 /// PixelPlayerem (github.com/brendmung/PixelPlayer) a Finampem: velký
@@ -70,15 +72,30 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         children: [
           // Plná barva vždy vespod -- přehrávač nemá mít gradient pozadí
           // appky, ani na okamžik, než se obal načte.
-          ColoredBox(color: accent),
-          if (nowPlaying.artworkUrl != null)
-            CachedNetworkImage(imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover),
-          Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 500),
-                color: accent.withValues(alpha: 0.78),
+          // Pozadí appky (živé, v barvě skladby) pod JEDINOU hustě namrzlou
+          // vrstvou přes celou obrazovku -- obal už není pozadím, jen velký
+          // náhled uprostřed. Vrstva se prolíná s animací vysunutí trasy, ať
+          // při přechodu nic neproblikne.
+          FadeTransition(
+            opacity: CurvedAnimation(
+              parent: ModalRoute.of(context)?.animation ?? kAlwaysCompleteAnimation,
+              curve: Curves.easeOut,
+            ),
+            child: GlassContainer.frosted(
+              borderRadius: BorderRadius.zero,
+              tint: accent,
+              showEdgeHighlight: false,
+              fit: StackFit.expand,
+              child: const SizedBox.expand(),
+            ),
+          ),
+          // Bílý text musí být čitelný i na světlém pozadí -- HIG Materials
+          // (clear varianta): "If the underlying content is bright, consider
+          // adding a dark dimming layer of 35% opacity."
+          IgnorePointer(
+            child: ColoredBox(
+              color: Colors.black.withValues(
+                alpha: Theme.of(context).brightness == Brightness.dark ? 0.18 : GlassTokens.mediaDimming,
               ),
             ),
           ),
@@ -161,7 +178,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                                 child: ClipPath(
                                   clipper: ShapeBorderClipper(shape: AppShapes.of(24)),
                                   child: nowPlaying.artworkUrl != null
-                                      ? CachedNetworkImage(imageUrl: nowPlaying.artworkUrl!, fit: BoxFit.cover)
+                                      ? NetImage(url: nowPlaying.artworkUrl!)
                                       : Container(
                                           color: Colors.white.withValues(alpha: 0.15),
                                           child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 96),
@@ -213,7 +230,18 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                                 style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
                               ),
                             ],
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 28),
+                            // Ovládání na světlejším skleněném panelu -- bez
+                            // vlastního rozmazání (leží na už namrzlém skle).
+                            GlassContainer(
+                              blur: false,
+                              baseFill: false,
+                              emphasis: GlassTokens.emphasis,
+                              borderRadius: BorderRadius.circular(28),
+                              padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
                             WavySeekBar(
                               progress: duration.inMilliseconds == 0 ? 0 : positionMs / duration.inMilliseconds,
                               isPlaying: playback.isPlaying,
@@ -254,27 +282,36 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                                       ? () => ref.read(audioPlayerControllerProvider.notifier).previous()
                                       : null,
                                 ),
-                                SizedBox(
-                                  width: 96,
-                                  height: 96,
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
-                                    child: IconButton(
-                                      icon: playback.isBuffering
-                                          ? Padding(
-                                              padding: const EdgeInsets.all(24),
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 3,
-                                                value: isProvisioning && provisioningPct != null
-                                                    ? provisioningPct / 100
-                                                    : null,
-                                              ),
-                                            )
-                                          : Icon(playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded, size: 48, color: accent),
-                                      onPressed: playback.isBuffering
-                                          ? null
-                                          : () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
-                                    ),
+                                // M3 Expressive: play = "cookie" tvar, pauza =
+                                // squircle -- tvar pružinou morfuje se stavem.
+                                GlassPressable(
+                                  onPressed: playback.isBuffering
+                                      ? null
+                                      : () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
+                                  shape: const CircleBorder(),
+                                  semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
+                                  child: ExpressiveMorph(
+                                    size: 96,
+                                    color: Colors.white,
+                                    shape: playback.isPlaying
+                                        ? const ExpressiveShape.squircle()
+                                        : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
+                                    child: playback.isBuffering
+                                        ? (isProvisioning && provisioningPct != null
+                                            ? SizedBox.square(
+                                                dimension: 44,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 3,
+                                                  color: accent,
+                                                  value: provisioningPct / 100,
+                                                ),
+                                              )
+                                            : ExpressiveLoadingIndicator(size: 44, color: accent))
+                                        : Icon(
+                                            playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
+                                            size: 48,
+                                            color: accent,
+                                          ),
                                   ),
                                 ),
                                 IconButton(
@@ -293,6 +330,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                                   onPressed: () => ref.read(audioPlayerControllerProvider.notifier).cycleRepeatMode(),
                                 ),
                               ],
+                            ),
+                                ],
+                              ),
                             ),
                           ],
                         ),

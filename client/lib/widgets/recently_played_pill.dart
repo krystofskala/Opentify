@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -7,6 +6,7 @@ import '../state/audio_player_controller.dart';
 import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
+import 'net_image.dart';
 
 /// PixelPlayerova "bublinová" `RecentlyPlayedPill` (viz `RecentlyPlayedSection.kt`)
 /// -- kapslový tvar (58dp vysoký, poloměr = polovina výšky), kruhový obal
@@ -66,7 +66,7 @@ class RecentlyPlayedPill extends ConsumerWidget {
                     width: 38,
                     height: 38,
                     child: info.artworkUrl != null
-                        ? CachedNetworkImage(imageUrl: info.artworkUrl!, fit: BoxFit.cover)
+                        ? NetImage(url: info.artworkUrl!)
                         : Container(
                             color: onContainer.withValues(alpha: 0.15),
                             child: Icon(Symbols.music_note_rounded, size: 16, color: onContainer),

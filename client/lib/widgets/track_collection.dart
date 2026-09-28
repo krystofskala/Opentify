@@ -6,6 +6,7 @@ import '../models/recording_model.dart';
 import '../state/audio_player_controller.dart';
 import '../theme/design_tokens.dart';
 import 'add_to_playlist_sheet.dart';
+import 'glass/glass.dart';
 import 'queue_action_bar.dart';
 import 'track_actions.dart';
 
@@ -124,6 +125,7 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
     this.artistName,
     this.onRemoveSelected,
     this.trailing,
+    this.downloadWholeList = false,
   });
 
   final TrackCollectionController controller;
@@ -138,6 +140,9 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
 
   /// Extra ovladač vpravo (např. seznam/karty přepínač v Knihovně).
   final Widget? trailing;
+
+  /// Viz `QueueActionBar.downloadWholeList` -- jen album a vlastní playlist.
+  final bool downloadWholeList;
 
   @override
   ConsumerState<TrackCollectionToolbar> createState() => _TrackCollectionToolbarState();
@@ -192,40 +197,52 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
           widget.visibleTracks.every((r) => c.isSelected(r.id));
       return Padding(
         padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xxs),
-        child: Wrap(
+        // Lišta výběru je plovoucí (akce nad seznamem) -- sklo + stín.
+        child: GlassContainer(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          shadow: true,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
+          child: Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: AppSpacing.xs,
           runSpacing: AppSpacing.xs,
           children: [
-            IconButton(
-              icon: const Icon(Symbols.close_rounded),
+            GlassIconButton(
+              icon: Symbols.close_rounded,
               tooltip: 'Zrušit výběr',
+              style: GlassButtonStyle.plain,
               onPressed: () => c.setSelecting(false),
             ),
             Text('$count vybráno', style: theme.textTheme.titleSmall),
-            TextButton.icon(
+            GlassButton(
+              label: allSelected ? 'Zrušit vše' : 'Vybrat vše',
+              icon: allSelected ? Symbols.deselect_rounded : Symbols.select_all_rounded,
+              style: GlassButtonStyle.plain,
+              compact: true,
               onPressed: () => c.selectAll(widget.visibleTracks),
-              icon: Icon(allSelected ? Symbols.deselect_rounded : Symbols.select_all_rounded),
-              label: Text(allSelected ? 'Zrušit vše' : 'Vybrat vše'),
             ),
-            FilledButton.tonalIcon(
+            GlassButton(
+              label: 'Do fronty',
+              icon: Symbols.queue_music_rounded,
+              compact: true,
               onPressed: count == 0 ? null : _addSelectedToQueue,
-              icon: const Icon(Symbols.queue_music_rounded),
-              label: const Text('Do fronty'),
             ),
-            FilledButton.tonalIcon(
+            GlassButton(
+              label: 'Do playlistu',
+              icon: Symbols.playlist_add_rounded,
+              compact: true,
               onPressed: count == 0 ? null : _addSelectedToPlaylist,
-              icon: const Icon(Symbols.playlist_add_rounded),
-              label: const Text('Do playlistu'),
             ),
             if (widget.onRemoveSelected != null)
-              FilledButton.tonalIcon(
+              GlassButton(
+                label: 'Odebrat',
+                icon: Symbols.delete_rounded,
+                compact: true,
+                destructive: true,
                 onPressed: count == 0 ? null : _removeSelected,
-                style: FilledButton.styleFrom(foregroundColor: theme.colorScheme.error),
-                icon: const Icon(Symbols.delete_rounded),
-                label: const Text('Odebrat'),
               ),
           ],
+          ),
         ),
       );
     }
@@ -245,6 +262,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
                     sourceLabel: widget.sourceLabel,
                     albumArtUrl: widget.albumArtUrl,
                     artistName: widget.artistName,
+                    downloadWholeList: widget.downloadWholeList,
                   ),
                 ),
               ),
@@ -254,35 +272,17 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
           const SizedBox(height: AppSpacing.xs),
           Row(
             children: [
+              // Inline filtr v obsahu -- plochá kapsle, ne sklo (HIG Materials).
               Expanded(
-                child: SizedBox(
-                  height: 40,
-                  child: TextField(
-                    controller: _filter,
-                    onChanged: (value) => c.query = value,
-                    decoration: InputDecoration(
-                      hintText: 'Filtrovat skladby…',
-                      prefixIcon: const Icon(Symbols.filter_list_rounded, size: 20),
-                      suffixIcon: _filter.text.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Symbols.close_rounded, size: 18),
-                              tooltip: 'Vymazat filtr',
-                              onPressed: () {
-                                _filter.clear();
-                                c.query = '';
-                                setState(() {});
-                              },
-                            ),
-                      isDense: true,
-                      filled: true,
-                      contentPadding: EdgeInsets.zero,
-                      border: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(AppRadii.pill)),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
+                child: GlassSearchField(
+                  controller: _filter,
+                  hintText: 'Filtrovat skladby…',
+                  glass: false,
+                  compact: true,
+                  showCancel: false,
+                  leadingIcon: Symbols.filter_list_rounded,
+                  onChanged: (value) => c.query = value,
+                  onCleared: () => setState(() => c.query = ''),
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),

@@ -1,10 +1,12 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
+import '../../theme/glass_tokens.dart';
+import '../../widgets/glass_container.dart';
+import '../../widgets/net_image.dart';
 
 /// Fronta přehrávání jako bottom sheet -- stejný `DraggableScrollableSheet`
 /// vzor jako `showLyricsPanel` (dvě různé navigační stylizace pro dvě
@@ -15,6 +17,7 @@ import '../../theme/design_tokens.dart';
 Future<void> showQueuePanel(BuildContext context, {required Color accentColor}) {
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => _QueuePanel(accentColor: accentColor),
@@ -35,15 +38,12 @@ class _QueuePanel extends ConsumerWidget {
       maxChildSize: 0.95,
       expand: false,
       builder: (context, scrollController) => ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [accentColor.withValues(alpha: 0.92), Colors.black.withValues(alpha: 0.95)],
-            ),
-          ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+        child: GlassContainer.frosted(
+          // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač pod ním.
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+          tint: accentColor,
+          fit: StackFit.expand,
           child: Column(
             children: [
               const SizedBox(height: 10),
@@ -163,7 +163,7 @@ class _QueueRow extends StatelessWidget {
                   width: 44,
                   height: 44,
                   child: info.artworkUrl != null
-                      ? CachedNetworkImage(imageUrl: info.artworkUrl!, fit: BoxFit.cover)
+                      ? NetImage(url: info.artworkUrl!)
                       : Container(
                           color: Colors.white.withValues(alpha: 0.15),
                           child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 18),

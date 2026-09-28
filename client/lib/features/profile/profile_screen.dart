@@ -10,14 +10,17 @@ import '../../data/library_repository.dart';
 import '../../models/playlist_model.dart';
 import '../../state/liked_songs_controller.dart';
 import '../../state/providers.dart';
+import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
-import '../../widgets/glass_container.dart';
+import '../../widgets/glass/glass.dart';
+import '../../widgets/surface_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_import_report.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../home/home_screen.dart' show dailyJamsProvider;
+import '../../routing/home_shell.dart' show navBottomInset;
 
 final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) {
   return ref.watch(libraryRepositoryProvider).likedSongs();
@@ -90,13 +93,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ref.invalidate(scanStatusProvider);
         },
         child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+          padding: EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.md + navBottomInset(context)),
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+            const _AppearanceCard(),
+            const SizedBox(height: 12),
             _ActionCard(
               icon: Symbols.cloud_upload_rounded,
               title: 'Import ze Spotify',
@@ -249,9 +254,7 @@ class _ScanStatusCard extends StatelessWidget {
     final theme = Theme.of(context);
     final progress = status.totalFiles == 0 ? null : status.scanned / status.totalFiles;
 
-    return GlassContainer(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      padding: const EdgeInsets.all(AppSpacing.md),
+    return SurfaceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -300,6 +303,41 @@ class _ScanStatusCard extends StatelessWidget {
   }
 }
 
+/// "Vzhled": Systém / Světlý / Tmavý (`themeModeProvider`, uložené per
+/// zařízení, výchozí tmavý). Přepne okamžitě, téma i pozadí přejdou plynule.
+class _AppearanceCard extends ConsumerWidget {
+  const _AppearanceCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Symbols.contrast_rounded),
+              const SizedBox(width: 10),
+              Text('Vzhled', style: theme.textTheme.titleMedium),
+            ],
+          ),
+          const SizedBox(height: 8),
+          GlassSegmentedControl<ThemeMode>(
+            selected: ref.watch(themeModeProvider),
+            onChanged: ref.read(themeModeProvider.notifier).set,
+            segments: const [
+              GlassSegment(value: ThemeMode.system, label: 'Systém', icon: Symbols.brightness_auto_rounded),
+              GlassSegment(value: ThemeMode.light, label: 'Světlý', icon: Symbols.light_mode_rounded),
+              GlassSegment(value: ThemeMode.dark, label: 'Tmavý', icon: Symbols.dark_mode_rounded),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ActionCard extends StatelessWidget {
   const _ActionCard({
     required this.icon,
@@ -318,10 +356,7 @@ class _ActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GlassContainer(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      tint: theme.colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.all(AppSpacing.md),
+    return SurfaceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -337,7 +372,7 @@ class _ActionCard extends StatelessWidget {
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerRight,
-            child: FilledButton(onPressed: onPressed, child: Text(buttonLabel)),
+            child: GlassButton(label: buttonLabel, compact: true, onPressed: onPressed),
           ),
         ],
       ),

@@ -9,6 +9,7 @@ import '../theme/design_tokens.dart';
 import 'media_card.dart';
 import 'state_views.dart';
 import 'track_tile.dart';
+import '../routing/home_shell.dart' show navBottomInset;
 
 const _librarySourceLabel = 'Hledání v knihovně';
 
@@ -56,7 +57,7 @@ class LibrarySearchResults extends ConsumerWidget {
         }
         return switch (scope) {
           LibrarySearchScope.all => _grouped(context, data),
-          LibrarySearchScope.tracks => _trackList(data),
+          LibrarySearchScope.tracks => _trackList(context, data),
           LibrarySearchScope.artists => _grid(context, [for (final a in data.artists) _artistCard(context, a)],
               aspect: 0.8, emptyLabel: 'interpreti'),
           LibrarySearchScope.albums => _grid(context, [for (final a in data.albums) _albumCard(context, a)],
@@ -69,7 +70,7 @@ class LibrarySearchResults extends ConsumerWidget {
   Widget _grouped(BuildContext context, LibrarySearchResult data) {
     VoidCallback? seeAll(LibrarySearchScope s) => onSeeAll == null ? null : () => onSeeAll!(s);
     return ListView(
-      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+      padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
       children: [
         if (data.tracks.isNotEmpty) ...[
           SectionHeader('Skladby', onSeeAll: data.tracks.length > 5 ? seeAll(LibrarySearchScope.tracks) : null),
@@ -111,12 +112,12 @@ class LibrarySearchResults extends ConsumerWidget {
     );
   }
 
-  Widget _trackList(LibrarySearchResult data) {
+  Widget _trackList(BuildContext context, LibrarySearchResult data) {
     if (data.tracks.isEmpty) {
       return EmptyState(icon: Symbols.search_off_rounded, message: 'Žádné skladby pro „$query“ v knihovně.');
     }
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg),
+      padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
       itemCount: data.tracks.length,
       itemBuilder: (context, index) => TrackTile(
         recording: data.tracks[index],
@@ -132,7 +133,7 @@ class LibrarySearchResults extends ConsumerWidget {
     }
     final columns = (MediaQuery.sizeOf(context).width / 170).floor().clamp(2, 8);
     return GridView.builder(
-      padding: const EdgeInsets.all(AppSpacing.sm),
+      padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.sm + navBottomInset(context)),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns,
         childAspectRatio: aspect,

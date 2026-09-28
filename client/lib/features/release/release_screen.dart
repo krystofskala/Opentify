@@ -149,6 +149,8 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
             sourceLabel: release.title,
             albumArtUrl: release.coverImageUrl,
             artistName: artistName,
+            // Album: stáhnout celé na pozadí.
+            downloadWholeList: true,
           ),
         ),
       ),

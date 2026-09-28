@@ -5,6 +5,8 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../data/library_repository.dart';
 import '../theme/design_tokens.dart';
 import 'state_views.dart';
+import '../theme/glass_tokens.dart';
+import 'glass_container.dart';
 
 /// Souhrn po importu Spotify exportu -- po playlistech: kolik skladeb,
 /// kolik jde přehrát hned (`inLibrary`), kolik se přeskočilo (epizody
@@ -12,14 +14,21 @@ import 'state_views.dart';
 Future<void> showSpotifyImportReport(BuildContext context, SpotifyImportResult result) {
   return showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
-    showDragHandle: true,
+    backgroundColor: Colors.transparent,
     builder: (sheetContext) => DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.6,
       minChildSize: 0.3,
       maxChildSize: 0.92,
-      builder: (context, scrollController) => _ImportReport(result: result, scrollController: scrollController),
+      builder: (context, scrollController) => GlassContainer(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+        shadow: false,
+        fit: StackFit.expand,
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: _ImportReport(result: result, scrollController: scrollController),
+      ),
     ),
   );
 }

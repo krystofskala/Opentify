@@ -8,6 +8,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../models/recording_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../widgets/glass/glass.dart';
 import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/section_app_bar.dart';
@@ -15,6 +16,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/view_mode_toggle.dart';
+import '../../routing/home_shell.dart' show navBottomInset;
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -91,51 +93,29 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
-                  child: TextField(
+                  child: GlassSearchField(
                     controller: _controller,
+                    hintText: 'Hledat v knihovně…',
                     onChanged: _onChanged,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Hledat v knihovně…',
-                      prefixIcon: const Icon(Symbols.search_rounded),
-                      suffixIcon: _controller.text.isEmpty
-                          ? null
-                          : IconButton(icon: const Icon(Symbols.close_rounded), tooltip: 'Vymazat', onPressed: _clear),
-                      filled: true,
-                      isDense: true,
-                      border: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(AppRadii.pill)),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
+                    onCleared: _clear,
                   ),
                 ),
                 SizedBox(
                   height: 48,
-                  child: searching
-                      ? ListView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                          children: [
-                            for (final s in LibrarySearchScope.values)
-                              Padding(
-                                padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
-                                child: ChoiceChip(
-                                  label: Text(_scopeLabels[s]!),
-                                  selected: _scope == s,
-                                  onSelected: (_) => setState(() => _scope = s),
-                                ),
-                              ),
-                          ],
-                        )
-                      : const TabBar(
-                          tabs: [
-                            Tab(text: 'Skladby'),
-                            Tab(text: 'Alba'),
-                            Tab(text: 'Interpreti'),
-                            Tab(text: 'Playlisty'),
-                          ],
-                        ),
+                  // Segmentový ovladač místo čipů/Material tabů (HIG Segmented
+                  // controls: přepínání příbuzných pohledů, ≤5 segmentů).
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    child: searching
+                        ? GlassSegmentedControl<LibrarySearchScope>(
+                            segments: [
+                              for (final s in LibrarySearchScope.values) GlassSegment(value: s, label: _scopeLabels[s]!),
+                            ],
+                            selected: _scope,
+                            onChanged: (s) => setState(() => _scope = s),
+                          )
+                        : const _LibraryTabSegments(),
+                  ),
                 ),
               ],
             ),
@@ -344,6 +324,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   ),
                 ),
               const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+              SliverToBoxAdapter(child: SizedBox(height: navBottomInset(context))),
             ],
           );
         },
@@ -369,22 +350,14 @@ class _GridFilterBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: SizedBox(
-              height: 40,
-              child: TextField(
-                onChanged: onChanged,
-                decoration: InputDecoration(
-                  hintText: hint,
-                  prefixIcon: const Icon(Symbols.filter_list_rounded, size: 20),
-                  isDense: true,
-                  filled: true,
-                  contentPadding: EdgeInsets.zero,
-                  border: const OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(AppRadii.pill)),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
+            // Inline filtr v obsahu -- plochá kapsle, ne sklo (HIG Materials).
+            child: GlassSearchField(
+              hintText: hint,
+              onChanged: onChanged,
+              glass: false,
+              compact: true,
+              showCancel: false,
+              leadingIcon: Symbols.filter_list_rounded,
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
@@ -478,6 +451,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                     },
                   ),
                 ),
+              SliverToBoxAdapter(child: SizedBox(height: navBottomInset(context))),
             ],
           ),
         );
@@ -577,6 +551,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                     },
                   ),
                 ),
+              SliverToBoxAdapter(child: SizedBox(height: navBottomInset(context))),
             ],
           ),
         );
@@ -609,9 +584,11 @@ class _PlaylistsTab extends ConsumerWidget {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
-          FilledButton(
+          GlassButton(
+            label: 'Vytvořit',
+            style: GlassButtonStyle.prominent,
+            compact: true,
             onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Vytvořit'),
           ),
         ],
       ),
@@ -640,7 +617,7 @@ class _PlaylistsTab extends ConsumerWidget {
             : RefreshIndicator(
                 onRefresh: () async => ref.invalidate(myPlaylistsProvider),
                 child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96),
+                  padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
                   itemCount: items.length,
                   itemBuilder: (context, index) {
                     final playlist = items[index];
@@ -660,6 +637,27 @@ class _PlaylistsTab extends ConsumerWidget {
           error: error,
           onRetry: () => ref.invalidate(myPlaylistsProvider),
         ),
+      ),
+    );
+  }
+}
+
+/// Taby Knihovny jako segmentový ovladač napojený na `DefaultTabController`
+/// (obsah zůstává `TabBarView` -- swipe mezi taby funguje dál).
+class _LibraryTabSegments extends StatelessWidget {
+  const _LibraryTabSegments();
+
+  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty'];
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = DefaultTabController.of(context);
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => GlassSegmentedControl<int>(
+        segments: [for (var i = 0; i < _labels.length; i++) GlassSegment(value: i, label: _labels[i])],
+        selected: controller.index,
+        onChanged: controller.animateTo,
       ),
     );
   }

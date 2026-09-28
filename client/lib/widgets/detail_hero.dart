@@ -1,6 +1,5 @@
 import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -10,6 +9,7 @@ import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'glass_container.dart';
 import 'media_card.dart' show ArtworkImage;
+import 'net_image.dart';
 
 /// Dopočítá barvu nálady obrázku detailové obrazovky a zapíše ji do
 /// `screenAccentStackProvider` (globální seed + gradient pozadí) po dobu, co
@@ -124,7 +124,7 @@ class DetailHeroAppBar extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (imageUrl != null)
-                CachedNetworkImage(imageUrl: imageUrl!, fit: BoxFit.cover)
+                NetImage(url: imageUrl!)
               else
                 DecoratedBox(
                   decoration: BoxDecoration(
@@ -204,7 +204,7 @@ extension on DetailHeroAppBar {
       fit: StackFit.expand,
       children: [
         if (url != null)
-          Transform.scale(scale: 1.3, child: CachedNetworkImage(imageUrl: url, fit: BoxFit.cover))
+          Transform.scale(scale: 1.3, child: NetImage(url: url))
         else
           DecoratedBox(
             decoration: BoxDecoration(
@@ -233,7 +233,7 @@ extension on DetailHeroAppBar {
     const maxAspect = 1.8;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final photo = CachedNetworkImage(imageUrl: url, fit: BoxFit.cover, alignment: const Alignment(0, -0.6));
+        final photo = NetImage(url: url, alignment: const Alignment(0, -0.6));
         if (constraints.maxWidth <= constraints.maxHeight * maxAspect) return photo;
         return Stack(
           fit: StackFit.expand,

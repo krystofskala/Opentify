@@ -37,10 +37,12 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       scrolledUnderElevation: 0,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
+      // Emphasized nadpis sekce (M3 Expressive) -- velký, těžký, úzký.
       titleTextStyle: base.textTheme.titleLarge?.copyWith(
         fontFamily: 'Nunito',
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.3,
+        fontSize: 28,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.8,
         color: colorScheme.onSurface,
       ),
       iconTheme: IconThemeData(color: colorScheme.onSurface),
@@ -66,7 +68,22 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
     filledButtonTheme: FilledButtonThemeData(style: ButtonStyle(shape: WidgetStatePropertyAll(AppShapes.pill))),
     outlinedButtonTheme: OutlinedButtonThemeData(style: ButtonStyle(shape: WidgetStatePropertyAll(AppShapes.pill))),
     textButtonTheme: TextButtonThemeData(style: ButtonStyle(shape: WidgetStatePropertyAll(AppShapes.pill))),
-    chipTheme: ChipThemeData(shape: AppShapes.pill, side: BorderSide.none),
+    // Čipy = obsahové ovládání -> M3 Expressive tónové kontejnery ze seedu,
+    // žádné sklo (HIG Materials) a žádná šeď (viz `theme/glass_tokens.dart`).
+    chipTheme: ChipThemeData(
+      shape: AppShapes.pill,
+      side: BorderSide.none,
+      backgroundColor: colorScheme.secondaryContainer,
+      selectedColor: colorScheme.primaryContainer,
+      labelStyle: TextStyle(color: colorScheme.onSecondaryContainer, fontWeight: FontWeight.w600),
+      iconTheme: IconThemeData(color: colorScheme.onSecondaryContainer, size: 18),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: colorScheme.inverseSurface.withValues(alpha: 0.9),
+      shape: const StadiumBorder(),
+      elevation: 0,
+    ),
     bottomSheetTheme: const BottomSheetThemeData(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl))),
     ),
@@ -81,13 +98,20 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
 /// Nadpisy dostávají mírně záporný `letterSpacing`, stejně jako PixelPlayerův
 /// mini-player titulek.
 TextTheme _buildTextTheme(TextTheme base) {
+  // M3 Expressive "emphasized" typografie: nadpisy větší, těžší a s
+  // užším prostrkáním -- editoriální hierarchie; tělo textu beze změny.
   return base
       .apply(fontFamily: 'Nunito')
       .copyWith(
-        titleLarge: base.titleLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w800, letterSpacing: -0.3),
-        titleMedium: base.titleMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w700, letterSpacing: -0.2),
+        displaySmall: base.displaySmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -1.0),
+        headlineLarge: base.headlineLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -0.8),
+        headlineMedium: base.headlineMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -0.6),
+        headlineSmall: base.headlineSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w800, letterSpacing: -0.5),
+        titleLarge: base.titleLarge?.copyWith(fontFamily: 'Nunito', fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+        titleMedium: base.titleMedium?.copyWith(fontFamily: 'Nunito', fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3),
         titleSmall: base.titleSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w700),
         bodyLarge: base.bodyLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w600),
         bodyMedium: base.bodyMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w500),
+        labelLarge: base.labelLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w700),
       );
 }

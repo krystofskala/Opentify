@@ -14,6 +14,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_actions.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
+import '../../widgets/glass/glass.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -122,6 +123,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     visibleTracks: _collection.apply(items),
                     sourceLabel: detail.title,
                     onRemoveSelected: (selected) => _removeTracks(selected),
+                    // Vlastní playlist: stáhnout celý na pozadí.
+                    downloadWholeList: true,
                   ),
                 ),
               ),
@@ -233,7 +236,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         content: const Text('Tohle nejde vrátit zpátky.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Zrušit')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Smazat')),
+          GlassButton(label: 'Smazat', destructive: true, compact: true, onPressed: () => Navigator.of(context).pop(true)),
         ],
       ),
     );

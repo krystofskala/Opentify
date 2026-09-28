@@ -11,13 +11,15 @@ import '../../models/search_result.dart';
 import '../../state/providers.dart';
 import '../../state/search_history_controller.dart';
 import '../../theme/design_tokens.dart';
-import '../../widgets/glass_container.dart';
+import '../../widgets/glass/glass.dart';
 import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart' show foldForSearch;
 import '../../widgets/track_tile.dart';
+import '../../routing/home_shell.dart' show navBottomInset;
+import '../../theme/glass_tokens.dart';
 
 const _searchSourceLabel = 'Výsledky hledání';
 
@@ -153,41 +155,36 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 ),
               ),
               if (query.isNotEmpty)
+                // Rozsah hledání jako segmentový ovladač (HIG Search fields:
+                // "Use a scope bar to filter among clearly defined search
+                // categories") + ikonové toggle tlačítko "jen moje knihovna"
+                // (HIG Toggles: mimo seznam toggle-tlačítko, ne přepínač).
                 SizedBox(
                   height: 48,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
+                  child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
-                        child: FilterChip(
-                          avatar: Icon(libraryOnly ? Symbols.check_rounded : Symbols.library_music_rounded, size: 18),
-                          showCheckmark: false,
-                          label: const Text('Jen moje knihovna'),
-                          selected: libraryOnly,
-                          onSelected: (value) => ref.read(searchLibraryOnlyProvider.notifier).state = value,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
-                        child: VerticalDivider(
-                          width: 1,
-                          indent: 10,
-                          endIndent: 10,
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                        ),
-                      ),
-                      for (final f in SearchFilter.values)
-                        Padding(
-                          padding: const EdgeInsets.only(right: AppSpacing.xs, bottom: AppSpacing.xs),
-                          child: ChoiceChip(
-                            label: Text(_filterLabels[f]!),
-                            selected: filter == f,
-                            onSelected: (_) => ref.read(searchFilterProvider.notifier).state = f,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GlassSegmentedControl<SearchFilter>(
+                            segments: [
+                              for (final f in SearchFilter.values) GlassSegment(value: f, label: _filterLabels[f]!),
+                            ],
+                            selected: filter,
+                            onChanged: (f) => ref.read(searchFilterProvider.notifier).state = f,
                           ),
                         ),
-                    ],
+                        const SizedBox(width: AppSpacing.xs),
+                        GlassIconButton(
+                          icon: Symbols.library_music_rounded,
+                          tooltip: 'Jen moje knihovna',
+                          size: GlassTokens.compactControlHeight,
+                          iconSize: 20,
+                          selected: libraryOnly,
+                          onPressed: () => ref.read(searchLibraryOnlyProvider.notifier).state = !libraryOnly,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
             ],
@@ -257,34 +254,14 @@ class _SearchField extends ConsumerWidget {
         focusNode: focusNode,
         optionsBuilder: (value) => history.where((h) => _fuzzy(h, value.text)).take(6),
         onSelected: onSubmitted,
-        fieldViewBuilder: (context, textController, fieldFocus, onFieldSubmitted) => TextField(
+        fieldViewBuilder: (context, textController, fieldFocus, onFieldSubmitted) => GlassSearchField(
           controller: textController,
           focusNode: fieldFocus,
           autofocus: true,
+          hintText: 'Interpret, album nebo skladba…',
           onChanged: onChanged,
           onSubmitted: onSubmitted,
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            hintText: 'Interpret, album nebo skladba…',
-            prefixIcon: const Icon(Symbols.search_rounded),
-            suffixIcon: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
-              child: textController.text.isEmpty
-                  ? const SizedBox.shrink()
-                  : IconButton(
-                      key: const ValueKey('clear'),
-                      icon: const Icon(Symbols.close_rounded),
-                      tooltip: 'Vymazat',
-                      onPressed: onClear,
-                    ),
-            ),
-            filled: true,
-            isDense: true,
-            border: const OutlineInputBorder(
-              borderRadius: BorderRadius.all(Radius.circular(AppRadii.pill)),
-              borderSide: BorderSide.none,
-            ),
-          ),
+          onCleared: onClear,
         ),
         optionsViewBuilder: (context, onSelected, options) => Align(
           alignment: Alignment.topLeft,
@@ -292,26 +269,17 @@ class _SearchField extends ConsumerWidget {
             padding: const EdgeInsets.only(top: AppSpacing.xxs),
             child: SizedBox(
               width: constraints.maxWidth,
-              child: Material(
-                type: MaterialType.transparency,
-                child: GlassContainer(
-                  borderRadius: BorderRadius.circular(AppRadii.lg),
-                  blurSigma: 30,
-                  child: ListView(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
-                    children: [
-                      for (final option in options)
-                        ListTile(
-                          dense: true,
-                          leading: const Icon(Symbols.history_rounded, size: 20),
-                          title: Text(option),
-                          trailing: const Icon(Symbols.north_west_rounded, size: 18),
-                          onTap: () => onSelected(option),
-                        ),
-                    ],
-                  ),
-                ),
+              child: GlassSuggestionsPanel(
+                children: [
+                  for (final option in options)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Symbols.history_rounded, size: 20),
+                      title: Text(option),
+                      trailing: const Icon(Symbols.north_west_rounded, size: 18),
+                      onTap: () => onSelected(option),
+                    ),
+                ],
               ),
             ),
           ),
@@ -399,7 +367,7 @@ class _AllResults extends ConsumerWidget {
     }
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+      padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
       children: [
         _Section(
           title: 'Skladby',
@@ -551,7 +519,7 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.tracks:
             final List<RecordingModel> recordings = items.map((i) => i.toRecordingModel()).toList();
             return ListView.builder(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg),
+              padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
               itemCount: recordings.length,
               itemBuilder: (context, index) => TrackTile(
                 recording: recordings[index],
@@ -564,7 +532,7 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.all:
             final columns = (MediaQuery.sizeOf(context).width / 170).floor().clamp(2, 8);
             return GridView.builder(
-              padding: const EdgeInsets.all(AppSpacing.sm),
+              padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.sm + navBottomInset(context)),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 childAspectRatio: filter == SearchFilter.artists ? 0.8 : 0.72,

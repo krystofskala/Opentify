@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'glass_container.dart';
+
 /// Sdílený vzhled AppBaru -- nahrazuje 5 různých ad hoc přístupů napříč
 /// obrazovkami (Home/Profil holý `AppBar`, Library `AppBar`+`TabBar`, Search
 /// s `TextField` natvrdo v `title`, Release bez AppBaru vůbec na úspěšné
@@ -16,7 +18,14 @@ class SectionAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppBar(title: Text(title), actions: actions, bottom: bottom);
+    // Sklo za lištou (včetně `bottom` -- vyhledávací pole, taby) se objeví až
+    // když pod ní obsah odjede, jinak průhledná na pozadí appky.
+    return AppBar(
+      title: Text(title),
+      actions: actions,
+      bottom: bottom,
+      flexibleSpace: const GlassScrolledUnderBackground(),
+    );
   }
 
   @override

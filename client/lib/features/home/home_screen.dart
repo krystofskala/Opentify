@@ -13,6 +13,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_list_sheet.dart';
 import '../../widgets/track_tile.dart';
+import '../../routing/home_shell.dart' show navBottomInset;
 
 final genresProvider = FutureProvider.autoDispose<List<LocalGenre>>((ref) {
   return ref.watch(libraryRepositoryProvider).genres();
@@ -70,7 +71,7 @@ class HomeScreen extends ConsumerWidget {
           ref.invalidate(czechMusicProvider);
         },
         child: ListView(
-          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+          padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
           children: [
             // PixelPlayerova "bublinová" řada naposledy přehraných -- skrytá,
             // dokud toho není aspoň pár.

@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/lyrics_repository.dart';
 import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
+import '../theme/glass_tokens.dart';
+import 'glass_container.dart';
+import 'glass/expressive_shapes.dart';
 
 final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>((ref, recordingId) {
   return ref.watch(lyricsRepositoryProvider).getLyrics(recordingId);
@@ -21,6 +24,7 @@ final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>(
 Future<void> showLyricsPanel(BuildContext context, {required String recordingId, required Color accentColor}) {
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => _LyricsPanel(recordingId: recordingId, accentColor: accentColor),
@@ -44,15 +48,12 @@ class _LyricsPanel extends ConsumerWidget {
       maxChildSize: 0.95,
       expand: false,
       builder: (context, sheetController) => ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [accentColor.withValues(alpha: 0.92), Colors.black.withValues(alpha: 0.95)],
-            ),
-          ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+        child: GlassContainer.frosted(
+          // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač pod ním.
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+          tint: accentColor,
+          fit: StackFit.expand,
           child: Column(
             children: [
               const SizedBox(height: 10),
@@ -94,7 +95,7 @@ class _LyricsPanel extends ConsumerWidget {
                       ),
                     );
                   },
-                  loading: () => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                  loading: () => const Center(child: ExpressiveLoadingIndicator(color: Colors.white)),
                   error: (error, stack) =>
                       const Center(child: Text('Text se nepodařilo načíst.', style: TextStyle(color: Colors.white70))),
                 ),

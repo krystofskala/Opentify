@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../state/artwork_provider.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
+import 'net_image.dart';
 
 enum MediaCardShape { roundedSquare, circle }
 enum MediaCardLayout { card, row }
@@ -166,21 +166,16 @@ class ArtworkImage extends StatelessWidget {
     if (url == null) return placeholder;
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Dekódovat jen v rozlišení, ve kterém se obrázek opravdu kreslí --
-        // obaly chodí jako 1000×1000, a desítky takových textur najednou
-        // (mřížka knihovny, řady na Domů) na webu (CanvasKit/WebGL) vyčerpají
-        // paměť GPU a karty se pak kreslily jako černé čtverce.
+        // Stahovat obal jen v rozlišení, ve kterém se opravdu kreslí (Deezer/
+        // CAA umí 250/500/1000 px) -- desítky 1000×1000 obrázků najednou
+        // (mřížka knihovny, řady na Domů) zbytečně zatěžují paměť.
         final dpr = MediaQuery.devicePixelRatioOf(context);
         final logical = constraints.hasBoundedWidth ? constraints.maxWidth : 300.0;
         final px = (logical * dpr).clamp(64.0, 1000.0).round();
-        return CachedNetworkImage(
-          imageUrl: sizedArtworkUrl(url!, px),
-          memCacheWidth: px,
-          fit: BoxFit.cover,
-          fadeInDuration: const Duration(milliseconds: 250),
-          placeholder: (context, _) => placeholder,
-          errorWidget: (context, _, __) => placeholder,
-        );
+        // `NetImage` (ne `CachedNetworkImage`) -- na webu rasterizuje, jinak
+        // obaly po zavření přehrávače zčernaly (viz `widgets/net_image.dart`).
+        // Velikost řeší `sizedArtworkUrl` (server posílá 250/500 px).
+        return NetImage(url: sizedArtworkUrl(url!, px), placeholder: placeholder);
       },
     );
   }

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import 'routing/app_router.dart';
 import 'state/audio_player_controller.dart';
+import 'state/theme_mode_controller.dart';
 import 'theme/accent_color.dart';
 import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
@@ -31,42 +31,36 @@ class OpentifyApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(seed: seed, brightness: Brightness.light),
       darkTheme: buildAppTheme(seed: seed, brightness: Brightness.dark),
+      // Volba "Vzhled" v Profilu (výchozí tmavý), přepnutí animuje stejná
+      // `themeAnimation*` jako změna barvy.
+      themeMode: ref.watch(themeModeProvider),
       routerConfig: router,
       // Změna seedu (jiné album/interpret/skladba) přebarví celé téma
       // plynule, stejnou křivkou jako přehrávač a pozadí -- ne skokem.
       themeAnimationDuration: accentTransitionDuration,
       themeAnimationCurve: accentTransitionCurve,
       // Zrnité pozadí pod úplně vším -- `Scaffold`y jsou průhledné
-      // (`buildAppTheme`), takže prosvítá skrz. Přehrávač má vlastní plnou
-      // výplň; když je otevřený, pozadí se zastaví (není vidět).
-      builder: (context, child) => ListenableBuilder(
-        listenable: router.routerDelegate,
-        builder: (context, _) => AppBackground(
-          selectedAccent: screenAccent ?? selectedAccent,
-          brightness: Theme.of(context).brightness,
-          isPlaying: isPlaying,
-          hidden: _isNowPlayingOpen(router),
-          child: child ?? const SizedBox.shrink(),
-        ),
-      ),
+      // (`buildAppTheme`), takže prosvítá skrz. I přehrávač je teď průhledný
+      // (pozadí appky pod hustě namrzlým sklem), takže se nikdy nezastavuje.
+      builder: (context, child) => _maybeSimulatedInsets(context, AppBackground(
+        selectedAccent: screenAccent ?? selectedAccent,
+        brightness: Theme.of(context).brightness,
+        isPlaying: isPlaying,
+        hidden: false,
+        child: child ?? const SizedBox.shrink(),
+      )),
     );
   }
 }
 
-bool _isNowPlayingOpen(GoRouter router) {
-  bool contains(List<RouteMatchBase> matches) {
-    for (final match in matches) {
-      if (match is ImperativeRouteMatch && contains(match.matches.matches)) return true;
-      if (match is ShellRouteMatch && contains(match.matches)) return true;
-      final route = match.route;
-      if (route is GoRoute && route.path == '/now-playing') return true;
-    }
-    return false;
-  }
+/// `--dart-define=SIMULATE_INSETS=true` (jen kontrolní buildy): iPhone-like
+/// safe-area insety (47 nahoře / 34 dole), aby šlo na desktopu ověřit, že
+/// tab bar, mini přehrávač, hlavičky a přehrávač insety respektují.
+const _simulateInsets = bool.fromEnvironment('SIMULATE_INSETS');
 
-  try {
-    return contains(router.routerDelegate.currentConfiguration.matches);
-  } catch (_) {
-    return false;
-  }
+Widget _maybeSimulatedInsets(BuildContext context, Widget child) {
+  if (!_simulateInsets) return child;
+  const insets = EdgeInsets.only(top: 47, bottom: 34);
+  final mq = MediaQuery.of(context);
+  return MediaQuery(data: mq.copyWith(padding: insets, viewPadding: insets), child: child);
 }

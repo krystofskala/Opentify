@@ -2,56 +2,54 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../widgets/glass/glass.dart';
 import '../widgets/player_bar.dart';
-
-/// Vyplněná varianta ikony pro vybraný tab -- `Symbols.*` nese "fill" jako
-/// osu variabilního fontu (`VariedIcon.varied`), ne jako samostatný název
-/// ikony jako staré Material Icons (`Icons.home` vs `Icons.home_outlined`).
-Widget _filled(IconData icon) => VariedIcon.varied(icon, fill: 1);
 
 /// Bottom-nav shell pro čtyři hlavní destinace (Domů/Hledat/Knihovna/Profil) --
 /// Artist/Release se pushují nad ním jako celoobrazovkové detaily, ne jako další tab.
+///
+/// Plovoucí skleněný tab bar + mini přehrávač nad ním (HIG Tab bars: "a tab
+/// bar floats above content"), `extendBody` -- obsah pod nimi pokračuje a
+/// prosvítá rozmazaný. Scaffold posílá jejich výšku jako
+/// `MediaQuery.padding.bottom`, kterou si seznamy přičítají (`navBottomInset`).
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
+  static const _tabs = [
+    GlassTabItem(icon: Symbols.home_rounded, label: 'Domů'),
+    GlassTabItem(icon: Symbols.search_rounded, label: 'Hledat'),
+    GlassTabItem(icon: Symbols.library_music_rounded, label: 'Knihovna'),
+    GlassTabItem(icon: Symbols.person_rounded, label: 'Profil'),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
       body: navigationShell,
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const PlayerBar(),
-          NavigationBar(
+          // Jeden stín na skupinu (má ho tab bar) -- žádné vrstvené stíny.
+          MediaQuery.removePadding(
+            context: context,
+            removeBottom: true,
+            child: const PlayerBar(shadow: false),
+          ),
+          GlassTabBar(
+            items: _tabs,
             selectedIndex: navigationShell.currentIndex,
-            onDestinationSelected: navigationShell.goBranch,
-            destinations: [
-              NavigationDestination(
-                icon: const Icon(Symbols.home_rounded),
-                selectedIcon: _filled(Symbols.home_rounded),
-                label: 'Domů',
-              ),
-              NavigationDestination(
-                icon: const Icon(Symbols.search_rounded),
-                selectedIcon: _filled(Symbols.search_rounded),
-                label: 'Hledat',
-              ),
-              NavigationDestination(
-                icon: const Icon(Symbols.library_music_rounded),
-                selectedIcon: _filled(Symbols.library_music_rounded),
-                label: 'Knihovna',
-              ),
-              NavigationDestination(
-                icon: const Icon(Symbols.person_rounded),
-                selectedIcon: _filled(Symbols.person_rounded),
-                label: 'Profil',
-              ),
-            ],
+            onSelected: navigationShell.goBranch,
           ),
         ],
       ),
     );
   }
 }
+
+/// Spodní odsazení seznamů na hlavních tabech -- obsah pod plovoucím tab
+/// barem (`HomeShell.extendBody`) se jinak na konci schová pod něj. Mimo
+/// shell (detaily s vlastní lištou přehrávače) je to 0.
+double navBottomInset(BuildContext context) => MediaQuery.paddingOf(context).bottom;

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -65,6 +66,9 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   double _tweenStart = -10;
 
   double _phase = 0;
+  // Posun tekutého pole (jednotky šumu). Perioda 256 = perioda mřížky šumu,
+  // takže přetečení je bezešvé.
+  double _flow = 0;
   double _speed = 1;
   double _boost = 0;
   double _boostTarget = 0;
@@ -165,6 +169,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
       if (now - _lastScrollAt > 0.12) _boostTarget *= math.exp(-step / 0.15);
       _bloom *= math.exp(-step / 0.2);
       _phase = (_phase + step * _speed * (1 + 3 * _boost)) % 600;
+      _flow = (_flow + step * _speed * (1 + 3 * _boost) * 0.02) % 256;
     }
     _frame.value++;
 
@@ -259,10 +264,13 @@ class _ShaderPainter extends CustomPainter {
   bool shouldRepaint(covariant _ShaderPainter old) => true;
 }
 
-/// Výchozí vykreslování: měkké barevné plochy jako nativní radiální
-/// gradienty (levné na GPU) -- kulaté "bokeh" záře i protáhlé, pomalu se
-/// otáčející "tekuté šmouhy" -- a přes ně husté filmové zrno předpočítané
-/// jednou v rozlišení zařízení. Fragment shader je jen volitelný
+/// Výchozí vykreslování: tekuté pole barev, které se "míchají" jako
+/// rozmíchaný inkoust -- ne oddělené záře na tmavé podlaze (uživatel: "jako
+/// světlo z reflektorů na podlaze"). Na CPU se v hrubé síti (~24-64 × 24-96
+/// vrcholů) spočítá dvakrát doménově pokřivený hodnotový šum (tekoucí v čase)
+/// a z něj směs 6 barev palety v OKLab (míchání nekalí do šeda). GPU pak
+/// barvy mezi vrcholy plynule interpoluje (`drawVertices`), přes to jde
+/// předpočítané filmové zrno. Fragment shader je jen volitelný
 /// (`BG_SHADER=true`): v CanvasKitu při plynulém překreslování rozbíjel
 /// vykreslování obrázků (obaly alb černaly).
 class _FallbackPainter extends CustomPainter {
@@ -271,64 +279,36 @@ class _FallbackPainter extends CustomPainter {
   final _AppBackgroundState state;
   static ui.Image? _grain;
   static String? _grainKey;
-
-  // [slot, rychlost x, rychlost y, fáze, velikost, protažení, rychlost rotace]
-  static const _layers = <List<double>>[
-    [1, 10, 7, 0.0, 0.95, 1.0, 0],
-    [2, 6, 11, 2.1, 0.75, 2.6, 3],
-    [3, 13, 9, 4.2, 0.62, 1.0, 0],
-    [5, 8, 14, 1.3, 0.55, 3.2, -4],
-    [2, 9, 5, 3.3, 0.45, 1.0, 0],
-    [4, 11, 6, 5.4, 0.30, 2.2, 5],
-  ];
+  static final _FlowMesh _mesh = _FlowMesh();
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final now = state._now;
     final dark = state.widget.brightness == Brightness.dark;
-    final colors = List.generate(6, (i) => state._slotAt(i, now).toColor());
-    canvas.drawRect(Offset.zero & size, Paint()..color = colors[0]);
+    final palette = List.generate(6, (i) => state._slotAt(i, now));
 
-    final t = state._phase * 2 * math.pi / 600;
-    final bloom = state._bloom;
-    for (final l in _layers) {
-      final color = colors[l[0].toInt()];
-      final center = Offset(
-        size.width * (0.5 + 0.42 * math.sin(t * l[1] + l[3])),
-        size.height * (0.5 + 0.40 * math.cos(t * l[2] + l[3] * 1.7)),
-      );
-      final radius = size.shortestSide * l[4] * (1 + 0.12 * bloom);
-      final stretch = l[5] * (1 + 0.15 * math.sin(t * 7 + l[3]));
-      canvas.save();
-      canvas.translate(center.dx, center.dy);
-      canvas.rotate(l[3] + t * l[6]);
-      canvas.scale(stretch, 1 / math.sqrt(stretch));
-      canvas.drawCircle(
-        Offset.zero,
-        radius,
-        Paint()
-          ..shader = ui.Gradient.radial(
-            Offset.zero,
-            radius,
-            [color.withValues(alpha: 0.95), color.withValues(alpha: 0.45), color.withValues(alpha: 0)],
-            const [0, 0.45, 1],
-          ),
-      );
-      canvas.restore();
-    }
+    final vertices = _mesh.build(
+      size,
+      palette,
+      flow: state._flow,
+      warp: 3.2 * (1 + 0.3 * state._boost) + 0.6 * state._bloom,
+      lift: 0.05 * state._bloom,
+      dark: dark,
+    );
+    canvas.drawVertices(vertices, BlendMode.dst, Paint());
 
     if (dark) {
-      final center = size.center(Offset.zero);
-      final r = size.longestSide * 0.75;
+      // Jen jemné ztmavení okrajů kvůli hloubce -- dřívější silná vinětka
+      // dělala z okrajů tu "tmavou podlahu".
       canvas.drawRect(
         Offset.zero & size,
         Paint()
           ..shader = ui.Gradient.radial(
-            center,
-            r,
-            [Colors.transparent, Colors.black.withValues(alpha: 0.35)],
-            const [0.45, 1],
+            size.center(Offset.zero),
+            size.longestSide * 0.8,
+            [Colors.transparent, Colors.black.withValues(alpha: 0.14)],
+            const [0.55, 1],
           ),
       );
     }
@@ -386,6 +366,140 @@ class _FallbackPainter extends CustomPainter {
   bool shouldRepaint(covariant _FallbackPainter old) => true;
 }
 
+/// Hrubá síť vrcholů s barvami z tekutého pole. Pozice a indexy se drží,
+/// dokud se nezmění velikost; barvy se počítají každý snímek (jen pár tisíc
+/// vrcholů, levné i v JS). Staré `Vertices` se uvolňují se zpožděním pár
+/// snímků -- ať je CanvasKit ještě nepoužívá v rozpracovaném snímku.
+class _FlowMesh {
+  Size? _size;
+  int _cols = 0;
+  int _rows = 0;
+  Float32List _positions = Float32List(0);
+  Uint16List _indices = Uint16List(0);
+  Int32List _colors = Int32List(0);
+
+  static final Uint8List _perm = () {
+    final random = math.Random(11);
+    final base = List<int>.generate(256, (i) => i)..shuffle(random);
+    final out = Uint8List(512);
+    for (var i = 0; i < 512; i++) {
+      out[i] = base[i & 255];
+    }
+    return out;
+  }();
+  static final Float64List _values = () {
+    final random = math.Random(23);
+    return Float64List.fromList(List.generate(256, (_) => random.nextDouble()));
+  }();
+
+  void _layout(Size size) {
+    _size = size;
+    _cols = (size.width / 16).round().clamp(24, 64);
+    _rows = (size.height / 16).round().clamp(24, 96);
+    final vx = _cols + 1;
+    final count = vx * (_rows + 1);
+    _positions = Float32List(count * 2);
+    _colors = Int32List(count);
+    for (var j = 0; j <= _rows; j++) {
+      for (var i = 0; i <= _cols; i++) {
+        final k = (j * vx + i) * 2;
+        _positions[k] = size.width * i / _cols;
+        _positions[k + 1] = size.height * j / _rows;
+      }
+    }
+    _indices = Uint16List(_cols * _rows * 6);
+    var n = 0;
+    for (var j = 0; j < _rows; j++) {
+      for (var i = 0; i < _cols; i++) {
+        final a = j * vx + i;
+        final b = a + 1;
+        final c = a + vx;
+        final d = c + 1;
+        _indices
+          ..[n++] = a
+          ..[n++] = b
+          ..[n++] = c
+          ..[n++] = b
+          ..[n++] = d
+          ..[n++] = c;
+      }
+    }
+  }
+
+  static double _noise(double x, double y) {
+    final xf = x.floorToDouble();
+    final yf = y.floorToDouble();
+    final xi = xf.toInt() & 255;
+    final yi = yf.toInt() & 255;
+    final tx = x - xf;
+    final ty = y - yf;
+    final u = tx * tx * (3 - 2 * tx);
+    final v = ty * ty * (3 - 2 * ty);
+    final a = _values[_perm[_perm[xi] + yi]];
+    final b = _values[_perm[_perm[xi + 1] + yi]];
+    final c = _values[_perm[_perm[xi] + yi + 1]];
+    final d = _values[_perm[_perm[xi + 1] + yi + 1]];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+
+  static double _fbm(double x, double y) =>
+      (_noise(x, y) + 0.5 * _noise(2 * x + 17.3, 2 * y + 5.1)) / 1.5;
+
+  static double _smooth(double t) {
+    final c = t.clamp(0.0, 1.0);
+    return c * c * (3 - 2 * c);
+  }
+
+  ui.Vertices build(
+    Size size,
+    List<_Lab> p, {
+    required double flow,
+    required double warp,
+    required double lift,
+    required bool dark,
+  }) {
+    // Tmavý režim: celé pole tmavší (bílý text musí být čitelný) a víc
+    // prostoru pro nejhlubší tón -- pořád ale barva, žádná černá podlaha.
+    final lightness = dark ? 0.66 : 1.0;
+    final deepWeight = dark ? 0.95 : 0.6;
+    if (_size != size) _layout(size);
+    final short = size.shortestSide;
+    final ax = size.width / short * 1.5;
+    final ay = size.height / short * 1.5;
+    final vx = _cols + 1;
+
+    for (var j = 0; j <= _rows; j++) {
+      final py = j / _rows * ay;
+      for (var i = 0; i <= _cols; i++) {
+        final px = i / _cols * ax;
+        // Dvojitě pokřivená doména (Quilez) -> mramorované, stáčející se
+        // proudy. Čas jen s celočíselnými koeficienty => bezešvá perioda 256.
+        final qx = _fbm(px + flow, py + flow);
+        final qy = _fbm(px + 5.2 - flow, py + 1.3 + flow);
+        final rx = _fbm(px + warp * qx + 1.7, py + warp * qy + 9.2 - flow);
+        final ry = _fbm(px + warp * qx + 8.3 + flow, py + warp * qy + 2.8);
+        final f = _fbm(px + warp * rx, py + warp * ry);
+
+        // Barvy se do sebe vmíchávají (vážené přechody přes celou plochu),
+        // nikde "díra" do černa: i nejtmavší slot palety je barevný.
+        var c = _Lab.lerp(p[1], p[2], _smooth(f * 2.2 - 0.6));
+        c = _Lab.lerp(c, p[3], _smooth(qx * 2.4 - 1.0));
+        c = _Lab.lerp(c, p[5], _smooth(ry * 2.6 - 1.4));
+        c = _Lab.lerp(c, p[0], _smooth(1.05 - (rx + qy) * 1.1) * deepWeight);
+        c = _Lab.lerp(c, p[4], _smooth(f * rx * 4.2 - 1.9) * 0.85);
+        _colors[j * vx + i] = c.toArgb(lift, lightness);
+      }
+    }
+
+    return ui.Vertices.raw(
+      ui.VertexMode.triangles,
+      _positions,
+      colors: _colors,
+      indices: _indices,
+    );
+  }
+}
+
 /// Paleta 6 slotů: [základ, stín, jádro, střed, highlight, doplněk].
 List<Color> _paletteFor(Color? accent, Brightness brightness) {
   final dark = brightness == Brightness.dark;
@@ -394,7 +508,8 @@ List<Color> _paletteFor(Color? accent, Brightness brightness) {
     // fialová/zelená jako v referencích.
     return dark
         ? const [
-            Color(0xFF0B0714),
+            // Nejtmavší tón je sytá indigová, ne skoro černá -- žádná "podlaha".
+            Color(0xFF2A1060),
             Color(0xFF7B2CFF),
             Color(0xFFE0359A),
             Color(0xFF12B5CB),
@@ -417,20 +532,23 @@ List<Color> _paletteFor(Color? accent, Brightness brightness) {
       HSLColor.fromAHSL(1, (h + dh) % 360, (s * sf).clamp(0.0, 1.0), l).toColor();
   return dark
       ? [
-          tone(8, 0.7, 0.05),
-          tone(-12, 1.0, 0.20),
-          tone(0, 1.0, 0.40),
-          tone(14, 0.9, 0.54),
-          tone(-6, 0.6, 0.74),
-          tone(4, 1.0, 0.30),
+          tone(10, 0.9, 0.13),
+          tone(-14, 1.0, 0.24),
+          tone(0, 1.0, 0.42),
+          tone(16, 0.9, 0.55),
+          tone(-6, 0.7, 0.72),
+          tone(6, 1.0, 0.32),
         ]
+      // Světlý režim: nejtmavší tón L≥0.72 -- tmavý text (`onSurface`) musí
+      // mít na kterémkoliv místě pole kontrast ≥ 4.5:1 (HIG Accessibility).
+      // Dřív L 0.56/0.66 → nadpisy a odkazy tmavé na tmavém.
       : [
           tone(0, 0.35, 0.95),
-          tone(-12, 0.8, 0.82),
-          tone(0, 1.0, 0.66),
-          tone(14, 0.9, 0.56),
-          tone(-6, 0.5, 0.92),
-          tone(4, 1.0, 0.74),
+          tone(-12, 0.8, 0.86),
+          tone(0, 1.0, 0.76),
+          tone(14, 0.9, 0.72),
+          tone(-6, 0.5, 0.93),
+          tone(4, 1.0, 0.8),
         ];
 }
 
@@ -470,6 +588,21 @@ class _Lab {
       green: ch(-1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc),
       blue: ch(-0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc),
     );
+  }
+
+  /// Jako `toColor`, jen rovnou ARGB int bez alokace (tisíce vrcholů/snímek).
+  /// `lift` přičte k světlosti (krátký "bloom" při změně barvy).
+  int toArgb([double lift = 0, double scale = 1]) {
+    final ll = l * scale + lift;
+    final l_ = ll + 0.3963377774 * a + 0.2158037573 * b;
+    final m_ = ll - 0.1055613458 * a - 0.0638541728 * b;
+    final s_ = ll - 0.0894841775 * a - 1.2914855480 * b;
+    final lc = l_ * l_ * l_, mc = m_ * m_ * m_, sc = s_ * s_ * s_;
+    int ch(double v) => (_toSrgb(v.clamp(0.0, 1.0)).clamp(0.0, 1.0) * 255).round();
+    final r = ch(4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc);
+    final g = ch(-1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc);
+    final bl = ch(-0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc);
+    return (0xFF << 24 | r << 16 | g << 8 | bl).toSigned(32);
   }
 
   static _Lab lerp(_Lab x, _Lab y, double t) =>

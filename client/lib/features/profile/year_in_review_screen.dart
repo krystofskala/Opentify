@@ -6,7 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../models/year_in_review_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
-import '../../widgets/glass_container.dart';
+import '../../widgets/surface_card.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/queue_action_bar.dart';
@@ -64,8 +64,7 @@ class _YearInReviewBody extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: GlassContainer(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
+          child: SurfaceCard(
           padding: const EdgeInsets.all(20),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,

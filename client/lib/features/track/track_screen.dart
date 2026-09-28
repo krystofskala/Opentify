@@ -19,6 +19,7 @@ import '../../widgets/track_actions.dart';
 import '../../widgets/track_tile.dart';
 import '../artist/artist_screen.dart' show discographyProvider;
 import '../release/release_screen.dart' show releaseArtistProvider, releaseProvider, releaseTracksProvider;
+import '../../widgets/glass/glass.dart';
 
 final recordingProvider = FutureProvider.autoDispose.family<RecordingModel, String>((ref, recordingId) {
   return ref.watch(catalogRepositoryProvider).getRecording(recordingId);
@@ -107,31 +108,29 @@ class _TrackBody extends ConsumerWidget {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xs),
-                child: Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.xs,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+                child: GlassButtonRow(
                   children: [
-                    FilledButton.icon(
+                    GlassButton(
+                      label: isPlaying ? 'Pozastavit' : 'Přehrát',
+                      icon: isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
+                      style: GlassButtonStyle.prominent,
                       onPressed: isCurrent ? () => player.togglePlayPause() : () => player.playTrack(info, sourceLabel: recording.title),
-                      icon: Icon(isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded),
-                      label: Text(isPlaying ? 'Pozastavit' : 'Přehrát'),
                     ),
-                    FilledButton.tonalIcon(
+                    GlassButton(
+                      label: 'Jako další',
+                      icon: Symbols.playlist_play_rounded,
                       onPressed: () {
                         player.playNext(info);
                         toast('Zařazeno jako další');
                       },
-                      icon: const Icon(Symbols.playlist_play_rounded),
-                      label: const Text('Jako další'),
                     ),
-                    FilledButton.tonalIcon(
+                    GlassButton(
+                      label: 'Do fronty',
+                      icon: Symbols.queue_music_rounded,
                       onPressed: () {
                         player.addToQueue(info);
                         toast('Přidáno do fronty');
                       },
-                      icon: const Icon(Symbols.queue_music_rounded),
-                      label: const Text('Do fronty'),
                     ),
                     IconButton.filledTonal(
                       onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(recording.id),

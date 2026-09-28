@@ -14,6 +14,7 @@ import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'track_actions.dart';
+import 'glass/expressive_shapes.dart';
 
 enum TrackTileLayout { row, card }
 
@@ -474,7 +475,7 @@ class _CardTile extends StatelessWidget {
                       right: 6,
                       bottom: 6,
                       child: isInFlight
-                          ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const ExpressiveLoadingIndicator(size: 28, color: Colors.white)
                           : Icon(
                               isAvailable ? Symbols.play_circle_rounded : Symbols.download_rounded,
                               color: Colors.white,

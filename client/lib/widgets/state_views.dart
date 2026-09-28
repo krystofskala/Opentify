@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
+import 'glass/expressive_shapes.dart';
 
 /// Jednotné stavové widgety (nadpis sekce, prázdno, chyba, načítání) pro
 /// celou appku -- dřív si každá obrazovka psala vlastní `_SectionHeader`/
@@ -42,7 +43,17 @@ class SectionHeader extends StatelessWidget {
             ),
           ),
           if (trailing != null) trailing!,
-          if (onSeeAll != null) TextButton(onPressed: onSeeAll, child: const Text('Zobrazit vše')),
+          // Leží přímo na barevném pozadí -> `onSurface`, ne akcent (HIG
+          // Accessibility: kontrast ≥ 4.5:1 v obou režimech).
+          if (onSeeAll != null)
+            TextButton(
+              onPressed: onSeeAll,
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.onSurface,
+                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              child: const Text('Zobrazit vše'),
+            ),
         ],
       ),
     );
@@ -60,17 +71,19 @@ class SectionBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
         decoration: ShapeDecoration(
-          color: color.withValues(alpha: 0.18),
-          shape: StadiumBorder(side: BorderSide(color: color.withValues(alpha: 0.4))),
+          // Plná tónová výplň (M3), ne průsvitná -- čitelná na jakémkoliv
+          // místě barevného pozadí.
+          color: Color.alphaBlend(color.withValues(alpha: 0.22), Theme.of(context).colorScheme.surfaceContainerHighest),
+          shape: StadiumBorder(side: BorderSide(color: color.withValues(alpha: 0.35))),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: 3),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 13, color: color),
+              Icon(icon, size: 13, color: Theme.of(context).colorScheme.onSurface),
               const SizedBox(width: AppSpacing.xxs),
-              Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+              Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface)),
             ],
           ),
         ),
@@ -290,6 +303,6 @@ class InlineSpinner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Padding(
         padding: EdgeInsets.all(AppSpacing.md),
-        child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))),
+        child: Center(child: ExpressiveLoadingIndicator(size: 32)),
       );
 }

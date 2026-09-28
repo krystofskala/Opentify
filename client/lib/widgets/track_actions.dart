@@ -9,7 +9,7 @@ import '../state/liked_songs_controller.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'add_to_playlist_sheet.dart';
-import 'glass_container.dart';
+import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
@@ -47,6 +47,7 @@ Future<void> showTrackActionsSheet(
 }) {
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (sheetContext) => _TrackActionsSheet(
@@ -96,8 +97,7 @@ class _TrackActionsSheet extends ConsumerWidget {
     void toast(String text) => messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
 
     return SafeArea(
-      child: GlassContainer(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      child: GlassSheet(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
           child: SingleChildScrollView(

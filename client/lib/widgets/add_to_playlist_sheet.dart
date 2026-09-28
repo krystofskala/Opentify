@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../state/providers.dart';
-import 'glass_container.dart';
+import 'glass/glass.dart';
 import 'state_views.dart';
+import 'glass/expressive_shapes.dart';
 
 /// Bottom sheet "Přidat do playlistu" -- seznam vlastních playlistů + řádek
 /// na založení nového rovnou z místa. Jedna skladba (`recordingId`, přehrávač/
@@ -14,6 +15,7 @@ Future<void> showAddToPlaylistSheet(BuildContext context, {String? recordingId, 
   final ids = recordingIds ?? [if (recordingId != null) recordingId];
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => _AddToPlaylistSheet(recordingIds: ids),
@@ -84,8 +86,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: GlassContainer(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: GlassSheet(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: Column(
@@ -111,7 +112,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                     const SizedBox(width: 8),
                     IconButton(
                       icon: _creating
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const ExpressiveLoadingIndicator(size: 22)
                           : const Icon(Symbols.add_circle_rounded),
                       onPressed: _creating ? null : _createAndAdd,
                     ),

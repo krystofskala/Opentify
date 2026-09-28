@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import 'glass/glass.dart';
+
 enum ViewMode { list, grid }
 
 /// Přepínač seznam/karty -- dřív existoval jen jako `_SongsViewMode`
@@ -14,14 +16,13 @@ class ViewModeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<ViewMode>(
-      showSelectedIcon: false,
+    return GlassSegmentedControl<ViewMode>.icons(
       segments: const [
-        ButtonSegment(value: ViewMode.list, icon: Icon(Symbols.view_list_rounded), tooltip: 'Seznam'),
-        ButtonSegment(value: ViewMode.grid, icon: Icon(Symbols.grid_view_rounded), tooltip: 'Karty'),
+        GlassSegment(value: ViewMode.list, label: 'Seznam', icon: Symbols.view_list_rounded),
+        GlassSegment(value: ViewMode.grid, label: 'Karty', icon: Symbols.grid_view_rounded),
       ],
-      selected: {mode},
-      onSelectionChanged: (selection) => onChanged(selection.first),
+      selected: mode,
+      onChanged: onChanged,
     );
   }
 }
