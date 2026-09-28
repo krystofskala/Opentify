@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../../theme/glass_tokens.dart';
 import '../glass_container.dart';
@@ -58,6 +59,15 @@ class GlassSegmentedControl<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     assert(segments.every((s) => s.icon == null) || segments.every((s) => s.icon != null),
         'HIG: nemíchat text a ikony v jednom segmentovém ovladači.');
+    // V obsahu M3 Expressive "connected button group" -- skleněná posuvná
+    // kapsle bez skutečného lomu světla (který Flutter web neumí) vypadala
+    // jako levná napodobenina iOS (zpětná vazba uživatele). Sklo zůstává
+    // jen pro plovoucí vrstvu (`floating`).
+    if (!floating) return _ConnectedSegments<T>(segments: segments, selected: selected, onChanged: onChanged, width: width);
+    return _buildGlass(context);
+  }
+
+  Widget _buildGlass(BuildContext context) {
     final theme = Theme.of(context);
     final index = segments.indexWhere((s) => s.value == selected).clamp(0, segments.length - 1);
     const height = GlassTokens.compactControlHeight;
@@ -147,6 +157,102 @@ class GlassSegmentedControl<T> extends StatelessWidget {
                 ),
         ),
       ),
+    );
+  }
+}
+
+/// M3 Expressive spojená skupina tlačítek (connected button group,
+/// https://m3.material.io/components/button-groups): samostatné tónové
+/// dílky s 2 px mezerou, vnější rohy plně kulaté, vnitřní malé
+/// (`Expressive.groupInnerCorner`). Vybraný dílek se pružinou "nafoukne"
+/// do plné pilulky, dostane `secondaryContainer` a zatržítko; ostatní
+/// `surfaceContainerHigh`. Stisk = pružinový morf rohů (GlassPressable).
+class _ConnectedSegments<T> extends StatelessWidget {
+  const _ConnectedSegments({required this.segments, required this.selected, required this.onChanged, this.width});
+
+  final List<GlassSegment<T>> segments;
+  final T selected;
+  final ValueChanged<T> onChanged;
+  final double? width;
+
+  static const double _height = 40;
+  static const double _gap = 2;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final iconsOnly = width != null;
+    final children = <Widget>[];
+    for (var i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      final isSelected = segment.value == selected;
+      const outer = Radius.circular(_height / 2);
+      const inner = Radius.circular(Expressive.groupInnerCorner);
+      final radius = isSelected
+          ? const BorderRadius.all(outer)
+          : BorderRadius.horizontal(
+              left: i == 0 ? outer : inner,
+              right: i == segments.length - 1 ? outer : inner,
+            );
+      final fg = isSelected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
+      if (i > 0) children.add(const SizedBox(width: _gap));
+      children.add(Expanded(
+        child: GlassPressable(
+          onPressed: isSelected ? () {} : () => onChanged(segment.value),
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          semanticLabel: segment.label,
+          selected: isSelected,
+          highlightColor: Colors.transparent,
+          minSize: const Size(0, GlassTokens.minHitTarget),
+          child: AnimatedContainer(
+            duration: Motion.enter.duration,
+            curve: Motion.enter,
+            height: _height,
+            decoration: ShapeDecoration(
+              shape: RoundedRectangleBorder(borderRadius: radius),
+              color: isSelected ? scheme.secondaryContainer : scheme.surfaceContainerHigh.withValues(alpha: 0.82),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedSize(
+                    duration: Motion.enter.duration,
+                    curve: Motion.enter,
+                    child: isSelected && !iconsOnly
+                        ? Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: Icon(Symbols.check_rounded, size: 18, color: fg),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  if (segment.icon != null) ...[
+                    Icon(segment.icon, size: 18, color: fg, fill: isSelected ? 1 : 0),
+                    if (!iconsOnly) const SizedBox(width: 6),
+                  ],
+                  if (!iconsOnly)
+                    Flexible(
+                      child: AnimatedDefaultTextStyle(
+                        duration: GlassTokens.stateDuration,
+                        style: Theme.of(context).textTheme.labelLarge!.copyWith(
+                              color: fg,
+                              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                            ),
+                        child: Text(segment.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ));
+    }
+    return SizedBox(
+      width: width,
+      height: GlassTokens.minHitTarget,
+      child: Center(child: SizedBox(height: _height, child: Row(children: children))),
     );
   }
 }
