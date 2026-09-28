@@ -43,6 +43,25 @@ class ProvisionRequest(BaseModel):
     priority: str | None = None
 
 
+def _job_out(job: ProvisioningJob) -> dict:
+    """camelCase jako zbytek API (docs/openapi.yaml `ProvisioningJob`) --
+    dřív šel ven syrový SQLModel dump se snake_case klíči a klient
+    (`ProvisioningJobModel.fromJson` čte `recordingId`) na tom spadl, takže
+    každé nové stažení se v appce hned ukázalo jako selhané, bez průběhu a
+    bez automatického přehrání po dokončení (živě nahlášeno)."""
+    return {
+        "id": job.id,
+        "recordingId": job.recording_id,
+        "status": job.status.value if hasattr(job.status, "value") else str(job.status),
+        "attempts": job.attempts,
+        "maxAttempts": job.max_attempts,
+        "errorMessage": job.error_message,
+        "createdAt": job.created_at.isoformat() if job.created_at else None,
+        "startedAt": job.started_at.isoformat() if job.started_at else None,
+        "finishedAt": job.finished_at.isoformat() if job.finished_at else None,
+    }
+
+
 @tracks_router.post("/{recording_id}/provision")
 async def provision_track(
     recording_id: str,
@@ -83,7 +102,7 @@ async def provision_track(
         "recordingId": recording_id,
         "status": asset.status.value,
         "streamUrl": None,
-        "job": job.model_dump(mode="json"),
+        "job": _job_out(job),
         "loudnessGainDb": None,
     }
 
@@ -107,7 +126,7 @@ def get_job(job_id: str, session: Session = Depends(get_session)):
     job = session.get(ProvisioningJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job nenalezen")
-    return job.model_dump(mode="json")
+    return _job_out(job)
 
 
 # Bezpečnostní pojistka pro `_tail_growing_file`: pokud soubor přestane růst
