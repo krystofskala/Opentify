@@ -18,7 +18,7 @@ class HomePlaylistCard {
 
   final String id;
   final String title;
-  final String kind; // CHART | GENRE | EDITORIAL | GENERATED_RECOMMENDATION | USER
+  final String kind; // CHART | GENRE | EDITORIAL | GENERATED_RECOMMENDATION | PERSONAL_MIX | USER
   final int itemCount;
   final String? description;
   final String? source;
@@ -28,6 +28,15 @@ class HomePlaylistCard {
 
   /// Žánry a nálady bez skutečné mozaiky dostanou tónovaný zrnitý gradient.
   bool get prefersGradient => kind == 'GENRE';
+
+  /// Číslo "Denního mixu" (`personal:daily-mix:N`) -- ty mají vlastní obal
+  /// (tónovaný gradient s číslem a fotkami interpretů), ne mozaiku alb.
+  int? get dailyMixNumber {
+    const prefix = 'personal:daily-mix:';
+    final s = source;
+    if (s == null || !s.startsWith(prefix)) return null;
+    return int.tryParse(s.substring(prefix.length));
+  }
 
   factory HomePlaylistCard.fromJson(Map<String, dynamic> json) => HomePlaylistCard(
         id: json['id'] as String,

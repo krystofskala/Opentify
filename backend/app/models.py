@@ -48,6 +48,9 @@ class PlaylistKind(str, enum.Enum):
     CHART = "CHART"
     GENRE = "GENRE"
     EDITORIAL = "EDITORIAL"
+    # Osobní mixy generované z oblíbených/poslechů (Denní mix, Objevy týdne,
+    # Na opakování, Návrat do minulosti), viz app/home/personal_mixes.py.
+    PERSONAL_MIX = "PERSONAL_MIX"
 
 
 class Artist(SQLModel, table=True):
@@ -168,6 +171,23 @@ class PlaylistItem(SQLModel, table=True):
 
 
 GLOBAL_PLAYLIST_OWNER = "__global__"
+
+
+class Listen(SQLModel, table=True):
+    """Jeden poslech (scrobble) -- zapisuje ho klient, když skladba hrála aspoň
+    polovinu délky nebo 4 minuty. Zdroj pro osobní mixy a zároveň fronta
+    pro odeslání do ListenBrainz (`lb_submitted_at` je `None`, dokud se
+    odeslání nepovede -- výpadek sítě/LB tak poslech neztratí)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    recording_id: str = Field(foreign_key="recording.id", index=True)
+    played_at: datetime = Field(default_factory=utcnow, index=True)
+    duration_played_ms: int | None = None
+    source: str | None = None
+    lb_submitted_at: datetime | None = Field(default=None, index=True)
+    lb_attempts: int = 0
+    lb_error: str | None = None
 
 
 class HomeSnapshot(SQLModel, table=True):

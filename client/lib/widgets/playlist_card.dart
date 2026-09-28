@@ -22,6 +22,7 @@ class PlaylistArtwork extends StatelessWidget {
     this.gradient = false,
     this.icon = Symbols.queue_music_rounded,
     this.showTitle = true,
+    this.dailyMixNumber,
   });
 
   final String title;
@@ -30,8 +31,14 @@ class PlaylistArtwork extends StatelessWidget {
   final IconData icon;
   final bool showTitle;
 
+  /// Denní mix: vlastní obal místo mozaiky (`coverUrls` = fotky interpretů).
+  final int? dailyMixNumber;
+
   @override
   Widget build(BuildContext context) {
+    if (dailyMixNumber != null) {
+      return _DailyMixArtwork(number: dailyMixNumber!, artistPhotos: coverUrls, compact: !showTitle);
+    }
     if (gradient || coverUrls.isEmpty) return _GradientArtwork(title: title, icon: icon, showTitle: showTitle);
     if (coverUrls.length < 4) return ArtworkImage(url: coverUrls.first, icon: icon);
     return Column(
@@ -100,6 +107,87 @@ class _GradientArtwork extends StatelessWidget {
   }
 }
 
+/// Obal "Denního mixu": tónovaný zrnitý gradient (každý mix vlastní stálý
+/// odstín), velké číslo a fotky hlavních interpretů v kruzích -- obsahová
+/// vrstva podle glass_tokens.dart (tónová barva + expresivní tvary, žádné
+/// sklo).
+class _DailyMixArtwork extends StatelessWidget {
+  const _DailyMixArtwork({required this.number, required this.artistPhotos, required this.compact});
+
+  final int number;
+  final List<String> artistPhotos;
+  final bool compact;
+
+  static const _hues = [268.0, 12.0, 196.0, 142.0, 330.0, 38.0];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hue = _hues[(number - 1) % _hues.length];
+    final a = HSLColor.fromAHSL(1, hue, 0.66, 0.52).toColor();
+    final b = HSLColor.fromAHSL(1, (hue + 35) % 360, 0.72, 0.26).toColor();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side = constraints.biggest.shortestSide;
+        final avatar = side * 0.27;
+        final photos = artistPhotos.take(compact ? 0 : 3).toList();
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [a, b]),
+              ),
+            ),
+            const RepaintBoundary(child: CustomPaint(painter: _GrainPainter())),
+            if (!compact)
+              Positioned(
+                left: side * 0.08,
+                top: side * 0.07,
+                child: Text(
+                  'DENNÍ MIX',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+            Positioned(
+              left: side * 0.07,
+              bottom: side * (compact ? 0.04 : 0.02),
+              child: Text(
+                '$number',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: side * (compact ? 0.62 : 0.42),
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                  shadows: const [Shadow(blurRadius: 10, color: Colors.black38)],
+                ),
+              ),
+            ),
+            for (var i = 0; i < photos.length; i++)
+              Positioned(
+                right: side * 0.06 + i * avatar * 0.6,
+                bottom: side * 0.08,
+                width: avatar,
+                height: avatar,
+                child: DecoratedBox(
+                  decoration: const ShapeDecoration(
+                    shape: CircleBorder(side: BorderSide(color: Colors.white, width: 2)),
+                    shadows: [BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2))],
+                  ),
+                  child: ClipOval(child: ArtworkImage(url: photos[i], icon: Symbols.person_rounded, iconSize: 16)),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// Statické jemné zrno (stejná estetika jako pozadí appky, jen levné).
 class _GrainPainter extends CustomPainter {
   const _GrainPainter();
@@ -164,6 +252,7 @@ class PlaylistCardView extends StatelessWidget {
                         coverUrls: card.coverUrls,
                         gradient: card.prefersGradient,
                         icon: _iconFor(card.kind),
+                        dailyMixNumber: card.dailyMixNumber,
                       ),
                       if (card.badge != null)
                         Positioned(left: AppSpacing.xs, top: AppSpacing.xs, child: RankBadge(label: card.badge!)),
@@ -193,6 +282,7 @@ IconData _iconFor(String kind) => switch (kind) {
       'GENRE' => Symbols.graphic_eq_rounded,
       'EDITORIAL' => Symbols.auto_awesome_rounded,
       'GENERATED_RECOMMENDATION' => Symbols.favorite_rounded,
+      'PERSONAL_MIX' => Symbols.library_music_rounded,
       _ => Symbols.queue_music_rounded,
     };
 
@@ -249,6 +339,7 @@ class QuickPickTile extends StatelessWidget {
                   gradient: card.prefersGradient,
                   icon: _iconFor(card.kind),
                   showTitle: false,
+                  dailyMixNumber: card.dailyMixNumber,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),

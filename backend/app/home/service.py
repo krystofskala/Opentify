@@ -14,6 +14,7 @@ from app.catalog.cache import CACHE_PREFIX, cached_json
 from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine
 from app.home import generators as g
+from app.home import personal_mixes as pm
 from app.models import GLOBAL_PLAYLIST_OWNER, Artist, HomeSnapshot, Playlist, PlaylistItem, Recording, Release
 from app.redis_bus import get_redis
 from app.utils import utcnow
@@ -58,6 +59,11 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("apple:rss:us", g.CHART_TTL, lambda: g.build_apple_chart("us", "Apple Music Top 50: USA", "Nejhranější na Apple Music v USA")))
     registry.append(("apple:rss:cz", g.CHART_TTL, lambda: g.build_apple_chart("cz", "Apple Music Top 50: Česko", "Nejhranější na Apple Music v Česku")))
     registry.append(("personal:mixes", g.DAILY_TTL, g.build_personal_mixes))
+    # Vlastní mixy: interně hlídají den (4:00) / týden, kontrola každou hodinu.
+    registry.append(("personal:daily-mixes", timedelta(hours=1), pm.build_daily_mixes))
+    registry.append(("personal:discover-weekly", timedelta(hours=1), pm.build_discover_weekly))
+    registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
+    registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
     registry.append(("lb:fresh-releases", g.DAILY_TTL, g.build_new_releases))
     registry.append(("apple:rss:albums", g.DAILY_TTL, g.build_top_albums))
     for spec in g._genre_specs():
@@ -124,7 +130,7 @@ async def home_refresh_loop(check_every_s: float = 15 * 60) -> None:
 # --------------------------------------------------------------------------
 
 _SECTION_ORDER: list[tuple[str, str, str]] = [
-    ("mixes", "Tvoje mixy", "playlist_cards"),
+    ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),
     ("new_releases", "Nová vydání", "album_cards"),
     ("top_albums", "Populární alba", "album_cards"),
@@ -139,6 +145,17 @@ _BADGES = {
     "apple:rss:us": "TOP 50",
     "apple:rss:cz": "TOP 50",
 }
+
+
+_MIX_ORDER = ["personal:daily-mix:", "personal:discover-weekly", "personal:on-repeat", "personal:throwback", "home:mix:"]
+
+
+def _mix_order(playlist: Playlist) -> tuple[int, str]:
+    source = playlist.source or ""
+    for rank, prefix in enumerate(_MIX_ORDER):
+        if source.startswith(prefix):
+            return rank, source
+    return len(_MIX_ORDER), source
 
 
 def _item_count(session: Session, playlist_id: str) -> int:
@@ -205,19 +222,13 @@ def build_home(user_id: str) -> dict[str, Any]:
                 Playlist.owner_user_id.in_([GLOBAL_PLAYLIST_OWNER, user_id]),  # type: ignore[attr-defined]
             )
         ).all()
-        # Daily Jams vzniká mimo Domů (RecommendationService) bez `section`.
-        # Může jich být víc (knihovní i starší ListenBrainz varianta) --
-        # ta s nejvíc skladbami, prázdná by kartu stejně neukázala.
-        dailies = session.exec(
-            select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.title == "Daily Jams")
-        ).all()
-        daily = max(dailies, key=lambda p: _item_count(session, p.id), default=None)
-
         by_section: dict[str, list[Playlist]] = {}
         for playlist in playlists:
             by_section.setdefault(playlist.section or "", []).append(playlist)
-        if daily is not None:
-            by_section.setdefault("mixes", []).insert(0, daily)
+        # Osobní mixy napřed (Denní mix 1-6, Objevy týdne, Na opakování,
+        # Návrat do minulosti), pak mixy z ListenBrainz, když mají data. Dřív
+        # tu byl "Daily Jams" -- jen zamíchané oblíbené, nahrazeno Denními mixy.
+        by_section.get("mixes", []).sort(key=_mix_order)
         chart_order = list(_BADGES)
         by_section.get("charts", []).sort(key=lambda p: chart_order.index(p.source) if p.source in chart_order else 99)
         genre_order = [f"deezer:chart:genre:{gid}" for gid, _ in g.GENRES]
@@ -231,7 +242,7 @@ def build_home(user_id: str) -> dict[str, Any]:
 
         quick = [
             c
-            for c in (cards_by_section["mixes"][:2] + cards_by_section["charts"][:3] + cards_by_section["editorial"][:1])
+            for c in (cards_by_section["mixes"][:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1])
         ][:6]
         if quick:
             sections.append({"id": "quick_picks", "title": "Rychlý výběr", "type": "quick_picks", "items": [c.model_dump(mode="json", by_alias=True) for c in quick]})

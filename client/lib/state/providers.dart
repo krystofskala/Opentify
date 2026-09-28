@@ -4,6 +4,7 @@ import '../core/api_client.dart';
 import '../core/config.dart';
 import '../core/realtime_event.dart';
 import '../core/ws_client.dart';
+import '../data/listens_repository.dart';
 import '../data/catalog_repository.dart';
 import '../models/playlist_model.dart';
 import '../data/home_repository.dart';
@@ -53,6 +54,10 @@ final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref)
 
 final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
   return LibraryRepository(ref.watch(apiClientProvider));
+});
+
+final listensRepositoryProvider = Provider<ListensRepository>((ref) {
+  return ListensRepository(ref.watch(apiClientProvider));
 });
 
 final lyricsRepositoryProvider = Provider<LyricsRepository>((ref) {

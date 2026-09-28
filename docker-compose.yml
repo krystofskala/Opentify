@@ -23,6 +23,8 @@ services:
       # `LISTENBRAINZ_BASE_URL=https://api.listenbrainz.org`.
       LISTENBRAINZ_BASE_URL: ${LISTENBRAINZ_BASE_URL:-http://listenbrainz:8080}
       LISTENBRAINZ_USERNAME: ${LISTENBRAINZ_USERNAME:-demo-user}
+      # Uživatelský token (listenbrainz.org -> Settings) pro odesílání poslechů.
+      LISTENBRAINZ_TOKEN: ${LISTENBRAINZ_TOKEN:-}
       JWT_SECRET: ${JWT_SECRET:?set a real secret in .env}
       LOCAL_MUSIC_ROOT: /data/local-music
     volumes:

@@ -15,6 +15,7 @@ from app.catalog.musicbrainz import close_musicbrainz_client
 from app.catalog.wikimedia import close_wikimedia_client
 from app.db import init_db
 from app.home.service import home_refresh_loop
+from app.listens import lb_submit_loop
 from app.loudness import backfill_loop
 from app.realtime import redis_listener, websocket_endpoint
 from app.recommendations.listenbrainz import close_listenbrainz_client, close_listenbrainz_public_client
@@ -22,6 +23,7 @@ from app.routes.artwork import artwork_router
 from app.routes.catalog import catalog_router
 from app.routes.home import home_router
 from app.routes.library import library_router
+from app.routes.listens import listens_router
 from app.routes.lyrics import lyrics_router
 from app.routes.playlists import playlists_router
 from app.routes.provisioning import jobs_router, tracks_router
@@ -54,6 +56,7 @@ app.include_router(lyrics_router, prefix="/api/v1")
 app.include_router(playlists_router, prefix="/api/v1")
 app.include_router(artwork_router, prefix="/api/v1")
 app.include_router(home_router, prefix="/api/v1")
+app.include_router(listens_router, prefix="/api/v1")
 
 
 @app.on_event("startup")
@@ -63,6 +66,7 @@ async def on_startup() -> None:
     asyncio.create_task(backfill_loop())
     asyncio.create_task(artwork_backfill_loop())
     asyncio.create_task(home_refresh_loop())
+    asyncio.create_task(lb_submit_loop())
 
 
 @app.on_event("shutdown")

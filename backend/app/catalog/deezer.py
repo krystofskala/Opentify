@@ -158,6 +158,20 @@ class DeezerClient:
     async def artist_albums(self, artist_id: str) -> list[dict[str, Any]] | None:
         return await self._cached_data(f"dz:artist_albums:{artist_id}", LOOKUP_TTL_SECONDS, f"/artist/{artist_id}/albums", {"limit": 100})
 
+    async def artist_radio(self, artist_id: str) -> list[dict[str, Any]] | None:
+        """~25 skladeb "v podobném duchu" -- základ nových skladeb v osobních mixech."""
+        return await self._cached_data(f"dz:artist_radio:{artist_id}", 12 * 60 * 60, f"/artist/{artist_id}/radio", {"limit": 50})
+
+    async def artist_related(self, artist_id: str, limit: int = 20) -> list[dict[str, Any]] | None:
+        return await self._cached_data(
+            f"dz:artist_related:{artist_id}:{limit}", LOOKUP_TTL_SECONDS, f"/artist/{artist_id}/related", {"limit": limit}
+        )
+
+    async def artist_top(self, artist_id: str, limit: int = 5) -> list[dict[str, Any]] | None:
+        return await self._cached_data(
+            f"dz:artist_top:{artist_id}:{limit}", LOOKUP_TTL_SECONDS, f"/artist/{artist_id}/top", {"limit": limit}
+        )
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

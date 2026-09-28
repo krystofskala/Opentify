@@ -284,6 +284,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (_priming) return;
       state = state.copyWith(position: position);
       _maybeWarmUpNext(position);
+      _trackScrobble(position);
     });
     _player.durationStream.listen((duration) {
       if (_priming) return;
@@ -975,6 +976,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _applyVolume();
       _realtime.playbackPlay(info.recordingId);
       _recordRecentlyPlayed(info);
+      _beginScrobble(info.recordingId);
       if (_ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId) == null) {
         unawaited(_loadGainFor(info.recordingId));
       }
@@ -1116,7 +1118,56 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
   }
 
+  // --- Scrobbling (poslechy pro osobní mixy + ListenBrainz) ---------------
+
+  String? _scrobbleId;
+  DateTime? _scrobbleStartedAt;
+  Duration _scrobbleAccum = Duration.zero;
+  Duration? _scrobbleLastPos;
+  bool _scrobbled = false;
+
+  /// Nové přehrávání skladby (i opakované přehrání téže) = nový poslech.
+  void _beginScrobble(String recordingId) {
+    _scrobbleId = recordingId;
+    _scrobbleStartedAt = DateTime.now();
+    _scrobbleAccum = Duration.zero;
+    _scrobbleLastPos = null;
+    _scrobbled = false;
+    unawaited(_ref.read(listensRepositoryProvider).playingNow(recordingId).catchError((Object _) {}));
+  }
+
+  /// Počítá jen skutečně odehraný čas (posun vpřed přes seek se nepočítá).
+  /// Poslech se nahlásí po polovině délky nebo 4 minutách -- standardní
+  /// pravidlo ListenBrainz/Last.fm; skladby kratší než 30 s se nehlásí.
+  void _trackScrobble(Duration position) {
+    final id = _scrobbleId;
+    if (id == null || _scrobbled || state.nowPlaying?.recordingId != id) return;
+    final last = _scrobbleLastPos;
+    _scrobbleLastPos = position;
+    if (last == null || !_player.playing) return;
+    final delta = position - last;
+    if (delta <= Duration.zero || delta > const Duration(seconds: 3)) return;
+    _scrobbleAccum += delta;
+    final duration = state.duration;
+    if (duration != null && duration < const Duration(seconds: 30)) return;
+    final half = duration == null ? const Duration(minutes: 4) : duration ~/ 2;
+    final threshold = half < const Duration(minutes: 4) ? half : const Duration(minutes: 4);
+    if (_scrobbleAccum < threshold) return;
+    _scrobbled = true;
+    unawaited(_ref
+        .read(listensRepositoryProvider)
+        .submitListen(
+          recordingId: id,
+          playedAt: _scrobbleStartedAt ?? DateTime.now(),
+          played: _scrobbleAccum,
+          source: state.queueSourceLabel,
+        )
+        .catchError((Object e) => debugPrint('AudioPlayerController: poslech se nepodařilo nahlásit: $e')));
+  }
+
   Future<void> _replayCurrent() async {
+    final current = state.nowPlaying;
+    if (current != null) _beginScrobble(current.recordingId);
     await _player.seek(Duration.zero);
     await _player.play();
   }
