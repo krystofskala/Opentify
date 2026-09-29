@@ -112,8 +112,8 @@ def main(out_dir):
     for frac in (0.9, 0.8, 0.7):
         ring = Image.new("L", (S, S), 0)
         rr = R * frac
-        ImageDraw.Draw(ring).ellipse((c - rr, c - rr, c + rr, c + rr), outline=255, width=max(2, int(S * 0.005)))
-        paint(np.asarray(ring.filter(ImageFilter.GaussianBlur(1.0))), (0, 0, 0), 0.18)
+        ImageDraw.Draw(ring).ellipse((c - rr, c - rr, c + rr, c + rr), outline=255, width=max(3, int(S * 0.014)))
+        paint(np.asarray(ring.filter(ImageFilter.GaussianBlur(1.5))), (0, 0, 0), 0.26)
 
     # Černá díra uprostřed (jako středový otvor desky) s jemným vnitřním stínem.
     hr = R * 0.36
