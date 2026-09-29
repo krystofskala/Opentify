@@ -49,7 +49,8 @@ typedef AccentSource = ({Color? accent, String? imageUrl});
 ///   2. když nic nehraje (pauza/stop): barva otevřené obrazovky (album,
 ///      interpret, playlist);
 ///   3. jinak naposledy platná barva (návrat na Domů nic nepřebarví);
-///   4. `null` jen úplně na začátku relace -> pestré výchozí pozadí.
+///   4. `null` na začátku relace a po zavření přehrávače -> pestré výchozí
+///      pozadí.
 ///
 /// Dokud barva nově hrající skladby není spočítaná (`accentColor == null`),
 /// drží se předchozí barva -- žádné probliknutí přes výchozí/albovou.
@@ -62,6 +63,15 @@ class EffectiveAccent extends StateNotifier<AccentSource> {
     _ref.listen(screenImageStackProvider, (_, __) => _recompute());
     _ref.listen<bool>(trackIsPlayingProvider, (_, __) => _recompute());
     _ref.listen<Color?>(audioPlayerControllerProvider.select((s) => s.accentColor), (_, __) => _recompute());
+    // Zavřený přehrávač (stažení mini přehrávače dolů): zapomenout
+    // "naposledy platnou" barvu -- zpět na výchozí barvy, dokud je zas
+    // neurčí hrající skladba nebo otevřená obrazovka.
+    _ref.listen<bool>(audioPlayerControllerProvider.select((s) => s.nowPlaying != null), (had, has) {
+      if (had == true && !has) {
+        state = (accent: null, imageUrl: null);
+        _recompute();
+      }
+    });
   }
 
   final Ref _ref;
