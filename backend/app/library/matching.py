@@ -17,8 +17,15 @@ from sqlmodel import Session, select
 from app.models import Artist, Recording, Release
 
 
+def primary_of(name: str) -> str:
+    """Hlavní interpret z víc-hodnotového tagu -- "Danny Vera;The Rosenberg
+    Trio" (tagy souborů spojují víc interpretů středníkem) -> "Danny Vera".
+    Jinak vznikal druhý interpret a s ním i druhá kopie skladby/alba."""
+    return name.split(";")[0].strip() or name.strip()
+
+
 def find_or_create_artist(session: Session, name: str) -> Artist:
-    name = name.strip()
+    name = primary_of(name)
     artist = session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).first()
     if artist is None:
         artist = Artist(name=name, sort_name=name)

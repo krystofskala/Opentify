@@ -327,7 +327,7 @@ async def period_stats(user_id: str, period: str) -> dict[str, Any] | None:
     current = _local(_now()).year
     finished = period != DECADE and int(period) < current
     # Uzavřený rok se nemění (týden cache); rozběhnutý rok a dekáda po dnech.
-    key = f"wrapped:v3:{user_id}:{period}" + ("" if finished else f":{pm._day_key()}")
+    key = f"wrapped:v4:{user_id}:{period}" + ("" if finished else f":{pm._day_key()}")
     return await cached_json(key, 7 * 24 * 3600 if finished else 24 * 3600, lambda: _stats(user_id, period))
 
 

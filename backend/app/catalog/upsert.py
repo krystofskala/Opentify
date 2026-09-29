@@ -7,6 +7,7 @@ identicky a nevytvářely duplicitní řádky pro stejné `mbid`.
 
 from __future__ import annotations
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.models import Artist, Recording, Release
@@ -19,6 +20,18 @@ def upsert_artist(
     artist = None
     if mbid:
         artist = session.exec(select(Artist).where(Artist.mbid == mbid)).first()
+    if artist is None:
+        # Bez shody podle MBID: stejnojmenný interpret BEZ MBID (z knihovny,
+        # Deezeru, Spotify importu) je tentýž -- převezme MBID. Bez tohohle
+        # každé volání bez MBID zakládalo nový řádek ("RM, Youjeen" 19x).
+        # Interpreti s JINÝM MBID se nepřebírají (různé kapely "Nirvana").
+        same_name = session.exec(select(Artist).where(func.lower(Artist.name) == name.strip().lower())).all()
+        if mbid:
+            artist = next((a for a in same_name if a.mbid is None), None)
+            if artist is not None:
+                artist.mbid = mbid
+        else:
+            artist = next((a for a in same_name if a.mbid), None) or (same_name[0] if same_name else None)
     if artist is None:
         artist = Artist(mbid=mbid, name=name, sort_name=sort_name or name, country=country)
         session.add(artist)
