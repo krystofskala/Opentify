@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 import 'accent_color.dart' show isAchromatic;
@@ -103,7 +104,50 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl))),
     ),
     dialogTheme: DialogThemeData(shape: AppShapes.lg),
+    // Přechody mezi obrazovkami: na iOS nativní (gesto zpět od okraje), jinde
+    // jemné prolnutí s krátkým posunem vzhůru. Výchozí "zoom" přechod na webu
+    // (Chrome na PC) trhal -- snímkuje celé stránky (živě nahlášeno).
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.android: _SoftRisePageTransitionsBuilder(),
+        TargetPlatform.windows: _SoftRisePageTransitionsBuilder(),
+        TargetPlatform.macOS: _SoftRisePageTransitionsBuilder(),
+        TargetPlatform.linux: _SoftRisePageTransitionsBuilder(),
+        TargetPlatform.fuchsia: _SoftRisePageTransitionsBuilder(),
+      },
+    ),
   );
+}
+
+/// Nová obrazovka se prolne a dojede o 24 px zespodu (ease-out), stará pod
+/// ní jen lehce ztmavne -- žádné snímkování ani škálování celé stránky, takže
+/// je to plynulé i v prohlížeči na PC.
+class _SoftRisePageTransitionsBuilder extends PageTransitionsBuilder {
+  const _SoftRisePageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final enter = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final under = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic);
+    return FadeTransition(
+      opacity: Tween<double>(begin: 1, end: 0.6).animate(under),
+      child: FadeTransition(
+        opacity: enter,
+        child: AnimatedBuilder(
+          animation: enter,
+          builder: (context, child) => Transform.translate(offset: Offset(0, 24 * (1 - enter.value)), child: child),
+          child: child,
+        ),
+      ),
+    );
+  }
 }
 
 /// Jednotný zaoblený typeface (Nunito, viz `pubspec.yaml`) napříč celou
@@ -115,15 +159,19 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
 TextTheme _buildTextTheme(TextTheme base) {
   // M3 Expressive "emphasized" typografie: nadpisy větší, těžší a s
   // užším prostrkáním -- editoriální hierarchie; tělo textu beze změny.
-  return base
-      .apply(fontFamily: 'Nunito')
-      .copyWith(
-        displaySmall: base.displaySmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -1.0),
-        headlineLarge: base.headlineLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -0.8),
-        headlineMedium: base.headlineMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -0.6),
-        headlineSmall: base.headlineSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w800, letterSpacing: -0.5),
-        titleLarge: base.titleLarge?.copyWith(fontFamily: 'Nunito', fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
-        titleMedium: base.titleMedium?.copyWith(fontFamily: 'Nunito', fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+  return base.apply(fontFamily: 'Nunito').copyWith(
+        displaySmall:
+            base.displaySmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -1.0),
+        headlineLarge:
+            base.headlineLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -0.8),
+        headlineMedium:
+            base.headlineMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w900, letterSpacing: -0.6),
+        headlineSmall:
+            base.headlineSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w800, letterSpacing: -0.5),
+        titleLarge: base.titleLarge
+            ?.copyWith(fontFamily: 'Nunito', fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+        titleMedium: base.titleMedium
+            ?.copyWith(fontFamily: 'Nunito', fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3),
         titleSmall: base.titleSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w700),
         bodyLarge: base.bodyLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w600),
         bodyMedium: base.bodyMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w500),

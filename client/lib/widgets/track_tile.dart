@@ -487,27 +487,24 @@ class _CardTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final radius = isPlaying ? AppRadii.lg : AppRadii.md;
-
-    Widget card = AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-      decoration: ShapeDecoration(
-        color: isPlaying ? theme.colorScheme.primaryContainer : theme.colorScheme.surfaceContainerHigh,
-        shape: AppShapes.of(radius),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          onSecondaryTap: onLongPress,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AspectRatio(
-                aspectRatio: 1,
+    // Jako karty alb/playlistů: obal + text pod ním, bez šedého podkladu
+    // (ten jinde na Domů není -- živě nahlášeno). Hrající skladba: ikona
+    // ekvalizéru na obalu a název v barvě akcentu.
+    final artShape = AppShapes.of(AppRadii.md);
+    Widget card = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        customBorder: artShape,
+        onTap: onTap,
+        onLongPress: onLongPress,
+        onSecondaryTap: onLongPress,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 1,
+              child: ClipPath(
+                clipper: ShapeBorderClipper(shape: artShape),
                 child: Stack(
                   children: [
                     Positioned.fill(
@@ -519,7 +516,11 @@ class _CardTile extends StatelessWidget {
                       child: isInFlight
                           ? const ExpressiveLoadingIndicator(size: 28, color: Colors.white)
                           : Icon(
-                              isAvailable ? Symbols.play_circle_rounded : Symbols.download_rounded,
+                              isPlaying
+                                  ? Symbols.graphic_eq_rounded
+                                  : isAvailable
+                                      ? Symbols.play_circle_rounded
+                                      : Symbols.download_rounded,
                               color: Colors.white,
                               shadows: const [Shadow(blurRadius: 6)],
                             ),
@@ -527,23 +528,30 @@ class _CardTile extends StatelessWidget {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.xs, AppSpacing.sm, AppSpacing.sm),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(recording.title,
-                        maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
-                    _LinkText(
-                      text: subtitle ?? recording.durationLabel,
-                      onTap: onArtistTap,
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(2, AppSpacing.xs, 2, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    recording.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isPlaying ? theme.colorScheme.primary : null,
+                      fontWeight: isPlaying ? FontWeight.w700 : null,
                     ),
-                  ],
-                ),
+                  ),
+                  _LinkText(
+                    text: subtitle ?? recording.durationLabel,
+                    onTap: onArtistTap,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -206,7 +206,12 @@ class _HomeSectionView extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (section.type) {
       case HomeSectionType.quickPicks:
-        return _QuickPicks(cards: section.playlists);
+        // Vlastní nadpis -- bez něj splýval s "Pokračovat v poslechu" nad ním
+        // (stejné kompaktní dlaždice, živě nahlášeno).
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [SectionHeader(section.title), _QuickPicks(cards: section.playlists)],
+        );
       case HomeSectionType.playlistCards:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
