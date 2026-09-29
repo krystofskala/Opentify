@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../core/share_link.dart';
 import '../models/recording_model.dart';
 import '../state/audio_player_controller.dart';
 import '../models/availability.dart';
@@ -64,6 +65,26 @@ Future<void> showTrackActionsSheet(
   );
 }
 
+/// Sdílí univerzální odkaz (song.link). Odkaz už načtený -> sdílí hned v
+/// rámci klepnutí; jinak ho dotáhne a zkopíruje (systémové sdílení by po
+/// síťovém čekání Safari odmítl).
+Future<void> shareWithToast(
+  ShareLink? ready,
+  ScaffoldMessengerState? messenger,
+  Future<ShareLink> Function() load,
+) async {
+  void toast(String text) =>
+      messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+  try {
+    final link = ready ?? await load();
+    final outcome = await shareLink(link);
+    if (outcome == ShareOutcome.copied) toast('Odkaz zkopírován -- otevře se v jakékoliv hudební appce');
+    if (outcome == ShareOutcome.failed) toast('Odkaz se nepodařilo zkopírovat: ${link.url}');
+  } catch (_) {
+    toast('Skladbu se nepodařilo najít pro sdílení');
+  }
+}
+
 class _TrackActionsSheet extends ConsumerWidget {
   const _TrackActionsSheet({
     required this.recording,
@@ -85,7 +106,8 @@ class _TrackActionsSheet extends ConsumerWidget {
     final controller = ref.read(audioPlayerControllerProvider.notifier);
     final info = nowPlayingInfoFor(recording, artworkUrl: artworkUrl, artistNameFallback: artistNameFallback);
     final artistName = recording.artistName ?? artistNameFallback;
-    final isLiked = ref.watch(likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(recording.id) ?? false));
+    final isLiked =
+        ref.watch(likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(recording.id) ?? false));
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
     final provisioningStatus = ref.watch(provisioningControllerProvider.select((s) => s[recording.id]?.status));
     // Jen co je opravdu v knihovně (stažené / z vlastní složky).
@@ -97,7 +119,11 @@ class _TrackActionsSheet extends ConsumerWidget {
       action();
     }
 
-    void toast(String text) => messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+    void toast(String text) =>
+        messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+    // Odkaz ke sdílení načíst hned (Safari sdílí jen přímo po klepnutí).
+    final ShareTarget shareTarget = (kind: 'recordings', id: recording.id);
+    final shareLinkAsync = ref.watch(shareLinkProvider(shareTarget));
 
     return SafeArea(
       child: GlassSheet(
@@ -125,9 +151,11 @@ class _TrackActionsSheet extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(recording.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+                            Text(recording.title,
+                                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
                             if (artistName != null)
-                              Text(artistName, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+                              Text(artistName,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
                           ],
                         ),
                       ),
@@ -166,6 +194,14 @@ class _TrackActionsSheet extends ConsumerWidget {
                   icon: Symbols.playlist_add_rounded,
                   label: 'Přidat do playlistu',
                   onTap: () => run(() => showAddToPlaylistSheet(hostContext, recordingId: recording.id)),
+                ),
+                _Item(
+                  icon: Symbols.ios_share_rounded,
+                  label: 'Sdílet',
+                  onTap: () {
+                    final link = shareLinkAsync.valueOrNull;
+                    run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
+                  },
                 ),
                 if (recording.releaseId != null)
                   _Item(

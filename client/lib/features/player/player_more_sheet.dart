@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/share_link.dart';
 import '../../state/audio_player_controller.dart';
+import '../../widgets/track_actions.dart' show shareWithToast;
 import '../../theme/design_tokens.dart';
 import '../../widgets/add_to_playlist_sheet.dart';
 import 'queue_panel.dart';
@@ -111,6 +113,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         showAddToPlaylistSheet(context, recordingId: playback.nowPlaying!.recordingId);
                       },
                     ),
+                  if (playback.nowPlaying != null) _shareTile(context, playback),
                   if (playback.nowPlaying != null) _abRepeatTile(context, playback),
                   const Divider(),
                   const Row(
@@ -193,6 +196,25 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Univerzální odkaz na právě hrající skladbu (song.link) -- načtený hned
+  /// při otevření menu, ať sdílení na iPhonu proběhne přímo po klepnutí.
+  Widget _shareTile(BuildContext context, AudioPlayerState playback) {
+    final ShareTarget target = (kind: 'recordings', id: playback.nowPlaying!.recordingId);
+    final link = ref.watch(shareLinkProvider(target));
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Symbols.ios_share_rounded),
+      title: const Text('Sdílet skladbu'),
+      subtitle: const Text('Odkaz, který kamarád otevře v jakékoliv hudební appce'),
+      onTap: () {
+        final ready = link.valueOrNull;
+        Navigator.of(context).pop();
+        shareWithToast(ready, messenger, () => ref.read(shareLinkProvider(target).future));
+      },
     );
   }
 

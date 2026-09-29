@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/share_link.dart';
 import '../../models/artist_model.dart';
 import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
@@ -13,6 +14,7 @@ import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
+import '../../widgets/track_actions.dart' show shareWithToast;
 import '../../widgets/track_tile.dart';
 
 final releaseProvider = FutureProvider.autoDispose.family<ReleaseModel, String>((ref, releaseId) {
@@ -128,6 +130,8 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     final artist = ref.watch(releaseArtistProvider(release.artistId)).valueOrNull;
     final artistName = artist?.name;
     final recordings = tracks.valueOrNull;
+    final ShareTarget albumShare = (kind: 'releases', id: release.id);
+    ref.watch(shareLinkProvider(albumShare)); // přednačíst (Safari sdílí jen hned po klepnutí)
 
     return ScreenAccent(
       imageUrl: release.coverImageUrl,
@@ -156,6 +160,18 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                 if (recordings != null) HeroMetaItem(Symbols.queue_music_rounded, heroTrackCount(recordings.length)),
                 if (recordings != null && heroTotalDuration(recordings.map((r) => r.durationMs)) != null)
                   HeroMetaItem(Symbols.schedule_rounded, heroTotalDuration(recordings.map((r) => r.durationMs))!),
+              ],
+              actions: [
+                // Univerzální odkaz na album (album.link) -- načtený dopředu.
+                HeroAction(
+                  icon: Symbols.ios_share_rounded,
+                  tooltip: 'Sdílet album',
+                  onPressed: () => shareWithToast(
+                    ref.read(shareLinkProvider(albumShare)).valueOrNull,
+                    ScaffoldMessenger.maybeOf(context),
+                    () => ref.read(shareLinkProvider(albumShare).future),
+                  ),
+                ),
               ],
             ),
             ...detailContentSlivers(context, [
