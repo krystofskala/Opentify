@@ -332,7 +332,9 @@
         // Zrno: stejná dlaždice, každý snímek jinak posunutá (jemný třpyt).
         gx.setTransform(1, 0, 0, 1, 0, 0);
         gx.clearRect(0, 0, grainCanvas.width, grainCanvas.height);
-        gx.setTransform(1, 0, 0, 1, -Math.floor(Math.random() * TILE), -Math.floor(Math.random() * TILE));
+        // Při "omezit pohyb" zrno stojí (dřív se třpytilo i tak).
+        var ox = reduced ? 0 : Math.floor(Math.random() * TILE), oy = reduced ? 0 : Math.floor(Math.random() * TILE);
+        gx.setTransform(1, 0, 0, 1, -ox, -oy);
         gx.fillStyle = pattern;
         gx.fillRect(0, 0, grainCanvas.width + TILE, grainCanvas.height + TILE);
       }

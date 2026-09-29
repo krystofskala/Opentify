@@ -221,8 +221,8 @@ class _YourMix extends ConsumerWidget {
     final mix = ref.watch(browseMixProvider(categoryId));
     final theme = Theme.of(context);
     return AnimatedSize(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
+      duration: Motion.enter.duration,
+      curve: Motion.enter,
       alignment: Alignment.topCenter,
       child: mix.when(
         data: (card) => card == null

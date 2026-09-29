@@ -187,6 +187,10 @@ class _QueueRow extends ConsumerWidget {
     // přes album/interpreta, jen pro řádky, které se opravdu vykreslí.
     final artUrl = info.artworkUrl ??
         ref.watch(recordingArtworkProvider((releaseId: info.releaseId, artistId: info.artistId))).valueOrNull;
+    final placeholder = Container(
+      color: Colors.white.withValues(alpha: 0.15),
+      child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 18),
+    );
     return Material(
       color: isCurrent ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
       borderRadius: BorderRadius.circular(AppRadii.md),
@@ -202,12 +206,9 @@ class _QueueRow extends ConsumerWidget {
                 child: SizedBox(
                   width: 44,
                   height: 44,
-                  child: artUrl != null
-                      ? NetImage(url: artUrl)
-                      : Container(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 18),
-                        ),
+                  // Zástupce i při načítání/chybě obrázku -- dřív prázdný
+                  // čtverec od třetího řádku (design audit #12).
+                  child: artUrl != null ? NetImage(url: artUrl, placeholder: placeholder) : placeholder,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -237,7 +238,11 @@ class _QueueRow extends ConsumerWidget {
               else if (dragIndex != null)
                 ReorderableDragStartListener(
                   index: dragIndex!,
-                  child: const Icon(Symbols.drag_handle_rounded, color: Colors.white54),
+                  // 48×48 -- holá ikona 24 px byla pro prst na iPhonu malá.
+                  child: const SizedBox.square(
+                    dimension: 48,
+                    child: Center(child: Icon(Symbols.drag_handle_rounded, color: Colors.white54)),
+                  ),
                 ),
             ],
           ),

@@ -7,7 +7,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
-import '../theme/glass_tokens.dart' show Expressive;
+import '../theme/glass_tokens.dart' show Expressive, Motion;
 import '../state/audio_player_controller.dart';
 import '../state/user_idle.dart';
 import '../theme/selected_accent.dart';
@@ -500,7 +500,8 @@ class _AmbientFade extends ConsumerWidget {
         final target = idle ? _trace : 1.0;
         return TweenAnimationBuilder<double>(
           tween: Tween(end: target),
-          // Pryč pomalu (rozplynutí), zpátky plynulým prolnutím -- ne skokem
+          // Výjimka z `Motion` (vlastní ambientní tempo, ne odezva na akci):
+          // pryč pomalu (rozplynutí), zpátky plynulým prolnutím -- ne skokem
           // (živě: "nesmí se objevit hned").
           duration: reduceMotion
               ? Duration.zero
@@ -995,7 +996,7 @@ class _Thumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final radius = circle ? BorderRadius.circular(size / 2) : BorderRadius.circular(size >= 64 ? AppRadii.md : 8);
+    final radius = circle ? BorderRadius.circular(size / 2) : BorderRadius.circular(size >= 64 ? AppRadii.md : AppRadii.xs);
     return Container(
       width: size,
       height: size,
@@ -1114,8 +1115,8 @@ class _HeroTeaserState extends State<HeroTeaser> {
           behavior: HitTestBehavior.opaque,
           onTap: () => setState(() => _expanded = !_expanded),
           child: AnimatedSize(
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
+            duration: Motion.enter.duration,
+            curve: Motion.enter,
             alignment: Alignment.topCenter,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1128,7 +1129,7 @@ class _HeroTeaserState extends State<HeroTeaser> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _expanded ? 'Méně' : 'Více',
+                  _expanded ? 'Zobrazit méně' : 'Zobrazit vše',
                   style: theme.textTheme.labelLarge?.copyWith(color: scheme.primary, fontWeight: FontWeight.w800),
                 ),
               ],

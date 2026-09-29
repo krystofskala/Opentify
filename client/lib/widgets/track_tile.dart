@@ -13,6 +13,7 @@ import '../state/liked_songs_controller.dart';
 import '../state/listen_later_controller.dart';
 import '../state/provisioning_controller.dart';
 import '../theme/design_tokens.dart';
+import '../theme/glass_tokens.dart';
 import '../theme/shapes.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'queue_swipe.dart';
@@ -340,8 +341,8 @@ class _RowTileState extends State<_RowTile> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
+        duration: Motion.state.duration,
+        curve: Motion.state,
         decoration: ShapeDecoration(color: background, shape: AppShapes.of(radius)),
         child: Material(
           color: Colors.transparent,
@@ -403,7 +404,7 @@ class _RowTileState extends State<_RowTile> {
                           SizedBox(
                             width: 52,
                             child: Text(
-                              w.recording.durationMs != null ? w.recording.durationLabel : '–:–',
+                              w.recording.durationLabel,
                               textAlign: TextAlign.right,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontFeatures: const [FontFeature.tabularFigures()],
@@ -581,8 +582,8 @@ class _CardTile extends StatelessWidget {
     if (animationIndex != null) {
       card = card
           .animate(delay: (animationIndex! * 60).ms)
-          .fadeIn(duration: 300.ms, curve: Curves.easeOut)
-          .slideY(begin: 0.08, end: 0, duration: 300.ms, curve: Curves.easeOutCubic);
+          .fadeIn(duration: Motion.state.duration, curve: Motion.state)
+          .slideY(begin: 0.08, end: 0, duration: Motion.enter.duration, curve: Motion.enter);
     }
     return card;
   }
@@ -652,9 +653,10 @@ class _Thumbnail extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final radius = isPlaying ? AppRadii.pill : AppRadii.sm;
+    // Náhled se při přehrávání přelévá do kruhu -- pružina jako zbytek appky.
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
+      duration: Motion.enter.duration,
+      curve: Motion.enter,
       width: 44,
       height: 44,
       clipBehavior: Clip.antiAlias,

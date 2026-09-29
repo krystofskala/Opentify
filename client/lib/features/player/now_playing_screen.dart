@@ -857,9 +857,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
   }
 
   String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(1, '0');
+    // Nad hodinu h:mm:ss -- dřív 70min skladba ukazovala "10:00".
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
+    if (d.inHours > 0) {
+      final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+      return '${d.inHours}:$minutes:$seconds';
+    }
+    return '${d.inMinutes}:$seconds';
   }
 }
 

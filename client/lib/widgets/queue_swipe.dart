@@ -144,7 +144,8 @@ class _QueueSwipeState extends State<QueueSwipe> with SingleTickerProviderStateM
                     child: width < 40
                         ? null
                         : AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
+                            duration: Motion.press.duration,
+                            switchInCurve: Motion.press,
                             transitionBuilder: (child, animation) => ScaleTransition(
                                 scale: animation, child: FadeTransition(opacity: animation, child: child)),
                             // Úzký pruh: obsah se zmenší, nepřeteče.

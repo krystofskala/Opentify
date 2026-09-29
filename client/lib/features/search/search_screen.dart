@@ -193,7 +193,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ),
       ),
       body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
+        duration: Motion.state.duration,
+        switchInCurve: Motion.state,
+        switchOutCurve: Motion.state,
         layoutBuilder: (current, previous) => Stack(
           alignment: Alignment.topCenter,
           children: [...previous, if (current != null) current],

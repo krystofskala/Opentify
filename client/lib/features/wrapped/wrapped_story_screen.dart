@@ -613,6 +613,8 @@ class _SlideFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Obsah i značka mimo Dynamic Island a pruh domovského indikátoru.
+    final safe = MediaQuery.paddingOf(context);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -628,12 +630,12 @@ class _SlideFrame extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(26, 84, 26, 90),
+          padding: EdgeInsets.fromLTRB(26, math.max(84, safe.top + 64), 26, math.max(90, safe.bottom + 64)),
           child: slide.build(active),
         ),
         Positioned(
           left: 26,
-          bottom: 30,
+          bottom: 30 + safe.bottom,
           child: Text(
             stats.isDecade ? 'OPENTIFY · DEKÁDA ${stats.label}' : 'OPENTIFY · WRAPPED ${stats.label}',
             style: _text(11, FontWeight.w800, opacity: 0.7).copyWith(letterSpacing: 1.4),
@@ -1085,7 +1087,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       ),
     ),
     _Slide(
-      style: MixArtStyle.year,
+      style: MixArtStyle.mood,  // graf/souhrn: klidná aurora, ne sloupce, co vypadají jako data
       hue: hue(-150),
       trackId: a(2),
       build: (a) => Column(
@@ -1134,7 +1136,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       ),
     ),
     _Slide(
-      style: MixArtStyle.year,
+      style: MixArtStyle.mood,  // graf/souhrn: klidná aurora, ne sloupce, co vypadají jako data
       hue: hue(0),
       trackId: t(0),
       build: (a) => _Summary(stats: s, active: a),
@@ -1317,7 +1319,7 @@ class _Summary extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (s.topArtists.isNotEmpty)
-            Center(child: _Art(url: s.topArtists.first.imageUrl, artistId: s.topArtists.first.id, size: 170)),
+            Center(child: _Art(url: s.topArtists.first.imageUrl, artistId: s.topArtists.first.id, size: 170, circle: true)),
           const SizedBox(height: 22),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1335,7 +1337,7 @@ class _Summary extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Minut', style: _text(14, FontWeight.w800, opacity: 0.8)),
-                    Text(wrappedNumber(s.totalMinutes), style: _text(30, FontWeight.w900)),
+                    Text(wrappedNumber(s.totalMinutes), style: _text(28, FontWeight.w900)),
                   ],
                 ),
               ),
@@ -1349,7 +1351,7 @@ class _Summary extends StatelessWidget {
                       s.topGenres.isEmpty ? '–' : s.topGenres.first.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: _text(24, FontWeight.w900),
+                      style: _text(28, FontWeight.w900),
                     ),
                   ],
                 ),

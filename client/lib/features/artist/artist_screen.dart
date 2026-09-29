@@ -12,6 +12,7 @@ import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../theme/glass_tokens.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/media_card.dart';
@@ -340,8 +341,8 @@ class _PopularTracksSectionState extends ConsumerState<_PopularTracksSection> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
               child: AnimatedSize(
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeOutCubic,
+                duration: Motion.enter.duration,
+                curve: Motion.enter,
                 alignment: Alignment.topCenter,
                 child: Column(
                   children: [
@@ -362,7 +363,7 @@ class _PopularTracksSectionState extends ConsumerState<_PopularTracksSection> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 child: GlassButton(
-                  label: _expanded ? 'Zobrazit méně' : 'Zobrazit víc',
+                  label: _expanded ? 'Zobrazit méně' : 'Zobrazit vše',
                   style: GlassButtonStyle.plain,
                   compact: true,
                   onPressed: () => setState(() => _expanded = !_expanded),

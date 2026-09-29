@@ -11,6 +11,7 @@ import '../state/audio_player_controller.dart';
 import '../state/liked_songs_controller.dart';
 import '../state/provisioning_controller.dart';
 import '../theme/accent_color.dart';
+import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
 import '../theme/selected_accent.dart';
 import 'glass/expressive_shapes.dart';
@@ -215,7 +216,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
             // zůstala viset napůl stažená za navigací.
             onPanCancel: () => _onPanEnd(DragEndDetails(), playback, screenHeight),
             child: GlassContainer.frosted(
-              borderRadius: BorderRadius.circular(26),
+              // Stejně kulatá jako tab bar pod ní -- dřív 26 vs. 31 (design audit #11).
+              borderRadius: BorderRadius.circular(GlassTokens.tabBarHeight / 2),
               tint: accent,
               shadow: widget.shadow,
               child: MediaQuery.removePadding(
@@ -408,7 +410,7 @@ class _TrackInfo extends StatelessWidget {
     return Row(
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
           child: SizedBox(
             width: 44,
             height: 44,

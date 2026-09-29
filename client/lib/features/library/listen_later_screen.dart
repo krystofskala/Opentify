@@ -279,11 +279,14 @@ class _LaterRow extends ConsumerWidget {
               },
             )))
             .valueOrNull;
+    // Stejná geometrie jako řádky skladeb (`TrackTile`): náhled 44 px,
+    // odsazení 8 + 12, mezera 12 -- náhledy pod sebou lícují (design audit #13).
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs + AppSpacing.sm),
+      horizontalTitleGap: AppSpacing.sm,
       leading: SizedBox(
-        width: 52,
-        height: 52,
+        width: 44,
+        height: 44,
         child: circle
             ? ClipOval(child: ArtworkImage(url: resolved, icon: Symbols.person_rounded, iconSize: 22))
             : ClipPath(
@@ -332,7 +335,8 @@ class ListenLaterReminder extends ConsumerWidget {
     if (item == null) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final shape = AppShapes.of(Expressive.cornerLarge);
+    // Stejný recept jako dlaždice "Pokračovat v poslechu" vedle (design audit #13).
+    final shape = AppShapes.of(Expressive.cornerMedium);
     final RecordingModel? track = item.track;
     final route = switch (item.kind) {
       LaterKind.album => '/releases/${item.album!.id}',
@@ -346,12 +350,12 @@ class ListenLaterReminder extends ConsumerWidget {
         minSize: Size.zero,
         onPressed: () => context.push(route),
         child: DecoratedBox(
-          decoration: ShapeDecoration(shape: shape, color: scheme.tertiaryContainer.withValues(alpha: 0.85)),
+          decoration: ShapeDecoration(shape: shape, color: scheme.secondaryContainer.withValues(alpha: 0.72)),
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.sm),
             child: Row(
               children: [
-                Icon(Symbols.schedule_rounded, color: scheme.onTertiaryContainer),
+                Icon(Symbols.schedule_rounded, color: scheme.onSecondaryContainer),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Column(
@@ -359,7 +363,7 @@ class ListenLaterReminder extends ConsumerWidget {
                     children: [
                       Text(
                         'Čeká na poslech',
-                        style: theme.textTheme.labelMedium?.copyWith(color: scheme.onTertiaryContainer),
+                        style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSecondaryContainer),
                       ),
                       Text(
                         [item.title, if (track?.artistName case final a?) a, if (item.note case final n?) '„$n“']
@@ -367,7 +371,7 @@ class ListenLaterReminder extends ConsumerWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          color: scheme.onTertiaryContainer,
+                          color: scheme.onSecondaryContainer,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -377,13 +381,13 @@ class ListenLaterReminder extends ConsumerWidget {
                 if (track != null)
                   IconButton(
                     tooltip: 'Přehrát',
-                    icon: Icon(Symbols.play_circle_rounded, fill: 1, size: 32, color: scheme.onTertiaryContainer),
+                    icon: Icon(Symbols.play_circle_rounded, fill: 1, size: 32, color: scheme.onSecondaryContainer),
                     onPressed: () => ref
                         .read(audioPlayerControllerProvider.notifier)
                         .playTrack(nowPlayingInfoFor(track), sourceLabel: _sourceLabel),
                   )
                 else
-                  Icon(Symbols.chevron_right_rounded, color: scheme.onTertiaryContainer),
+                  Icon(Symbols.chevron_right_rounded, color: scheme.onSecondaryContainer),
               ],
             ),
           ),
