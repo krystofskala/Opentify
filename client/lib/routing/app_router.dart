@@ -9,6 +9,7 @@ import '../features/library/playlist_detail_screen.dart';
 import '../features/player/now_playing_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/profile/year_in_review_screen.dart';
+import '../features/browse/browse_category_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
 import 'home_shell.dart';
@@ -44,6 +45,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           releaseId: state.pathParameters['releaseId']!,
           highlightTrackId: state.uri.queryParameters['track'],
         ),
+      ),
+      GoRoute(
+        path: '/browse/:categoryId',
+        builder: (context, state) => BrowseCategoryScreen(categoryId: state.pathParameters['categoryId']!),
       ),
       GoRoute(
         path: '/library/liked',

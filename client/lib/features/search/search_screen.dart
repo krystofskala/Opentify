@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/api_client.dart';
+import '../browse/browse_grid.dart';
 import '../../models/recording_model.dart';
 import '../../models/search_result.dart';
 import '../../state/providers.dart';
@@ -62,8 +63,7 @@ typedef _SectionKey = ({String query, String type, int limit});
 /// ořízne výsledky na `limit` CELKEM (interpreti jdou první a zbytek
 /// vytlačí), takže sekce "Vše" se skládá ze tří samostatných dotazů, které
 /// se navíc načítají a zobrazují nezávisle na sobě.
-final searchSectionProvider =
-    FutureProvider.autoDispose.family<List<SearchResultItem>, _SectionKey>((ref, key) async {
+final searchSectionProvider = FutureProvider.autoDispose.family<List<SearchResultItem>, _SectionKey>((ref, key) async {
   final result = await ref.watch(catalogRepositoryProvider).search(key.query, entityType: key.type, limit: key.limit);
   return result.results;
 });
@@ -208,8 +208,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         _libraryScopeFor.entries.firstWhere((e) => e.value == scope).key,
                   )
                 : filter == SearchFilter.all
-                ? _AllResults(key: ValueKey('all-$query'), query: query)
-                : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
+                    ? _AllResults(key: ValueKey('all-$query'), query: query)
+                    : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
       ),
     );
   }
@@ -297,38 +297,36 @@ class _SearchHistoryView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(searchHistoryControllerProvider);
-    if (history.isEmpty) {
-      return const EmptyState(
-        icon: Symbols.travel_explore_rounded,
-        message: 'Najdi cokoliv v globálním katalogu -- interpreta, album nebo skladbu.\n'
-            'Co ještě nemáš, se při přehrání samo stáhne.',
-      );
-    }
+    // Prázdný dotaz: naposledy hledané + "Procházet" (nálady a žánry).
     return ListView(
+      padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
       children: [
-        SectionHeader(
-          'Nedávno hledáno',
-          trailing: TextButton(
-            onPressed: () => ref.read(searchHistoryControllerProvider.notifier).clear(),
-            child: const Text('Vymazat'),
+        if (history.isNotEmpty) ...[
+          SectionHeader(
+            'Nedávno hledáno',
+            trailing: TextButton(
+              onPressed: () => ref.read(searchHistoryControllerProvider.notifier).clear(),
+              child: const Text('Vymazat'),
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: Wrap(
-            spacing: AppSpacing.xs,
-            runSpacing: AppSpacing.xs,
-            children: [
-              for (final query in history)
-                InputChip(
-                  label: Text(query),
-                  avatar: const Icon(Symbols.history_rounded, size: 18),
-                  onPressed: () => onPick(query),
-                  onDeleted: () => ref.read(searchHistoryControllerProvider.notifier).remove(query),
-                ),
-            ],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final query in history)
+                  InputChip(
+                    label: Text(query),
+                    avatar: const Icon(Symbols.history_rounded, size: 18),
+                    onPressed: () => onPick(query),
+                    onDeleted: () => ref.read(searchHistoryControllerProvider.notifier).remove(query),
+                  ),
+              ],
+            ),
           ),
-        ),
+        ],
+        const BrowseGrid(),
       ],
     );
   }
@@ -519,7 +517,8 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.tracks:
             final List<RecordingModel> recordings = items.map((i) => i.toRecordingModel()).toList();
             return ListView.builder(
-              padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
+              padding: EdgeInsets.fromLTRB(
+                  AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
               itemCount: recordings.length,
               itemBuilder: (context, index) => TrackTile(
                 recording: recordings[index],
@@ -532,7 +531,8 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.all:
             final columns = (MediaQuery.sizeOf(context).width / 170).floor().clamp(2, 8);
             return GridView.builder(
-              padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.sm + navBottomInset(context)),
+              padding: EdgeInsets.fromLTRB(
+                  AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.sm + navBottomInset(context)),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 childAspectRatio: filter == SearchFilter.artists ? 0.8 : 0.72,
@@ -540,9 +540,8 @@ class _FilteredResults extends ConsumerWidget {
                 mainAxisSpacing: AppSpacing.sm,
               ),
               itemCount: items.length,
-              itemBuilder: (context, index) => filter == SearchFilter.artists
-                  ? _ArtistCard(item: items[index])
-                  : _ReleaseCard(item: items[index]),
+              itemBuilder: (context, index) =>
+                  filter == SearchFilter.artists ? _ArtistCard(item: items[index]) : _ReleaseCard(item: items[index]),
             );
         }
       },

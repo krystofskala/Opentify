@@ -25,6 +25,7 @@ from app.routes.home import home_router
 from app.routes.library import library_router
 from app.routes.listens import listens_router
 from app.routes.lyrics import lyrics_router
+from app.routes.browse import browse_router
 from app.routes.radio import radio_router
 from app.routes.share import share_router
 from app.routes.playlists import playlists_router
@@ -61,6 +62,7 @@ app.include_router(home_router, prefix="/api/v1")
 app.include_router(listens_router, prefix="/api/v1")
 app.include_router(share_router, prefix="/api/v1")
 app.include_router(radio_router, prefix="/api/v1")
+app.include_router(browse_router, prefix="/api/v1")
 
 
 @app.on_event("startup")

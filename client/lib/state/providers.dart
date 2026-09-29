@@ -7,6 +7,7 @@ import '../core/ws_client.dart';
 import '../data/listens_repository.dart';
 import '../data/catalog_repository.dart';
 import '../models/playlist_model.dart';
+import '../data/browse_repository.dart';
 import '../data/home_repository.dart';
 import '../data/library_repository.dart';
 import '../data/lyrics_repository.dart';
@@ -44,6 +45,17 @@ final homeRepositoryProvider = Provider<HomeRepository>((ref) {
 });
 
 /// Celá obrazovka Domů jedním voláním (`GET /home`, snapshoty v DB).
+final browseRepositoryProvider = Provider<BrowseRepository>((ref) => BrowseRepository(ref.watch(apiClientProvider)));
+
+/// Kategorie stránky Procházet -- pevný seznam, stačí jednou za běh appky.
+final browseCategoriesProvider = FutureProvider<List<BrowseCategory>>((ref) {
+  return ref.watch(browseRepositoryProvider).categories();
+});
+
+final browsePageProvider = FutureProvider.autoDispose.family<BrowsePage, String>((ref, id) {
+  return ref.watch(browseRepositoryProvider).page(id);
+});
+
 final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
   return ref.watch(homeRepositoryProvider).home();
 });
