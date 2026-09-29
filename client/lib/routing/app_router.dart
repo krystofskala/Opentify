@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/diagnostics.dart';
+
 import '../features/artist/artist_discography_screen.dart';
 import '../features/artist/artist_screen.dart';
 import '../features/home/home_screen.dart';
@@ -20,7 +22,7 @@ import '../features/wrapped/wrapped_story_screen.dart';
 import 'home_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  return GoRouter(
+  final router = GoRouter(
     initialLocation: '/',
     routes: [
       StatefulShellRoute.indexedStack(
@@ -106,4 +108,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+  // Kroky navigace do "černé skříňky" (diagnostika zamrzání).
+  router.routerDelegate.addListener(() {
+    diagNote('route ${router.routerDelegate.currentConfiguration.uri}');
+  });
+  return router;
 });

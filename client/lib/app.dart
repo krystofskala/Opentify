@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'routing/app_router.dart';
 import 'state/audio_player_controller.dart';
 import 'state/theme_mode_controller.dart';
+import 'state/user_idle.dart';
 import 'theme/accent_color.dart' show accentTransitionCurve, accentTransitionDuration;
 import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
@@ -41,17 +42,20 @@ class OpentifyApp extends ConsumerWidget {
       // Zrnité pozadí pod úplně vším -- `Scaffold`y jsou průhledné
       // (`buildAppTheme`), takže prosvítá skrz. I přehrávač je teď průhledný
       // (pozadí appky pod hustě namrzlým sklem), takže se nikdy nezastavuje.
-      builder: (context, child) => _maybeSimulatedInsets(context, AppBackground(
-        selectedAccent: accent,
-        supportTones: ref.watch(effectiveSupportTonesProvider),
-        character: ref.watch(effectiveCoverCharacterProvider),
-        brightness: Theme.of(context).brightness,
-        isPlaying: isPlaying,
-        hidden: false,
-        // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
-        // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
-        child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
-      )),
+      builder: (context, child) => _maybeSimulatedInsets(
+          context,
+          UserActivityListener(
+              child: AppBackground(
+            selectedAccent: accent,
+            supportTones: ref.watch(effectiveSupportTonesProvider),
+            character: ref.watch(effectiveCoverCharacterProvider),
+            brightness: Theme.of(context).brightness,
+            isPlaying: isPlaying,
+            hidden: false,
+            // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
+            // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
+            child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
+          ))),
     );
   }
 }

@@ -8,6 +8,8 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart' show Expressive;
+import '../state/audio_player_controller.dart';
+import '../state/user_idle.dart';
 import '../theme/selected_accent.dart';
 import 'glass/expressive_shapes.dart';
 import 'glass_container.dart';
@@ -329,7 +331,10 @@ class _HeroFlexible extends StatelessWidget {
                       left: 0,
                       right: 0,
                       height: imageHeight,
-                      child: _FadedMedia(hero: hero, darken: iconOnly ? 0 : collapse * 0.45),
+                      child: _AmbientFade(
+                        enabled: !iconOnly,
+                        child: _FadedMedia(hero: hero, darken: iconOnly ? 0 : collapse * 0.45),
+                      ),
                     ),
                   ],
                 ),
@@ -342,13 +347,16 @@ class _HeroFlexible extends StatelessWidget {
               left: 0,
               right: 0,
               height: top + kToolbarHeight + 24,
-              child: const IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x66000000), Color(0x00000000)],
+              child: const _AmbientFade(
+                enabled: true,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x66000000), Color(0x00000000)],
+                      ),
                     ),
                   ),
                 ),
@@ -362,23 +370,26 @@ class _HeroFlexible extends StatelessWidget {
               right: 0,
               bottom: 0,
               height: height * 0.62,
-              child: IgnorePointer(
-                child: Opacity(
-                  opacity: titleT,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        // Dole zase do nuly -- jinak by na hraně hlavičky
-                        // vznikl ostrý tmavý předěl proti pozadí seznamu.
-                        colors: [
-                          theme.colorScheme.surface.withValues(alpha: 0),
-                          theme.colorScheme.surface.withValues(alpha: 0.45),
-                          theme.colorScheme.surface.withValues(alpha: 0.4),
-                          theme.colorScheme.surface.withValues(alpha: 0),
-                        ],
-                        stops: const [0, 0.42, 0.78, 1],
+              child: _AmbientFade(
+                enabled: true,
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: titleT,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          // Dole zase do nuly -- jinak by na hraně hlavičky
+                          // vznikl ostrý tmavý předěl proti pozadí seznamu.
+                          colors: [
+                            theme.colorScheme.surface.withValues(alpha: 0),
+                            theme.colorScheme.surface.withValues(alpha: 0.45),
+                            theme.colorScheme.surface.withValues(alpha: 0.4),
+                            theme.colorScheme.surface.withValues(alpha: 0),
+                          ],
+                          stops: const [0, 0.42, 0.78, 1],
+                        ),
                       ),
                     ),
                   ),
@@ -462,6 +473,43 @@ class _HeroFlexible extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// "Ambientní" hlavička: při přehrávání a ~8 s bez doteku se fotka
+/// pomalu rozplyne do živého pozadí (zůstane jen slabá stopa), dotek ji
+/// hned vrátí. Rozvržení se nehýbe -- mizí jen obraz, ne místo.
+class _AmbientFade extends ConsumerWidget {
+  const _AmbientFade({required this.enabled, required this.child});
+
+  final bool enabled;
+  final Widget child;
+
+  static const _trace = 0.14;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!enabled) return child;
+    final playing = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
+    if (!playing) return child;
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return ValueListenableBuilder<bool>(
+      valueListenable: UserIdle.idle,
+      builder: (context, idle, child) {
+        final target = idle ? _trace : 1.0;
+        return TweenAnimationBuilder<double>(
+          tween: Tween(end: target),
+          // Pryč pomalu (rozplynutí), zpátky hned (odezva na dotek).
+          duration: reduceMotion
+              ? Duration.zero
+              : (idle ? const Duration(milliseconds: 2200) : const Duration(milliseconds: 260)),
+          curve: idle ? Curves.easeInOutCubic : Curves.easeOutCubic,
+          builder: (context, v, child) => v >= 0.999 ? child! : Opacity(opacity: v, child: child),
+          child: child,
+        );
+      },
+      child: child,
     );
   }
 }
