@@ -47,6 +47,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
   late final AnimationController _down = AnimationController.unbounded(vsync: this);
   bool _dismissing = false;
   static const _dismissDistance = 150.0;
+  static const _autoDismiss = 56.0;
   double _swipeWidth = 1;
 
   static const _spring = SpringDescription(mass: 1, stiffness: 420, damping: 38);
@@ -83,6 +84,13 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
         _onSwipeUpdate(d.delta.dx, playback);
       case Axis.vertical when _dismissing:
         _down.value = math.max(0, _down.value + d.delta.dy);
+        // Dotažení až k okraji displeje nečekat -- dole si tah bere iOS
+        // (lišta domů) a gesto zruší. Po dostatečném stažení zavřít hned.
+        if (_down.value > _autoDismiss) {
+          _dismissing = false;
+          _panAxis = null;
+          _onDismissEnd(0);
+        }
       case Axis.vertical:
         _sheet.dragUpdate(d.delta.dy, screenHeight);
       case null:
@@ -119,7 +127,9 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
 
   Future<void> _onDismissEnd(double v) async {
     final y = _down.value;
-    if (y > 48 || v > 700) {
+    // Nízké prahy -- na dotyku Flutter pozná tah až po ~36 px, a víc místa
+    // dolů nad lištou domů není (na iPhonu se dřív nedalo zavřít).
+    if (y > 24 || v > 350) {
       HapticFeedback.lightImpact();
       await _down.animateWith(SpringSimulation(_spring, y, _dismissDistance, v));
       if (!mounted) return;

@@ -12,6 +12,7 @@ import '../../state/audio_player_controller.dart';
 import '../../widgets/track_actions.dart' show shareWithToast;
 import '../../theme/design_tokens.dart';
 import '../../widgets/add_to_playlist_sheet.dart';
+import '../../widgets/now_playing_sheet.dart';
 import 'queue_panel.dart';
 import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
@@ -119,6 +120,22 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                   if (playback.nowPlaying != null) _laterTile(context, playback),
                   if (playback.nowPlaying != null) _shareTile(context, playback),
                   if (playback.nowPlaying != null) _abRepeatTile(context, playback),
+                  if (playback.nowPlaying != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Symbols.close_rounded),
+                      title: const Text('Zavřít přehrávač'),
+                      subtitle: const Text('Zastaví hudbu a vyprázdní frontu'),
+                      onTap: () {
+                        // Nejdřív zasunout velký přehrávač, pak ukončit -- jinak by
+                        // na chvíli ukázal prázdné "Nic nehraje".
+                        final sheet = NowPlayingSheetController.of(context);
+                        final player = ref.read(audioPlayerControllerProvider.notifier);
+                        Navigator.of(context).pop();
+                        sheet.close();
+                        Future.delayed(const Duration(milliseconds: 450), player.dismiss);
+                      },
+                    ),
                   const Divider(),
                   const Row(
                     children: [
