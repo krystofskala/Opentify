@@ -619,7 +619,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       baseFill: false,
       emphasis: GlassTokens.emphasis,
       borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -640,7 +640,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               ],
             ),
           ),
-          const SizedBox(height: 20),
+          // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
+          // spodní řádek přimáčknutý).
+          const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
@@ -661,7 +663,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                 shape: const CircleBorder(),
                 semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
                 child: ExpressiveMorph(
-                  size: 88,
+                  size: 76,
                   color: Colors.white,
                   shape: playback.isPlaying
                       ? const ExpressiveShape.squircle()
@@ -696,6 +698,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               ),
             ],
           ),
+          const SizedBox(height: 10),
           // Text a fronta vždy na dosah pod ovládáním (jako Apple Music);
           // na PC otevírají druhý sloupec, na mobilu sheet.
           Row(

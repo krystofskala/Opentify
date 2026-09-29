@@ -286,6 +286,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       state = state.copyWith(position: position);
       _maybeWarmUpNext(position);
       _trackScrobble(position);
+      _maybeAdvanceEarly(position);
     });
     _player.durationStream.listen((duration) {
       if (_priming) return;
@@ -639,8 +640,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Uživatelova hlasitost vynásobená korekcí normalizace. Jen zeslabení --
   /// `just_audio` na webu (HTML `<audio>.volume`) neumí nad 1.0, takže tiché
   /// skladby (kladná korekce) hrají prostě na uživatelově hlasitosti.
-  double get _effectiveVolume =>
-      (state.volume * (state.normalizationEnabled ? _trackGainFactor : 1.0)).clamp(0.0, 1.0);
+  double get _effectiveVolume => (state.volume * (state.normalizationEnabled ? _trackGainFactor : 1.0)).clamp(0.0, 1.0);
 
   static double _factorForGainDb(double? gainDb) {
     if (gainDb == null) return 1.0;
@@ -753,6 +753,34 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Jen naplní `_artworkCache`/`_accentColorCache` -- stav mění, jen když
     // `nowPlaying` odpovídá, což tu ještě neplatí.
     unawaited(_resolveArtworkAndAccent(next));
+  }
+
+  /// Zamčený iPhone: když skladba dohraje, audio prvek "skončí", iOS uspí
+  /// zvukovou relaci a `play()` další skladby, co přijde o pár asynchronních
+  /// kroků později, Safari potichu odmítne -- appka ukazovala, že hraje, a
+  /// po odemčení skladba začala od začátku (živě nahlášeno). Proto na webu,
+  /// když je další skladba už stažená, přepnout ~0,6 s PŘED koncem, dokud
+  /// audio ještě hraje (konec skladby bývá ticho). Jinak zůstává běžné
+  /// přepnutí po `completed`.
+  static const _earlyAdvanceWindow = Duration(milliseconds: 600);
+  String? _earlyAdvancedFrom;
+  DateTime? _earlyAdvancedAt;
+
+  void _maybeAdvanceEarly(Duration position) {
+    if (!kIsWeb || _priming || !_player.playing) return;
+    final current = state.nowPlaying;
+    final duration = state.duration;
+    if (current == null || duration == null || duration < const Duration(seconds: 10)) return;
+    if (_earlyAdvancedFrom == current.recordingId) return;
+    if (duration - position > _earlyAdvanceWindow) return;
+    if (state.repeatMode == RepeatMode.one) return;
+    final nextIndex = state.nextIndex;
+    if (nextIndex == null || nextIndex >= state.queue.length) return;
+    final next = _ref.read(provisioningControllerProvider)[state.queue[nextIndex].recordingId];
+    if (next == null || next.status != 'AVAILABLE' || next.streamUrl == null) return;
+    _earlyAdvancedFrom = current.recordingId;
+    _earlyAdvancedAt = DateTime.now();
+    unawaited(this.next());
   }
 
   /// Prostý `Timer`, žádná Hive/background persistence jako u Finampu --
@@ -1160,6 +1188,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
           playerState.processingState == ProcessingState.buffering,
     );
     if (playerState.processingState == ProcessingState.completed) {
+      // Právě přepnuto dřív (`_maybeAdvanceEarly`) -- `completed` patří staré
+      // skladbě, jinak by se přeskočilo o dvě.
+      final early = _earlyAdvancedAt;
+      if (early != null && DateTime.now().difference(early) < const Duration(seconds: 3)) return;
       if (state.repeatMode == RepeatMode.one) {
         unawaited(_replayCurrent());
       } else {
