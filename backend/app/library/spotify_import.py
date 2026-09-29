@@ -144,14 +144,15 @@ def _import_tracks_into_playlist(
         for position, rid in enumerate(final_ids):
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=position))
     else:
-        final_ids = [item.recording_id for item in existing_items]
-        next_position = len(existing_items)
-        for rid in resolved:
-            if rid in existing_ids:
-                continue
-            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=next_position))
-            final_ids.append(rid)
-            next_position += 1
+        # Oblíbené: nové NAHORU v pořadí exportu (ten je nejnovější první),
+        # stejně jako lajk v appce (routes/library.like_song).
+        new_ids = [rid for rid in resolved if rid not in existing_ids]
+        top = min((item.position for item in existing_items), default=0)
+        for i, rid in enumerate(new_ids):
+            session.add(
+                PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=top - len(new_ids) + i)
+            )
+        final_ids = new_ids + [item.recording_id for item in existing_items]
 
     playlist.updated_at = utcnow()
     session.add(playlist)

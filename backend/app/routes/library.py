@@ -574,9 +574,13 @@ def like_song(
         .where(PlaylistItem.playlist_id == playlist.id, PlaylistItem.recording_id == recording_id)
     ).first()
     if existing is None:
-        position = len(
-            session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all()
-        )
+        # NAHORU (nejnovější první, jako Spotify a import z něj) -- dřív se
+        # přidávalo na konec seznamu o stovkách skladeb a nové lajky "nebyly
+        # vidět" (živě nahlášeno).
+        top = session.exec(
+            select(func.min(PlaylistItem.position)).where(PlaylistItem.playlist_id == playlist.id)
+        ).one()
+        position = (top - 1) if top is not None else 0
         session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         session.commit()
     return {"recordingId": recording_id, "liked": True}
