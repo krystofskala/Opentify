@@ -112,24 +112,70 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
 
   // --- tažení dolů = zasunout ---------------------------------------------
 
-  void _onVerticalStart(DragStartDetails _) => _sheet?.dragStart(context);
-  void _onVerticalUpdate(DragUpdateDetails d) => _sheet?.dragUpdate(d.delta.dy, MediaQuery.sizeOf(context).height);
-  void _onVerticalEnd(DragEndDetails d) =>
+  // Jeden rozpoznávač tahu pro celý panel se ZÁMKEM SMĚRU (stejně jako mini
+  // přehrávač): dřív soupeřilo svislé zavírání s vodorovným karuselem obalu
+  // a šikmý tah dělal to druhé. Po `_lockDistance` px rozhodne převládající
+  // osa; vodorovně jen jasně vodorovný tah, který začal NA OBALU (jinde
+  // vodorovný tah nic nedělá -- seek bar má vlastní rozpoznávač a vyhraje).
+  static const _lockDistance = 12.0;
+  final _carouselKey = GlobalKey();
+  Offset _panTotal = Offset.zero;
+  Axis? _panAxis;
+  bool _panOnCover = false;
+
+  void _onPanStart(DragStartDetails d) {
+    _panTotal = Offset.zero;
+    _panAxis = null;
+    final box = _carouselKey.currentContext?.findRenderObject() as RenderBox?;
+    _panOnCover = box != null && box.hasSize && (box.localToGlobal(Offset.zero) & box.size).contains(d.globalPosition);
+    if (_panOnCover) _carousel.stop();
+  }
+
+  void _onPanUpdate(DragUpdateDetails d) {
+    final height = MediaQuery.sizeOf(context).height;
+    switch (_panAxis) {
+      case Axis.horizontal:
+        _onCarouselUpdate(d.delta.dx);
+      case Axis.vertical:
+        _sheet?.dragUpdate(d.delta.dy, height);
+      case null:
+        _panTotal += d.delta;
+        if (_panTotal.distance < _lockDistance) return;
+        if (_panOnCover && _panTotal.dx.abs() > _panTotal.dy.abs() * 1.5) {
+          _panAxis = Axis.horizontal;
+          _onCarouselUpdate(_panTotal.dx);
+        } else if (_panTotal.dy.abs() >= _panTotal.dx.abs()) {
+          _panAxis = Axis.vertical;
+          _sheet?.dragStart(context);
+          _sheet?.dragUpdate(_panTotal.dy, height);
+        }
+    }
+  }
+
+  void _onPanEnd(DragEndDetails d) {
+    final axis = _panAxis;
+    _panAxis = null;
+    if (axis == Axis.horizontal) {
+      _onCarouselEnd(d.velocity.pixelsPerSecond.dx);
+    } else if (axis == Axis.vertical) {
       _sheet?.dragEnd(d.velocity.pixelsPerSecond.dy, MediaQuery.sizeOf(context).height);
+    }
+  }
 
   // --- karusel obalů ---------------------------------------------------------
 
-  void _onCarouselUpdate(DragUpdateDetails d, AudioPlayerState playback) {
-    var next = _carousel.value + d.delta.dx;
+  void _onCarouselUpdate(double deltaX) {
+    final playback = ref.read(audioPlayerControllerProvider);
+    var next = _carousel.value + deltaX;
     // Na kraji fronty odpor (gumička), ne volný pohyb do prázdna.
     if ((next < 0 && !playback.hasNext) || (next > 0 && playback.previousIndex == null)) {
-      next = _carousel.value + d.delta.dx * 0.3;
+      next = _carousel.value + deltaX * 0.3;
     }
     _carousel.value = next;
   }
 
-  Future<void> _onCarouselEnd(DragEndDetails d, AudioPlayerState playback) async {
-    final v = d.velocity.pixelsPerSecond.dx;
+  Future<void> _onCarouselEnd(double v) async {
+    final playback = ref.read(audioPlayerControllerProvider);
     final dx = _carousel.value;
     final page = _carouselWidth;
     final controller = ref.read(audioPlayerControllerProvider.notifier);
@@ -293,9 +339,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                   Expanded(
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                      onVerticalDragStart: _onVerticalStart,
-                      onVerticalDragUpdate: _onVerticalUpdate,
-                      onVerticalDragEnd: _onVerticalEnd,
+                      onPanStart: _onPanStart,
+                      onPanUpdate: _onPanUpdate,
+                      onPanEnd: _onPanEnd,
                       child: Column(
                         children: [
                           _grabber(),
@@ -458,10 +504,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
         builder: (context, constraints) {
           const gap = 24.0;
           _carouselWidth = constraints.maxWidth + gap;
-          return GestureDetector(
-            onHorizontalDragStart: (_) => _carousel.stop(),
-            onHorizontalDragUpdate: (d) => _onCarouselUpdate(d, playback),
-            onHorizontalDragEnd: (d) => _onCarouselEnd(d, playback),
+          // Tah řeší jeden rozpoznávač se zámkem směru na celém panelu
+          // (`_onPan*`); tady jen klíč, podle kterého pozná, že tah začal na obalu.
+          return KeyedSubtree(
+            key: _carouselKey,
             child: AnimatedBuilder(
               animation: _carousel,
               builder: (context, _) {
