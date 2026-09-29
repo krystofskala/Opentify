@@ -589,16 +589,26 @@ List<Color> _paletteFor(
     // zvednutí sytosti níž by z ní udělalo červenou appku. Neutrální
     // monochrom bez odstínu -- grafit/stříbro v tmavém, teplá šeď/papír ve
     // světlém režimu (L ≥ 0.72 kvůli kontrastu textu, viz níž).
+    // Širší rozsah jasu (téměř černá -> jasná stříbrná záře) a jemná teplota
+    // (chladný grafit vs. teplé stříbro, sytost ≤ 0.08) -- s úzkým rozsahem
+    // čistých šedých nebyl pohyb gradientu skoro vidět (živě nahlášeno).
     Color grey(double l, {double hue = 0, double s = 0}) => HSLColor.fromAHSL(1, hue, s, l).toColor();
     return dark
-        ? [grey(0.10), grey(0.18), grey(0.30), grey(0.40), grey(0.56), grey(0.24)]
+        ? [
+            grey(0.06, hue: 220, s: 0.08),
+            grey(0.20, hue: 215, s: 0.07),
+            grey(0.36, hue: 35, s: 0.05),
+            grey(0.50, hue: 210, s: 0.05),
+            grey(0.78, hue: 40, s: 0.06),
+            grey(0.28, hue: 30, s: 0.06),
+          ]
         : [
-            grey(0.95, hue: 40, s: 0.06),
-            grey(0.86, hue: 40, s: 0.05),
-            grey(0.77, hue: 40, s: 0.04),
-            grey(0.73, hue: 40, s: 0.04),
-            grey(0.92, hue: 40, s: 0.06),
-            grey(0.81, hue: 40, s: 0.05),
+            grey(0.97, hue: 40, s: 0.08),
+            grey(0.82, hue: 215, s: 0.05),
+            grey(0.74, hue: 40, s: 0.06),
+            grey(0.72, hue: 210, s: 0.05),
+            grey(0.99, hue: 45, s: 0.08),
+            grey(0.78, hue: 35, s: 0.06),
           ];
   }
   final hsl = HSLColor.fromColor(accent);
