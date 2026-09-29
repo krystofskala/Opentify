@@ -212,6 +212,14 @@ class _HomeSectionView extends StatelessWidget {
               onSeeAll: section.playlists.length > 3
                   ? () => _showPlaylistGrid(context, section.title, section.playlists)
                   : null,
+              // "Tvoje roky" -> Wrapped (statistiky a sdílecí obrázky).
+              trailing: section.id == 'years'
+                  ? TextButton.icon(
+                      onPressed: () => context.push('/wrapped'),
+                      icon: const Icon(Symbols.auto_awesome_rounded, size: 18),
+                      label: const Text('Wrapped'),
+                    )
+                  : null,
             ),
             SizedBox(
               height: 214,

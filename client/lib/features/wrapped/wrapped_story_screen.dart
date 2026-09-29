@@ -1,0 +1,1150 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:material_symbols_icons/symbols.dart';
+
+import '../../core/share_image.dart';
+import '../../data/wrapped_repository.dart';
+import '../../state/artwork_provider.dart';
+import '../../state/providers.dart';
+import '../../widgets/media_card.dart' show ArtworkImage;
+import '../../widgets/mix_artwork.dart';
+import '../../widgets/state_views.dart';
+import 'wrapped_hub_screen.dart' show WrappedCountdown;
+
+/// "Tisíce" úzkou nezlomitelnou mezerou: 34 698.
+String wrappedNumber(int value) {
+  final digits = value.abs().toString();
+  final buffer = StringBuffer(value < 0 ? '-' : '');
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(' ');
+    buffer.write(digits[i]);
+  }
+  return buffer.toString();
+}
+
+String _plural(int n, String one, String few, String many) => n == 1
+    ? one
+    : n >= 2 && n <= 4
+        ? few
+        : many;
+
+const _monthShort = ['led', 'úno', 'bře', 'dub', 'kvě', 'čvn', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
+
+/// Wrapped jako příběh: obrazovky 9:16 přes celý displej, klepnutí vpravo/
+/// vlevo = další/předchozí, samy se posouvají (podržením se zastaví). Každou
+/// jde sdílet jako obrázek 1080×1920 -- vyrenderuje se předem, hned jak
+/// doběhne její animace (Safari pustí sdílení jen přímo z klepnutí).
+class WrappedStoryScreen extends ConsumerWidget {
+  const WrappedStoryScreen({super.key, required this.period});
+
+  final String period;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final stats = ref.watch(wrappedStatsProvider(period));
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: stats.when(
+        data: (s) => s.locked ? _Locked(stats: s) : _Story(stats: s),
+        loading: () => const _Loading(),
+        error: (e, _) => ErrorState(
+          message: 'Wrapped se nepodařilo načíst.',
+          error: e,
+          onRetry: () => ref.invalidate(wrappedStatsProvider(period)),
+        ),
+      ),
+    );
+  }
+}
+
+class _Loading extends StatelessWidget {
+  const _Loading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const MixBackground(style: MixArtStyle.mood, hue: 262, seed: 'wrapped-loading'),
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                  width: 28, height: 28, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5)),
+              const SizedBox(height: 16),
+              Text('Počítám tvůj rok v hudbě…', style: _text(18, FontWeight.w700)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Locked extends StatelessWidget {
+  const _Locked({required this.stats});
+  final WrappedStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const MixBackground(style: MixArtStyle.year, hue: 40, seed: 'wrapped-locked'),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconButton(
+                  onPressed: () => context.pop(),
+                  icon: const Icon(Symbols.close_rounded, color: Colors.white),
+                ),
+                const Spacer(),
+                const Icon(Symbols.lock_rounded, color: Colors.white, size: 40),
+                const SizedBox(height: 12),
+                Text(stats.isDecade ? 'Tvoje dekáda' : 'Tvůj rok ${stats.label}', style: _text(40, FontWeight.w900)),
+                const SizedBox(height: 8),
+                if (stats.unlockAt != null)
+                  WrappedCountdown(unlockAt: stats.unlockAt!, style: _text(20, FontWeight.w600)),
+                const SizedBox(height: 60),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+TextStyle _text(double size, FontWeight weight, {double opacity = 1, double height = 1.1}) => TextStyle(
+      color: Colors.white.withValues(alpha: opacity),
+      fontSize: size,
+      fontWeight: weight,
+      height: height,
+      letterSpacing: size > 40 ? -size * 0.02 : 0,
+      shadows: const [Shadow(blurRadius: 12, color: Colors.black38)],
+    );
+
+/// Jedna obrazovka: pozadí + obsah (obsah dostává `active`, aby animace
+/// běžely, až je obrazovka vidět).
+class _Slide {
+  const _Slide({required this.style, required this.hue, required this.build});
+
+  final MixArtStyle style;
+  final double hue;
+  final Widget Function(bool active) build;
+}
+
+class _Story extends ConsumerStatefulWidget {
+  const _Story({required this.stats});
+  final WrappedStats stats;
+
+  @override
+  ConsumerState<_Story> createState() => _StoryState();
+}
+
+class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMixin {
+  static const _slideDuration = Duration(seconds: 8);
+  static const _renderDelay = Duration(milliseconds: 2400);
+
+  late final List<_Slide> _slides = _buildSlides(widget.stats);
+  late final List<GlobalKey> _keys = [for (final _ in _slides) GlobalKey()];
+  final _page = PageController();
+  late final AnimationController _progress = AnimationController(vsync: this, duration: _slideDuration)
+    ..addStatusListener((status) {
+      if (status == AnimationStatus.completed) _go(_index + 1);
+    });
+  final Map<int, Uint8List> _rendered = {};
+  Timer? _renderTimer;
+  int _index = 0;
+  bool _sharing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _progress.forward();
+    _scheduleRender();
+  }
+
+  @override
+  void dispose() {
+    _renderTimer?.cancel();
+    _progress.dispose();
+    _page.dispose();
+    super.dispose();
+  }
+
+  void _go(int index) {
+    if (index < 0 || index >= _slides.length) {
+      if (index >= _slides.length) _progress.stop();
+      return;
+    }
+    _page.jumpToPage(index);
+  }
+
+  void _onPage(int index) {
+    setState(() => _index = index);
+    _progress
+      ..stop()
+      ..value = 0;
+    if (index < _slides.length - 1) _progress.forward();
+    _scheduleRender();
+  }
+
+  void _scheduleRender() {
+    _renderTimer?.cancel();
+    final index = _index;
+    if (_rendered.containsKey(index)) return;
+    _renderTimer = Timer(_renderDelay, () async {
+      final png = await _capture(index);
+      if (png != null && mounted) _rendered[index] = png;
+    });
+  }
+
+  Future<Uint8List?> _capture(int index) async {
+    final boundary = _keys[index].currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null || !boundary.hasSize) return null;
+    try {
+      final image = await boundary.toImage(pixelRatio: 1080 / boundary.size.width);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      return data?.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _share() async {
+    if (_sharing) return;
+    final name = 'opentify-wrapped-${widget.stats.id}-${_index + 1}.png';
+    final text =
+        widget.stats.isDecade ? 'Moje hudební dekáda ${widget.stats.label}' : 'Můj rok v hudbě ${widget.stats.label}';
+    final ready = _rendered[_index];
+    if (ready != null) {
+      // Synchronně z klepnutí -- jinak Safari sdílení odmítne.
+      unawaited(shareImage(ready, fileName: name, text: text));
+      return;
+    }
+    setState(() => _sharing = true);
+    final png = await _capture(_index);
+    if (mounted) setState(() => _sharing = false);
+    if (png != null) await shareImage(png, fileName: name, text: text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = widget.stats;
+    final last = _index == _slides.length - 1;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Na PC uprostřed jako telefon, na telefonu přes celou obrazovku.
+        final maxW = constraints.maxWidth;
+        final maxH = constraints.maxHeight;
+        final w = math.min(maxW, maxH * 9 / 16);
+        final phone = maxW < 600;
+        final frameW = phone ? maxW : w;
+        final frameH = phone ? maxH : w * 16 / 9;
+        return Center(
+          child: SizedBox(
+            width: frameW,
+            height: frameH,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(phone ? 0 : 24),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapUp: (d) => _go(d.localPosition.dx < frameW * 0.3 ? _index - 1 : _index + 1),
+                    onLongPressStart: (_) => _progress.stop(),
+                    onLongPressEnd: (_) {
+                      if (!last) _progress.forward();
+                    },
+                    child: PageView.builder(
+                      controller: _page,
+                      onPageChanged: _onPage,
+                      itemCount: _slides.length,
+                      itemBuilder: (context, i) => RepaintBoundary(
+                        key: _keys[i],
+                        child: _SlideFrame(slide: _slides[i], active: i == _index, stats: stats),
+                      ),
+                    ),
+                  ),
+                  // Ovládání (není součástí sdíleného obrázku).
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                      child: Column(
+                        children: [
+                          _ProgressBars(count: _slides.length, index: _index, progress: _progress),
+                          Row(
+                            children: [
+                              Text(
+                                stats.isDecade ? 'Tvoje dekáda' : 'Wrapped ${stats.label}',
+                                style: _text(14, FontWeight.w700, opacity: 0.9),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                tooltip: 'Zavřít',
+                                onPressed: () => context.pop(),
+                                icon: const Icon(Symbols.close_rounded, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: Row(
+                          children: [
+                            if (last)
+                              for (final p in stats.playlists.take(1))
+                                Expanded(
+                                  child: _PillButton(
+                                    icon: Symbols.play_arrow_rounded,
+                                    label: 'Otevřít playlist',
+                                    onPressed: () => context.push('/playlists/${p.id}'),
+                                  ),
+                                )
+                            else
+                              const Spacer(),
+                            const SizedBox(width: 10),
+                            _PillButton(
+                              icon: Symbols.ios_share_rounded,
+                              label: _sharing ? 'Připravuji…' : 'Sdílet',
+                              onPressed: _share,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PillButton extends StatelessWidget {
+  const _PillButton({required this.icon, required this.label, required this.onPressed});
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+      ),
+      onPressed: onPressed,
+      icon: Icon(icon, size: 20),
+      label: Text(label),
+    );
+  }
+}
+
+class _ProgressBars extends StatelessWidget {
+  const _ProgressBars({required this.count, required this.index, required this.progress});
+  final int count;
+  final int index;
+  final Animation<double> progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var i = 0; i < count; i++)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: SizedBox(
+                  height: 3,
+                  child: i == index
+                      ? AnimatedBuilder(
+                          animation: progress,
+                          builder: (_, __) => LinearProgressIndicator(
+                            value: progress.value,
+                            backgroundColor: Colors.white24,
+                            color: Colors.white,
+                          ),
+                        )
+                      : ColoredBox(color: i < index ? Colors.white : Colors.white24),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Pozadí + obsah + nenápadná značka dole (je vidět i na sdíleném obrázku).
+class _SlideFrame extends StatelessWidget {
+  const _SlideFrame({required this.slide, required this.active, required this.stats});
+  final _Slide slide;
+  final bool active;
+  final WrappedStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        MixBackground(style: slide.style, hue: slide.hue, seed: 'wrapped:${stats.id}:${slide.hue}'),
+        // Ztmavení pro čitelnost textu.
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0x55000000), Color(0x22000000), Color(0x88000000)],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(26, 84, 26, 90),
+          child: slide.build(active),
+        ),
+        Positioned(
+          left: 26,
+          bottom: 30,
+          child: Text(
+            stats.isDecade ? 'OPENTIFY · DEKÁDA ${stats.label}' : 'OPENTIFY · WRAPPED ${stats.label}',
+            style: _text(11, FontWeight.w800, opacity: 0.7).copyWith(letterSpacing: 1.4),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Animace
+// ---------------------------------------------------------------------------
+
+/// Prvek najede zespodu a zprůhlední se, `order` = pořadí (zpoždění).
+class _Reveal extends StatelessWidget {
+  const _Reveal({required this.active, required this.order, required this.child});
+  final bool active;
+  final int order;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final delay = order * 160;
+    final total = 600 + delay;
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(active),
+      tween: Tween(begin: 0, end: active ? 1 : 0),
+      duration: Duration(milliseconds: total),
+      curve: Interval(delay / total, 1, curve: Curves.easeOutCubic),
+      builder: (context, t, child) => Opacity(
+        opacity: t,
+        child: Transform.translate(offset: Offset(0, (1 - t) * 30), child: child),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _CountUp extends StatelessWidget {
+  const _CountUp({required this.value, required this.active, required this.style});
+  final int value;
+  final bool active;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(active),
+      tween: Tween(begin: 0, end: active ? value.toDouble() : 0),
+      duration: const Duration(milliseconds: 1700),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) => Text(wrappedNumber(v.round()), style: style),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Obrázky (interpret / skladba), s dohledáním, když server obal nemá
+// ---------------------------------------------------------------------------
+
+class _Art extends ConsumerWidget {
+  const _Art({this.url, this.releaseId, this.artistId, required this.size, this.circle = false});
+  final String? url;
+  final String? releaseId;
+  final String? artistId;
+  final double size;
+  final bool circle;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resolved = url ??
+        (releaseId != null || artistId != null
+            ? ref.watch(recordingArtworkProvider((releaseId: releaseId, artistId: artistId))).valueOrNull
+            : null);
+    final image = SizedBox(
+      width: size,
+      height: size,
+      child: ArtworkImage(
+        url: resolved,
+        icon: circle ? Symbols.person_rounded : Symbols.album_rounded,
+        iconSize: size * 0.35,
+      ),
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        shape: circle ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: circle ? null : BorderRadius.circular(size * 0.06),
+        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 24, offset: Offset(0, 10))],
+      ),
+      child:
+          circle ? ClipOval(child: image) : ClipRRect(borderRadius: BorderRadius.circular(size * 0.06), child: image),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Obrazovky
+// ---------------------------------------------------------------------------
+
+List<_Slide> _buildSlides(WrappedStats s) {
+  final baseHue = s.isDecade ? 36.0 : ((int.tryParse(s.label) ?? 0) * 47 + 20) % 360.0;
+  double hue(int shift) => (baseHue + shift) % 360;
+  final days = (s.totalMinutes / 1440).floor();
+  final slides = <_Slide>[
+    _Slide(
+      style: MixArtStyle.year,
+      hue: hue(0),
+      build: (a) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Spacer(),
+          _Reveal(
+            active: a,
+            order: 0,
+            child: Text(s.isDecade ? 'TVOJE HUDEBNÍ DEKÁDA' : 'TVŮJ ROK V HUDBĚ',
+                style: _text(15, FontWeight.w800, opacity: 0.85)),
+          ),
+          const SizedBox(height: 10),
+          _Reveal(
+            active: a,
+            order: 1,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(s.label, style: _text(s.isDecade ? 72 : 110, FontWeight.w900, height: 0.95)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          _Reveal(
+            active: a,
+            order: 2,
+            child: Text(
+              s.partial
+                  ? 'Zatím. Rok ještě neskončil.'
+                  : (s.isDecade ? 'Deset let. Pojďme na to.' : 'Pojďme se podívat, co ti hrálo.'),
+              style: _text(20, FontWeight.w600, opacity: 0.9, height: 1.25),
+            ),
+          ),
+          const Spacer(flex: 2),
+        ],
+      ),
+    ),
+    _Slide(
+      style: MixArtStyle.mood,
+      hue: hue(40),
+      build: (a) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _Reveal(active: a, order: 0, child: Text('Čas s hudbou', style: _text(22, FontWeight.w700, opacity: 0.9))),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: _CountUp(value: s.totalMinutes, active: a, style: _text(84, FontWeight.w900, height: 1)),
+          ),
+          _Reveal(active: a, order: 1, child: Text('minut', style: _text(34, FontWeight.w800))),
+          const SizedBox(height: 28),
+          _Reveal(
+            active: a,
+            order: 3,
+            child: Text(
+              'To je $days ${_plural(days, 'den', 'dny', 'dní')} hudby v kuse.\n'
+              '${wrappedNumber(s.plays)} přehrání · ${wrappedNumber(s.daysListened)} ${_plural(s.daysListened, 'den', 'dny', 'dní')} s hudbou',
+              style: _text(19, FontWeight.w600, opacity: 0.9, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    ),
+    if (s.topArtists.isNotEmpty)
+      _Slide(
+        style: MixArtStyle.genre,
+        hue: hue(-30),
+        build: (a) {
+          final top = s.topArtists.first;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _Reveal(
+                active: a,
+                order: 0,
+                child: Text(s.isDecade ? 'Interpret dekády' : 'Interpret roku',
+                    style: _text(22, FontWeight.w700, opacity: 0.9)),
+              ),
+              const SizedBox(height: 24),
+              _Reveal(
+                active: a,
+                order: 1,
+                child: _Art(url: top.imageUrl, artistId: top.id, size: 210, circle: true),
+              ),
+              const SizedBox(height: 24),
+              _Reveal(
+                active: a,
+                order: 2,
+                child: Text(top.name, textAlign: TextAlign.center, style: _text(40, FontWeight.w900)),
+              ),
+              const SizedBox(height: 10),
+              _Reveal(
+                active: a,
+                order: 3,
+                child: Text(
+                  '${wrappedNumber(top.minutes)} minut · ${wrappedNumber(top.plays)} přehrání',
+                  style: _text(18, FontWeight.w600, opacity: 0.9),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    if (s.topArtists.length > 1)
+      _Slide(
+        style: MixArtStyle.daily,
+        hue: hue(-60),
+        build: (a) => _RankList(
+          active: a,
+          title: 'Tvoji top interpreti',
+          rows: [
+            for (final artist in s.topArtists)
+              _RankRow(
+                title: artist.name,
+                subtitle: '${wrappedNumber(artist.minutes)} min',
+                art: _Art(url: artist.imageUrl, artistId: artist.id, size: 58, circle: true),
+              ),
+          ],
+        ),
+      ),
+    if (s.topTracks.isNotEmpty)
+      _Slide(
+        style: MixArtStyle.mood,
+        hue: hue(80),
+        build: (a) {
+          final top = s.topTracks.first;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _Reveal(
+                active: a,
+                order: 0,
+                child: Text(s.isDecade ? 'Skladba dekády' : 'Skladba roku',
+                    style: _text(22, FontWeight.w700, opacity: 0.9)),
+              ),
+              const SizedBox(height: 24),
+              _Reveal(
+                active: a,
+                order: 1,
+                child: _Art(url: top.imageUrl, releaseId: top.releaseId, artistId: top.artistId, size: 230),
+              ),
+              const SizedBox(height: 24),
+              _Reveal(
+                active: a,
+                order: 2,
+                child: Text(top.title, textAlign: TextAlign.center, maxLines: 2, style: _text(34, FontWeight.w900)),
+              ),
+              if (top.artistName != null)
+                _Reveal(
+                  active: a,
+                  order: 2,
+                  child: Text(top.artistName!,
+                      textAlign: TextAlign.center, style: _text(20, FontWeight.w600, opacity: 0.85)),
+                ),
+              const SizedBox(height: 14),
+              _Reveal(
+                active: a,
+                order: 3,
+                child: Text(
+                  '${wrappedNumber(top.plays)}× přehráno · ${wrappedNumber(top.minutes)} minut',
+                  style: _text(18, FontWeight.w600, opacity: 0.9),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    if (s.topTracks.length > 1)
+      _Slide(
+        style: MixArtStyle.daily,
+        hue: hue(120),
+        build: (a) => _RankList(
+          active: a,
+          title: 'Tvoje top skladby',
+          rows: [
+            for (final t in s.topTracks)
+              _RankRow(
+                title: t.title,
+                subtitle: '${t.artistName ?? ''} · ${wrappedNumber(t.plays)}×',
+                art: _Art(url: t.imageUrl, releaseId: t.releaseId, artistId: t.artistId, size: 58),
+              ),
+          ],
+        ),
+      ),
+    if (s.isDecade && s.eras.isNotEmpty)
+      _Slide(
+        style: MixArtStyle.year,
+        hue: hue(160),
+        build: (a) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _Reveal(active: a, order: 0, child: Text('Tvoje éry', style: _text(34, FontWeight.w900))),
+            const SizedBox(height: 16),
+            for (final (i, era) in s.eras.indexed)
+              _Reveal(
+                active: a,
+                order: 1 + i ~/ 2,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      SizedBox(width: 62, child: Text('${era.year}', style: _text(18, FontWeight.w900, opacity: 0.75))),
+                      Expanded(
+                        child: Text(
+                          era.artist.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _text(20, FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    if (s.isDecade && s.evergreens.isNotEmpty)
+      _Slide(
+        style: MixArtStyle.genre,
+        hue: hue(200),
+        build: (a) => _RankList(
+          active: a,
+          title: 'Nesmrtelné',
+          subtitle: 'Skladby, které se ti vracely rok co rok',
+          rows: [
+            for (final t in s.evergreens)
+              _RankRow(
+                title: t.title,
+                subtitle: '${t.artistName ?? ''} · v top 100 ${t.years} ${_plural(t.years, 'rok', 'roky', 'let')}',
+                art: _Art(url: t.imageUrl, releaseId: t.releaseId, artistId: t.artistId, size: 58),
+              ),
+          ],
+        ),
+      ),
+    if (s.topGenres.isNotEmpty)
+      _Slide(
+        style: MixArtStyle.genre,
+        hue: hue(-100),
+        build: (a) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _Reveal(active: a, order: 0, child: Text('Tvoje žánry', style: _text(34, FontWeight.w900))),
+            const SizedBox(height: 22),
+            for (final (i, g) in s.topGenres.indexed)
+              _Reveal(
+                active: a,
+                order: 1 + i,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: Text(g.title, style: _text(21, FontWeight.w800))),
+                          Text('${g.percent} %', style: _text(21, FontWeight.w900)),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      _GrowBar(
+                        active: a,
+                        fraction: g.percent / math.max(1, s.topGenres.first.percent),
+                        color: HSLColor.fromColor(g.color).withLightness(0.62).withSaturation(0.75).toColor(),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('${wrappedNumber(g.minutes)} minut', style: _text(14, FontWeight.w600, opacity: 0.75)),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    _Slide(
+      style: MixArtStyle.daily,
+      hue: hue(150),
+      build: (a) => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Reveal(active: a, order: 0, child: Text('Objevy', style: _text(22, FontWeight.w700, opacity: 0.9))),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: _CountUp(
+              value: s.isDecade ? s.artistsCount : s.newArtists,
+              active: a,
+              style: _text(84, FontWeight.w900, height: 1),
+            ),
+          ),
+          _Reveal(
+            active: a,
+            order: 1,
+            child: Text(
+              s.isDecade ? 'různých interpretů za deset let' : 'nových interpretů',
+              style: _text(26, FontWeight.w800),
+            ),
+          ),
+          if (s.topNewArtist case final n? when !s.isDecade) ...[
+            const SizedBox(height: 34),
+            _Reveal(
+              active: a,
+              order: 3,
+              child: Row(
+                children: [
+                  _Art(url: n.imageUrl, artistId: n.id, size: 76, circle: true),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Největší objev', style: _text(15, FontWeight.w700, opacity: 0.8)),
+                        Text(n.name, maxLines: 2, style: _text(24, FontWeight.w900)),
+                        Text('${wrappedNumber(n.minutes)} minut', style: _text(15, FontWeight.w600, opacity: 0.8)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
+    _Slide(
+      style: MixArtStyle.year,
+      hue: hue(-150),
+      build: (a) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _Reveal(
+            active: a,
+            order: 0,
+            child: Text(s.isDecade ? 'Deset let v číslech' : 'Tvůj rok po měsících', style: _text(30, FontWeight.w900)),
+          ),
+          const SizedBox(height: 22),
+          _Reveal(
+            active: a,
+            order: 1,
+            child: SizedBox(
+              height: 200,
+              child: _BarChart(
+                active: a,
+                values: [for (final t in s.timeline) t.minutes],
+                labels: [
+                  for (final t in s.timeline)
+                    s.isDecade ? "'${(t.key % 100).toString().padLeft(2, '0')}" : _monthShort[t.key - 1],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 30),
+          _Reveal(
+            active: a,
+            order: 2,
+            child: Text('Nejvíc posloucháš kolem', style: _text(18, FontWeight.w600, opacity: 0.85)),
+          ),
+          _Reveal(
+            active: a,
+            order: 3,
+            child: Text('${s.peakHour}:00', style: _text(64, FontWeight.w900, height: 1)),
+          ),
+          const SizedBox(height: 10),
+          _Reveal(
+            active: a,
+            order: 4,
+            child: SizedBox(height: 60, child: _BarChart(active: a, values: s.hours, highlight: s.peakHour)),
+          ),
+        ],
+      ),
+    ),
+    _Slide(
+      style: MixArtStyle.year,
+      hue: hue(0),
+      build: (a) => _Summary(stats: s, active: a),
+    ),
+  ];
+  return slides;
+}
+
+class _RankRow {
+  const _RankRow({required this.title, required this.subtitle, required this.art});
+  final String title;
+  final String subtitle;
+  final Widget art;
+}
+
+class _RankList extends StatelessWidget {
+  const _RankList({required this.active, required this.title, required this.rows, this.subtitle});
+  final bool active;
+  final String title;
+  final String? subtitle;
+  final List<_RankRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _Reveal(active: active, order: 0, child: Text(title, style: _text(34, FontWeight.w900))),
+        if (subtitle != null)
+          _Reveal(active: active, order: 0, child: Text(subtitle!, style: _text(16, FontWeight.w600, opacity: 0.85))),
+        const SizedBox(height: 22),
+        for (final (i, row) in rows.indexed)
+          _Reveal(
+            active: active,
+            order: 1 + i,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Row(
+                children: [
+                  SizedBox(width: 34, child: Text('${i + 1}', style: _text(26, FontWeight.w900, opacity: 0.8))),
+                  row.art,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(row.title,
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: _text(19, FontWeight.w800)),
+                        const SizedBox(height: 2),
+                        Text(
+                          row.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _text(14, FontWeight.w600, opacity: 0.8),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _GrowBar extends StatelessWidget {
+  const _GrowBar({required this.active, required this.fraction, required this.color});
+  final bool active;
+  final double fraction;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(active),
+      tween: Tween(begin: 0, end: active ? fraction.clamp(0.04, 1.0) : 0),
+      duration: const Duration(milliseconds: 1200),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) => Container(
+        height: 12,
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: v,
+          child: Container(decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6))),
+        ),
+      ),
+    );
+  }
+}
+
+class _BarChart extends StatelessWidget {
+  const _BarChart({required this.active, required this.values, this.labels, this.highlight});
+  final bool active;
+  final List<int> values;
+  final List<String>? labels;
+  final int? highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final peak = values.fold<int>(1, math.max);
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(active),
+      tween: Tween(begin: 0, end: active ? 1 : 0),
+      duration: const Duration(milliseconds: 1300),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, _) => Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (var i = 0; i < values.length; i++)
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: values.length > 14 ? 1 : 3),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Flexible(
+                      child: FractionallySizedBox(
+                        heightFactor: math.max(0.03, values[i] / peak * t),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: highlight == null || highlight == i
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (labels != null) ...[
+                      const SizedBox(height: 6),
+                      Text(labels![i], style: _text(11, FontWeight.w700, opacity: 0.8)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Závěrečná karta jako na Spotify -- všechno podstatné na jednom obrázku.
+class _Summary extends StatelessWidget {
+  const _Summary({required this.stats, required this.active});
+  final WrappedStats stats;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = stats;
+    Widget column(String title, List<String> items) => Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: _text(14, FontWeight.w800, opacity: 0.8)),
+              const SizedBox(height: 8),
+              for (final (i, item) in items.indexed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 5),
+                  child: Text(
+                    '${i + 1}  $item',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _text(15, FontWeight.w700),
+                  ),
+                ),
+            ],
+          ),
+        );
+    return _Reveal(
+      active: active,
+      order: 0,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (s.topArtists.isNotEmpty)
+            Center(child: _Art(url: s.topArtists.first.imageUrl, artistId: s.topArtists.first.id, size: 170)),
+          const SizedBox(height: 22),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              column('Top interpreti', [for (final a in s.topArtists) a.name]),
+              const SizedBox(width: 14),
+              column('Top skladby', [for (final t in s.topTracks) t.title]),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Minut', style: _text(14, FontWeight.w800, opacity: 0.8)),
+                    Text(wrappedNumber(s.totalMinutes), style: _text(30, FontWeight.w900)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Top žánr', style: _text(14, FontWeight.w800, opacity: 0.8)),
+                    Text(
+                      s.topGenres.isEmpty ? '–' : s.topGenres.first.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _text(24, FontWeight.w900),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

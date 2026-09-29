@@ -89,10 +89,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             const SizedBox(height: 12),
             _ActionCard(
               icon: Symbols.equalizer_rounded,
-              title: 'Rok v hudbě',
-              description: 'Souhrn nejposlouchanějších skladeb a interpretů za poslední rok.',
-              buttonLabel: 'Zobrazit',
-              onPressed: () => context.push('/year-in-review'),
+              title: 'Wrapped',
+              description: 'Tvoje roky v hudbě od 2016 -- minuty, interpreti, skladby a žánry, '
+                  'každou obrazovku jde sdílet jako obrázek. Zůstávají napořád.',
+              buttonLabel: 'Otevřít',
+              onPressed: () => context.push('/wrapped'),
             ),
             const SizedBox(height: 12),
             _ActionCard(

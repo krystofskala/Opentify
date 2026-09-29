@@ -12,6 +12,8 @@ import '../features/profile/year_in_review_screen.dart';
 import '../features/browse/browse_category_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/wrapped/wrapped_hub_screen.dart';
+import '../features/wrapped/wrapped_story_screen.dart';
 import 'home_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -57,6 +59,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/playlists/:playlistId',
         builder: (context, state) => PlaylistDetailScreen(playlistId: state.pathParameters['playlistId']!),
+      ),
+      GoRoute(
+        path: '/wrapped',
+        builder: (context, state) => const WrappedHubScreen(),
+      ),
+      GoRoute(
+        path: '/wrapped/:period',
+        builder: (context, state) => WrappedStoryScreen(period: state.pathParameters['period']!),
       ),
       GoRoute(
         path: '/year-in-review',

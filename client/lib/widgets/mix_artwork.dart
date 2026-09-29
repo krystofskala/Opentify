@@ -13,21 +13,30 @@ enum MixArtStyle { daily, genre, mood, year }
 /// Co obal potřebuje: styl, stálý seed (stejný mix = pořád stejný obrázek),
 /// barvu, velký text (číslo mixu / žánr / rok) a fotky interpretů.
 class MixArtSpec {
-  const MixArtSpec(
-      {required this.style, required this.seed, required this.headline, this.color, this.photos = const []});
+  const MixArtSpec({
+    required this.style,
+    required this.seed,
+    required this.headline,
+    this.color,
+    this.photos = const [],
+    this.eyebrow,
+  });
 
   final MixArtStyle style;
   final String seed;
   final String headline;
   final Color? color;
   final List<String> photos;
+
+  /// Popisek nahoře místo výchozího ("DENNÍ MIX", "TOP SKLADBY"...).
+  final String? eyebrow;
 }
 
 MixArtStyle? _styleFrom(String? raw) => switch (raw) {
       'daily' => MixArtStyle.daily,
       'genre' => MixArtStyle.genre,
       'mood' => MixArtStyle.mood,
-      'year' => MixArtStyle.year,
+      'year' || 'decade' => MixArtStyle.year,
       _ => null,
     };
 
@@ -42,8 +51,10 @@ MixArtSpec? mixArtOf(HomePlaylistCard card) {
   final source = card.source ?? '';
   final style = _styleFrom(card.artStyle) ?? (card.dailyMixNumber != null ? MixArtStyle.daily : null);
   if (style == null) return null;
+  final decade = card.artStyle == 'decade';
   final headline = switch (style) {
     MixArtStyle.daily => '${card.dailyMixNumber ?? ''}',
+    MixArtStyle.year when decade => '16–26',
     MixArtStyle.year => source.split(':').last,
     _ => card.categoryMixLabel ?? card.title,
   };
@@ -53,6 +64,7 @@ MixArtSpec? mixArtOf(HomePlaylistCard card) {
     headline: headline,
     color: _hex(card.accentColor),
     photos: card.coverUrls,
+    eyebrow: decade ? 'DEKÁDA' : null,
   );
 }
 
@@ -114,11 +126,12 @@ class MixArtwork extends StatelessWidget {
 
   List<Widget> _overlay(BuildContext context, double side) {
     const shadow = [Shadow(blurRadius: 10, color: Colors.black38)];
-    final eyebrow = switch (spec.style) {
-      MixArtStyle.daily => 'DENNÍ MIX',
-      MixArtStyle.year => 'TOP SKLADBY',
-      _ => 'TVŮJ MIX',
-    };
+    final eyebrow = spec.eyebrow ??
+        switch (spec.style) {
+          MixArtStyle.daily => 'DENNÍ MIX',
+          MixArtStyle.year => 'TOP SKLADBY',
+          _ => 'TVŮJ MIX',
+        };
     final label = compact
         ? null
         : Positioned(
@@ -218,6 +231,34 @@ class MixArtwork extends StatelessWidget {
           ),
         ];
     }
+  }
+}
+
+/// Samotná generativní kresba (bez popisků) přes celou plochu -- pozadí
+/// obrazovek Wrappedu ve stejném výtvarném jazyce jako obaly mixů.
+class MixBackground extends StatelessWidget {
+  const MixBackground({super.key, required this.style, required this.hue, required this.seed});
+
+  final MixArtStyle style;
+  final double hue;
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _seedOf(seed);
+    final CustomPainter painter = switch (style) {
+      MixArtStyle.daily => _WavesPainter(hue, s),
+      MixArtStyle.genre => _GroovesPainter(hue, s),
+      MixArtStyle.mood => _AuroraPainter(hue, s),
+      MixArtStyle.year => _BarsPainter(hue, s),
+    };
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        RepaintBoundary(child: CustomPaint(painter: painter)),
+        const RepaintBoundary(child: CustomPaint(painter: GrainPainter())),
+      ],
+    );
   }
 }
 

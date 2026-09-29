@@ -72,6 +72,9 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
 
     registry.append(("personal:category-mixes", timedelta(hours=1), cm.build_home_category_mixes))
     registry.append(("personal:years", g.DAILY_TTL, _build_years))
+    from app import wrapped
+
+    registry.append(("personal:wrapped", g.DAILY_TTL, wrapped.warm_all))
     registry.append(("lb:fresh-releases", g.DAILY_TTL, g.build_new_releases))
     registry.append(("apple:rss:albums", g.DAILY_TTL, g.build_top_albums))
     for spec in g._genre_specs():
@@ -204,6 +207,8 @@ def _art_style(source: str | None) -> str | None:
         return "daily"
     if source.startswith("personal:year:"):
         return "year"
+    if source.startswith("personal:decade:"):
+        return "decade"
     if source.startswith("personal:category-mix:"):
         from app.browse import get_category
 
@@ -280,7 +285,10 @@ def build_home(user_id: str) -> dict[str, Any]:
         by_section["category_mixes"] = sorted(
             (p for p in by_section.get("category_mixes", []) if p.source in picks), key=lambda p: picks.index(p.source)
         )
-        by_section.get("years", []).sort(key=lambda p: p.source or "", reverse=True)  # nejnovější rok první
+        # Playlisty dekády napřed, pak roky od nejnovějšího.
+        years_section = by_section.get("years", [])
+        years_section.sort(key=lambda p: p.source or "", reverse=True)
+        years_section.sort(key=lambda p: not (p.source or "").startswith("personal:decade:"))  # stabilní
         genre_order = [f"deezer:chart:genre:{gid}" for gid, _ in g.GENRES]
         by_section.get("genres", []).sort(key=lambda p: genre_order.index(p.source) if p.source in genre_order else 99)
 

@@ -14,6 +14,7 @@ import '../data/lyrics_repository.dart';
 import '../data/playlists_repository.dart';
 import '../data/provisioning_repository.dart';
 import '../data/recommendations_repository.dart';
+import '../data/wrapped_repository.dart';
 import 'audio_player_controller.dart';
 
 /// Sdílený `ApiClient` -- jedna instance pro celou appku (connection reuse),
@@ -54,6 +55,16 @@ final browseCategoriesProvider = FutureProvider<List<BrowseCategory>>((ref) {
 
 final browsePageProvider = FutureProvider.autoDispose.family<BrowsePage, String>((ref, id) {
   return ref.watch(browseRepositoryProvider).page(id);
+});
+
+final wrappedRepositoryProvider = Provider<WrappedRepository>((ref) => WrappedRepository(ref.watch(apiClientProvider)));
+
+final wrappedIndexProvider = FutureProvider.autoDispose<WrappedIndex>((ref) {
+  return ref.watch(wrappedRepositoryProvider).index();
+});
+
+final wrappedStatsProvider = FutureProvider.autoDispose.family<WrappedStats, String>((ref, period) {
+  return ref.watch(wrappedRepositoryProvider).stats(period);
 });
 
 /// "Tvůj mix · X" na stránce kategorie (viz backend app/home/category_mixes.py).
