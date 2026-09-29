@@ -41,19 +41,26 @@
       position: fixed;
       inset: 0;
     }
-    /* Úvodní animace: z téměř černé se s přibývajícím zrnem postupně
-       "vyzrní" gradient -- stejné barvy jako pozadí appky na startu, takže
-       se po prvním snímku Flutteru plynule prolne. */
+    /* Úvodní animace: zrnitý gradient v barvách pozadí appky je vidět hned,
+       barevné plochy pomalu krouží a míchají se směrem ke středu, dokud se
+       appka nenačte -- pak se plynule prolne do prvního snímku Flutteru. */
     #splash {
       position: fixed;
       inset: 0;
-      transition: opacity 600ms ease;
+      background: #0b0c0f;
+      transition: opacity 700ms ease;
       pointer-events: none;
     }
     #splash canvas {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       display: block;
+    }
+    /* Zrno ostré (ne rozmazané zvětšením), gradient je měkký sám o sobě. */
+    #splash canvas.grain {
+      image-rendering: pixelated;
     }
   </style>
 </head>
@@ -83,24 +90,19 @@
       window.addEventListener('orientationchange', function () { setTimeout(fit, 250); });
     })();
   </script>
-  <div id="splash"><canvas></canvas></div>
+  <div id="splash"><canvas class="color"></canvas><canvas class="grain"></canvas></div>
   <script>
-    // Úvodní animace: z téměř černé se s přibývajícím zrnem postupně objeví
-    // gradient -- barvy = výchozí paleta pozadí appky (widgets/app_background
-    // _startDark včetně _soften), takže přechod na Flutter je plynulý.
+    // Úvodní animace: zrnitý gradient (barvy = výchozí paleta pozadí appky,
+    // widgets/app_background _startDark včetně _soften) je vidět hned; plochy
+    // barev pomalu krouží ve spirále ke středu a míchají se, dokud se appka
+    // nenačte. Levné: plochy kreslí prohlížeč jako radiální gradienty na malé
+    // plátno, zrno je předpočítaná vrstva, která se jen posouvá (třpyt).
     (function () {
       var splash = document.getElementById('splash');
-      var canvas = splash.querySelector('canvas');
-      var ctx = canvas.getContext('2d');
-      // Zrno aspoň 2×2 CSS px (na telefonu je vidět); na velké obrazovce
-      // hrubší, ať výpočet nikdy nepřesáhne ~120k pixelů na snímek (jinak
-      // blokuje stránku a zpomalí start samotné appky).
-      var SCALE = Math.max(2, Math.ceil(Math.sqrt(window.innerWidth * window.innerHeight / 120000)));
-      // Předpočítaná tabulka náhodných čísel -- Math.random per pixel je drahý.
-      var RN = new Float32Array(1 << 16);
-      for (var ri = 0; ri < RN.length; ri++) RN[ri] = Math.random();
-      var rOff = 0;
-      var base = [11, 12, 15];
+      var colorCanvas = splash.querySelector('canvas.color');
+      var grainCanvas = splash.querySelector('canvas.grain');
+      var cx = colorCanvas.getContext('2d');
+      var gx = grainCanvas.getContext('2d');
       var raw = ['#2A1060', '#7B2CFF', '#E0359A', '#12B5CB', '#FF8A3D', '#2BD67B'];
 
       function hexToHsl(hex) {
@@ -122,33 +124,47 @@
       }
       var hsl = raw.map(hexToHsl);
       var meanL = hsl.reduce(function (a, c) { return a + c[2]; }, 0) / hsl.length;
-      var palette = hsl.map(function (c) { return hslToRgb(c[0], c[1] * 0.8, meanL + (c[2] - meanL) * 0.78); });
-      // Plochy barev: [x, y, poloměr] v podílech obrazovky.
-      var blobs = [[0.15, 0.2, 0.7], [0.85, 0.15, 0.6], [0.2, 0.75, 0.65], [0.8, 0.8, 0.6], [0.5, 0.45, 0.5], [0.9, 0.5, 0.45]];
-      var order = [1, 2, 3, 4, 5, 0];
+      var palette = hsl.map(function (c) { return hslToRgb(c[0], c[1] * 0.8, meanL + (c[2] - meanL) * 0.78).map(Math.round).join(','); });
 
-      var w, h, grad, img;
+      // Plochy: úhel a vzdálenost od středu (podíl úhlopříčky), poloměr, rychlost
+      // oběhu (střídavě po a proti směru -- barvy se proplétají).
+      var blobs = [
+        { c: 1, a: 0.3, d: 0.42, r: 0.62, w: 0.22 },
+        { c: 2, a: 2.2, d: 0.44, r: 0.58, w: -0.18 },
+        { c: 3, a: 4.1, d: 0.40, r: 0.6, w: 0.2 },
+        { c: 4, a: 5.3, d: 0.46, r: 0.52, w: -0.24 },
+        { c: 5, a: 1.2, d: 0.38, r: 0.5, w: 0.16 },
+      ];
+
+      var COLOR_SCALE = 4; // gradient je měkký -- stačí čtvrtinové plátno (vyhlazené zvětšení)
+      // Zrno v plném rozlišení displeje -- stejné jako pozadí appky
+      // (app_background _buildGrain: buňka 1,6 fyzického px, ±14 % jasu,
+      // trojúhelníkové rozdělení), ať na něj splash plynule naváže.
+      var DPR = window.devicePixelRatio || 1;
+      var CELL = 1.6;
+      var TILE = 256;
+      var W, H, pattern;
       function build() {
-        w = Math.ceil(window.innerWidth / SCALE);
-        h = Math.ceil(window.innerHeight / SCALE);
-        canvas.width = w;
-        canvas.height = h;
-        var off = document.createElement('canvas');
-        off.width = w; off.height = h;
-        var o = off.getContext('2d');
-        o.fillStyle = 'rgb(' + palette[0].map(Math.round).join(',') + ')';
-        o.fillRect(0, 0, w, h);
-        blobs.forEach(function (bl, i) {
-          var c = palette[order[i]].map(Math.round).join(',');
-          var r = bl[2] * Math.max(w, h);
-          var g = o.createRadialGradient(bl[0] * w, bl[1] * h, 0, bl[0] * w, bl[1] * h, r);
-          g.addColorStop(0, 'rgba(' + c + ',0.9)');
-          g.addColorStop(1, 'rgba(' + c + ',0)');
-          o.fillStyle = g;
-          o.fillRect(0, 0, w, h);
-        });
-        grad = o.getImageData(0, 0, w, h).data;
-        img = ctx.createImageData(w, h);
+        W = window.innerWidth; H = window.innerHeight;
+        colorCanvas.width = Math.ceil(W / COLOR_SCALE);
+        colorCanvas.height = Math.ceil(H / COLOR_SCALE);
+        grainCanvas.width = Math.ceil(W * DPR / CELL);
+        grainCanvas.height = Math.ceil(H * DPR / CELL);
+        // Jedna dlaždice šumu, opakuje se vzorkem -- žádné miliony pixelů.
+        var tile = document.createElement('canvas');
+        tile.width = tile.height = TILE;
+        var n = tile.getContext('2d');
+        var img = n.createImageData(TILE, TILE);
+        var d = img.data;
+        for (var i = 0; i < d.length; i += 4) {
+          var g = Math.random() + Math.random() - 1; // -1..1
+          if (Math.abs(g) < 0.15) continue;
+          var level = (Math.min(2, Math.floor(Math.abs(g) * 3)) + 1) / 3;
+          d[i] = d[i + 1] = d[i + 2] = g > 0 ? 255 : 0;
+          d[i + 3] = Math.min(255, 0.14 * level * 2 * 255);
+        }
+        n.putImageData(img, 0, 0);
+        pattern = gx.createPattern(tile, 'repeat');
       }
       build();
 
@@ -161,34 +177,53 @@
         requestAnimationFrame(frame);
         if (now - last < 33) return; // ~30 fps stačí, šetří CPU pro start appky
         last = now;
-        var t = reduced ? 1 : Math.min(1, (now - start) / 1600);
-        var reveal = t * t * (3 - 2 * t); // smoothstep
-        var grain = 10 + 38 * reveal; // zrna přibývá s gradientem
-        var d = img.data;
-        var mask = RN.length - 1;
-        rOff = (rOff + 7919) & mask;
-        var k = rOff;
-        for (var i = 0; i < d.length; i += 4) {
-          var a = RN[k]; k = (k + 1) & mask;
-          var b = RN[k]; k = (k + 3) & mask;
-          var shown = a < reveal ? 1 : b * reveal * 0.6;
-          var n = (RN[(k * 13) & mask] - 0.5) * grain;
-          d[i] = base[0] + (grad[i] - base[0]) * shown + n;
-          d[i + 1] = base[1] + (grad[i + 1] - base[1]) * shown + n;
-          d[i + 2] = base[2] + (grad[i + 2] - base[2]) * shown + n;
-          d[i + 3] = 255;
-        }
-        ctx.putImageData(img, 0, 0);
+        var t = reduced ? 0 : (now - start) / 1000;
+        // Stahování ke středu: rychle zkraje, pak se zpomalí (nikdy úplně
+        // nesplyne do jednoho bodu -- barvy se jen víc a víc prolínají).
+        var pull = 1 - 0.55 * (1 - Math.exp(-t / 2.6));
+        var cw = colorCanvas.width, ch = colorCanvas.height, diag = Math.sqrt(cw * cw + ch * ch);
+        cx.globalCompositeOperation = 'source-over';
+        cx.fillStyle = 'rgb(' + palette[0] + ')';
+        cx.fillRect(0, 0, cw, ch);
+        // Sčítání světla se slabšími plochami: v prolnutí se barvy rozzáří
+        // (ne "screen" -- vybledlo do bílé; ne běžné krytí -- zešedlo).
+        cx.globalCompositeOperation = 'lighter';
+        blobs.forEach(function (b, i) {
+          var angle = b.a + b.w * t * 2;
+          var dist = b.d * diag * pull * (1 + 0.06 * Math.sin(t * 1.3 + i));
+          var x = cw / 2 + Math.cos(angle) * dist;
+          var y = ch / 2 + Math.sin(angle) * dist;
+          var r = b.r * diag * (0.85 + 0.15 * pull);
+          var g = cx.createRadialGradient(x, y, 0, x, y, r);
+          g.addColorStop(0, 'rgba(' + palette[b.c] + ',0.5)');
+          g.addColorStop(0.5, 'rgba(' + palette[b.c] + ',0.2)');
+          g.addColorStop(1, 'rgba(' + palette[b.c] + ',0)');
+          cx.fillStyle = g;
+          cx.fillRect(0, 0, cw, ch);
+        });
+        // Ztmavení okrajů -- střed září, jako by se barvy stahovaly dovnitř.
+        cx.globalCompositeOperation = 'source-over';
+        var v = cx.createRadialGradient(cw / 2, ch / 2, 0, cw / 2, ch / 2, diag * 0.6);
+        v.addColorStop(0, 'rgba(11,12,15,0)');
+        v.addColorStop(1, 'rgba(11,12,15,' + (0.35 + 0.25 * (1 - pull)) + ')');
+        cx.fillStyle = v;
+        cx.fillRect(0, 0, cw, ch);
+        // Zrno: stejná dlaždice, každý snímek jinak posunutá (jemný třpyt).
+        gx.setTransform(1, 0, 0, 1, 0, 0);
+        gx.clearRect(0, 0, grainCanvas.width, grainCanvas.height);
+        gx.setTransform(1, 0, 0, 1, -Math.floor(Math.random() * TILE), -Math.floor(Math.random() * TILE));
+        gx.fillStyle = pattern;
+        gx.fillRect(0, 0, grainCanvas.width + TILE, grainCanvas.height + TILE);
       }
       requestAnimationFrame(frame);
       window.addEventListener('resize', build);
 
       window.addEventListener('flutter-first-frame', function () {
-        // Nech animaci aspoň doběhnout, pak prolnout do appky.
-        var wait = Math.max(0, 1200 - (performance.now() - start));
+        // Aspoň chvilku animace, pak prolnout do appky.
+        var wait = Math.max(0, 900 - (performance.now() - start));
         setTimeout(function () {
           splash.style.opacity = '0';
-          setTimeout(function () { running = false; splash.remove(); }, 650);
+          setTimeout(function () { running = false; splash.remove(); }, 750);
         }, wait);
       });
     })();

@@ -1538,6 +1538,34 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
   }
 
+  /// Zavřít přehrávač (stažení mini přehrávače dolů): zastavit, vyprázdnit
+  /// frontu a zapomenout uloženou relaci -- po znovuotevření appky se
+  /// neobnoví. Nastavení (hlasitost, rychlost, opakování...) zůstává.
+  Future<void> dismiss() async {
+    if (state.nowPlaying == null) return;
+    _stopRadio();
+    _restoredIdle = false;
+    _realtime.playbackPause();
+    try {
+      await _player.stop();
+    } catch (_) {}
+    state = AudioPlayerState(
+      isPlaying: false,
+      isBuffering: false,
+      position: Duration.zero,
+      repeatMode: state.repeatMode,
+      speed: state.speed,
+      volume: state.volume,
+      recentlyPlayed: state.recentlyPlayed,
+      normalizationEnabled: state.normalizationEnabled,
+    );
+    _lastPersistKey = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_sessionPrefKey);
+    } catch (_) {}
+  }
+
   Future<void> togglePlayPause() async {
     if (state.nowPlaying == null) return;
     if (_restoredIdle) {

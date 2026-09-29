@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -37,8 +40,13 @@ class PlayerBar extends ConsumerStatefulWidget {
   ConsumerState<PlayerBar> createState() => _PlayerBarState();
 }
 
-class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProviderStateMixin {
+class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateMixin {
   late final AnimationController _swipe = AnimationController.unbounded(vsync: this);
+
+  /// Stažení dolů = zavřít přehrávač (lišta jede za prstem a průhlední).
+  late final AnimationController _down = AnimationController.unbounded(vsync: this);
+  bool _dismissing = false;
+  static const _dismissDistance = 150.0;
   double _swipeWidth = 1;
 
   static const _spring = SpringDescription(mass: 1, stiffness: 420, damping: 38);
@@ -46,6 +54,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
   @override
   void dispose() {
     _swipe.dispose();
+    _down.dispose();
     super.dispose();
   }
 
@@ -63,13 +72,17 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
   void _onPanStart(DragStartDetails _) {
     _panTotal = Offset.zero;
     _panAxis = null;
+    _dismissing = false;
     _swipe.stop();
+    _down.stop();
   }
 
   void _onPanUpdate(DragUpdateDetails d, AudioPlayerState playback, double screenHeight) {
     switch (_panAxis) {
       case Axis.horizontal:
         _onSwipeUpdate(d.delta.dx, playback);
+      case Axis.vertical when _dismissing:
+        _down.value = math.max(0, _down.value + d.delta.dy);
       case Axis.vertical:
         _sheet.dragUpdate(d.delta.dy, screenHeight);
       case null:
@@ -78,6 +91,11 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
         if (_panTotal.dx.abs() > _panTotal.dy.abs() * 1.5) {
           _panAxis = Axis.horizontal;
           _onSwipeUpdate(_panTotal.dx, playback);
+        } else if (_panTotal.dy > 0) {
+          // Dolů = zavřít (nahoru = vytáhnout velký přehrávač).
+          _panAxis = Axis.vertical;
+          _dismissing = true;
+          _down.value = _panTotal.dy;
         } else {
           _panAxis = Axis.vertical;
           _sheet.dragStart(context);
@@ -91,8 +109,24 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
     _panAxis = null;
     if (axis == Axis.horizontal) {
       _onSwipeEnd(d.velocity.pixelsPerSecond.dx, playback);
+    } else if (axis == Axis.vertical && _dismissing) {
+      _dismissing = false;
+      _onDismissEnd(d.velocity.pixelsPerSecond.dy);
     } else if (axis == Axis.vertical) {
       _sheet.dragEnd(d.velocity.pixelsPerSecond.dy, screenHeight);
+    }
+  }
+
+  Future<void> _onDismissEnd(double v) async {
+    final y = _down.value;
+    if (y > 48 || v > 700) {
+      HapticFeedback.lightImpact();
+      await _down.animateWith(SpringSimulation(_spring, y, _dismissDistance, v));
+      if (!mounted) return;
+      await ref.read(audioPlayerControllerProvider.notifier).dismiss();
+      _down.value = 0;
+    } else {
+      await _down.animateWith(SpringSimulation(_spring, y, 0, v));
     }
   }
 
@@ -271,7 +305,17 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with SingleTickerProvider
         return Align(
           alignment: Alignment.bottomCenter,
           heightFactor: 1,
-          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: kFloatingBarMaxWidth), child: bar),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: kFloatingBarMaxWidth),
+            child: AnimatedBuilder(
+              animation: _down,
+              builder: (context, child) => Transform.translate(
+                offset: Offset(0, _down.value),
+                child: Opacity(opacity: (1 - _down.value / _dismissDistance).clamp(0.0, 1.0), child: child),
+              ),
+              child: bar,
+            ),
+          ),
         );
       },
     );

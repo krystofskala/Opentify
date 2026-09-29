@@ -90,7 +90,9 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   double _pixelRatio = 1;
   bool _reducedMotion = false;
 
-  static const _tweenSeconds = 1.2;
+  // Delší přechod -- zrno se přebarvuje zrnko po zrnku (shader), má to být
+  // pozvolné, ne blik.
+  static const _tweenSeconds = 2.8;
   static const _staggerSeconds = 0.06;
 
   double get _now => _clock.elapsedMicroseconds / 1e6;
@@ -136,7 +138,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
       // by jinak pozadí pulzovalo s každým klepnutím.
       final retarget = _tweening(_now);
       _startTween(_paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character));
-      if (!retarget && old.selectedAccent != null && widget.selectedAccent != null && !_reducedMotion) _bloom = 1;
+      if (!retarget && old.selectedAccent != null && widget.selectedAccent != null && !_reducedMotion) _bloom = 0.3;
     }
     if (old.hidden != widget.hidden || old.isPlaying != widget.isPlaying) _wake();
   }
@@ -160,6 +162,10 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   double get _tweenDuration => _reducedMotion ? 0.4 : _tweenSeconds;
   double get _stagger => _reducedMotion ? 0 : _staggerSeconds;
   bool _tweening(double now) => now < _tweenStart + _tweenDuration + _stagger * 5;
+
+  /// Průběh přechodu pro shader (jedna hodnota, bez posunu mezi sloty --
+  /// rozfázování obstará práh každého zrnka).
+  double _mixAt(double now) => _tweenCurve.transform(((now - _tweenStart) / _tweenDuration).clamp(0.0, 1.0));
 
   _Lab _slotAt(int i, double now) {
     final raw = ((now - _tweenStart - i * _stagger) / _tweenDuration).clamp(0.0, 1.0);
@@ -302,13 +308,20 @@ class _ShaderPainter extends CustomPainter {
       ..setFloat(5, state._pixelRatio)
       ..setFloat(6, state._bloom)
       ..setFloat(7, isDark ? 1 : 0);
+    // Nová (cílová) a předchozí paleta + průběh -- shader přebarvuje zrnko
+    // po zrnku (viz shaders/chroma_grain.frag, uMix).
     for (var i = 0; i < 6; i++) {
-      final c = state._slotAt(i, now).toColor();
+      final c = state._to[i].toColor();
+      final p = state._from[i].toColor();
       shader
         ..setFloat(8 + i * 3, c.r)
         ..setFloat(9 + i * 3, c.g)
-        ..setFloat(10 + i * 3, c.b);
+        ..setFloat(10 + i * 3, c.b)
+        ..setFloat(26 + i * 3, p.r)
+        ..setFloat(27 + i * 3, p.g)
+        ..setFloat(28 + i * 3, p.b);
     }
+    shader.setFloat(44, state._mixAt(now));
     canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
   }
 
