@@ -273,6 +273,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   sourceLabel: _librarySourceLabel,
                   onRemoveSelected: (selected) => confirmRemoveFromLibrary(context, selected),
                   removeLabel: 'Odebrat z knihovny',
+                  showFilter: false,
                   trailing: ViewModeToggle(mode: _viewMode, onChanged: (mode) => setState(() => _viewMode = mode)),
                 ),
               ),
@@ -349,13 +350,11 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   }
 }
 
-/// Filtrovací pole nad mřížkou alb/interpretů -- stejný vzhled jako filtr
-/// v `TrackCollectionToolbar`.
-class _GridFilterBar extends StatelessWidget {
-  const _GridFilterBar({required this.hint, required this.onChanged, required this.viewMode, required this.onViewMode});
+/// Přepínač mřížka/seznam nad alby/interprety. Vlastní filtr tu není --
+/// hledá se horním polem "Hledat v knihovně".
+class _GridViewBar extends StatelessWidget {
+  const _GridViewBar({required this.viewMode, required this.onViewMode});
 
-  final String hint;
-  final ValueChanged<String> onChanged;
   final ViewMode viewMode;
   final ValueChanged<ViewMode> onViewMode;
 
@@ -363,22 +362,9 @@ class _GridFilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
-      child: Row(
-        children: [
-          Expanded(
-            // Inline filtr v obsahu -- plochá kapsle, ne sklo (HIG Materials).
-            child: GlassSearchField(
-              hintText: hint,
-              onChanged: onChanged,
-              glass: false,
-              compact: true,
-              showCancel: false,
-              leadingIcon: Symbols.filter_list_rounded,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          ViewModeToggle(mode: viewMode, onChanged: onViewMode),
-        ],
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: ViewModeToggle(mode: viewMode, onChanged: onViewMode),
       ),
     );
   }
@@ -396,29 +382,22 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
   bool get wantKeepAlive => true;
 
   ViewMode _viewMode = ViewMode.grid;
-  String _query = '';
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final albums = ref.watch(_localAlbumsProvider);
     return albums.when(
-      data: (all) {
-        if (all.isEmpty) {
+      data: (items) {
+        if (items.isEmpty) {
           return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba -- spusť sken v Profilu.');
         }
-        final q = foldForSearch(_query.trim());
-        final items = q.isEmpty
-            ? all
-            : all.where((a) => foldForSearch(a.title).contains(q) || foldForSearch(a.artistName).contains(q)).toList();
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localAlbumsProvider),
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: _GridFilterBar(
-                  hint: 'Filtrovat alba…',
-                  onChanged: (value) => setState(() => _query = value),
+                child: _GridViewBar(
                   viewMode: _viewMode,
                   onViewMode: (mode) => setState(() => _viewMode = mode),
                 ),
@@ -494,27 +473,22 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
   bool get wantKeepAlive => true;
 
   ViewMode _viewMode = ViewMode.grid;
-  String _query = '';
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final artists = ref.watch(_localArtistsProvider);
     return artists.when(
-      data: (all) {
-        if (all.isEmpty) {
+      data: (items) {
+        if (items.isEmpty) {
           return const EmptyState(icon: Symbols.person_rounded, message: 'Zatím žádní interpreti -- spusť sken v Profilu.');
         }
-        final q = foldForSearch(_query.trim());
-        final items = q.isEmpty ? all : all.where((a) => foldForSearch(a.name).contains(q)).toList();
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localArtistsProvider),
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: _GridFilterBar(
-                  hint: 'Filtrovat interprety…',
-                  onChanged: (value) => setState(() => _query = value),
+                child: _GridViewBar(
                   viewMode: _viewMode,
                   onViewMode: (mode) => setState(() => _viewMode = mode),
                 ),

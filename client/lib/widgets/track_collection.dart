@@ -144,6 +144,7 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
     this.removeLabel = 'Odebrat',
     this.trailing,
     this.downloadWholeList = false,
+    this.showFilter = true,
   });
 
   final TrackCollectionController controller;
@@ -164,6 +165,10 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
 
   /// Viz `QueueActionBar.downloadWholeList` -- jen album a vlastní playlist.
   final bool downloadWholeList;
+
+  /// `false` v Knihovně -- tam filtr zastane horní "Hledat v knihovně"
+  /// (dvě pole pod sebou působila jako dvě různé věci).
+  final bool showFilter;
 
   @override
   ConsumerState<TrackCollectionToolbar> createState() => _TrackCollectionToolbarState();
@@ -297,7 +302,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
               // Inline filtr v obsahu -- plochá kapsle, ne sklo (HIG Materials).
               // Jen u delších seznamů (Oblíbené, velké playlisty) -- u alba o
               // pár skladbách působil jako nefunkční prvek navíc (živě nahlášeno).
-              if (widget.allTracks.length < _filterMinTracks && c.query.isEmpty)
+              if (!widget.showFilter || (widget.allTracks.length < _filterMinTracks && c.query.isEmpty))
                 const Spacer()
               else
                 Expanded(

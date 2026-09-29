@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../models/artist_bio_model.dart';
 import '../../models/discography_model.dart';
+import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
@@ -85,8 +86,8 @@ class _ArtistBody extends ConsumerWidget {
     final artist = discography.artist;
     final grouped = discography.groupedByType;
 
-    // Žádný "top tracks" endpoint na backendu -- skladby z nejnovějšího
-    // vydání, ať jde interpreta přehrát bez proklikávání přes album.
+    // Skladby z nejnovějšího vydání -- jen záloha, když k interpretovi
+    // nejsou populární skladby (viz `_PopularTracksSection`).
     final sortedReleases = [...discography.releases]
       ..sort((a, b) => (b.releaseDate ?? '').compareTo(a.releaseDate ?? ''));
     final topRelease = sortedReleases.isEmpty ? null : sortedReleases.first;
@@ -130,9 +131,13 @@ class _ArtistBody extends ConsumerWidget {
                   orElse: () => const SizedBox.shrink(),
                 ),
               ),
-              if (topTracks != null)
-                SliverToBoxAdapter(
-                  child: topTracks.when(
+              SliverToBoxAdapter(
+                child: _PopularTracksSection(
+                  artistId: artist.id,
+                  artistName: artist.name,
+                  fallback: topTracks == null
+                      ? const SizedBox.shrink()
+                      : topTracks.when(
                     data: (recordings) {
                       final top = recordings.take(5).toList();
                       if (top.isEmpty) return const SizedBox.shrink();
@@ -181,6 +186,7 @@ class _ArtistBody extends ConsumerWidget {
                     error: (_, __) => const SizedBox.shrink(),
                   ),
                 ),
+              ),
               SliverToBoxAdapter(
                 child: bio.maybeWhen(
                   data: (data) => _RelatedArtistsSection(bio: data),
@@ -204,6 +210,102 @@ class _ArtistBody extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+final artistTopTracksProvider = FutureProvider.autoDispose.family<List<RecordingModel>, String>((ref, artistId) {
+  return ref.watch(catalogRepositoryProvider).getArtistTopTracks(artistId);
+});
+
+/// "8 691 poslechů" -- tisíce oddělené úzkou nezlomitelnou mezerou.
+String _listensLabel(int count) {
+  final digits = count.toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(' ');
+    buffer.write(digits[i]);
+  }
+  final word = count == 1
+      ? 'poslech'
+      : count >= 2 && count <= 4
+          ? 'poslechy'
+          : 'poslechů';
+  return '$buffer $word';
+}
+
+/// "Populární" jako na Spotify/Apple Music -- nejposlouchanější skladby
+/// s počty poslechů komunity ListenBrainz (bez MBID pořadí z Deezeru bez
+/// počtů). Nic nenalezeno / chyba -> `fallback` (z nejnovějšího vydání).
+class _PopularTracksSection extends ConsumerStatefulWidget {
+  const _PopularTracksSection({required this.artistId, required this.artistName, required this.fallback});
+
+  final String artistId;
+  final String artistName;
+  final Widget fallback;
+
+  @override
+  ConsumerState<_PopularTracksSection> createState() => _PopularTracksSectionState();
+}
+
+class _PopularTracksSectionState extends ConsumerState<_PopularTracksSection> {
+  static const _collapsed = 5;
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final tracks = ref.watch(artistTopTracksProvider(widget.artistId));
+    return tracks.when(
+      data: (all) {
+        if (all.isEmpty) return widget.fallback;
+        final shown = _expanded ? all : all.take(_collapsed).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SectionHeader('Populární'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xxs, AppSpacing.md, AppSpacing.xs),
+              child: QueueActionBar(tracks: all, sourceLabel: widget.artistName, artistName: widget.artistName),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: Column(
+                  children: [
+                    for (final (i, recording) in shown.indexed)
+                      TrackTile(
+                        recording: recording,
+                        leadingIndex: i + 1,
+                        subtitle: recording.listenCount == null ? null : _listensLabel(recording.listenCount!),
+                        queueRecordings: all,
+                        artistName: widget.artistName,
+                        sourceLabel: widget.artistName,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (all.length > _collapsed)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: GlassButton(
+                  label: _expanded ? 'Zobrazit méně' : 'Zobrazit víc',
+                  style: GlassButtonStyle.plain,
+                  compact: true,
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                ),
+              ),
+          ],
+        );
+      },
+      loading: () => const Padding(
+        padding: EdgeInsets.only(top: AppSpacing.md),
+        child: SkeletonTrackList(count: 5),
+      ),
+      error: (_, __) => widget.fallback,
     );
   }
 }

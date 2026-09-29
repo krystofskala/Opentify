@@ -70,4 +70,11 @@ class CatalogRepository {
     final json = await _api.getJsonList('/catalog/releases/$releaseId/tracks');
     return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  /// Nejposlouchanější skladby interpreta s `listenCount` (ListenBrainz),
+  /// nebo pořadí oblíbenosti z Deezeru bez počtů.
+  Future<List<RecordingModel>> getArtistTopTracks(String artistId) async {
+    final json = await _api.getJsonList('/catalog/artists/$artistId/top-tracks');
+    return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
 }

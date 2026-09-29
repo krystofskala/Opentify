@@ -61,6 +61,15 @@ async def get_artist(
     return artist.model_dump(by_alias=True)
 
 
+@catalog_router.get("/artists/{artist_id}/top-tracks")
+async def get_artist_top_tracks(artist_id: str, _current=Depends(get_current_user)):
+    """Nejposlouchanější skladby interpreta s počty poslechů (viz
+    app/catalog/top_tracks.py)."""
+    from app.catalog.top_tracks import artist_top_tracks
+
+    return await artist_top_tracks(artist_id)
+
+
 @catalog_router.get("/artists/{artist_id}/rarities")
 async def get_rarities(
     artist_id: str,
