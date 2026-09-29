@@ -180,15 +180,6 @@ class TrackTile extends ConsumerWidget {
           onLongPress: onLongPress,
           onRetry: () => _play(ref, resolvedArtUrl),
           onToggleLike: () => ref.read(likedSongsControllerProvider.notifier).toggle(recording.id),
-          // Skladba nemá vlastní stránku -- název vede na její album (a tam
-          // ji zvýrazní), bez alba na interpreta.
-          onOpenDetail: selectionMode
-              ? null
-              : recording.releaseId != null
-                  ? () => context.push('/releases/${recording.releaseId}?track=${recording.id}')
-                  : recording.artistId != null
-                      ? () => context.push('/artists/${recording.artistId}')
-                      : null,
           onArtistTap: selectionMode ? null : artistTap,
           selectionMode: selectionMode,
           selected: selected,
@@ -262,7 +253,6 @@ class _RowTile extends StatefulWidget {
     required this.onLongPress,
     required this.onRetry,
     required this.onToggleLike,
-    required this.onOpenDetail,
     required this.onArtistTap,
     required this.selectionMode,
     required this.selected,
@@ -282,7 +272,6 @@ class _RowTile extends StatefulWidget {
   final VoidCallback onLongPress;
   final VoidCallback onRetry;
   final VoidCallback onToggleLike;
-  final VoidCallback? onOpenDetail;
   final VoidCallback? onArtistTap;
   final bool selectionMode;
   final bool selected;
@@ -365,11 +354,12 @@ class _RowTileState extends State<_RowTile> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Název vede na detail skladby, zbytek řádku přehrává
-                            // -- stejný vzor jako Spotube/Spotify desktop.
+                            // Název NEvede na album -- při tapnutí na skladbu
+                            // v seznamu se omylem otevíralo album (živě
+                            // nahlášeno). Album je v menu skladby a v přehrávači.
                             _LinkText(
                               text: w.recording.title,
-                              onTap: w.onOpenDetail,
+                              onTap: null,
                               // Na podbarveném řádku `onPrimaryContainer`, ne
                               // `primary` -- u černobílých obalů (monochromní
                               // schéma) byly obě skoro bílé a text zmizel.
