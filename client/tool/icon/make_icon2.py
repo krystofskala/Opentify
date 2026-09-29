@@ -14,6 +14,33 @@ rng = np.random.default_rng(11)
 yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
 
 
+def disc_field():
+    """Pestré, méně fialové: barvy appky ve víru v pořadí magenta -> oranžová
+    -> zelená -> azurová -> fialová (jen kousek)."""
+    import colorsys
+    raw = [(0xE0, 0x35, 0x9A), (0xFF, 0x8A, 0x3D), (0x2B, 0xD6, 0x7B), (0x12, 0xB5, 0xCB), (0x7B, 0x2C, 0xFF)]
+    hls = [colorsys.rgb_to_hls(*(v / 255 for v in c)) for c in raw]
+    mean_l = sum(h[1] for h in hls) / len(hls)
+    soft = [np.array(colorsys.hls_to_rgb(h, mean_l + (l - mean_l) * 0.8, s * 0.85), np.float32) * 255 for h, l, s in hls]
+    u, v = xx / S, yy / S
+    cx, cy = 0.5, 0.5
+    dx, dy = u - cx, v - cy
+    r = np.sqrt(dx * dx + dy * dy)
+    theta = np.arctan2(dy, dx)
+    # Úhlový gradient (jako barevná deska) zkroucený vírem + vlnou.
+    t = (theta / (2 * np.pi) + 0.5 + 0.35 * r + 0.06 * np.sin(2 * np.pi * r * 3)) % 1.0
+    n = len(soft)
+    pos = t * n
+    i0 = np.floor(pos).astype(np.int32) % n
+    i1 = (i0 + 1) % n
+    f = (pos - np.floor(pos))[..., None]
+    f = f * f * (3 - 2 * f)
+    pal = np.stack(soft)
+    out = pal[i0] * (1 - f) + pal[i1] * f
+    img = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+    return img.filter(ImageFilter.GaussianBlur(S * 0.02))
+
+
 def dark_tile():
     top, bottom = np.array([44, 44, 48], np.float32), np.array([20, 20, 23], np.float32)
     t = (yy / S)[..., None]
@@ -38,7 +65,7 @@ def main(out_dir):
     bg = bg * (1 - sh * 0.55)
 
     # Deska = barevný gradient appky (vír) + zrno.
-    colour = np.asarray(mi.swirl(mi.home_field())).astype(np.float32)
+    colour = np.asarray(disc_field()).astype(np.float32)
     colour = colour + rng.normal(0, 22, (S, S, 1))
     # Mírné stínování do kraje desky -- objem.
     r = np.sqrt((xx - c) ** 2 + (yy - c) ** 2) / R
@@ -54,38 +81,16 @@ def main(out_dir):
     grad = 1.0 - ((xx + yy) / (2 * S))
     grad = 0.2 + 0.8 * np.clip((grad - 0.25) / 0.5, 0, 1)
 
-    # Drážky.
-    for frac, alpha in [(0.88, 0.35), (0.76, 0.28), (0.64, 0.22), (0.52, 0.16)]:
+    # Drážky: jemné tmavé kroužky (žádné sklo).
+    for frac in (0.9, 0.8, 0.7):
         ring = Image.new("L", (S, S), 0)
         rr = R * frac
-        ImageDraw.Draw(ring).ellipse((c - rr, c - rr, c + rr, c + rr), outline=255, width=max(2, int(S * 0.004)))
-        paint(np.asarray(ring.filter(ImageFilter.GaussianBlur(0.8))) * grad, (255, 255, 255), alpha)
+        ImageDraw.Draw(ring).ellipse((c - rr, c - rr, c + rr, c + rr), outline=255, width=max(2, int(S * 0.005)))
+        paint(np.asarray(ring.filter(ImageFilter.GaussianBlur(1.0))), (0, 0, 0), 0.18)
 
-    # Skleněná hrana desky.
-    rim = Image.new("L", (S, S), 0)
-    ImageDraw.Draw(rim).ellipse(box, outline=255, width=int(S * 0.008))
-    paint(np.asarray(rim.filter(ImageFilter.GaussianBlur(1.0))) * grad, (255, 255, 255), 0.9)
-    # Lesk přes horní polovinu (sklo).
-    gl = Image.new("L", (S, S), 0)
-    ImageDraw.Draw(gl).ellipse((c - R * 0.92, c - R * 0.96, c + R * 0.92, c + R * 0.2), fill=255)
-    fade = np.clip(1 - (yy - (c - R)) / (R * 1.1), 0, 1)
-    paint(np.asarray(gl.filter(ImageFilter.GaussianBlur(S * 0.02))) * fade, (255, 255, 255), 0.22)
-
-    # Namrzlý skleněný střed + trojúhelník.
-    lr = R * 0.36
-    lab = Image.new("L", (S, S), 0)
-    ImageDraw.Draw(lab).ellipse((c - lr, c - lr, c + lr, c + lr), fill=255)
-    lab = lab.filter(ImageFilter.GaussianBlur(1.0))
-    blurred = np.asarray(Image.fromarray(np.clip(out, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(S * 0.03))).astype(np.float32)
-    milky = blurred * 0.7 + 255 * 0.3
-    la = np.asarray(lab).astype(np.float32)[..., None] / 255
-    out = out * (1 - la) + milky * la
-    lrim = Image.new("L", (S, S), 0)
-    ImageDraw.Draw(lrim).ellipse((c - lr, c - lr, c + lr, c + lr), outline=255, width=max(2, int(S * 0.005)))
-    paint(np.asarray(lrim.filter(ImageFilter.GaussianBlur(0.8))) * grad, (255, 255, 255), 0.9)
-
+    # Velký trojúhelník přehrávání přímo na desce.
     tri = Image.new("L", (S * 2, S * 2), 0)
-    tr = lr * 2 * 0.62
+    tr = R * 1.15  # plátno 2S -> po zmenšení ~0.58 R
     pts = [(S - tr * 0.55, S - tr * 0.78), (S - tr * 0.55, S + tr * 0.78), (S + tr * 0.85, S)]
     ImageDraw.Draw(tri).polygon(pts, fill=255)
     tri = tri.filter(ImageFilter.GaussianBlur(S * 0.03)).point(lambda v: 255 if v > 110 else 0).resize((S, S), Image.LANCZOS)
