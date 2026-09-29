@@ -25,7 +25,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from app.catalog.artwork import fill_artist, fill_release
+from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient
 from app.catalog.deezer_ingest import ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
@@ -709,14 +709,24 @@ class CatalogService:
             # Deezer id jsme ještě neznali -- dohledat album jménem.
             artist = self._session.get(Artist, release.artist_id)
             candidates = await self._dz.search_album(artist.name, release.title) if artist else []
-            wanted = norm(release.title)
+            if artist and clean_album_title(release.title) != release.title:
+                # "Black Currents EP" vs. Deezer "Black Currents".
+                candidates = [*(candidates or []), *await self._dz.search_album(artist.name, clean_album_title(release.title))]
+            wanted = {norm(release.title), norm(clean_album_title(release.title))}
             match = next(
-                (a for a in candidates or [] if norm(a.get("title")) == wanted and norm((a.get("artist") or {}).get("name")) == norm(artist.name)),
+                (
+                    a
+                    for a in candidates or []
+                    if {norm(a.get("title")), norm(clean_album_title(a.get("title") or ""))} & wanted
+                    and norm((a.get("artist") or {}).get("name")) == norm(artist.name)
+                ),
                 None,
             )
             if match is None:
                 return []
             release.deezer_id = str(match["id"])
+            if not release.images and (match.get("cover_xl") or match.get("cover_big")):
+                release.images = [match.get("cover_xl") or match.get("cover_big")]
             self._session.add(release)
             self._session.commit()
         tracks = await self._dz.album_tracks(release.deezer_id)

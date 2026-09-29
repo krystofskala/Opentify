@@ -117,6 +117,14 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
   Widget build(BuildContext context) {
     final release = widget.release;
     final tracks = ref.watch(releaseTracksProvider(release.id));
+    // Tracklist z Deezeru album často teprve dohledá a uloží mu i obal --
+    // bez obalu tedy po načtení tracklistu album jednou načíst znovu (dřív
+    // se obal ukázal až při další návštěvě).
+    ref.listen(releaseTracksProvider(release.id), (previous, next) {
+      if (release.coverImageUrl == null && next.hasValue && !(previous?.hasValue ?? false)) {
+        ref.invalidate(releaseProvider(release.id));
+      }
+    });
     final artist = ref.watch(releaseArtistProvider(release.artistId)).valueOrNull;
     final artistName = artist?.name;
     final recordings = tracks.valueOrNull;

@@ -380,9 +380,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(nowPlaying.recordingId) ?? false),
     );
     final sourceLabel = ref.watch(audioPlayerControllerProvider.select((s) => s.queueSourceLabel));
-    // Vlevo 1 tlačítko, vpravo 2 -- obě strany stejně široké, jinak titulek
-    // "Přehrává se" není opticky uprostřed (živě nahlášeno).
-    const sideWidth = 2 * kMinInteractiveDimension;
+    // Obě strany stejně široké, jinak titulek "Přehrává se" není opticky
+    // uprostřed (živě nahlášeno). Mobil: 1 + 1 tlačítko, PC: 1 + 2.
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final sideWidth = (narrow ? 1 : 2) * kMinInteractiveDimension;
     return Row(
       children: [
         SizedBox(
@@ -402,6 +403,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               const Text(
                 'PŘEHRÁVÁ SE',
                 textAlign: TextAlign.center,
+                maxLines: 1,
+                softWrap: false,
                 style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 2),
               ),
               if (sourceLabel != null)
@@ -420,15 +423,18 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              IconButton(
-                icon: Icon(
-                  isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-                  color: isLiked ? Colors.redAccent : Colors.white,
-                  size: 24,
+              // Mobil: srdíčko je v řádku pod ovládáním -- lišta by jinak
+              // titulek "Přehrává se" zmáčkla do dvou řádků (živě nahlášeno).
+              if (!narrow)
+                IconButton(
+                  icon: Icon(
+                    isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
+                    color: isLiked ? Colors.redAccent : Colors.white,
+                    size: 24,
+                  ),
+                  tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
+                  onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
                 ),
-                tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
-              ),
               IconButton(
                 icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
                 tooltip: 'Další možnosti',
@@ -651,10 +657,28 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
             children: [
               _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback),
               _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback),
+              // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
+              if (MediaQuery.sizeOf(context).width < 600) _likeButton(playback),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _likeButton(AudioPlayerState playback) {
+    final id = playback.nowPlaying!.recordingId;
+    final isLiked = ref.watch(likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(id) ?? false));
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      icon: Icon(
+        isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
+        fill: isLiked ? 1 : 0,
+        color: isLiked ? Colors.redAccent : Colors.white70,
+        size: 22,
+      ),
+      tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
+      onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(id),
     );
   }
 

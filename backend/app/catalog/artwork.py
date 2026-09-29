@@ -20,6 +20,7 @@ backfill smyčka tytéž položky nezkoušela při každém průchodu znovu.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import re
 import unicodedata
@@ -76,19 +77,73 @@ async def _caa_front(kind: str, mbid: str) -> str | None:
     return url if resp.status_code in (301, 302, 307, 308) else None
 
 
-async def resolve_release_cover(release_mbid: str | None, artist_name: str, title: str) -> str | None:
+# " EP", " - Single", "(Deluxe Edition)", " (2011 Remaster)" ... -- Deezer a
+# MusicBrainz tyhle přípony píšou různě, přesné hledání pak nic nenašlo
+# ("Black Currents EP" vs. Deezer "Black Currents").
+_TITLE_SUFFIX = re.compile(
+    r"\s*(?:[-–]\s*)?(?:\(|\[)?\b(?:ep|single|deluxe(?: edition| version)?|expanded edition|"
+    r"(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|bonus tracks?(?: version)?)\b(?:\)|\])?\s*$",
+    re.IGNORECASE,
+)
+
+
+def clean_album_title(title: str) -> str:
+    cleaned = title
+    for _ in range(3):
+        stripped = _TITLE_SUFFIX.sub("", cleaned).strip()
+        if stripped == cleaned or not stripped:
+            break
+        cleaned = stripped
+    return cleaned or title
+
+
+def _titles_match(a: str, b: str) -> bool:
+    return _names_match(a, b) or _names_match(clean_album_title(a), clean_album_title(b))
+
+
+def _titles_close(a: str, b: str) -> bool:
+    """Drobné rozdíly v zápisu ("Black Currents EP" vs. Deezer "Black
+    Current EP") -- podobnost očištěných názvů ≥ 85 %."""
+    na, nb = _normalize(clean_album_title(a)), _normalize(clean_album_title(b))
+    return bool(na) and bool(nb) and difflib.SequenceMatcher(None, na, nb).ratio() >= 0.85
+
+
+async def resolve_release_cover(
+    release_mbid: str | None, artist_name: str, title: str, deezer_id: str | None = None
+) -> str | None:
     if release_mbid:
         for kind in ("release-group", "release"):
             cover = await _caa_front(kind, release_mbid)
             if cover:
                 return cover
+    client = get_deezer_client()
+    if deezer_id:
+        # Deezer id už známe (tracklist ho dohledal) -- obal rovnou.
+        album = await client.album(deezer_id)
+        if album and (album.get("cover_xl") or album.get("cover_big")):
+            return album.get("cover_xl") or album.get("cover_big")
+    artist = primary_artist_name(artist_name)
+    queries = [title]
+    if clean_album_title(title) != title:
+        queries.append(clean_album_title(title))
+    for query in queries:
+        try:
+            albums = await client.search_album(artist, query)
+        except Exception:  # noqa: BLE001 - best-effort
+            continue
+        for album in albums:
+            if _titles_match(album.get("title", ""), title) and _names_match(
+                (album.get("artist") or {}).get("name", ""), artist
+            ):
+                return album.get("cover_xl") or album.get("cover_big")
+    # Poslední pokus: volné hledání a tolerantní shoda názvu (překlepy, "s").
     try:
-        albums = await get_deezer_client().search_album(primary_artist_name(artist_name), title)
-    except Exception:  # noqa: BLE001 - best-effort
-        return None
-    for album in albums:
-        if _names_match(album.get("title", ""), title) and _names_match(
-            (album.get("artist") or {}).get("name", ""), primary_artist_name(artist_name)
+        loose = await client.search_typed("album", f"{artist} {clean_album_title(title)}", 5) or []
+    except Exception:  # noqa: BLE001
+        loose = []
+    for album in loose:
+        if _titles_close(album.get("title", ""), title) and _names_match(
+            (album.get("artist") or {}).get("name", ""), artist
         ):
             return album.get("cover_xl") or album.get("cover_big")
     return None
@@ -173,8 +228,9 @@ async def fill_release(release_id: str, *, force: bool = False) -> bool:
             return False
         artist = session.get(Artist, release.artist_id)
         mbid, title, artist_name = release.mbid, release.title, artist.name if artist else ""
+        deezer_id = release.deezer_id
 
-    cover = await resolve_release_cover(mbid, artist_name, title)
+    cover = await resolve_release_cover(mbid, artist_name, title, deezer_id)
     if cover is None:
         # Poslední záchrana jen pro alba z knihovny: obal vložený v lokálních
         # souborech (u alb bez lokálních souborů vrátí rovnou `None`).
