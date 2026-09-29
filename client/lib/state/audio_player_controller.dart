@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' show Random, pow;
 import 'dart:typed_data' show BytesBuilder;
 
@@ -282,6 +283,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   AudioPlayerController(this._realtime, this._ref) : super(const AudioPlayerState.idle()) {
     _configureSession();
     unawaited(_loadPreferences());
+    unawaited(_restoreSession());
+    addListener(_maybePersistSession, fireImmediately: false);
     _player.playerStateStream.listen(_onPlayerStateChanged);
     _player.positionStream.listen((position) {
       if (_priming) return;
@@ -307,6 +310,99 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   final MediaSessionBridge _mediaSession = MediaSessionBridge();
+
+  // --- Zapamatování přehrávače mezi spuštěními appky ------------------------
+  //
+  // Po zavření a znovuotevření se přehrávač obnoví tam, kde se skončilo
+  // (fronta, skladba, pozice, shuffle/opakování) -- pozastavený; iOS webové
+  // appce nedovolí se po otevření sama rozehrát, play naváže od pozice.
+
+  static const _sessionPrefKey = 'player.session.v1';
+  bool _restoredIdle = false;
+  Duration? _resumeAt;
+  String? _resumeFor;
+  DateTime _lastPersist = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastPersistKey;
+
+  Duration? _takeResume(NowPlayingInfo info) {
+    if (_resumeFor != info.recordingId) return null;
+    final at = _resumeAt;
+    _resumeAt = null;
+    _resumeFor = null;
+    return at;
+  }
+
+  static Map<String, dynamic> _infoToJson(NowPlayingInfo i) => {
+        'id': i.recordingId,
+        't': i.title,
+        if (i.artistName != null) 'a': i.artistName,
+        if (i.artistId != null) 'ai': i.artistId,
+        if (i.releaseId != null) 'r': i.releaseId,
+        if (i.artworkUrl != null) 'art': i.artworkUrl,
+      };
+
+  static NowPlayingInfo _infoFromJson(Map<String, dynamic> j) => NowPlayingInfo(
+        recordingId: j['id'] as String,
+        title: j['t'] as String,
+        artistName: j['a'] as String?,
+        artistId: j['ai'] as String?,
+        releaseId: j['r'] as String?,
+        artworkUrl: j['art'] as String?,
+      );
+
+  /// Uloží stav: hned při změně skladby/fronty, pozici nejvýš jednou za 5 s.
+  void _maybePersistSession(AudioPlayerState s) {
+    final np = s.nowPlaying;
+    if (np == null || _restoredIdle) return;
+    final key = '${np.recordingId}|${s.queueIndex}|${s.queue.length}|${s.shuffleEnabled}|${s.repeatMode.name}';
+    final now = DateTime.now();
+    if (key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
+    _lastPersistKey = key;
+    _lastPersist = now;
+    final data = jsonEncode({
+      'queue': [for (final q in s.queue) _infoToJson(q)],
+      'index': s.queueIndex,
+      'positionMs': s.position.inMilliseconds,
+      'source': s.queueSourceLabel,
+      'context': _queueContext,
+      'shuffle': s.shuffleEnabled,
+      'shuffleOrder': s.shuffleOrder,
+      'repeat': s.repeatMode.name,
+    });
+    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_sessionPrefKey, data)).then<void>(
+          (_) {},
+          onError: (Object _) {},
+        ));
+  }
+
+  Future<void> _restoreSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_sessionPrefKey);
+      if (raw == null || state.nowPlaying != null) return;
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      final queue = [for (final e in (j['queue'] as List<dynamic>)) _infoFromJson(e as Map<String, dynamic>)];
+      if (queue.isEmpty) return;
+      final index = (j['index'] as int).clamp(0, queue.length - 1);
+      _queueContext = j['context'] as String?;
+      state = state.copyWith(
+        nowPlaying: queue[index],
+        queue: queue,
+        queueIndex: index,
+        position: Duration(milliseconds: j['positionMs'] as int? ?? 0),
+        queueSourceLabel: j['source'] as String?,
+        shuffleEnabled: j['shuffle'] as bool? ?? false,
+        shuffleOrder: (j['shuffleOrder'] as List<dynamic>?)?.cast<int>(),
+        repeatMode: RepeatMode.values.firstWhere((m) => m.name == j['repeat'], orElse: () => RepeatMode.off),
+        isPlaying: false,
+        isBuffering: false,
+      );
+      _restoredIdle = true;
+      unawaited(_resolveArtworkAndAccent(queue[index]));
+    } catch (e) {
+      debugPrint('AudioPlayerController: obnova přehrávače selhala: $e');
+    }
+  }
 
   /// Tlačítka zamykací obrazovky. Znovu i po spuštění rádia -- Safari je při
   /// změně zdroje (živý stream) přepíše na ±10 s.
@@ -666,6 +762,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
+    _restoredIdle = false;
+    _resumeAt = null;
+    _resumeFor = null;
     _queueContext = _currentRoute();
     _primeAudioElement(items[index].recordingId);
     state = AudioPlayerState(
@@ -1156,6 +1255,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   Future<void> _playAtIndex(int index) async {
     final info = state.queue[index];
+    _restoredIdle = false;
     _primeAudioElement(info.recordingId);
     state = AudioPlayerState(
       nowPlaying: info,
@@ -1297,7 +1397,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // `_startRadio`). Ještě se stahující soubor (progresivní přehrávání) jde
     // postaru -- rádio řadí jen hotové skladby.
     if (_radioMode && !isProgressive) {
-      streamUrl = _startRadio(info, Duration.zero);
+      streamUrl = _startRadio(info, _takeResume(info) ?? Duration.zero);
     } else {
       _stopRadio();
     }
@@ -1319,7 +1419,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // často až při skutečném přehrávání, ne při `setUrl`) -- bez vlastního
       // `catchError` by to byla jen nezachycená výjimka nikde neviditelná
       // v UI, ne chyba v `state.error`.
-      final durationFuture = _player.setUrl(streamUrl);
+      final resumeAt = _radioActive ? null : _takeResume(info);
+      final durationFuture = _player.setUrl(streamUrl, initialPosition: resumeAt);
       unawaited(_player.play().catchError((Object e) {
         debugPrint('AudioPlayerController: play() selhalo pro ${info.recordingId}: $e');
         _handleStreamFailure(info, e, isProgressive: isProgressive);
@@ -1439,6 +1540,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   Future<void> togglePlayPause() async {
     if (state.nowPlaying == null) return;
+    if (_restoredIdle) {
+      // Obnovený přehrávač po znovuotevření appky -- zdroj ještě není
+      // načtený; spustit skladbu od uložené pozice.
+      _restoredIdle = false;
+      _resumeAt = state.position;
+      _resumeFor = state.nowPlaying!.recordingId;
+      await _playAtIndex(state.queueIndex);
+      return;
+    }
     if (_player.playing) {
       await _player.pause();
       _realtime.playbackPause();
