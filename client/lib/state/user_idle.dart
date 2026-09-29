@@ -9,13 +9,22 @@ class UserIdle {
   const UserIdle._();
 
   static const idleAfter = Duration(seconds: 5);
+
+  /// Delší nečinnost -- hlavička bez hrající hudby (uživatel si nejspíš
+  /// prohlíží stránku, fotka nemá mizet tak brzy).
+  static const idleLongAfter = Duration(seconds: 10);
   static final ValueNotifier<bool> idle = ValueNotifier(false);
+  static final ValueNotifier<bool> idleLong = ValueNotifier(false);
   static Timer? _timer;
+  static Timer? _longTimer;
 
   static void poke() {
     if (idle.value) idle.value = false;
+    if (idleLong.value) idleLong.value = false;
     _timer?.cancel();
+    _longTimer?.cancel();
     _timer = Timer(idleAfter, () => idle.value = true);
+    _longTimer = Timer(idleLongAfter, () => idleLong.value = true);
   }
 }
 

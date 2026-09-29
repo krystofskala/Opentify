@@ -28,10 +28,14 @@ class AppBackground extends StatefulWidget {
     required this.brightness,
     required this.isPlaying,
     required this.hidden,
+    this.fineGrain = false,
     required this.child,
   });
 
   final Color? selectedAccent;
+
+  /// Profil › Vzhled › "Jemnější zrno" (slabší filmové zrno).
+  final bool fineGrain;
 
   /// Doplňkové tóny z obalu (`effectiveSupportTonesProvider`) -- odstíny
   /// vedlejších slotů monochromatické palety; prázdné = syntetický posun.
@@ -317,7 +321,7 @@ class _ShaderPainter extends CustomPainter {
       Paint()..filterQuality = FilterQuality.low,
     );
     final dark = state.widget.brightness == Brightness.dark;
-    final grain = _FallbackPainter.grainFor(size, state._pixelRatio, dark);
+    final grain = _FallbackPainter.grainFor(size, state._pixelRatio, dark, state.widget.fineGrain);
     canvas.drawImageRect(
       grain,
       Rect.fromLTWH(0, 0, grain.width.toDouble(), grain.height.toDouble()),
@@ -445,7 +449,7 @@ class _FallbackPainter extends CustomPainter {
       canvas.drawRect(Offset.zero & size, Paint()..shader = _vignette);
     }
 
-    final grain = grainFor(size, state._pixelRatio, dark);
+    final grain = grainFor(size, state._pixelRatio, dark, state.widget.fineGrain);
     canvas.drawImageRect(
       grain,
       Rect.fromLTWH(0, 0, grain.width.toDouble(), grain.height.toDouble()),
@@ -455,12 +459,12 @@ class _FallbackPainter extends CustomPainter {
   }
 
   /// Předpočítaná vrstva zrna (sdílí ji i shaderová cesta).
-  static ui.Image grainFor(Size size, double dpr, bool dark) {
-    final key = '${size.width.round()}x${size.height.round()}@$dpr/$dark';
+  static ui.Image grainFor(Size size, double dpr, bool dark, [bool fine = false]) {
+    final key = '${size.width.round()}x${size.height.round()}@$dpr/$dark/$fine';
     if (_grain == null || _grainKey != key) {
       _grain?.dispose();
       _grainKey = key;
-      _grain = _buildGrain(size, dpr, dark);
+      _grain = _buildGrain(size, dpr, dark, fine);
     }
     return _grain!;
   }
@@ -468,14 +472,15 @@ class _FallbackPainter extends CustomPainter {
   /// Zrno ve fyzických pixelech (buňky ~1.6 px), trojúhelníkové rozdělení
   /// jasu, jednou za velikost okna -- každý snímek pak jen jedno vykreslení
   /// textury. Tmavý režim silnější (±14 %), světlý jemnější (±9 %).
-  static ui.Image _buildGrain(Size size, double dpr, bool dark) {
+  static ui.Image _buildGrain(Size size, double dpr, bool dark, bool fine) {
     const cell = 1.6;
     final cols = (size.width * dpr / cell).ceil();
     final rows = (size.height * dpr / cell).ceil();
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final random = math.Random(7);
-    final strength = dark ? 0.14 : 0.09;
+    // "Jemnější zrno" (Profil): ~0.08 místo 0.14 (návrh z design auditu).
+    final strength = fine ? (dark ? 0.08 : 0.05) : (dark ? 0.14 : 0.09);
     final buckets = List.generate(6, (_) => <double>[]);
     for (var y = 0; y < rows; y++) {
       for (var x = 0; x < cols; x++) {

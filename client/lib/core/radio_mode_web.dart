@@ -22,3 +22,11 @@ bool shouldUseRadioStream() {
     return false;
   }
 }
+
+bool pageVisible() {
+  try {
+    return web.document.visibilityState == 'visible';
+  } catch (_) {
+    return true;
+  }
+}

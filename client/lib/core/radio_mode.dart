@@ -10,3 +10,7 @@ bool shouldUseRadioStream() => impl.shouldUseRadioStream();
 /// stahuje systémový přehrávač i na pozadí; obyčejný MP3 stream iOS po
 /// odchodu z appky přestal stahovat a přehrávání se zastavilo.
 bool supportsNativeHls() => impl.supportsNativeHls();
+
+/// Je stránka vidět (ne zamčený telefon / appka na pozadí)? Na webu přímo
+/// z `document.visibilityState` -- Flutterův lifecycle to na iOS nemusí hlásit.
+bool pageVisible() => impl.pageVisible();

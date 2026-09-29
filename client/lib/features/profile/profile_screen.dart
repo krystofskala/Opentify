@@ -8,6 +8,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/library_repository.dart';
 import '../../state/providers.dart';
+import '../../state/grain_controller.dart';
 import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
@@ -267,6 +268,28 @@ class _AppearanceCard extends ConsumerWidget {
               GlassSegment(value: ThemeMode.system, label: 'Systém', icon: Symbols.brightness_auto_rounded),
               GlassSegment(value: ThemeMode.light, label: 'Světlý', icon: Symbols.light_mode_rounded),
               GlassSegment(value: ThemeMode.dark, label: 'Tmavý', icon: Symbols.dark_mode_rounded),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Jemnější zrno', style: theme.textTheme.titleSmall),
+                    Text(
+                      'Slabší zrnitost pozadí, klidnější plochy.',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              GlassSwitch(
+                value: ref.watch(fineGrainProvider),
+                semanticLabel: 'Jemnější zrno',
+                onChanged: ref.read(fineGrainProvider.notifier).set,
+              ),
             ],
           ),
         ],

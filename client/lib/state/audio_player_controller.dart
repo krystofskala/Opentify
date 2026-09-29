@@ -548,6 +548,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   // playlist a čeká) -> nový stream. Živě: po 2 h pauzy spuštění ze
   // zamčené obrazovky přehrálo 5 s a stálo, pozice 5378 ms 15 minut.
   Duration? _radioStallRaw;
+
+  /// Appka na obrazovce (ne zamčený telefon / pozadí). Jen tehdy smí rádio
+  /// navázat novým streamem -- iOS jinak nový zdroj zvuku zablokuje.
+  bool get _appVisible {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return pageVisible() && (lifecycle == null || lifecycle == AppLifecycleState.resumed);
+  }
   DateTime _radioStallSince = DateTime.now();
   DateTime? _radioPausedAt;
   Timer? _radioTick;
@@ -649,7 +656,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (sid == null || !_player.playing) return;
     final raw = _player.position;
     final now = DateTime.now();
-    if (raw > Duration.zero && raw == _radioStallRaw) {
+    if (!_appVisible) {
+      _radioStallRaw = null; // na pozadí nový stream nejde (iOS) -- nehlídat
+    } else if (raw > Duration.zero && raw == _radioStallRaw) {
       if (now.difference(_radioStallSince) > const Duration(seconds: 8) &&
           now.difference(_radioLastRestart) > const Duration(seconds: 15)) {
         debugPrint('AudioPlayerController: rádio stojí na $raw, navazuji novým streamem');
@@ -1607,6 +1616,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (_player.playing) {
       await _player.pause();
       _realtime.playbackPause();
+    } else if (_radioActive && !_appVisible) {
+      // Zamčená obrazovka / appka na pozadí: iOS webové appce NEdovolí
+      // spustit nový zdroj zvuku -- jen pokračovat ve stávajícím streamu
+      // (živě: po pauze ze zamčené obrazovky nešlo znovu pustit). Zastaralý
+      // stream po návratu do appky vyřeší hlídač v `_pollRadio`.
+      _radioPausedAt = null;
+      await _player.play();
+      _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
     } else if (_radioActive) {
       // Po pauze navázat novým streamem (starý mohl vypršet / Safari drží
       // zastaralý buffer živého streamu).
@@ -1655,7 +1672,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _radioPausedAt ??= DateTime.now();
       } else if (_radioPausedAt case final pausedAt?) {
         _radioPausedAt = null;
-        if (DateTime.now().difference(pausedAt) > const Duration(minutes: 1)) {
+        // Jen s appkou na obrazovce -- na zamčené by nový stream iOS zakázal.
+        if (_appVisible && DateTime.now().difference(pausedAt) > const Duration(minutes: 1)) {
           debugPrint('AudioPlayerController: rádio po dlouhé pauze, nový stream');
           _restartRadio(state.position);
           return;

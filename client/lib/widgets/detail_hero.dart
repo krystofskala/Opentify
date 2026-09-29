@@ -477,7 +477,7 @@ class _HeroFlexible extends StatelessWidget {
   }
 }
 
-/// "Ambientní" hlavička: při přehrávání a ~5 s bez doteku se fotka
+/// "Ambientní" hlavička: ~5 s bez doteku při přehrávání (~10 s bez hudby) se fotka
 /// pomalu rozplyne do živého pozadí (zůstane jen slabá stopa), dotek ji
 /// hned vrátí. Rozvržení se nehýbe -- mizí jen obraz, ne místo.
 class _AmbientFade extends ConsumerWidget {
@@ -491,11 +491,11 @@ class _AmbientFade extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (!enabled) return child;
+    // S hudbou po ~5 s, bez ní po ~10 s (stránku si nejspíš prohlížíš).
     final playing = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
-    if (!playing) return child;
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     return ValueListenableBuilder<bool>(
-      valueListenable: UserIdle.idle,
+      valueListenable: playing ? UserIdle.idle : UserIdle.idleLong,
       builder: (context, idle, child) {
         final target = idle ? _trace : 1.0;
         return TweenAnimationBuilder<double>(

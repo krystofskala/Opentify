@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'routing/app_router.dart';
 import 'state/audio_player_controller.dart';
+import 'state/grain_controller.dart';
 import 'state/theme_mode_controller.dart';
 import 'state/user_idle.dart';
 import 'theme/accent_color.dart' show accentTransitionCurve, accentTransitionDuration;
@@ -52,6 +53,7 @@ class OpentifyApp extends ConsumerWidget {
             brightness: Theme.of(context).brightness,
             isPlaying: isPlaying,
             hidden: false,
+            fineGrain: ref.watch(fineGrainProvider),
             // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
             // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
             child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
