@@ -108,6 +108,14 @@ class BrowseRepository {
 
   Future<BrowsePage> page(String categoryId) async => BrowsePage.fromJson(await _api.getJson('/browse/$categoryId'));
 
+  /// "Tvůj mix" kategorie podle poslechů; `null`, když na něj nemáš v téhle
+  /// náladě/žánru dost skladeb. Poprvé za den se skládá pár sekund.
+  Future<HomePlaylistCard?> mix(String categoryId) async {
+    final json = await _api.getJson('/browse/$categoryId/mix');
+    final playlist = json['playlist'];
+    return playlist == null ? null : HomePlaylistCard.fromJson(playlist as Map<String, dynamic>);
+  }
+
   /// Převezme Deezer playlist do katalogu a vrátí id našeho playlistu.
   Future<String> openDeezerPlaylist(String deezerId) async {
     final json = await _api.postJson('/browse/deezer-playlists/$deezerId');

@@ -56,6 +56,11 @@ final browsePageProvider = FutureProvider.autoDispose.family<BrowsePage, String>
   return ref.watch(browseRepositoryProvider).page(id);
 });
 
+/// "Tvůj mix · X" na stránce kategorie (viz backend app/home/category_mixes.py).
+final browseMixProvider = FutureProvider.autoDispose.family<HomePlaylistCard?, String>((ref, id) {
+  return ref.watch(browseRepositoryProvider).mix(id);
+});
+
 final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
   return ref.watch(homeRepositoryProvider).home();
 });

@@ -14,6 +14,7 @@ class HomePlaylistCard {
     this.section,
     this.coverUrls = const [],
     this.badge,
+    this.accentColor,
   });
 
   final String id;
@@ -25,6 +26,16 @@ class HomePlaylistCard {
   final String? section;
   final List<String> coverUrls;
   final String? badge;
+
+  /// Barva kategorie u "Tvůj mix · X" (`#RRGGBB`).
+  final String? accentColor;
+
+  /// "Rock" z "Tvůj mix · Rock" -- mix kategorie Procházet má vlastní obal.
+  String? get categoryMixLabel {
+    if (!(source ?? '').startsWith('personal:category-mix:')) return null;
+    final i = title.indexOf('· ');
+    return i < 0 ? title : title.substring(i + 2);
+  }
 
   /// Žánry a nálady bez skutečné mozaiky dostanou tónovaný zrnitý gradient.
   bool get prefersGradient => kind == 'GENRE';
@@ -48,6 +59,7 @@ class HomePlaylistCard {
         section: json['section'] as String?,
         coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
         badge: json['badge'] as String?,
+        accentColor: json['accentColor'] as String?,
       );
 }
 

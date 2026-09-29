@@ -14,6 +14,7 @@ import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/net_image.dart';
 import '../../widgets/player_bar.dart';
+import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import 'browse_grid.dart' show browseIcon;
@@ -119,6 +120,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
             ),
           ),
         ),
+        SliverToBoxAdapter(child: _YourMix(categoryId: c.id)),
         if (data.playlists.isNotEmpty) ...[
           const SliverToBoxAdapter(child: SectionHeader('Playlisty')),
           SliverPadding(
@@ -203,6 +205,57 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
             child: Text('Pro tuhle kategorii teď nic nemáme.', style: theme.textTheme.bodyMedium),
           ),
       ],
+    );
+  }
+}
+
+/// "Pro tebe": mix kategorie z tvých poslechů. Poprvé za den se skládá pár
+/// sekund (načítá se zvlášť, stránka na něj nečeká); bez dost tvých skladeb
+/// v kategorii se sekce vůbec neukáže.
+class _YourMix extends ConsumerWidget {
+  const _YourMix({required this.categoryId});
+  final String categoryId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mix = ref.watch(browseMixProvider(categoryId));
+    final theme = Theme.of(context);
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: mix.when(
+        data: (card) => card == null
+            ? const SizedBox(width: double.infinity)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SectionHeader('Pro tebe'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    child: PlaylistCardView(
+                      card: card,
+                      width: 170,
+                      onTap: () => context.push('/playlists/${card.id}'),
+                    ),
+                  ),
+                ],
+              ),
+        loading: () => Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+          child: Row(
+            children: [
+              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'Skládám tvůj mix…',
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+        error: (_, __) => const SizedBox(width: double.infinity),
+      ),
     );
   }
 }

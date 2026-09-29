@@ -35,6 +35,8 @@ class PlaylistCardOut(CamelModel):
     item_count: int
     generated_at: datetime | None = None
     badge: str | None = None
+    # Barva kategorie Procházet u "Tvůj mix · X" -- obal v barvě kategorie.
+    accent_color: str | None = None
 
 
 class AlbumCardOut(CamelModel):
@@ -64,6 +66,9 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:discover-weekly", timedelta(hours=1), pm.build_discover_weekly))
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
+    from app.home import category_mixes as cm
+
+    registry.append(("personal:category-mixes", timedelta(hours=1), cm.build_home_category_mixes))
     registry.append(("lb:fresh-releases", g.DAILY_TTL, g.build_new_releases))
     registry.append(("apple:rss:albums", g.DAILY_TTL, g.build_top_albums))
     for spec in g._genre_specs():
@@ -131,6 +136,7 @@ async def home_refresh_loop(check_every_s: float = 15 * 60) -> None:
 
 _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
+    ("category_mixes", "Tvoje žánry", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),
     ("new_releases", "Nová vydání", "album_cards"),
     ("top_albums", "Populární alba", "album_cards"),
@@ -171,8 +177,19 @@ def _fallback_covers(session: Session, playlist_id: str) -> list[str]:
     return g._covers_for(list(ids))
 
 
+def _accent_for(source: str | None) -> str | None:
+    prefix = "personal:category-mix:"
+    if not source or not source.startswith(prefix):
+        return None
+    from app.browse import get_category
+
+    category = get_category(source[len(prefix):])
+    return category.color if category else None
+
+
 def _card(session: Session, playlist: Playlist) -> PlaylistCardOut:
     return PlaylistCardOut(
+        accent_color=_accent_for(playlist.source),
         id=playlist.id,
         title=playlist.title,
         description=playlist.description,
@@ -231,6 +248,12 @@ def build_home(user_id: str) -> dict[str, Any]:
         by_section.get("mixes", []).sort(key=_mix_order)
         chart_order = list(_BADGES)
         by_section.get("charts", []).sort(key=lambda p: chart_order.index(p.source) if p.source in chart_order else 99)
+        from app.home import category_mixes as cm
+
+        picks = [f"personal:category-mix:{p}" for p in cm.picks_order()]
+        by_section["category_mixes"] = sorted(
+            (p for p in by_section.get("category_mixes", []) if p.source in picks), key=lambda p: picks.index(p.source)
+        )
         genre_order = [f"deezer:chart:genre:{gid}" for gid, _ in g.GENRES]
         by_section.get("genres", []).sort(key=lambda p: genre_order.index(p.source) if p.source in genre_order else 99)
 

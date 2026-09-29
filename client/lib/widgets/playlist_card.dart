@@ -23,6 +23,7 @@ class PlaylistArtwork extends StatelessWidget {
     this.icon = Symbols.queue_music_rounded,
     this.showTitle = true,
     this.dailyMixNumber,
+    this.categoryMix,
   });
 
   final String title;
@@ -34,10 +35,17 @@ class PlaylistArtwork extends StatelessWidget {
   /// Denní mix: vlastní obal místo mozaiky (`coverUrls` = fotky interpretů).
   final int? dailyMixNumber;
 
+  /// "Tvůj mix · Rock": stejný obal jako Denní mix, v barvě kategorie a s
+  /// jejím názvem místo čísla.
+  final ({String label, Color color})? categoryMix;
+
   @override
   Widget build(BuildContext context) {
     if (dailyMixNumber != null) {
       return _DailyMixArtwork(number: dailyMixNumber!, artistPhotos: coverUrls, compact: !showTitle);
+    }
+    if (categoryMix case final mix?) {
+      return _DailyMixArtwork(label: mix.label, color: mix.color, artistPhotos: coverUrls, compact: !showTitle);
     }
     if (gradient || coverUrls.isEmpty) return _GradientArtwork(title: title, icon: icon, showTitle: showTitle);
     if (coverUrls.length < 4) return ArtworkImage(url: coverUrls.first, icon: icon);
@@ -112,9 +120,12 @@ class _GradientArtwork extends StatelessWidget {
 /// vrstva podle glass_tokens.dart (tónová barva + expresivní tvary, žádné
 /// sklo).
 class _DailyMixArtwork extends StatelessWidget {
-  const _DailyMixArtwork({required this.number, required this.artistPhotos, required this.compact});
+  const _DailyMixArtwork({this.number, this.label, this.color, required this.artistPhotos, required this.compact});
 
-  final int number;
+  /// Denní mix (číslo) nebo mix kategorie (`label` + `color`).
+  final int? number;
+  final String? label;
+  final Color? color;
   final List<String> artistPhotos;
   final bool compact;
 
@@ -123,9 +134,12 @@ class _DailyMixArtwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hue = _hues[(number - 1) % _hues.length];
-    final a = HSLColor.fromAHSL(1, hue, 0.66, 0.52).toColor();
-    final b = HSLColor.fromAHSL(1, (hue + 35) % 360, 0.72, 0.26).toColor();
+    final base = color != null ? HSLColor.fromColor(color!) : null;
+    final hue = base?.hue ?? _hues[((number ?? 1) - 1) % _hues.length];
+    final a = HSLColor.fromAHSL(1, hue, base == null ? 0.66 : base.saturation.clamp(0.25, 0.7), 0.52).toColor();
+    final b =
+        HSLColor.fromAHSL(1, (hue + 35) % 360, base == null ? 0.72 : base.saturation.clamp(0.3, 0.75), 0.26).toColor();
+    final word = label;
     return LayoutBuilder(
       builder: (context, constraints) {
         final side = constraints.biggest.shortestSide;
@@ -145,7 +159,7 @@ class _DailyMixArtwork extends StatelessWidget {
                 left: side * 0.08,
                 top: side * 0.07,
                 child: Text(
-                  'DENNÍ MIX',
+                  word == null ? 'DENNÍ MIX' : 'TVŮJ MIX',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: Colors.white.withValues(alpha: 0.9),
                     fontWeight: FontWeight.w800,
@@ -153,20 +167,39 @@ class _DailyMixArtwork extends StatelessWidget {
                   ),
                 ),
               ),
-            Positioned(
-              left: side * 0.07,
-              bottom: side * (compact ? 0.04 : 0.02),
-              child: Text(
-                '$number',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: side * (compact ? 0.62 : 0.42),
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                  shadows: const [Shadow(blurRadius: 10, color: Colors.black38)],
+            if (word != null)
+              Positioned(
+                left: side * 0.07,
+                right: side * 0.07,
+                top: compact ? side * 0.1 : side * 0.2,
+                child: Text(
+                  word,
+                  maxLines: compact ? 3 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: side * (compact ? 0.2 : 0.15),
+                    fontWeight: FontWeight.w900,
+                    height: 1.05,
+                    shadows: const [Shadow(blurRadius: 10, color: Colors.black38)],
+                  ),
+                ),
+              )
+            else
+              Positioned(
+                left: side * 0.07,
+                bottom: side * (compact ? 0.04 : 0.02),
+                child: Text(
+                  '$number',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: side * (compact ? 0.62 : 0.42),
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                    shadows: const [Shadow(blurRadius: 10, color: Colors.black38)],
+                  ),
                 ),
               ),
-            ),
             for (var i = 0; i < photos.length; i++)
               Positioned(
                 right: side * 0.06 + i * avatar * 0.6,
@@ -253,6 +286,7 @@ class PlaylistCardView extends StatelessWidget {
                         gradient: card.prefersGradient,
                         icon: _iconFor(card.kind),
                         dailyMixNumber: card.dailyMixNumber,
+                        categoryMix: categoryMixOf(card),
                       ),
                       if (card.badge != null)
                         Positioned(left: AppSpacing.xs, top: AppSpacing.xs, child: RankBadge(label: card.badge!)),
@@ -275,6 +309,14 @@ class PlaylistCardView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Obal "Tvůj mix · X" -- název a barva kategorie z karty.
+({String label, Color color})? categoryMixOf(HomePlaylistCard card) {
+  final label = card.categoryMixLabel;
+  if (label == null) return null;
+  final hex = (card.accentColor ?? '#6A5ACD').replaceFirst('#', '');
+  return (label: label, color: Color(int.tryParse('FF$hex', radix: 16) ?? 0xFF6A5ACD));
 }
 
 IconData _iconFor(String kind) => switch (kind) {
@@ -340,6 +382,7 @@ class QuickPickTile extends StatelessWidget {
                   icon: _iconFor(card.kind),
                   showTitle: false,
                   dailyMixNumber: card.dailyMixNumber,
+                  categoryMix: categoryMixOf(card),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),

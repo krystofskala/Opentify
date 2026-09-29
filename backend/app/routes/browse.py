@@ -26,6 +26,19 @@ async def category(category_id: str):
     return await browse.category_page(c)
 
 
+@browse_router.get("/{category_id}/mix")
+async def category_mix(category_id: str):
+    """"Tvůj mix" kategorie podle poslechů -- `playlist: null`, když na mix
+    není dost tvých skladeb v téhle náladě/žánru."""
+    from app.home import category_mixes as cm
+
+    c = browse.get_category(category_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="kategorie neexistuje")
+    playlist_id = await cm.build_category_mix(c)
+    return {"playlist": cm.playlist_card(playlist_id) if playlist_id else None}
+
+
 @browse_router.post("/deezer-playlists/{deezer_id}")
 async def open_playlist(deezer_id: str, title: str | None = None):
     """Otevřít Deezer playlist z kategorie -- převezme ho do katalogu a vrátí
