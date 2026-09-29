@@ -198,6 +198,20 @@ class Listen(SQLModel, table=True):
     lb_error: str | None = None
 
 
+class ListenLater(SQLModel, table=True):
+    """"Poslechnout později" -- skladba, album nebo interpret, na které teď
+    není nálada. Po poslechnutí se samo označí `listened_at` (viz
+    app/listen_later.py) a přesune do "Poslechnuto"."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    kind: str  # track | album | artist
+    target_id: str = Field(index=True)  # recording / release / artist id
+    note: str | None = None
+    added_at: datetime = Field(default_factory=utcnow, index=True)
+    listened_at: datetime | None = Field(default=None, index=True)
+
+
 class HomeSnapshot(SQLModel, table=True):
     """Poslední úspěšný výsledek jednoho generátoru Domů (seznam id alb pro
     "Nové vydání", čas posledního úspěšného běhu...) -- v DB, ne v Redisu, ať

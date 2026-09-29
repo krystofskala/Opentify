@@ -13,6 +13,7 @@ import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/playlist_card.dart' show PlaylistArtwork;
 import 'liked_songs_screen.dart' show LikedSongsCard;
+import 'listen_later_screen.dart' show ListenLaterCard;
 import '../../widgets/remove_from_library.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -592,9 +593,16 @@ class _PlaylistsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlists = ref.watch(myPlaylistsProvider);
+    // Připnuté nahoře: Oblíbené + Poslechnout později.
     const liked = Padding(
       padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.xs),
-      child: LikedSongsCard(),
+      child: Column(
+        children: [
+          LikedSongsCard(),
+          SizedBox(height: AppSpacing.sm),
+          ListenLaterCard(),
+        ],
+      ),
     );
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(

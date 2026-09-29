@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../library/listen_later_screen.dart' show ListenLaterReminder;
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/home_repository.dart';
@@ -56,6 +58,8 @@ class HomeScreen extends ConsumerWidget {
                 ),
               // Úplně nahoře: na co navázat (poslední poslouchaná alba).
               if (recent.isNotEmpty) _ContinueListening(items: recent),
+              // Něco, co v "Poslechnout později" leží přes 2 týdny.
+              const ListenLaterReminder(),
               for (final section in sections) _HomeSectionView(section: section),
             ],
           ),
@@ -216,7 +220,7 @@ class _HomeSectionView extends StatelessWidget {
               trailing: section.id == 'years'
                   ? TextButton.icon(
                       onPressed: () => context.push('/wrapped'),
-                      icon: const Icon(Symbols.auto_awesome_rounded, size: 18),
+                      icon: const Icon(Symbols.equalizer_rounded, size: 18),
                       label: const Text('Wrapped'),
                     )
                   : null,

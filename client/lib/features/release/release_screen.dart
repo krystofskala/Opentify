@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/share_link.dart';
+import '../../data/listen_later_repository.dart' show LaterKind;
+import '../../state/listen_later_controller.dart';
 import '../../models/artist_model.dart';
 import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
@@ -132,6 +134,8 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     final recordings = tracks.valueOrNull;
     final ShareTarget albumShare = (kind: 'releases', id: release.id);
     ref.watch(shareLinkProvider(albumShare)); // přednačíst (Safari sdílí jen hned po klepnutí)
+    final albumLater =
+        ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.album, release.id) != null));
 
     return ScreenAccent(
       imageUrl: release.coverImageUrl,
@@ -162,6 +166,11 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                   HeroMetaItem(Symbols.schedule_rounded, heroTotalDuration(recordings.map((r) => r.durationMs))!),
               ],
               actions: [
+                HeroAction(
+                  icon: albumLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
+                  tooltip: albumLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',
+                  onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.album, release.id),
+                ),
                 // Univerzální odkaz na album (album.link) -- načtený dopředu.
                 HeroAction(
                   icon: Symbols.ios_share_rounded,

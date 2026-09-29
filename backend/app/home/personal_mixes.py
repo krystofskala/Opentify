@@ -30,6 +30,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from app import listen_later
 from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.db import engine
@@ -362,6 +363,18 @@ def _clear_playlists(owner: str, sources: list[str]) -> None:
 # --------------------------------------------------------------------------
 
 
+def _listen_later_candidates(user_id: str) -> list[tuple[str, str, str | None]]:
+    """(recording, artist, Deezer id interpreta) ze "Poslechnout později"."""
+    out = []
+    with Session(engine) as session:
+        for rid, artist_id in listen_later.mix_candidates(user_id):
+            artist = session.get(Artist, artist_id)
+            refs = (artist.external_refs or {}) if artist else {}
+            dz = (artist.deezer_id if artist else None) or (refs.get("dzGenres") or {}).get("dz")
+            out.append((rid, artist_id, dz))
+    return out
+
+
 def _already_built(key: str, stamp: str) -> int | None:
     with Session(engine) as session:
         snapshot = g.load_snapshot(session, key)
@@ -381,6 +394,8 @@ async def build_daily_mixes() -> int:
     clusters = await build_clusters(taste)
     known = taste.known
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
+    later = await asyncio.to_thread(_listen_later_candidates, g.HOME_USER_ID)
+    later_used: set[str] = set()
     built = 0
     for index, cluster in enumerate(clusters, start=1):
         rng = random.Random(f"{day}:{index}")
@@ -399,6 +414,15 @@ async def build_daily_mixes() -> int:
         tracks = _interleave(familiar, new)
         if len(tracks) < MIN_MIX_SIZE:
             continue
+        # "Poslechnout později": pár skladeb, jejichž interpret do skupiny patří
+        # (nebo je jí podobný podle Deezeru).
+        fitting = [
+            rid
+            for rid, artist_id, dz_id in later
+            if rid not in later_used and (artist_id in cluster_artists or (dz_id and dz_id in cluster.signature))
+        ]
+        tracks = listen_later.weave(tracks, fitting)
+        later_used.update(fitting[:3])
         built += 1
         names = [taste.artist_name[a] for a in cluster.artists[:2] if a in taste.artist_name]
         genre = _genre_label(taste, cluster, familiar)

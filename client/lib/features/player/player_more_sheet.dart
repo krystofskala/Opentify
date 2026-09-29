@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/share_link.dart';
+import '../../data/listen_later_repository.dart' show LaterKind;
+import '../../state/listen_later_controller.dart';
 import '../../state/audio_player_controller.dart';
 import '../../widgets/track_actions.dart' show shareWithToast;
 import '../../theme/design_tokens.dart';
@@ -114,6 +116,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         showAddToPlaylistSheet(context, recordingId: playback.nowPlaying!.recordingId);
                       },
                     ),
+                  if (playback.nowPlaying != null) _laterTile(context, playback),
                   if (playback.nowPlaying != null) _shareTile(context, playback),
                   if (playback.nowPlaying != null) _abRepeatTile(context, playback),
                   const Divider(),
@@ -208,6 +211,22 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
           ),
         ),
       ),
+    );
+  }
+
+  /// "Poslechnout později" pro právě hrající skladbu (přepínač).
+  Widget _laterTile(BuildContext context, AudioPlayerState playback) {
+    final id = playback.nowPlaying!.recordingId;
+    final isLater = ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, id) != null));
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded),
+      title: Text(isLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později'),
+      onTap: () {
+        final host = Navigator.of(context).context;
+        Navigator.of(context).pop();
+        ref.read(listenLaterProvider.notifier).toggle(host, LaterKind.track, id);
+      },
     );
   }
 

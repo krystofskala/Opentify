@@ -28,6 +28,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from app import listen_later
 from app.browse import CATEGORIES, Category, _category_playlists, get_category
 from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
@@ -270,6 +271,33 @@ async def _mood_mix(
     return familiar, new, top_artists
 
 
+async def _listen_later_fitting(c: Category, taste: pm.Taste, mix_artists: list[str]) -> list[str]:
+    """Skladby z "Poslechnout později", které do kategorie sedí: interpret v
+    žánru (u nálady v žánrech nálady) nebo přímo mezi interprety mixu."""
+    candidates = await asyncio.to_thread(listen_later.mix_candidates, g.HOME_USER_ID)
+    if not candidates:
+        return []
+    artist_ids = list(dict.fromkeys(a for _, a in candidates))
+    stored = await asyncio.to_thread(_stored_shares, artist_ids)
+    for artist_id in [a for a in artist_ids if stored.get(a) is None][:10]:
+        with Session(engine) as session:
+            artist = session.get(Artist, artist_id)
+            if artist is None:
+                continue
+            taste.artist_name.setdefault(artist_id, artist.name)
+            if artist.deezer_id:
+                taste.artist_deezer.setdefault(artist_id, artist.deezer_id)
+        stored[artist_id] = await _classify(taste, artist_id)
+    genres = (c.id,) if c.group == "genre" else _MOOD_GENRES.get(c.id, ())
+    in_mix = set(mix_artists)
+
+    def fits(artist_id: str) -> bool:
+        shares = stored.get(artist_id) or {}
+        return artist_id in in_mix or sum(shares.get(x, 0) for x in genres) >= (MEMBER_SHARE if c.group == "genre" else 0.5)
+
+    return [rid for rid, artist_id in candidates if fits(artist_id)]
+
+
 def _section_for(category_id: str) -> str | None:
     """Jen žánry vybrané na Domů mají sekci -- ostatní mixy jsou vidět jen
     na stránce kategorie."""
@@ -300,6 +328,7 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
             familiar, new, top_artists = await _mood_mix(c, taste, shares, rng)
 
         tracks = pm._interleave(familiar, new)
+        tracks = listen_later.weave(tracks, await _listen_later_fitting(c, taste, top_artists))
         playlist_id = None
         if len(familiar) >= MIN_FAMILIAR and len(tracks) >= MIN_MIX_SIZE:
             names = [taste.artist_name[a] for a in top_artists[:2] if a in taste.artist_name]

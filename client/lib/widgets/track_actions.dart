@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../core/share_link.dart';
+import '../data/listen_later_repository.dart' show LaterKind;
+import '../state/listen_later_controller.dart';
 import '../models/recording_model.dart';
 import '../state/audio_player_controller.dart';
 import '../models/availability.dart';
@@ -109,6 +111,8 @@ class _TrackActionsSheet extends ConsumerWidget {
     final isLiked =
         ref.watch(likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(recording.id) ?? false));
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
+    final isLater =
+        ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, recording.id) != null));
     final provisioningStatus = ref.watch(provisioningControllerProvider.select((s) => s[recording.id]?.status));
     // Jen co je opravdu v knihovně (stažené / z vlastní složky).
     final inLibrary = provisioningStatus == 'AVAILABLE' ||
@@ -194,6 +198,13 @@ class _TrackActionsSheet extends ConsumerWidget {
                   icon: Symbols.playlist_add_rounded,
                   label: 'Přidat do playlistu',
                   onTap: () => run(() => showAddToPlaylistSheet(hostContext, recordingId: recording.id)),
+                ),
+                _Item(
+                  icon: isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
+                  label: isLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',
+                  onTap: () => run(
+                    () => ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id),
+                  ),
                 ),
                 _Item(
                   icon: Symbols.ios_share_rounded,

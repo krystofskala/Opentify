@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -33,48 +34,49 @@ class WrappedLaunchCard extends StatelessWidget {
     final decade = period == 'decade';
     final year = int.tryParse(period) ?? 0;
     final hue = decade ? 36.0 : (year * 47 + 20) % 360.0;
+    final scheme = theme.colorScheme;
     final shape = AppShapes.of(Expressive.cornerLarge);
+    // Sklo jako zbytek appky (lehce tónované barvou roku); barva a zrno jsou
+    // jen uvnitř hravých tvarů -- ne plný barevný pruh.
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
       child: GlassPressable(
         shape: shape,
         minSize: Size.zero,
         onPressed: () => context.push('/wrapped/$period'),
-        child: DecoratedBox(
-          decoration: ShapeDecoration(
-            shape: shape,
-            gradient: LinearGradient(
-              colors: [
-                HSLColor.fromAHSL(1, hue, 0.6, 0.42).toColor(),
-                HSLColor.fromAHSL(1, (hue + 40) % 360, 0.65, 0.22).toColor(),
-              ],
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            child: Row(
-              children: [
-                _FunShapes(hue: hue),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        decade ? 'Tvoje dekáda' : 'Tvůj Wrapped $period',
-                        style: theme.textTheme.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Minuty, interpreti, žánry a obrázky ke sdílení',
-                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.85)),
-                      ),
-                    ],
-                  ),
+        child: GlassContainer(
+          borderRadius: BorderRadius.circular(Expressive.cornerLarge),
+          tint: HSLColor.fromAHSL(1, hue, 0.6, 0.45).toColor(),
+          tintOpacity: 0.14,
+          padding: const EdgeInsets.all(AppSpacing.sm),
+          child: Row(
+            children: [
+              _FunShapes(hue: hue),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      decade ? 'Tvoje dekáda' : 'Tvůj Wrapped $period',
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Minuty, interpreti, žánry a obrázky ke sdílení',
+                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-                const Icon(Symbols.play_circle_rounded, color: Colors.white, size: 32, fill: 1),
-              ],
-            ),
+              ),
+              SizedBox.square(
+                dimension: 46,
+                child: CustomPaint(
+                  painter: _GrainShapePainter(hue: hue + 30, shape: const ExpressiveShape.cookie(lobes: 7, depth: 0.1)),
+                  child: const Icon(Symbols.play_arrow_rounded, color: Colors.white, fill: 1, size: 26),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -131,25 +133,20 @@ class _FunShapesPainter extends CustomPainter {
   static const _flower = ExpressiveShape.cookie(lobes: 5, depth: 0.28);
   static const _clover = ExpressiveShape.cookie(lobes: 4, depth: 0.22);
 
-  Color _c(double shift, double l) => HSLColor.fromAHSL(1, (hue + shift) % 360, 0.8, l).toColor();
-
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final angle = t * 2 * math.pi;
     // Malý čtyřlístek vlevo nahoře (otáčí se opačně).
-    canvas.drawPath(
-      expressivePath(Rect.fromLTWH(0, 0, w * 0.42, w * 0.42), _clover, null, 0, -angle * 1.5),
-      Paint()..color = _c(-40, 0.7),
-    );
+    final cloverRect = Rect.fromLTWH(0, 0, w * 0.42, w * 0.42);
+    paintGrainShape(canvas, expressivePath(cloverRect, _clover, null, 0, -angle * 1.5), cloverRect, hue - 40);
     // Velký cookie, který se pomalu přelévá do květu a zpět.
     final morph = 0.5 - 0.5 * math.cos(angle);
-    canvas.drawPath(
-      expressivePath(Rect.fromLTWH(w * 0.12, w * 0.12, w * 0.8, w * 0.8), _cookie, _flower, morph, angle),
-      Paint()..color = _c(30, 0.66),
-    );
+    final mainRect = Rect.fromLTWH(w * 0.12, w * 0.12, w * 0.8, w * 0.8);
+    paintGrainShape(canvas, expressivePath(mainRect, _cookie, _flower, morph, angle), mainRect, hue + 30);
     // Kolečko vpravo dole.
-    canvas.drawCircle(Offset(w * 0.86, w * 0.84), w * 0.12, Paint()..color = _c(160, 0.75));
+    final dotRect = Rect.fromCircle(center: Offset(w * 0.86, w * 0.84), radius: w * 0.12);
+    paintGrainShape(canvas, Path()..addOval(dotRect), dotRect, hue + 160);
     // Nota uprostřed.
     const icon = Symbols.music_note_rounded;
     final painter = TextPainter(
@@ -170,4 +167,62 @@ class _FunShapesPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FunShapesPainter old) => old.t != t || old.hue != hue;
+}
+
+/// Tvar vyplněný zrnitým gradientem (estetika pozadí appky a obalů mixů):
+/// úhlopříčný přechod dvou tónů, zrno a jemný lesk nahoře -- vše oříznuté
+/// na `path`.
+void paintGrainShape(Canvas canvas, Path path, Rect rect, double hue) {
+  Color c(double shift, double s, double l) => HSLColor.fromAHSL(1, (hue + shift) % 360, s, l).toColor();
+  canvas.save();
+  canvas.clipPath(path);
+  canvas.drawRect(
+    rect,
+    Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [c(0, 0.75, 0.66), c(40, 0.7, 0.36)],
+      ).createShader(rect),
+  );
+  // Zrno -- stálé (seed z rozměru), ať při otáčení neblikne.
+  final rnd = math.Random(rect.width.round());
+  final count = (rect.width * rect.height / 6).clamp(60, 1500).toInt();
+  final light = <Offset>[];
+  final dark = <Offset>[];
+  for (var i = 0; i < count; i++) {
+    final p = Offset(rect.left + rnd.nextDouble() * rect.width, rect.top + rnd.nextDouble() * rect.height);
+    (rnd.nextBool() ? light : dark).add(p);
+  }
+  final grain = Paint()
+    ..strokeWidth = 1.1
+    ..strokeCap = StrokeCap.round;
+  canvas.drawPoints(ui.PointMode.points, light, grain..color = Colors.white.withValues(alpha: 0.22));
+  canvas.drawPoints(ui.PointMode.points, dark, grain..color = Colors.black.withValues(alpha: 0.22));
+  canvas.drawRect(
+    rect,
+    Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.center,
+        colors: [Colors.white.withValues(alpha: 0.25), Colors.white.withValues(alpha: 0)],
+      ).createShader(rect),
+  );
+  canvas.restore();
+}
+
+/// Jeden (statický) tvar se zrnitým gradientem -- tlačítko přehrání.
+class _GrainShapePainter extends CustomPainter {
+  const _GrainShapePainter({required this.hue, required this.shape});
+  final double hue;
+  final ExpressiveShape shape;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    paintGrainShape(canvas, expressivePath(rect, shape), rect, hue);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GrainShapePainter old) => old.hue != hue || old.shape != shape;
 }

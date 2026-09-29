@@ -91,9 +91,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               title: detail.title,
               imageUrl: cover,
               accent: accent,
-              eyebrow: _eyebrowFor(detail.kind),
-              eyebrowIcon: _eyebrowIconFor(detail.kind),
-              placeholderIcon: _eyebrowIconFor(detail.kind),
+              eyebrow: _eyebrowFor(detail.kind, detail.source),
+              eyebrowIcon: _eyebrowIconFor(detail.kind, detail.source),
+              placeholderIcon: _eyebrowIconFor(detail.kind, detail.source),
               subtitle: [
                 if ((detail.description ?? _artistsLine(items)) case final line?) HeroMeta(line),
               ],
@@ -253,22 +253,39 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     }
   }
 
-  String _eyebrowFor(String kind) => switch (kind) {
-        'CHART' => 'Žebříček',
-        'GENRE' => 'Žánr',
-        'EDITORIAL' => 'Výběr',
-        'PERSONAL_MIX' => 'Denní mix',
-        'GENERATED_RECOMMENDATION' => 'Mix',
-        _ => 'Playlist',
-      };
+  /// Štítek nad názvem -- u vlastních mixů podle zdroje (roční top skladby
+  /// nejsou "Denní mix", i když jsou stejného druhu).
+  String _eyebrowFor(String kind, String? source) {
+    final s = source ?? '';
+    if (s.startsWith('personal:year:')) return 'Top skladby roku';
+    if (s.startsWith('personal:decade:')) return 'Dekáda';
+    if (s.startsWith('personal:discover-weekly')) return 'Objevy týdne';
+    if (s.startsWith('personal:category-mix:') ||
+        s.startsWith('personal:on-repeat') ||
+        s.startsWith('personal:throwback')) {
+      return 'Tvůj mix';
+    }
+    return switch (kind) {
+      'CHART' => 'Žebříček',
+      'GENRE' => 'Žánr',
+      'EDITORIAL' => 'Výběr',
+      'PERSONAL_MIX' => 'Denní mix',
+      'GENERATED_RECOMMENDATION' => 'Mix',
+      _ => 'Playlist',
+    };
+  }
 
-  IconData _eyebrowIconFor(String kind) => switch (kind) {
-        'CHART' => Symbols.trending_up_rounded,
-        'GENRE' => Symbols.category_rounded,
-        'EDITORIAL' => Symbols.star_rounded,
-        'PERSONAL_MIX' || 'GENERATED_RECOMMENDATION' => Symbols.auto_awesome_rounded,
-        _ => Symbols.queue_music_rounded,
-      };
+  IconData _eyebrowIconFor(String kind, String? source) {
+    final s = source ?? '';
+    if (s.startsWith('personal:year:') || s.startsWith('personal:decade:')) return Symbols.equalizer_rounded;
+    return switch (kind) {
+      'CHART' => Symbols.trending_up_rounded,
+      'GENRE' => Symbols.category_rounded,
+      'EDITORIAL' => Symbols.star_rounded,
+      'PERSONAL_MIX' || 'GENERATED_RECOMMENDATION' => Symbols.library_music_rounded,
+      _ => Symbols.queue_music_rounded,
+    };
+  }
 
   /// Bez popisu: "Interpret A, Interpret B a další" podle nejčastějších
   /// interpretů v playlistu (jako popisky mixů na Domů).

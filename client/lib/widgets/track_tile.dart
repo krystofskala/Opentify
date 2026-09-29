@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../data/listen_later_repository.dart' show LaterKind;
 import '../models/availability.dart';
 import '../models/recording_model.dart';
 import '../state/artwork_provider.dart';
 import '../state/audio_player_controller.dart';
 import '../state/liked_songs_controller.dart';
+import '../state/listen_later_controller.dart';
 import '../state/provisioning_controller.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
@@ -203,6 +205,8 @@ class TrackTile extends ConsumerWidget {
     return QueueSwipe(
       onPlayNext: () => enqueue(next: true),
       onPlayLast: () => enqueue(next: false),
+      // Dlouhý tah doleva = "Poslechnout později" (přepínač).
+      onLater: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.track, recording.id),
       child: row,
     );
   }

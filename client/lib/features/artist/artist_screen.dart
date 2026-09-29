@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../data/listen_later_repository.dart' show LaterKind;
 import '../../models/artist_bio_model.dart';
+import '../../state/listen_later_controller.dart';
 import '../../models/discography_model.dart';
 import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
@@ -93,6 +95,8 @@ class _ArtistBody extends ConsumerWidget {
     final topRelease = sortedReleases.isEmpty ? null : sortedReleases.first;
     final topTracks = topRelease == null ? null : ref.watch(releaseTracksProvider(topRelease.id));
     final bio = ref.watch(artistBioProvider(artist.id));
+    final artistLater =
+        ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.artist, artist.id) != null));
 
     return ScreenAccent(
       imageUrl: artist.coverImageUrl,
@@ -114,6 +118,13 @@ class _ArtistBody extends ConsumerWidget {
               // portrét jako kulatý avatar vedle jména, ať je jasné, kdo to je.
               thumbnailUrl: artist.bannerUrl != null ? artist.coverImageUrl : null,
               thumbnailCircle: true,
+              actions: [
+                HeroAction(
+                  icon: artistLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
+                  tooltip: artistLater ? 'Odebrat z Poslechnout později' : 'Prozkoumat později',
+                  onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.artist, artist.id),
+                ),
+              ],
               meta: [
                 if (grouped['album']?.length case final albums? when albums > 0)
                   HeroMetaItem(
@@ -138,53 +149,53 @@ class _ArtistBody extends ConsumerWidget {
                   fallback: topTracks == null
                       ? const SizedBox.shrink()
                       : topTracks.when(
-                    data: (recordings) {
-                      final top = recordings.take(5).toList();
-                      if (top.isEmpty) return const SizedBox.shrink();
-                      // Nejnovější vydání často nemá obal (čerstvý singl) --
-                      // pak fotka interpreta, ne notová ikonka u všech řádků.
-                      final rowArt = topRelease!.coverImageUrl ?? artist.coverImageUrl;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SectionHeader(
-                            'Z nejnovějšího vydání',
-                            onSeeAll: () => context.push('/releases/${topRelease.id}'),
-                          ),
-                          Padding(
-                            padding:
-                                const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xxs, AppSpacing.md, AppSpacing.xs),
-                            child: QueueActionBar(
-                              tracks: top,
-                              sourceLabel: artist.name,
-                              artistName: artist.name,
-                              albumArtUrl: rowArt,
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                            child: Column(
+                          data: (recordings) {
+                            final top = recordings.take(5).toList();
+                            if (top.isEmpty) return const SizedBox.shrink();
+                            // Nejnovější vydání často nemá obal (čerstvý singl) --
+                            // pak fotka interpreta, ne notová ikonka u všech řádků.
+                            final rowArt = topRelease!.coverImageUrl ?? artist.coverImageUrl;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                for (final recording in top)
-                                  TrackTile(
-                                    recording: recording,
-                                    queueRecordings: top,
-                                    albumArtUrl: rowArt,
-                                    artistName: artist.name,
+                                SectionHeader(
+                                  'Z nejnovějšího vydání',
+                                  onSeeAll: () => context.push('/releases/${topRelease.id}'),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      AppSpacing.md, AppSpacing.xxs, AppSpacing.md, AppSpacing.xs),
+                                  child: QueueActionBar(
+                                    tracks: top,
                                     sourceLabel: artist.name,
+                                    artistName: artist.name,
+                                    albumArtUrl: rowArt,
                                   ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                                  child: Column(
+                                    children: [
+                                      for (final recording in top)
+                                        TrackTile(
+                                          recording: recording,
+                                          queueRecordings: top,
+                                          albumArtUrl: rowArt,
+                                          artistName: artist.name,
+                                          sourceLabel: artist.name,
+                                        ),
+                                    ],
+                                  ),
+                                ),
                               ],
-                            ),
+                            );
+                          },
+                          loading: () => const Padding(
+                            padding: EdgeInsets.only(top: AppSpacing.md),
+                            child: SkeletonTrackList(count: 5),
                           ),
-                        ],
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.only(top: AppSpacing.md),
-                      child: SkeletonTrackList(count: 5),
-                    ),
-                    error: (_, __) => const SizedBox.shrink(),
-                  ),
+                          error: (_, __) => const SizedBox.shrink(),
+                        ),
                 ),
               ),
               SliverToBoxAdapter(
@@ -199,7 +210,13 @@ class _ArtistBody extends ConsumerWidget {
                 )
               else
                 for (final entry in grouped.entries) ...[
-                  SliverToBoxAdapter(child: SectionHeader(_releaseTypeLabels[entry.key] ?? entry.key)),
+                  SliverToBoxAdapter(
+                    child: SectionHeader(
+                      _releaseTypeLabels[entry.key] ?? entry.key,
+                      // Celá diskografie jako časová osa (roky, chronologicky).
+                      onSeeAll: () => context.push('/artists/${artist.id}/discography?type=${entry.key}'),
+                    ),
+                  ),
                   SliverToBoxAdapter(child: _ReleaseRail(releases: entry.value)),
                 ],
               // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru

@@ -61,6 +61,12 @@ def record_listen(
         session.commit()
         listen_id = listen.id
     _wakeup.set()
+    try:
+        from app.listen_later import on_listen
+
+        on_listen(user_id, recording_id)  # "Poslechnout později" -> "Poslechnuto"
+    except Exception:  # noqa: BLE001 - poslech se nesmí ztratit kvůli seznamu
+        logger.exception("poslechnout později: označení poslechnutého selhalo")
     return listen_id
 
 

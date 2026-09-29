@@ -1,10 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/artist/artist_discography_screen.dart';
 import '../features/artist/artist_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/local_library_screen.dart';
 import '../features/library/liked_songs_screen.dart';
+import '../features/library/listen_later_screen.dart';
 import '../features/library/playlist_detail_screen.dart';
 import '../features/player/now_playing_screen.dart';
 import '../features/profile/profile_screen.dart';
@@ -42,6 +44,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => ArtistScreen(artistId: state.pathParameters['artistId']!),
       ),
       GoRoute(
+        path: '/artists/:artistId/discography',
+        builder: (context, state) => ArtistDiscographyScreen(
+          artistId: state.pathParameters['artistId']!,
+          initialType: state.uri.queryParameters['type'] ?? 'all',
+        ),
+      ),
+      GoRoute(
         path: '/releases/:releaseId',
         builder: (context, state) => ReleaseScreen(
           releaseId: state.pathParameters['releaseId']!,
@@ -51,6 +60,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/browse/:categoryId',
         builder: (context, state) => BrowseCategoryScreen(categoryId: state.pathParameters['categoryId']!),
+      ),
+      GoRoute(
+        path: '/library/later',
+        builder: (context, state) => const ListenLaterScreen(),
       ),
       GoRoute(
         path: '/library/liked',

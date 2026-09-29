@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/radio_mode.dart' show shouldUseRadioStream;
 import '../../core/share_image.dart';
 import '../../state/audio_player_controller.dart';
 import '../../data/wrapped_repository.dart';
@@ -174,8 +175,20 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   int _index = 0;
   bool _sharing = false;
 
-  // --- Hudba pod obrazovkami (vlastní přehrávač, hlavní se pozastaví) ---
-  final _audio = AudioPlayer();
+  // --- Hudba pod obrazovkami (vlastní přehrávače, hlavní se pozastaví) ---
+  // Dva přehrávače střídavě -- nový úryvek se pomalu zesiluje, zatímco starý
+  // doznívá (prolnutí). iOS hlasitost webu měnit nedovolí a každý <audio>
+  // musí zvlášť odemknout klepnutím -- tam jen jeden přehrávač a střih.
+  static const _crossfade = Duration(milliseconds: 1600);
+  static const _tailFade = Duration(milliseconds: 2500);
+  static const _snippetLength = Duration(seconds: 30);
+  late final bool _canFade = !shouldUseRadioStream();
+  late final List<AudioPlayer> _players = [AudioPlayer(), if (_canFade) AudioPlayer()];
+  int _activePlayer = 0;
+  AudioPlayer get _audio => _players[_activePlayer];
+  final Map<AudioPlayer, Timer> _fades = {};
+  StreamSubscription<Duration>? _tailWatch;
+  bool _tailFading = false;
   late final AudioPlayerController _mainPlayer = ref.read(audioPlayerControllerProvider.notifier);
   late final WrappedRepository _repo = ref.read(wrappedRepositoryProvider);
   final Map<String, Future<({String url, Duration start})?>> _snippets = {};
@@ -186,7 +199,6 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   bool _muted = false;
   String? _currentTrack;
   int _audioToken = 0;
-  Timer? _fade;
 
   @override
   void initState() {
@@ -206,8 +218,13 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   @override
   void dispose() {
     _renderTimer?.cancel();
-    _fade?.cancel();
-    _audio.dispose();
+    for (final t in _fades.values) {
+      t.cancel();
+    }
+    _tailWatch?.cancel();
+    for (final p in _players) {
+      p.dispose();
+    }
     _progress.dispose();
     _page.dispose();
     if (_mainWasPlaying) unawaited(_mainPlayer.togglePlayPause());
@@ -216,7 +233,9 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
 
   void _close() {
     // Hlavní přehrávač obnovit ještě v obsluze klepnutí (iOS).
-    unawaited(_audio.pause());
+    for (final p in _players) {
+      unawaited(p.pause());
+    }
     if (_mainWasPlaying) {
       _mainWasPlaying = false;
       unawaited(_mainPlayer.togglePlayPause());
@@ -244,7 +263,9 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   void _toggleMute() {
     setState(() => _muted = !_muted);
     if (_muted) {
-      unawaited(_audio.pause());
+      for (final p in _players) {
+        unawaited(p.pause());
+      }
     } else {
       _audioUnlocked = true;
       unawaited(_audio.play().catchError((_) {}));
@@ -261,22 +282,48 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     _playSlideAudio(index);
   }
 
-  /// Plynulé ztišení/zesílení (iOS hlasitost webu nemění -- tam jen střih).
-  Future<void> _fadeTo(double target, Duration duration) {
-    _fade?.cancel();
-    final start = _audio.volume;
-    const steps = 12;
+  /// Plynulá změna hlasitosti jednoho přehrávače (ease-in-out, ~30 kroků/s).
+  Future<void> _fadeTo(AudioPlayer player, double target, Duration duration) {
+    _fades.remove(player)?.cancel();
+    final start = player.volume;
+    final steps = math.max(1, duration.inMilliseconds ~/ 33);
     var step = 0;
     final done = Completer<void>();
-    _fade = Timer.periodic(duration ~/ steps, (timer) {
+    _fades[player] = Timer.periodic(duration ~/ steps, (timer) {
       step++;
-      unawaited(_audio.setVolume(start + (target - start) * step / steps));
+      final t = Curves.easeInOut.transform(step / steps);
+      unawaited(player.setVolume(start + (target - start) * t));
       if (step >= steps) {
         timer.cancel();
+        _fades.remove(player);
         if (!done.isCompleted) done.complete();
       }
     });
     return done.future;
+  }
+
+  /// Před koncem úryvku (Deezer ukázka má 30 s) hudbu plynule ztlumit, ať
+  /// neutne.
+  void _watchTail(AudioPlayer player, Duration start) {
+    _tailWatch?.cancel();
+    _tailFading = false;
+    _tailWatch = player.positionStream.listen((position) {
+      // Úryvek = nejvýš 30 s (i u stažené skladby, která by jinak hrála celá).
+      final full = player.duration;
+      final end = start + _snippetLength;
+      final limit = full == null || full > end ? end : full;
+      if (_tailFading) return;
+      final left = limit - position;
+      if (!player.playing) return;
+      if (_canFade && left <= _tailFade) {
+        _tailFading = true;
+        final fade = left > Duration.zero ? left : const Duration(milliseconds: 300);
+        unawaited(_fadeTo(player, 0, fade).then((_) => player.pause()));
+      } else if (!_canFade && left <= Duration.zero) {
+        _tailFading = true;
+        unawaited(player.pause()); // iOS: hlasitost nejde -- jen zastavit na konci
+      }
+    });
   }
 
   Future<void> _playSlideAudio(int index) async {
@@ -289,20 +336,33 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     final token = ++_audioToken;
     final snippet = await (_snippets[trackId] ??= _repo.snippet(trackId));
     if (!mounted || token != _audioToken || snippet == null) return;
-    if (_audio.playing) await _fadeTo(0, const Duration(milliseconds: 350));
-    if (!mounted || token != _audioToken) return;
+
+    final previous = _audio;
+    // S prolnutím připravit úryvek na druhém přehrávači; bez něj (iOS) nejdřív
+    // krátce dotlumit (hlasitost stejně nejde, tak aspoň pauza) a přepnout.
+    final next = _canFade ? _players[1 - _activePlayer] : previous;
+    if (!_canFade && previous.playing) await previous.pause();
     try {
-      await _audio.setUrl(snippet.url, initialPosition: snippet.start);
+      await next.setVolume(0);
+      await next.setUrl(snippet.url, initialPosition: snippet.start);
     } catch (_) {
       return;
     }
-    if (!mounted || token != _audioToken || _muted || !_audioUnlocked) return;
-    await _audio.setVolume(0);
-    unawaited(_audio.play().catchError((_) {
+    if (!mounted || token != _audioToken) return;
+    _activePlayer = _players.indexOf(next);
+    if (_canFade && previous != next && previous.playing) {
+      unawaited(_fadeTo(previous, 0, _crossfade).then((_) {
+        if (_audio != previous) previous.pause();
+      }));
+    }
+    if (_muted || !_audioUnlocked) return;
+    if (!_canFade) await next.setVolume(1);
+    unawaited(next.play().catchError((_) {
       // Autoplay odmítnut (iOS) -- odemkne se prvním klepnutím.
       _audioUnlocked = false;
     }));
-    unawaited(_fadeTo(1, const Duration(milliseconds: 900)));
+    if (_canFade) unawaited(_fadeTo(next, 1, _crossfade));
+    _watchTail(next, snippet.start);
   }
 
   void _scheduleRender() {
