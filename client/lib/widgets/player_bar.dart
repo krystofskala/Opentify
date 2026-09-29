@@ -201,6 +201,9 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
             onPanStart: _onPanStart,
             onPanUpdate: (d) => _onPanUpdate(d, playback, screenHeight),
             onPanEnd: (d) => _onPanEnd(d, playback, screenHeight),
+            // Zrušené gesto (prst sjel z okna/displeje): vrátit lištu, jinak
+            // zůstala viset napůl stažená za navigací.
+            onPanCancel: () => _onPanEnd(DragEndDetails(), playback, screenHeight),
             child: GlassContainer.frosted(
               borderRadius: BorderRadius.circular(26),
               tint: accent,
