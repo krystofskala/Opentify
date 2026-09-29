@@ -79,11 +79,23 @@
         if (trail.length > 30) trail.shift();
       };
       function heap() { var m = performance.memory; return m ? Math.round(m.usedJSHeapSize / 1048576) : null; }
+      // Snímky (requestAnimationFrame): když kód běží, ale snímky nechodí,
+      // zamrzlo vykreslování, ne appka (živě: data se načítala dál).
+      var lastFrame = performance.now();
+      (function frame() { lastFrame = performance.now(); requestAnimationFrame(frame); })();
+      var taps = [];
+      document.addEventListener('pointerdown', function () {
+        var now = Date.now();
+        taps.push(now);
+        while (taps.length && now - taps[0] > 10000) taps.shift();
+      }, true);
+      function tapsRecent() { var now = Date.now(); return taps.filter(function (t) { return now - t < 10000; }).length; }
       function state() {
         return {
           t: new Date().toISOString(), route: location.hash, vis: document.visibilityState,
           standalone: navigator.standalone === true, heapMB: heap(),
-          canvases: document.querySelectorAll('canvas').length, trail: trail.slice(-20)
+          canvases: document.querySelectorAll('canvas').length, trail: trail.slice(-20),
+          frameAgeMs: Math.round(performance.now() - lastFrame), taps10s: tapsRecent()
         };
       }
       function send(obj) {
@@ -126,7 +138,35 @@
           window.__opentifyNote('stall ' + gap + 'ms');
           window.__opentifyReport('stall', { ms: gap });
         }
+        // Kód běží, snímky ne -> zamrzlé vykreslování.
+        var frameAge = performance.now() - lastFrame;
+        if (document.visibilityState === 'visible' && frameAge > 4000 && gap < 2500) {
+          if (!renderStuck) {
+            renderStuck = true;
+            window.__opentifyNote('render stuck ' + Math.round(frameAge) + 'ms');
+            window.__opentifyReport('render-stuck', { frameAgeMs: Math.round(frameAge) });
+          }
+        } else if (renderStuck && frameAge < 500) {
+          renderStuck = false;
+          window.__opentifyReport('render-recovered');
+        }
+        // Zběsilé ťukání = appka nereaguje na dotek (i když kreslí).
+        var t = tapsRecent();
+        if (t >= 8 && Date.now() - lastRageReport > 20000) {
+          lastRageReport = Date.now();
+          window.__opentifyNote('rage taps ' + t);
+          window.__opentifyReport('rage-taps', { taps: t });
+        }
       }, 500);
+      var renderStuck = false, lastRageReport = 0;
+      // Zavření / přepnutí appky -- poslední snímek stavu (co bylo těsně před
+      // tím, než uživatel zamrzlou appku zabil).
+      function onLeave(kind) {
+        var s = state();
+        if (s.taps10s >= 3 || s.frameAgeMs > 2000) window.__opentifyReport(kind);
+      }
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') onLeave('left-app'); });
+      window.addEventListener('pagehide', function () { onLeave('pagehide'); });
 
       // Úplné zamrznutí: hlásí Worker, protože hlavní vlákno už nic neudělá.
       try {

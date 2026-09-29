@@ -543,6 +543,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Timer? _radioPoll;
   Duration? _radioStartPosition;
   DateTime _radioLastRestart = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Hlídač rádia: "hraje", ale pozice streamu stojí (Safari dohrál zastaralý
+  // playlist a čeká) -> nový stream. Živě: po 2 h pauzy spuštění ze
+  // zamčené obrazovky přehrálo 5 s a stálo, pozice 5378 ms 15 minut.
+  Duration? _radioStallRaw;
+  DateTime _radioStallSince = DateTime.now();
+  DateTime? _radioPausedAt;
   Timer? _radioTick;
   Duration _radioLastRaw = Duration.zero;
   DateTime _radioLastRawAt = DateTime.now();
@@ -627,6 +634,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   void _restartRadio(Duration position) {
     final info = state.nowPlaying;
     if (info == null) return;
+    _radioPausedAt = null;
+    _radioStallRaw = null;
     final url = _startRadio(info, position);
     state = state.copyWith(position: position);
     unawaited(_player
@@ -638,6 +647,20 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> _pollRadio() async {
     final sid = _radioSession;
     if (sid == null || !_player.playing) return;
+    final raw = _player.position;
+    final now = DateTime.now();
+    if (raw > Duration.zero && raw == _radioStallRaw) {
+      if (now.difference(_radioStallSince) > const Duration(seconds: 8) &&
+          now.difference(_radioLastRestart) > const Duration(seconds: 15)) {
+        debugPrint('AudioPlayerController: rádio stojí na $raw, navazuji novým streamem');
+        _radioLastRestart = now;
+        _restartRadio(state.position);
+        return;
+      }
+    } else {
+      _radioStallRaw = raw;
+      _radioStallSince = now;
+    }
     try {
       final json = await _ref
           .read(apiClientProvider)
@@ -1624,6 +1647,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       isPlaying: playerState.playing,
       isBuffering: _awaitingProvisioning || (loading && !(_radioActive && _player.position > Duration.zero)),
     );
+    if (_radioActive) {
+      // Spuštění mimo appku (zamčená obrazovka, sluchátka) obejde
+      // `togglePlayPause` a Safari pustí starý živý playlist -- po delší
+      // pauze proto vždy nový stream.
+      if (!playerState.playing) {
+        _radioPausedAt ??= DateTime.now();
+      } else if (_radioPausedAt case final pausedAt?) {
+        _radioPausedAt = null;
+        if (DateTime.now().difference(pausedAt) > const Duration(minutes: 1)) {
+          debugPrint('AudioPlayerController: rádio po dlouhé pauze, nový stream');
+          _restartRadio(state.position);
+          return;
+        }
+      }
+    }
     if (playerState.processingState == ProcessingState.completed && _radioActive) {
       // Živý stream "skončil" -- u rádia to znamená spadlé spojení, ne konec
       // fronty (ten server nepošle, dokud je co hrát). Navázat od aktuální
