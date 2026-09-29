@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -68,6 +69,40 @@ MixArtSpec? mixArtForSource({
   }
   if (s.startsWith('personal:decade:')) {
     return MixArtSpec(style: MixArtStyle.year, seed: s, headline: '16–26', photos: photos, eyebrow: 'DEKÁDA');
+  }
+  // Ostatní vlastní mixy -- styly, které unesou delší název (2 řádky).
+  if (s.startsWith('personal:discover-weekly')) {
+    return MixArtSpec(
+      style: MixArtStyle.mood,
+      seed: s,
+      headline: 'Objevy týdne',
+      color: const Color(0xFF12B5CB),
+      photos: photos,
+      eyebrow: 'PRO TEBE',
+    );
+  }
+  if (s.startsWith('personal:on-repeat')) {
+    return MixArtSpec(
+      style: MixArtStyle.mood,
+      seed: s,
+      headline: 'Na opakování',
+      color: const Color(0xFFFF6B5B),
+      photos: photos,
+      eyebrow: 'POSLEDNÍ MĚSÍC',
+    );
+  }
+  if (s.startsWith('personal:throwback')) {
+    return MixArtSpec(
+      style: MixArtStyle.genre,
+      seed: s,
+      headline: 'Návrat do minulosti',
+      color: const Color(0xFFE0A21B),
+      photos: photos,
+      eyebrow: 'ZNOVU OBJEVENO',
+    );
+  }
+  if (s.startsWith('home:mix:')) {
+    return MixArtSpec(style: MixArtStyle.mood, seed: s, headline: title, photos: photos, eyebrow: 'MIX');
   }
   if (s.startsWith('personal:category-mix:')) {
     final i = title.indexOf('· ');
@@ -341,7 +376,9 @@ class _GroovesPainter extends CustomPainter {
     final rnd = math.Random(seed);
     final w = size.width, h = size.height;
     _fillBase(canvas, size, hue, light: 0.36, dark: 0.12);
-    final center = Offset(w * (0.78 + rnd.nextDouble() * 0.3), h * (0.8 + rnd.nextDouble() * 0.3));
+    // Deska vždy na stejném místě (vpravo dole) -- vedle sebe v řadě žánrů
+    // rozházené pozice rušily; liší se jen drážky a barva.
+    final center = Offset(w * 0.92, h * 0.95);
     final maxR = w * 0.95;
     // Plná "deska" s jemným přechodem.
     canvas.drawCircle(
@@ -472,25 +509,51 @@ class _BarsPainter extends CustomPainter {
   bool shouldRepaint(_BarsPainter old) => old.hue != hue || old.seed != seed;
 }
 
-/// Statické jemné zrno (stejná estetika jako pozadí appky, jen levné).
+/// Jemné husté zrno jako pozadí appky: dlaždice 128×128 (ve dvojnásobném
+/// rozlišení, ať je ostré i na retině) spočítaná jednou a opakovaná přes
+/// celou plochu. Dřív řídké silné tečky působily jako fleky (živě nahlášeno).
 class GrainPainter extends CustomPainter {
   const GrainPainter();
 
-  @override
-  void paint(Canvas canvas, Size size) {
+  static const _tile = 128.0;
+  static ui.Image? _image;
+
+  static ui.Image _build() {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder)..scale(2);
     final rnd = math.Random(3);
-    final count = (size.width * size.height / 14).clamp(200, 4000).toInt();
-    final light = <Offset>[];
-    final dark = <Offset>[];
+    final buckets = List.generate(6, (_) => <double>[]);
+    final count = (_tile * _tile * 1.4).toInt();
     for (var i = 0; i < count; i++) {
-      final p = Offset(rnd.nextDouble() * size.width, rnd.nextDouble() * size.height);
-      (rnd.nextBool() ? light : dark).add(p);
+      final g = rnd.nextDouble() + rnd.nextDouble() - 1; // -1..1, trojúhelníkové
+      if (g.abs() < 0.15) continue;
+      final level = math.min(2, (g.abs() * 3).floor());
+      buckets[level + (g > 0 ? 0 : 3)]
+        ..add(rnd.nextDouble() * _tile)
+        ..add(rnd.nextDouble() * _tile);
     }
     final paint = Paint()
-      ..strokeWidth = 1.2
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPoints(ui.PointMode.points, light, paint..color = Colors.white.withValues(alpha: 0.10));
-    canvas.drawPoints(ui.PointMode.points, dark, paint..color = Colors.black.withValues(alpha: 0.12));
+      ..strokeWidth = 0.75
+      ..strokeCap = StrokeCap.square;
+    for (var i = 0; i < 6; i++) {
+      paint.color = (i < 3 ? Colors.white : Colors.black).withValues(alpha: 0.05 + 0.045 * (i % 3));
+      canvas.drawRawPoints(ui.PointMode.points, Float32List.fromList(buckets[i]), paint);
+    }
+    return recorder.endRecording().toImageSync((_tile * 2).toInt(), (_tile * 2).toInt());
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final image = _image ??= _build();
+    final matrix = Float64List(16)
+      ..[0] = 0.5
+      ..[5] = 0.5
+      ..[10] = 1
+      ..[15] = 1;
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..shader = ImageShader(image, TileMode.repeated, TileMode.repeated, matrix),
+    );
   }
 
   @override
