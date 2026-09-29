@@ -119,12 +119,33 @@ class _QueueList extends ConsumerWidget {
             itemBuilder: (context, i) {
               final queueIndex = currentIndex + 1 + i;
               final info = queue[queueIndex];
-              return _QueueRow(
+              // Tah doleva odebere skladbu z fronty (Apple Music).
+              return Dismissible(
                 key: ValueKey('${info.recordingId}_$queueIndex'),
-                info: info,
-                isCurrent: false,
-                onTap: () => controller.skipToIndex(queueIndex),
-                dragIndex: i,
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.75),
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Symbols.remove_circle_rounded, color: Colors.white, size: 20),
+                      SizedBox(width: 6),
+                      Text('Odebrat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                onDismissed: (_) => controller.removeFromQueue(queueIndex),
+                child: _QueueRow(
+                  info: info,
+                  isCurrent: false,
+                  onTap: () => controller.skipToIndex(queueIndex),
+                  dragIndex: i,
+                ),
               );
             },
             onReorderItem: (oldIndex, newIndex) {
@@ -153,7 +174,7 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _QueueRow extends ConsumerWidget {
-  const _QueueRow({super.key, required this.info, required this.isCurrent, required this.onTap, this.dragIndex});
+  const _QueueRow({required this.info, required this.isCurrent, required this.onTap, this.dragIndex});
 
   final NowPlayingInfo info;
   final bool isCurrent;

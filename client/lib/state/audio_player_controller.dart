@@ -542,6 +542,23 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     state = state.copyWith(queue: newQueue, queueIndex: newCurrentIndex, shuffleEnabled: false);
   }
 
+  /// Odebere skladbu z fronty (swipe ve frontě). Právě hrající se odebrat
+  /// nedá -- na to je "Další". Zamíchané pořadí se přepočítá (indexy za
+  /// odebranou se posunou o jednu).
+  void removeFromQueue(int index) {
+    if (index < 0 || index >= state.queue.length || index == state.queueIndex) return;
+    final newQueue = [...state.queue]..removeAt(index);
+    final newCurrentIndex = index < state.queueIndex ? state.queueIndex - 1 : state.queueIndex;
+    var newShuffleOrder = state.shuffleOrder;
+    if (newShuffleOrder != null) {
+      newShuffleOrder = [
+        for (final i in newShuffleOrder)
+          if (i != index) i > index ? i - 1 : i,
+      ];
+    }
+    state = state.copyWith(queue: newQueue, queueIndex: newCurrentIndex, shuffleOrder: newShuffleOrder);
+  }
+
   /// Vloží skladbu hned za právě hrající, bez přerušení aktuálního
   /// přehrávání -- "Přehrát jako další" (vlastní implementace inspirovaná
   /// UX Musify's `song_bar.dart`, github.com/gokadzev/Musify, GPL-3.0; jejich
