@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/listen_later_repository.dart' show LaterKind;
 import '../../models/artist_bio_model.dart';
+import '../../models/artist_model.dart';
 import '../../state/listen_later_controller.dart';
 import '../../models/discography_model.dart';
 import '../../models/recording_model.dart';
@@ -69,11 +70,57 @@ class ArtistScreen extends ConsumerWidget {
 
     return discography.when(
       data: (data) => _ArtistBody(discography: data),
-      loading: () => const DetailLoadingScaffold(),
+      // Diskografie může napoprvé trvat pár sekund (MusicBrainz) -- hlavička
+      // interpreta z rychlého dotazu se ukáže hned, zbytek se donačte.
+      loading: () => ref.watch(artistHeaderProvider(artistId)).maybeWhen(
+            data: (artist) => _ArtistLoadingBody(artist: artist),
+            orElse: () => const DetailLoadingScaffold(),
+          ),
       error: (error, stack) => DetailErrorScaffold(
         message: 'Interpreta se nepodařilo načíst.',
         error: error,
         onRetry: () => ref.invalidate(discographyProvider(artistId)),
+      ),
+    );
+  }
+}
+
+/// Samotný interpret (bez diskografie) -- rychlý dotaz na hlavičku.
+final artistHeaderProvider = FutureProvider.autoDispose.family<ArtistModel, String>((ref, artistId) {
+  return ref.watch(catalogRepositoryProvider).getArtist(artistId);
+});
+
+class _ArtistLoadingBody extends StatelessWidget {
+  const _ArtistLoadingBody({required this.artist});
+  final ArtistModel artist;
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenAccent(
+      imageUrl: artist.coverImageUrl,
+      builder: (context, accent) => Scaffold(
+        bottomNavigationBar: const PlayerBar(),
+        body: CustomScrollView(
+          slivers: [
+            DetailHeroAppBar(
+              title: artist.name,
+              imageUrl: artist.coverImageUrl,
+              accent: accent,
+              eyebrow: 'Interpret',
+              eyebrowIcon: Symbols.person_rounded,
+              placeholderIcon: Symbols.person_rounded,
+              bannerImageUrl: artist.bannerUrl,
+              thumbnailUrl: artist.bannerUrl != null ? artist.coverImageUrl : null,
+              thumbnailCircle: true,
+            ),
+            ...detailContentSlivers(context, [
+              const SliverToBoxAdapter(child: SectionHeader('Populární')),
+              const SliverToBoxAdapter(child: SkeletonTrackList(count: 5)),
+              const SliverToBoxAdapter(child: SectionHeader('Alba')),
+              const SliverToBoxAdapter(child: SkeletonCardRail(height: 190, cardWidth: 140)),
+            ]),
+          ],
+        ),
       ),
     );
   }

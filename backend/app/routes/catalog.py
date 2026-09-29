@@ -16,7 +16,8 @@ from app.catalog.deezer import DeezerClient, get_deezer_client
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError, get_musicbrainz_client
 from app.catalog.service import CatalogService
 from app.catalog.schemas import RecordingOut
-from app.db import get_session
+from app.catalog.cache import cached_json_swr
+from app.db import engine, get_session
 from app.models import Recording
 
 catalog_router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -93,13 +94,23 @@ async def get_discography(
     release_type: str | None = Query(
         default=None, alias="releaseType", pattern="^(album|ep|single|compilation)$"
     ),
-    service: CatalogService = Depends(get_catalog_service),
     _current=Depends(get_current_user),
 ):
-    discography = await service.get_discography(artist_id, release_type)
-    if discography is None:
+    # Stale-while-revalidate: hotová diskografie hned, obnova na pozadí, je-li
+    # starší než den. Dřív se po hodině (cache MB hledání) skládala znovu --
+    # MB 1 dotaz/s, víc stránek u velkých interpretů + Deezer = stránka
+    # interpreta se otevírala i několik sekund (živě nahlášeno).
+    async def build():
+        # Vlastní DB session -- obnova na pozadí běží i po odeslání odpovědi.
+        with Session(engine) as session:
+            service = CatalogService(session, get_musicbrainz_client(), get_deezer_client())
+            discography = await service.get_discography(artist_id, release_type)
+            return discography.model_dump(mode="json", by_alias=True) if discography else None
+
+    data = await cached_json_swr(f"discography:v1:{artist_id}:{release_type}", 24 * 60 * 60, build)
+    if data is None:
         raise HTTPException(status_code=404, detail="interpret nenalezen")
-    return discography.model_dump(by_alias=True)
+    return data
 
 
 @catalog_router.get("/artists/{artist_id}/bio")
