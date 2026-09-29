@@ -97,6 +97,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 12),
             _ActionCard(
+              icon: Symbols.music_note_rounded,
+              title: 'Ladička',
+              description: 'Ladička na kytaru -- standardní i alternativní ladění, struna se pozná '
+                  'sama. Zvuk z mikrofonu zůstává v zařízení, nic se neodesílá.',
+              buttonLabel: 'Ladit',
+              onPressed: () => context.push('/tuner'),
+            ),
+            const SizedBox(height: 12),
+            _ActionCard(
               icon: Symbols.folder_rounded,
               title: 'Lokální knihovna',
               description:
