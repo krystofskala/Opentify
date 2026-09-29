@@ -28,6 +28,10 @@ class BrowseGrid extends ConsumerWidget {
           _Tiles(items: items.where((c) => c.group == 'mood').toList()),
           const SectionHeader('Žánry'),
           _Tiles(items: items.where((c) => c.group == 'genre').toList()),
+          if (items.any((c) => c.group == 'soundtrack')) ...[
+            const SectionHeader('Soundtracky'),
+            _Tiles(items: items.where((c) => c.group == 'soundtrack').toList()),
+          ],
         ],
       ),
       loading: () => const Padding(padding: EdgeInsets.all(AppSpacing.lg), child: LoadingState()),
@@ -74,6 +78,8 @@ IconData browseIcon(String? name) => switch (name) {
       'rainy' => Symbols.rainy_rounded,
       'coffee' => Symbols.coffee_rounded,
       'car' => Symbols.directions_car_rounded,
+      'gamepad' => Symbols.sports_esports_rounded,
+      'movie' => Symbols.movie_rounded,
       _ => Symbols.music_note_rounded,
     };
 

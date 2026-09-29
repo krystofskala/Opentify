@@ -278,6 +278,40 @@ class _Rail extends StatelessWidget {
       );
 }
 
+/// Playlist z Deezeru, který se sám otevře: převezme ho do katalogu (chvíli
+/// točí kolečko) a přejde na jeho stránku. Pro Hledat a další místa mimo
+/// stránku kategorie.
+class DeezerPlaylistTile extends ConsumerStatefulWidget {
+  const DeezerPlaylistTile({super.key, required this.playlist});
+  final BrowsePlaylist playlist;
+
+  @override
+  ConsumerState<DeezerPlaylistTile> createState() => _DeezerPlaylistTileState();
+}
+
+class _DeezerPlaylistTileState extends ConsumerState<DeezerPlaylistTile> {
+  bool _opening = false;
+
+  Future<void> _open() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      final id = await ref.read(browseRepositoryProvider).openDeezerPlaylist(widget.playlist.deezerId);
+      if (mounted) context.push('/playlists/$id');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)
+            ?.showSnackBar(const SnackBar(content: Text('Playlist se nepodařilo otevřít, zkus to znovu.')));
+      }
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _PlaylistTile(playlist: widget.playlist, opening: _opening, onTap: _open);
+}
+
 class _PlaylistTile extends StatelessWidget {
   const _PlaylistTile({required this.playlist, required this.opening, required this.onTap});
   final BrowsePlaylist playlist;

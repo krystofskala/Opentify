@@ -37,7 +37,7 @@ PLAYLIST_FRESH = timedelta(hours=24)
 class Category:
     id: str
     title: str
-    group: str  # mood | genre
+    group: str  # mood | genre | soundtrack
     color: str  # hex, barva dlaždice
     query: str  # Deezer hledání playlistů
     genre_id: int | None = None
@@ -69,6 +69,10 @@ CATEGORIES: list[Category] = [
     Category("folk", "Folk / Akustická", "genre", "#7A6A4F", "folk acoustic", 466),
     Category("metal", "Metal", "genre", "#3A3A3A", "metal", 464),
     Category("soul", "Soul / Funk", "genre", "#B0662B", "soul funk", 169),
+    # Soundtracky -- redakce "Deezer Soundtracks Editor" + playlisty od lidí
+    # (herní rádia typu GTA, filmové OST...).
+    Category("games", "Herní soundtracky", "soundtrack", "#3F7D52", "video game soundtrack", icon="gamepad"),
+    Category("movies", "Filmy a seriály", "soundtrack", "#6B3F8A", "movie soundtrack", icon="movie"),
 ]
 
 _BY_ID = {c.id: c for c in CATEGORIES}
@@ -83,12 +87,21 @@ def list_categories() -> list[dict[str, Any]]:
 
 
 async def _category_playlists(c: Category) -> list[dict[str, Any]]:
+    return await search_playlists(c.query)
+
+
+async def search_playlists(
+    query: str, limit: int = 12, min_tracks: int = 15, max_tracks: int = 250
+) -> list[dict[str, Any]]:
+    """Playlisty z Deezeru podle dotazu -- redakční napřed, pak od lidí
+    (GTA rádia, soundtracky...). Do katalogu se převezmou až při otevření.
+    Rozsah počtu skladeb odfiltruje prázdné a obří "vše možné" playlisty."""
     dz = get_deezer_client()
-    items = await dz.search_typed("playlist", c.query, 25) or []
+    items = await dz.search_typed("playlist", query, 25) or []
     editorial = [p for p in items if "deezer" in ((p.get("user") or {}).get("name") or "").lower()]
-    others = [p for p in items if p not in editorial and 15 <= (p.get("nb_tracks") or 0) <= 250]
+    others = [p for p in items if p not in editorial and min_tracks <= (p.get("nb_tracks") or 0) <= max_tracks]
     out = []
-    for p in (editorial + others)[:12]:
+    for p in (editorial + others)[:limit]:
         if not p.get("id"):
             continue
         out.append(

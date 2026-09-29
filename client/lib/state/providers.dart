@@ -57,6 +57,11 @@ final browsePageProvider = FutureProvider.autoDispose.family<BrowsePage, String>
   return ref.watch(browseRepositoryProvider).page(id);
 });
 
+/// Sekce "Playlisty" v Hledat (Deezer, převezmou se až při otevření).
+final searchPlaylistsProvider = FutureProvider.autoDispose.family<List<BrowsePlaylist>, String>((ref, query) {
+  return ref.watch(browseRepositoryProvider).searchPlaylists(query);
+});
+
 final wrappedRepositoryProvider = Provider<WrappedRepository>((ref) => WrappedRepository(ref.watch(apiClientProvider)));
 
 final wrappedIndexProvider = FutureProvider.autoDispose<WrappedIndex>((ref) {

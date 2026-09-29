@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app import browse
 
@@ -16,6 +16,14 @@ _DEEZER_ID = re.compile(r"^\d{1,20}$")
 @browse_router.get("")
 def categories():
     return {"categories": browse.list_categories()}
+
+
+@browse_router.get("/playlists/search")
+async def search_playlists(q: str = Query(..., min_length=2, max_length=100)):
+    """Playlisty od lidí i redakce Deezeru pro Hledat ("GTA Vice City",
+    "Zaklínač soundtrack"...). Jednotlivé rádiové stanice mívají jen ~13
+    skladeb, proto nižší spodní hranice než u kategorií."""
+    return {"playlists": await browse.search_playlists(q, limit=15, min_tracks=5, max_tracks=3000)}
 
 
 @browse_router.get("/{category_id}")

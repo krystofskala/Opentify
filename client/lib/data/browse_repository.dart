@@ -116,6 +116,13 @@ class BrowseRepository {
     return playlist == null ? null : HomePlaylistCard.fromJson(playlist as Map<String, dynamic>);
   }
 
+  /// Playlisty z Deezeru pro Hledat (od lidí i redakce -- GTA rádia,
+  /// soundtracky...).
+  Future<List<BrowsePlaylist>> searchPlaylists(String query) async {
+    final json = await _api.getJson('/browse/playlists/search', query: {'q': query});
+    return (json['playlists'] as List<dynamic>).cast<Map<String, dynamic>>().map(BrowsePlaylist.fromJson).toList();
+  }
+
   /// Převezme Deezer playlist do katalogu a vrátí id našeho playlistu.
   Future<String> openDeezerPlaylist(String deezerId) async {
     final json = await _api.postJson('/browse/deezer-playlists/$deezerId');

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/api_client.dart';
+import '../browse/browse_category_screen.dart' show DeezerPlaylistTile;
 import '../browse/browse_grid.dart';
 import '../../models/recording_model.dart';
 import '../../models/search_result.dart';
@@ -348,7 +349,10 @@ class _AllResults extends ConsumerWidget {
     final albums = ref.watch(searchSectionProvider((query: query, type: 'release', limit: 10)));
     void show(SearchFilter f) => ref.read(searchFilterProvider.notifier).state = f;
 
-    final allEmpty = [tracks, artists, albums].every((v) => v.hasValue && v.value!.isEmpty);
+    final playlists = ref.watch(searchPlaylistsProvider(query));
+    final allEmpty = [tracks, artists, albums].every((v) => v.hasValue && v.value!.isEmpty) &&
+        playlists.hasValue &&
+        playlists.value!.isEmpty;
     final allError = [tracks, artists, albums].every((v) => v.hasError);
     if (allEmpty) {
       return EmptyState(icon: Symbols.search_off_rounded, message: 'Pro „$query“ nic nenalezeno.');
@@ -399,7 +403,40 @@ class _AllResults extends ConsumerWidget {
           loading: const SkeletonCardRail(height: 190, cardWidth: 140),
           builder: (items) => _Rail(height: 190, width: 140, children: [for (final a in items) _ReleaseCard(item: a)]),
         ),
+        _PlaylistsSection(query: query),
       ],
+    );
+  }
+}
+
+/// Playlisty od lidí i redakce Deezeru -- soundtracky, herní rádia (GTA),
+/// tematické výběry. Otevřením se převezmou do katalogu.
+class _PlaylistsSection extends ConsumerWidget {
+  const _PlaylistsSection({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playlists = ref.watch(searchPlaylistsProvider(query));
+    return playlists.when(
+      data: (items) => items.isEmpty
+          ? const SizedBox.shrink()
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SectionHeader('Playlisty'),
+                _Rail(
+                  height: 214,
+                  width: 150,
+                  children: [for (final p in items) DeezerPlaylistTile(playlist: p)],
+                ),
+              ],
+            ),
+      loading: () => const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [SectionHeader('Playlisty'), SkeletonCardRail(height: 214, cardWidth: 150)],
+      ),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
