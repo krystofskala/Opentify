@@ -9,6 +9,7 @@ import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart' show Expressive;
 import '../theme/selected_accent.dart';
+import 'glass/expressive_shapes.dart';
 import 'glass_container.dart';
 import 'net_image.dart';
 
@@ -171,7 +172,7 @@ class DetailHeroAppBar extends StatelessWidget {
 
   /// Široké okno (desktop/tablet na šířku): místo fotky přes celou šířku
   /// (roztažená fotka na 2000 px nikdy nevypadá dobře) rozostřený tónovaný
-  /// pás + plovoucí skleněný box s velkým obalem a informačním blokem,
+  /// pás + M3 Expressive kompozice (obal na hravých tvarech) a informační blok,
   /// vše v obsahovém sloupci [kDetailMaxWidth].
   static bool isWide(BuildContext context) => MediaQuery.sizeOf(context).width >= 840;
 
@@ -294,7 +295,7 @@ class _HeroFlexible extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           // Široké okno: žádný pás s rozmazanou fotkou -- jeho barvy se bily
-          // s pozadím v barvě hrající skladby (živě nahlášeno). Skleněný box
+          // s pozadím v barvě hrající skladby (živě nahlášeno). Obal s tvary
           // leží přímo na živém pozadí appky.
           if (!wide)
             // Prolnutí do pozadí vždy k AKTUÁLNÍ spodní hraně hlavičky -- při
@@ -494,8 +495,9 @@ class _FadedMedia extends StatelessWidget {
   }
 }
 
-/// Široké okno: plovoucí skleněný box -- velký obal/fotka vlevo (kruh u
-/// interpreta), informační blok vpravo.
+/// Široké okno: M3 Expressive kompozice přímo na živém pozadí (bez
+/// skleněného boxu) -- velký obal/fotka (kruh u interpreta) na hravých
+/// tvarech se zrnitým gradientem v barvě stránky, informační blok vpravo.
 class _WideHeroBox extends StatelessWidget {
   const _WideHeroBox({required this.hero});
 
@@ -504,21 +506,75 @@ class _WideHeroBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cover = DetailHeroAppBar._wideCoverSize(MediaQuery.sizeOf(context).width);
-    return GlassContainer(
-      borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
-      child: Padding(
-        padding: const EdgeInsets.all(DetailHeroAppBar._wideBoxPadding),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _WideCover(hero: hero, size: cover),
-            const SizedBox(width: AppSpacing.xl),
-            Expanded(child: _HeroTitleBlock(hero: hero, showThumb: false)),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.all(DetailHeroAppBar._wideBoxPadding),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          SizedBox.square(
+            dimension: cover,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Tvary vyčnívají za obal nahoru/doleva a doprava dolů --
+                // místo je v odsazení (`_wideBoxPadding` + lišta nad).
+                Positioned(
+                  left: -cover * 0.13,
+                  top: -cover * 0.13,
+                  width: cover * 1.3,
+                  height: cover * 1.3,
+                  child: RepaintBoundary(
+                    child: AnimatedAccent(
+                      color: hero.accent ?? Theme.of(context).colorScheme.primary,
+                      builder: (context, c) => CustomPaint(painter: _StagePainter(c)),
+                    ),
+                  ),
+                ),
+                _WideCover(hero: hero, size: cover),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xl + AppSpacing.md),
+          Expanded(child: _HeroTitleBlock(hero: hero, showThumb: false)),
+        ],
       ),
     );
   }
+}
+
+/// Pozadí obalu na širokém okně: velký "cookie" za obalem a malý
+/// čtyřlístek u jeho pravého dolního rohu (stejná řeč tvarů jako karta
+/// Wrapped). Barvy z akcentu stránky; u černobílé stránky zůstanou šedé.
+class _StagePainter extends CustomPainter {
+  const _StagePainter(this.accent);
+
+  final Color accent;
+
+  static const _cookie = ExpressiveShape.cookie(lobes: 9, depth: 0.08);
+  static const _clover = ExpressiveShape.cookie(lobes: 4, depth: 0.22);
+
+  Color _tone(double hueShift, double lightness) {
+    final hsl = HSLColor.fromColor(accent);
+    return hsl
+        .withHue((hsl.hue + hueShift) % 360)
+        .withSaturation(math.min(hsl.saturation, 0.7))
+        .withLightness(lightness)
+        .toColor();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final main = Rect.fromLTWH(0, 0, w * 0.86, w * 0.86);
+    paintGrainShape(canvas, expressivePath(main, _cookie, null, 0, 0.35), main, 0,
+        from: _tone(0, 0.68), to: _tone(35, 0.42));
+    final clover = Rect.fromLTWH(w * 0.7, w * 0.7, w * 0.3, w * 0.3);
+    paintGrainShape(canvas, expressivePath(clover, _clover, null, 0, 0.4), clover, 0,
+        from: _tone(-40, 0.76), to: _tone(-10, 0.52));
+  }
+
+  @override
+  bool shouldRepaint(covariant _StagePainter old) => old.accent != accent;
 }
 
 class _WideCover extends StatelessWidget {
@@ -532,8 +588,7 @@ class _WideCover extends StatelessWidget {
     final mosaic = hero.mosaicUrls.toSet().toList();
     final url = hero.thumbnailUrl ?? hero.imageUrl ?? (mosaic.isNotEmpty ? mosaic.first : null);
     final circle = hero.thumbnailCircle;
-    // O stupeň menší poloměr než box kolem (glass_tokens: vnořený obrázek).
-    final radius = BorderRadius.circular(circle ? size / 2 : Expressive.cornerLargeIncreased);
+    final radius = BorderRadius.circular(circle ? size / 2 : Expressive.cornerExtraLarge);
     final Widget child;
     if (hero.artwork != null) {
       child = hero.artwork!;

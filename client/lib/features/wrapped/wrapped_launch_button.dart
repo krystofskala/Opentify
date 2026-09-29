@@ -1,6 +1,4 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -169,69 +167,6 @@ class _FunShapesPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _FunShapesPainter old) => old.t != t || old.hue != hue;
 }
-
-/// Tvar vyplněný zrnitým gradientem (estetika pozadí appky a obalů mixů):
-/// úhlopříčný přechod dvou tónů, zrno a jemný lesk nahoře -- vše oříznuté
-/// na `path`.
-void paintGrainShape(Canvas canvas, Path path, Rect rect, double hue) {
-  Color c(double shift, double s, double l) => HSLColor.fromAHSL(1, (hue + shift) % 360, s, l).toColor();
-  canvas.save();
-  canvas.clipPath(path);
-  canvas.drawRect(
-    rect,
-    Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [c(0, 0.75, 0.66), c(40, 0.7, 0.36)],
-      ).createShader(rect),
-  );
-  // Zrno jako pozadí appky: husté (bod na každý ~0,7 px²), drobné body a
-  // slabé krytí s trojúhelníkovým rozdělením síly -- řídké silné tečky
-  // působily jako fleky, ne zrno. Stálé (seed z rozměru), ať při otáčení
-  // neblikne.
-  final buckets = _grainFor(rect.size);
-  final grain = Paint()
-    ..strokeWidth = 0.75
-    ..strokeCap = StrokeCap.square;
-  canvas.save();
-  canvas.translate(rect.left, rect.top);
-  for (var i = 0; i < 6; i++) {
-    final alpha = 0.05 + 0.045 * (i % 3);
-    grain.color = (i < 3 ? Colors.white : Colors.black).withValues(alpha: alpha);
-    canvas.drawRawPoints(ui.PointMode.points, buckets[i], grain);
-  }
-  canvas.restore();
-  canvas.drawRect(
-    rect,
-    Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.center,
-        colors: [Colors.white.withValues(alpha: 0.25), Colors.white.withValues(alpha: 0)],
-      ).createShader(rect),
-  );
-  canvas.restore();
-}
-
-/// Body zrna pro danou velikost -- spočítané jednou (tvary se animují, zrno
-/// se nemá generovat každý snímek). 6 skupin: 3 síly světlých, 3 tmavých.
-final Map<Size, List<Float32List>> _grainCache = {};
-
-List<Float32List> _grainFor(Size size) => _grainCache.putIfAbsent(size, () {
-      final rnd = math.Random(size.width.round());
-      final count = (size.width * size.height * 1.4).clamp(200, 9000).toInt();
-      final buckets = List.generate(6, (_) => <double>[]);
-      for (var i = 0; i < count; i++) {
-        final g = rnd.nextDouble() + rnd.nextDouble() - 1; // -1..1
-        if (g.abs() < 0.15) continue;
-        final level = math.min(2, (g.abs() * 3).floor());
-        buckets[level + (g > 0 ? 0 : 3)]
-          ..add(rnd.nextDouble() * size.width)
-          ..add(rnd.nextDouble() * size.height);
-      }
-      return [for (final b in buckets) Float32List.fromList(b)];
-    });
 
 /// Jeden (statický) tvar se zrnitým gradientem -- tlačítko přehrání.
 class _GrainShapePainter extends CustomPainter {
