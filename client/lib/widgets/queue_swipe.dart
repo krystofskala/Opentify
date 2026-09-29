@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -24,7 +26,7 @@ class QueueSwipe extends StatefulWidget {
 class _QueueSwipeState extends State<QueueSwipe> with SingleTickerProviderStateMixin {
   late final AnimationController _dx = AnimationController.unbounded(vsync: this);
   static const _threshold = 72.0;
-  static const _max = 120.0;
+  static const _max = 96.0;
   static const _spring = SpringDescription(mass: 1, stiffness: 500, damping: 34);
   bool _armed = false;
 
@@ -54,7 +56,14 @@ class _QueueSwipeState extends State<QueueSwipe> with SingleTickerProviderStateM
       }
     }
     setState(() => _armed = false);
-    _dx.animateWith(SpringSimulation(_spring, _dx.value, 0, d.velocity.pixelsPerSecond.dx));
+    _springBack(d.velocity.pixelsPerSecond.dx);
+  }
+
+  // Pružina končí jen "skoro" na nule -- dojet na přesnou nulu, jinak zůstal
+  // pod řádkem zbytek podbarvení (živě nahlášeno).
+  Future<void> _springBack(double velocity) async {
+    await _dx.animateWith(SpringSimulation(_spring, _dx.value, 0, velocity));
+    if (mounted) _dx.value = 0;
   }
 
   @override
@@ -63,49 +72,40 @@ class _QueueSwipeState extends State<QueueSwipe> with SingleTickerProviderStateM
     return GestureDetector(
       onHorizontalDragUpdate: _update,
       onHorizontalDragEnd: _end,
-      onHorizontalDragCancel: () => _dx.animateWith(SpringSimulation(_spring, _dx.value, 0, 0)),
+      onHorizontalDragCancel: () => _springBack(0),
       child: AnimatedBuilder(
         animation: _dx,
         builder: (context, child) {
           final dx = _dx.value;
           final next = dx > 0;
-          final progress = (dx.abs() / _threshold).clamp(0.0, 1.0);
+          final width = dx.abs();
+          final progress = (width / _threshold).clamp(0.0, 1.0);
+          // Řádek je průhledný -- akce se kreslí JEN v odkrytém pruhu vedle
+          // posunutého řádku (jako Apple Music), jinak prosvítala přes text.
           return Stack(
             children: [
-              if (dx != 0)
-                Positioned.fill(
+              if (width >= 1)
+                Positioned(
+                  top: 4,
+                  bottom: 4,
+                  left: next ? 4 : null,
+                  right: next ? null : 4,
+                  width: math.max(0.0, width - 8),
                   child: AnimatedContainer(
                     duration: Motion.state.duration,
                     curve: Motion.state,
                     decoration: BoxDecoration(
-                      color: (_armed ? scheme.primaryContainer : scheme.surfaceContainerHigh)
-                          .withValues(alpha: 0.5 + 0.4 * progress),
+                      color: (_armed ? scheme.primary : scheme.surfaceContainerHighest).withValues(alpha: progress),
                       borderRadius: BorderRadius.circular(Expressive.cornerMedium),
                     ),
-                    alignment: next ? Alignment.centerLeft : Alignment.centerRight,
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                    child: Opacity(
-                      opacity: progress,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            next ? Symbols.playlist_play_rounded : Symbols.queue_music_rounded,
-                            color: _armed ? scheme.onPrimaryContainer : scheme.onSurface,
+                    alignment: Alignment.center,
+                    child: width < 40
+                        ? null
+                        : Icon(
+                            next ? Symbols.playlist_play_rounded : Symbols.playlist_add_rounded,
+                            color: (_armed ? scheme.onPrimary : scheme.onSurface).withValues(alpha: progress),
                             fill: _armed ? 1 : 0,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            next ? 'Hrát jako další' : 'Na konec fronty',
-                            style: TextStyle(
-                              color: _armed ? scheme.onPrimaryContainer : scheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ),
               Transform.translate(offset: Offset(dx, 0), child: child),
