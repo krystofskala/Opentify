@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show pow;
+import 'dart:math' show Random, pow;
 import 'dart:typed_data' show BytesBuilder;
 
 import 'package:audio_session/audio_session.dart';
@@ -12,6 +12,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/media_session.dart';
+import '../core/radio_mode.dart';
 import '../core/ws_client.dart';
 import '../models/playback_model.dart' show RepeatMode;
 import '../routing/app_router.dart';
@@ -283,6 +284,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _player.playerStateStream.listen(_onPlayerStateChanged);
     _player.positionStream.listen((position) {
       if (_priming) return;
+      if (_radioActive) {
+        _onRadioPosition(position);
+        return;
+      }
       state = state.copyWith(position: position);
       _maybeWarmUpNext(position);
       _trackScrobble(position);
@@ -290,7 +295,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _maybeAdvanceEarly(position);
     });
     _player.durationStream.listen((duration) {
-      if (_priming) return;
+      if (_priming || _radioActive) return; // délku v rádiu dává časová osa
       state = state.copyWith(duration: duration);
     });
     _mediaSession.setHandlers(
@@ -400,6 +405,183 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// jeden prvek, takže Předchozí/Další v `NowPlayingScreen` zůstanou
   /// neaktivní. Volající, co mají po ruce celý seznam (tracklist alba,
   /// knihovna...), by měli volat `playQueue` místo tohohle.
+  // --- Nepřetržitý stream fronty ("rádio", iOS) ----------------------------
+  //
+  // Na zamčeném iPhonu webová appka nesmí spustit nový zdroj zvuku -- další
+  // skladba "hrála" potichu, dokud se appka neotevřela (živě nahlášeno).
+  // V rádiu se `<audio>` připojí JEDNOU na stream ze serveru (backend
+  // app/radio.py), do kterého server skladby řadí za sebou; zdroj se nemění.
+  // Podle časové osy (kde ve streamu která skladba začíná) se tady přepíná
+  // `nowPlaying`, pozice a délka. Posun/přeskočení = nový stream od daného
+  // místa (to je vždy přímo po klepnutí, takže ho iOS pustí).
+
+  /// Výchozí: zapnuto na iPhonu/iPadu; uživatel ho v menu přehrávače může
+  /// vypnout (uloženo per zařízení).
+  bool _radioMode = shouldUseRadioStream();
+  static const _radioPrefKey = 'player.radio_mode';
+
+  bool get radioModeEnabled => _radioMode;
+
+  Future<void> setRadioMode(bool enabled) async {
+    _radioMode = enabled;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_radioPrefKey, enabled);
+    } catch (_) {}
+    // Projeví se od dalšího spuštění skladby (běžící stream nepřerušujeme).
+  }
+
+  String? _radioSession;
+  List<_RadioSegment> _radioTimeline = const [];
+  Timer? _radioPoll;
+  Duration? _radioStartPosition;
+
+  bool get _radioActive => _radioSession != null;
+
+  /// Pořadí dalších skladeb po té aktuální (indexy do fronty) -- stejná
+  /// logika jako `nextIndex`, jen dopředu celá (shuffle, opakování).
+  List<int> _upcomingOrder() {
+    final s = state;
+    if (s.queue.isEmpty) return const [];
+    if (s.repeatMode == RepeatMode.one) return List.filled(30, s.queueIndex);
+    List<int> order;
+    if (s.shuffleEnabled && s.shuffleOrder != null) {
+      final pos = s.shuffleOrder!.indexOf(s.queueIndex);
+      order = pos < 0 ? <int>[] : s.shuffleOrder!.sublist(pos + 1);
+      if (s.repeatMode == RepeatMode.all) order = [...order, ...s.shuffleOrder!, ...s.shuffleOrder!];
+    } else {
+      order = [for (var i = s.queueIndex + 1; i < s.queue.length; i++) i];
+      if (s.repeatMode == RepeatMode.all) {
+        order = [
+          ...order,
+          for (var r = 0; r < 2; r++)
+            for (var i = 0; i < s.queue.length; i++) i,
+        ];
+      }
+    }
+    return order.take(300).toList();
+  }
+
+  static String _randomHex() {
+    final rnd = Random.secure();
+    return List.generate(16, (_) => rnd.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Založí relaci (souběžně -- id volí klient, stream může začít hned v
+  /// obsluze klepnutí) a vrátí URL streamu.
+  String _startRadio(NowPlayingInfo info, Duration position) {
+    final sid = _randomHex();
+    _radioSession = sid;
+    _radioTimeline = const [];
+    _radioStartPosition = position;
+    final api = _ref.read(apiClientProvider);
+    final ids = [info.recordingId, for (final i in _upcomingOrder()) state.queue[i].recordingId];
+    unawaited(api.putJson('/radio/$sid', body: {'recordingIds': ids, 'positionMs': position.inMilliseconds}).then<void>(
+        (_) {},
+        onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e')));
+    _radioPoll?.cancel();
+    _radioPoll = Timer.periodic(const Duration(seconds: 2), (_) => unawaited(_pollRadio()));
+    return '${api.baseUrl}/radio/$sid/stream';
+  }
+
+  void _stopRadio() {
+    _radioSession = null;
+    _radioTimeline = const [];
+    _radioPoll?.cancel();
+    _radioPoll = null;
+  }
+
+  /// Nový stream od `position` aktuální skladby (posun, obnovení po pauze).
+  void _restartRadio(Duration position) {
+    final info = state.nowPlaying;
+    if (info == null) return;
+    final url = _startRadio(info, position);
+    state = state.copyWith(position: position);
+    unawaited(_player.setUrl(url).then<void>((_) {}, onError: (Object e) => debugPrint('rádio setUrl: $e')));
+    unawaited(_player.play().catchError((Object e) => debugPrint('rádio play: $e')));
+  }
+
+  Future<void> _pollRadio() async {
+    final sid = _radioSession;
+    if (sid == null || !_player.playing) return;
+    try {
+      final json = await _ref
+          .read(apiClientProvider)
+          .getJson('/radio/$sid/timeline', query: {'playedMs': _player.position.inMilliseconds.toString()});
+      if (_radioSession != sid) return;
+      _radioTimeline = [
+        for (final e in (json['segments'] as List<dynamic>).cast<Map<String, dynamic>>())
+          _RadioSegment(
+            recordingId: e['recordingId'] as String,
+            startMs: (e['startMs'] as num).toDouble(),
+            offsetMs: (e['offsetMs'] as num).toDouble(),
+            trackMs: (e['trackMs'] as num?)?.toDouble(),
+          ),
+      ];
+    } catch (_) {
+      // Síť -- příště.
+    }
+  }
+
+  /// Poslat serveru nové pořadí dalších skladeb (přidání/odebrání/přeřazení
+  /// ve frontě, shuffle, opakování).
+  void _radioSyncUpcoming() {
+    final sid = _radioSession;
+    if (!_radioActive || sid == null) return;
+    final ids = [for (final i in _upcomingOrder()) state.queue[i].recordingId];
+    unawaited(_ref
+        .read(apiClientProvider)
+        .putJson('/radio/$sid/queue', body: {'upcoming': ids}).then<void>((_) {}, onError: (Object _) {}));
+  }
+
+  /// Pozice ve streamu -> co hraje a kde ve skladbě.
+  void _onRadioPosition(Duration streamPosition) {
+    final ms = streamPosition.inMilliseconds.toDouble();
+    _RadioSegment? seg;
+    for (final s in _radioTimeline) {
+      if (s.startMs <= ms) {
+        seg = s;
+      } else {
+        break;
+      }
+    }
+    if (seg == null) {
+      // Časová osa ještě nedorazila -- ukaž, odkud se začalo.
+      state = state.copyWith(position: (_radioStartPosition ?? Duration.zero) + streamPosition);
+      return;
+    }
+    if (state.nowPlaying?.recordingId != seg.recordingId) _radioSwitchTo(seg.recordingId);
+    final trackPos = Duration(milliseconds: (ms - seg.startMs + seg.offsetMs).round());
+    final trackMs = seg.trackMs;
+    state = state.copyWith(
+      // Zvuk běží -> nenačítá se (viz `_onPlayerStateChanged`).
+      isBuffering: _awaitingProvisioning ? null : false,
+      position: trackPos,
+      duration: trackMs != null ? Duration(milliseconds: trackMs.round()) : state.duration,
+    );
+    _trackScrobble(trackPos);
+    _maybeLoopAb(trackPos);
+  }
+
+  /// Server přešel na další skladbu -- přepnout `nowPlaying` bez nového zdroje.
+  void _radioSwitchTo(String recordingId) {
+    var idx = -1;
+    final n = state.nextIndex;
+    if (n != null && state.queue[n].recordingId == recordingId) {
+      idx = n;
+    } else {
+      idx = state.queue.indexWhere((q) => q.recordingId == recordingId, state.queueIndex + 1);
+      if (idx < 0) idx = state.queue.indexWhere((q) => q.recordingId == recordingId);
+    }
+    if (idx < 0) return;
+    final info = state.queue[idx];
+    state = state.copyWith(nowPlaying: info, queueIndex: idx, accentColor: _accentColorCache[info.recordingId]);
+    unawaited(_resolveArtworkAndAccent(info));
+    _recordRecentlyPlayed(info);
+    _beginScrobble(info.recordingId);
+    _realtime.playbackPlay(info.recordingId);
+  }
+
   /// Stránka, ze které se aktuální fronta spustila ("/playlists/<id>",
   /// "/library/liked", ...) -- jde s poslechem na server, "Pokračovat v
   /// poslechu" na Domů pak ukáže i playlist, ne jen album skladby.
@@ -542,6 +724,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
 
     state = state.copyWith(queue: newQueue, queueIndex: newCurrentIndex, shuffleEnabled: false);
+    _radioSyncUpcoming();
   }
 
   /// Odebere skladbu z fronty (swipe ve frontě). Právě hrající se odebrat
@@ -559,6 +742,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       ];
     }
     state = state.copyWith(queue: newQueue, queueIndex: newCurrentIndex, shuffleOrder: newShuffleOrder);
+    _radioSyncUpcoming();
   }
 
   /// Vloží skladbu hned za právě hrající, bez přerušení aktuálního
@@ -584,6 +768,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       newShuffleOrder = shifted;
     }
     state = state.copyWith(queue: newQueue, shuffleOrder: newShuffleOrder);
+    _radioSyncUpcoming();
     unawaited(_ref.read(provisioningControllerProvider.notifier).provision(info.recordingId));
   }
 
@@ -601,6 +786,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       newShuffleOrder = [...newShuffleOrder, newIndex];
     }
     state = state.copyWith(queue: newQueue, shuffleOrder: newShuffleOrder);
+    _radioSyncUpcoming();
     unawaited(_ref.read(provisioningControllerProvider.notifier).provision(info.recordingId));
   }
 
@@ -610,6 +796,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       shuffleEnabled: enabling,
       shuffleOrder: enabling ? _buildShuffleOrder(state.queue.length, state.queueIndex) : state.shuffleOrder,
     );
+    _radioSyncUpcoming();
   }
 
   List<int> _buildShuffleOrder(int length, int currentIndex) {
@@ -626,6 +813,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       RepeatMode.one => RepeatMode.off,
     };
     state = state.copyWith(repeatMode: next);
+    _radioSyncUpcoming();
   }
 
   Future<void> setSpeed(double value) async {
@@ -651,6 +839,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> _loadPreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final radio = prefs.getBool(_radioPrefKey);
+      if (radio != null) _radioMode = radio;
       final enabled = prefs.getBool(_normalizationPrefKey);
       if (enabled != null && enabled != state.normalizationEnabled) {
         state = state.copyWith(normalizationEnabled: enabled);
@@ -1041,12 +1231,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _priming = false;
     _awaitingProvisioning = false;
     _warmedUpAfter = null;
+    // iOS: místo souboru skladby jeden nepřetržitý stream celé fronty (viz
+    // `_startRadio`). Ještě se stahující soubor (progresivní přehrávání) jde
+    // postaru -- rádio řadí jen hotové skladby.
+    if (_radioMode && !isProgressive) {
+      streamUrl = _startRadio(info, Duration.zero);
+    } else {
+      _stopRadio();
+    }
     // Korekci z cache (už stažené skladby ji dostaly rovnou v `provision()`)
     // nastavíme PŘED spuštěním, ať první vteřina nehraje nahlas a pak se
     // neztlumí. Neznámá korekce -> 1.0, `_loadGainFor` ji případně doplní.
-    _trackGainFactor = _factorForGainDb(
-      _ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId),
-    );
+    // V rádiu ji aplikuje rovnou server.
+    _trackGainFactor = _radioActive
+        ? 1.0
+        : _factorForGainDb(_ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId));
     _applyVolume();
     try {
       // `play()` musí padnout do stejného synchronního běhu jako uživatelův
@@ -1072,7 +1271,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _realtime.playbackPlay(info.recordingId);
       _recordRecentlyPlayed(info);
       _beginScrobble(info.recordingId);
-      if (_ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId) == null) {
+      if (!_radioActive &&
+          _ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId) == null) {
         unawaited(_loadGainFor(info.recordingId));
       }
     } catch (e) {
@@ -1179,6 +1379,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (_player.playing) {
       await _player.pause();
       _realtime.playbackPause();
+    } else if (_radioActive) {
+      // Po pauze navázat novým streamem (starý mohl vypršet / Safari drží
+      // zastaralý buffer živého streamu).
+      _restartRadio(state.position);
+      _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
     } else {
       await _player.play();
       _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
@@ -1186,6 +1391,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   Future<void> seek(Duration position) async {
+    if (_radioActive) {
+      // Živý stream převíjet nejde -- nový stream od dané pozice skladby.
+      _restartRadio(position);
+      _realtime.playbackSeek(position.inMilliseconds);
+      return;
+    }
     await _player.seek(position);
     _realtime.playbackSeek(position.inMilliseconds);
     _mediaSession.setPosition(position: position, duration: state.duration, speed: state.speed);
@@ -1198,11 +1409,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       state = state.copyWith(isPlaying: false, isBuffering: true);
       return;
     }
+    // Živý stream (rádio) přehrávač často hlásí trvale jako "loading/
+    // buffering" (nekonečná délka) -- tlačítko pauzy pak bylo zablokované
+    // točícím se kolečkem a nešlo zastavit (živě nahlášeno). V rádiu se
+    // načítání ukazuje jen do prvního zvuku.
+    final loading = playerState.processingState == ProcessingState.loading ||
+        playerState.processingState == ProcessingState.buffering;
     state = state.copyWith(
       isPlaying: playerState.playing,
-      isBuffering: _awaitingProvisioning ||
-          playerState.processingState == ProcessingState.loading ||
-          playerState.processingState == ProcessingState.buffering,
+      isBuffering: _awaitingProvisioning || (loading && !(_radioActive && _player.position > Duration.zero)),
     );
     if (playerState.processingState == ProcessingState.completed) {
       // Právě přepnuto dřív (`_maybeAdvanceEarly`) -- `completed` patří staré
@@ -1277,6 +1492,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _sleepTimer?.cancel();
     _fadeTimer?.cancel();
     _gainRampTimer?.cancel();
+    _radioPoll?.cancel();
     _provisioningSub?.close();
     _player.dispose();
     super.dispose();
@@ -1292,3 +1508,14 @@ final abRepeatProvider = StateProvider<AbRepeat?>((ref) => null);
 final audioPlayerControllerProvider = StateNotifierProvider<AudioPlayerController, AudioPlayerState>((ref) {
   return AudioPlayerController(ref.watch(realtimeClientProvider), ref);
 });
+
+/// Úsek nepřetržitého streamu: od `startMs` (čas streamu) hraje skladba
+/// `recordingId` od svého `offsetMs`; `trackMs` = délka celé skladby.
+class _RadioSegment {
+  const _RadioSegment({required this.recordingId, required this.startMs, required this.offsetMs, this.trackMs});
+
+  final String recordingId;
+  final double startMs;
+  final double offsetMs;
+  final double? trackMs;
+}

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -151,6 +152,17 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                     value: playback.normalizationEnabled,
                     onChanged: controller.setNormalizationEnabled,
                   ),
+                  if (kIsWeb)
+                    GlassSwitchRow(
+                      leading: const Icon(Symbols.lock_rounded),
+                      title: 'Hrát dál na zamčeném displeji',
+                      subtitle: 'Fronta jako jeden nepřetržitý stream (pro iPhone). Projeví se od další skladby.',
+                      value: controller.radioModeEnabled,
+                      onChanged: (v) async {
+                        await controller.setRadioMode(v);
+                        if (mounted) setState(() {});
+                      },
+                    ),
                   const SizedBox(height: AppSpacing.sm),
                   Text('Uspávač', style: theme.textTheme.titleSmall),
                   const SizedBox(height: AppSpacing.xs),

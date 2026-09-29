@@ -63,6 +63,15 @@ class ApiClient {
     return _decode(response) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> putJson(String path, {Object? body}) async {
+    final response = await _http.put(
+      _uri(path, null),
+      headers: _headers,
+      body: body == null ? null : jsonEncode(body),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> patchJson(String path, {Object? body}) async {
     final response = await _http.patch(
       _uri(path, null),
