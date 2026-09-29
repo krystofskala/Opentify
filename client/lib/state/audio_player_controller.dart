@@ -285,7 +285,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _player.positionStream.listen((position) {
       if (_priming) return;
       if (_radioActive) {
-        _onRadioPosition(position);
+        _radioLastRaw = position;
+        _radioLastRawAt = DateTime.now();
+        _onRadioPosition(position, measured: true);
         return;
       }
       state = state.copyWith(position: position);
@@ -436,6 +438,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Timer? _radioPoll;
   Duration? _radioStartPosition;
   DateTime _radioLastRestart = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _radioTick;
+  Duration _radioLastRaw = Duration.zero;
+  DateTime _radioLastRawAt = DateTime.now();
 
   bool get _radioActive => _radioSession != null;
   final bool _nativeHls = supportsNativeHls();
@@ -483,6 +488,17 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e')));
     _radioPoll?.cancel();
     _radioPoll = Timer.periodic(const Duration(seconds: 2), (_) => unawaited(_pollRadio()));
+    // Plynulá pozice: Safari u HLS hlásí `currentTime` jen po kouskách, tečka
+    // na vlnovce skákala (živě nahlášeno) -- mezi hlášeními dopočítat.
+    _radioLastRaw = Duration.zero;
+    _radioLastRawAt = DateTime.now();
+    _radioTick?.cancel();
+    _radioTick = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (!_radioActive || !_player.playing) return;
+      final since = DateTime.now().difference(_radioLastRawAt);
+      if (since > const Duration(seconds: 3)) return; // hlášení nechodí -> nehádat
+      _onRadioPosition(_radioLastRaw + since * state.speed);
+    });
     // Safari: HLS (stahuje ho systémový přehrávač i na pozadí); jinde MP3.
     return _nativeHls ? '${api.baseUrl}/radio/$sid/index.m3u8' : '${api.baseUrl}/radio/$sid/stream';
   }
@@ -492,6 +508,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _radioTimeline = const [];
     _radioPoll?.cancel();
     _radioPoll = null;
+    _radioTick?.cancel();
+    _radioTick = null;
   }
 
   /// Nový stream od `position` aktuální skladby (posun, obnovení po pauze).
@@ -538,7 +556,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   /// Pozice ve streamu -> co hraje a kde ve skladbě.
-  void _onRadioPosition(Duration streamPosition) {
+  void _onRadioPosition(Duration streamPosition, {bool measured = false}) {
     final ms = streamPosition.inMilliseconds.toDouble();
     _RadioSegment? seg;
     for (final s in _radioTimeline) {
@@ -553,8 +571,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       state = state.copyWith(position: (_radioStartPosition ?? Duration.zero) + streamPosition);
       return;
     }
-    if (state.nowPlaying?.recordingId != seg.recordingId) _radioSwitchTo(seg.recordingId);
+    final switching = state.nowPlaying?.recordingId != seg.recordingId;
+    if (switching) _radioSwitchTo(seg.recordingId);
     final trackPos = Duration(milliseconds: (ms - seg.startMs + seg.offsetMs).round());
+    // Skutečné hlášení kousek za dopočtem -> necukat tečkou zpátky (další
+    // dopočet už vychází ze skutečné hodnoty a srovná se sám).
+    final back = state.position - trackPos;
+    if (measured && !switching && back > Duration.zero && back < const Duration(seconds: 1)) return;
     final trackMs = seg.trackMs;
     state = state.copyWith(
       // Zvuk běží -> nenačítá se (viz `_onPlayerStateChanged`).
@@ -1509,6 +1532,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _fadeTimer?.cancel();
     _gainRampTimer?.cancel();
     _radioPoll?.cancel();
+    _radioTick?.cancel();
     _provisioningSub?.close();
     _player.dispose();
     super.dispose();
