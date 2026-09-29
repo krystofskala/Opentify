@@ -1,6 +1,3 @@
-import 'dart:math' as math;
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -10,6 +7,7 @@ import '../theme/glass_tokens.dart';
 import '../theme/shapes.dart';
 import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
+import 'mix_artwork.dart';
 
 /// Obal playlistu: mozaika 2×2 z prvních čtyř obalů (1 obal = přes celou
 /// plochu), nebo -- u žánrů/nálad, případně bez obalů -- tónovaný zrnitý
@@ -23,7 +21,7 @@ class PlaylistArtwork extends StatelessWidget {
     this.icon = Symbols.queue_music_rounded,
     this.showTitle = true,
     this.dailyMixNumber,
-    this.categoryMix,
+    this.mix,
   });
 
   final String title;
@@ -32,21 +30,25 @@ class PlaylistArtwork extends StatelessWidget {
   final IconData icon;
   final bool showTitle;
 
-  /// Denní mix: vlastní obal místo mozaiky (`coverUrls` = fotky interpretů).
+  /// Denní mix bez karty ("Pokračovat v poslechu") -- `coverUrls` = fotky
+  /// interpretů.
   final int? dailyMixNumber;
 
-  /// "Tvůj mix · Rock": stejný obal jako Denní mix, v barvě kategorie a s
-  /// jejím názvem místo čísla.
-  final ({String label, Color color})? categoryMix;
+  /// Generativní obal vlastního mixu (viz `mixArtOf`).
+  final MixArtSpec? mix;
 
   @override
   Widget build(BuildContext context) {
-    if (dailyMixNumber != null) {
-      return _DailyMixArtwork(number: dailyMixNumber!, artistPhotos: coverUrls, compact: !showTitle);
-    }
-    if (categoryMix case final mix?) {
-      return _DailyMixArtwork(label: mix.label, color: mix.color, artistPhotos: coverUrls, compact: !showTitle);
-    }
+    final spec = mix ??
+        (dailyMixNumber == null
+            ? null
+            : MixArtSpec(
+                style: MixArtStyle.daily,
+                seed: 'personal:daily-mix:$dailyMixNumber',
+                headline: '$dailyMixNumber',
+                photos: coverUrls,
+              ));
+    if (spec != null) return MixArtwork(spec: spec, compact: !showTitle);
     if (gradient || coverUrls.isEmpty) return _GradientArtwork(title: title, icon: icon, showTitle: showTitle);
     if (coverUrls.length < 4) return ArtworkImage(url: coverUrls.first, icon: icon);
     return Column(
@@ -87,7 +89,7 @@ class _GradientArtwork extends StatelessWidget {
             gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [a, b]),
           ),
         ),
-        const RepaintBoundary(child: CustomPaint(painter: _GrainPainter())),
+        const RepaintBoundary(child: CustomPaint(painter: GrainPainter())),
         Padding(
           padding: const EdgeInsets.all(AppSpacing.sm),
           child: Column(
@@ -113,137 +115,6 @@ class _GradientArtwork extends StatelessWidget {
       ],
     );
   }
-}
-
-/// Obal "Denního mixu": tónovaný zrnitý gradient (každý mix vlastní stálý
-/// odstín), velké číslo a fotky hlavních interpretů v kruzích -- obsahová
-/// vrstva podle glass_tokens.dart (tónová barva + expresivní tvary, žádné
-/// sklo).
-class _DailyMixArtwork extends StatelessWidget {
-  const _DailyMixArtwork({this.number, this.label, this.color, required this.artistPhotos, required this.compact});
-
-  /// Denní mix (číslo) nebo mix kategorie (`label` + `color`).
-  final int? number;
-  final String? label;
-  final Color? color;
-  final List<String> artistPhotos;
-  final bool compact;
-
-  static const _hues = [268.0, 12.0, 196.0, 142.0, 330.0, 38.0];
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final base = color != null ? HSLColor.fromColor(color!) : null;
-    final hue = base?.hue ?? _hues[((number ?? 1) - 1) % _hues.length];
-    final a = HSLColor.fromAHSL(1, hue, base == null ? 0.66 : base.saturation.clamp(0.25, 0.7), 0.52).toColor();
-    final b =
-        HSLColor.fromAHSL(1, (hue + 35) % 360, base == null ? 0.72 : base.saturation.clamp(0.3, 0.75), 0.26).toColor();
-    final word = label;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final side = constraints.biggest.shortestSide;
-        final avatar = side * 0.27;
-        final photos = artistPhotos.take(compact ? 0 : 3).toList();
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [a, b]),
-              ),
-            ),
-            const RepaintBoundary(child: CustomPaint(painter: _GrainPainter())),
-            if (!compact)
-              Positioned(
-                left: side * 0.08,
-                top: side * 0.07,
-                child: Text(
-                  word == null ? 'DENNÍ MIX' : 'TVŮJ MIX',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-            if (word != null)
-              Positioned(
-                left: side * 0.07,
-                right: side * 0.07,
-                top: compact ? side * 0.1 : side * 0.2,
-                child: Text(
-                  word,
-                  maxLines: compact ? 3 : 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: side * (compact ? 0.2 : 0.15),
-                    fontWeight: FontWeight.w900,
-                    height: 1.05,
-                    shadows: const [Shadow(blurRadius: 10, color: Colors.black38)],
-                  ),
-                ),
-              )
-            else
-              Positioned(
-                left: side * 0.07,
-                bottom: side * (compact ? 0.04 : 0.02),
-                child: Text(
-                  '$number',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: side * (compact ? 0.62 : 0.42),
-                    fontWeight: FontWeight.w900,
-                    height: 1,
-                    shadows: const [Shadow(blurRadius: 10, color: Colors.black38)],
-                  ),
-                ),
-              ),
-            for (var i = 0; i < photos.length; i++)
-              Positioned(
-                right: side * 0.06 + i * avatar * 0.6,
-                bottom: side * 0.08,
-                width: avatar,
-                height: avatar,
-                child: DecoratedBox(
-                  decoration: const ShapeDecoration(
-                    shape: CircleBorder(side: BorderSide(color: Colors.white, width: 2)),
-                    shadows: [BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2))],
-                  ),
-                  child: ClipOval(child: ArtworkImage(url: photos[i], icon: Symbols.person_rounded, iconSize: 16)),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Statické jemné zrno (stejná estetika jako pozadí appky, jen levné).
-class _GrainPainter extends CustomPainter {
-  const _GrainPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rnd = math.Random(3);
-    final count = (size.width * size.height / 14).clamp(200, 4000).toInt();
-    final light = <Offset>[];
-    final dark = <Offset>[];
-    for (var i = 0; i < count; i++) {
-      final p = Offset(rnd.nextDouble() * size.width, rnd.nextDouble() * size.height);
-      (rnd.nextBool() ? light : dark).add(p);
-    }
-    final paint = Paint()
-      ..strokeWidth = 1.2
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPoints(ui.PointMode.points, light, paint..color = Colors.white.withValues(alpha: 0.10));
-    canvas.drawPoints(ui.PointMode.points, dark, paint..color = Colors.black.withValues(alpha: 0.12));
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 /// Karta playlistu do vodorovné řady na Domů.
@@ -286,7 +157,7 @@ class PlaylistCardView extends StatelessWidget {
                         gradient: card.prefersGradient,
                         icon: _iconFor(card.kind),
                         dailyMixNumber: card.dailyMixNumber,
-                        categoryMix: categoryMixOf(card),
+                        mix: mixArtOf(card),
                       ),
                       if (card.badge != null)
                         Positioned(left: AppSpacing.xs, top: AppSpacing.xs, child: RankBadge(label: card.badge!)),
@@ -309,14 +180,6 @@ class PlaylistCardView extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Obal "Tvůj mix · X" -- název a barva kategorie z karty.
-({String label, Color color})? categoryMixOf(HomePlaylistCard card) {
-  final label = card.categoryMixLabel;
-  if (label == null) return null;
-  final hex = (card.accentColor ?? '#6A5ACD').replaceFirst('#', '');
-  return (label: label, color: Color(int.tryParse('FF$hex', radix: 16) ?? 0xFF6A5ACD));
 }
 
 IconData _iconFor(String kind) => switch (kind) {
@@ -382,7 +245,7 @@ class QuickPickTile extends StatelessWidget {
                   icon: _iconFor(card.kind),
                   showTitle: false,
                   dailyMixNumber: card.dailyMixNumber,
-                  categoryMix: categoryMixOf(card),
+                  mix: mixArtOf(card),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),

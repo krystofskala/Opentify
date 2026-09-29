@@ -37,6 +37,8 @@ class PlaylistCardOut(CamelModel):
     badge: str | None = None
     # Barva kategorie Procházet u "Tvůj mix · X" -- obal v barvě kategorie.
     accent_color: str | None = None
+    # Generativní obal vlastních mixů: daily | genre | mood | year.
+    art_style: str | None = None
 
 
 class AlbumCardOut(CamelModel):
@@ -137,6 +139,7 @@ async def home_refresh_loop(check_every_s: float = 15 * 60) -> None:
 _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
     ("category_mixes", "Tvoje žánry", "playlist_cards"),
+    ("years", "Tvoje roky", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),
     ("new_releases", "Nová vydání", "album_cards"),
     ("top_albums", "Populární alba", "album_cards"),
@@ -187,9 +190,24 @@ def _accent_for(source: str | None) -> str | None:
     return category.color if category else None
 
 
+def _art_style(source: str | None) -> str | None:
+    source = source or ""
+    if source.startswith("personal:daily-mix:"):
+        return "daily"
+    if source.startswith("personal:year:"):
+        return "year"
+    if source.startswith("personal:category-mix:"):
+        from app.browse import get_category
+
+        category = get_category(source.rsplit(":", 1)[-1])
+        return category.group if category else "genre"
+    return None
+
+
 def _card(session: Session, playlist: Playlist) -> PlaylistCardOut:
     return PlaylistCardOut(
         accent_color=_accent_for(playlist.source),
+        art_style=_art_style(playlist.source),
         id=playlist.id,
         title=playlist.title,
         description=playlist.description,
@@ -254,6 +272,7 @@ def build_home(user_id: str) -> dict[str, Any]:
         by_section["category_mixes"] = sorted(
             (p for p in by_section.get("category_mixes", []) if p.source in picks), key=lambda p: picks.index(p.source)
         )
+        by_section.get("years", []).sort(key=lambda p: p.source or "", reverse=True)  # nejnovější rok první
         genre_order = [f"deezer:chart:genre:{gid}" for gid, _ in g.GENRES]
         by_section.get("genres", []).sort(key=lambda p: genre_order.index(p.source) if p.source in genre_order else 99)
 

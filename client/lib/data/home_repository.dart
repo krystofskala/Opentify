@@ -15,7 +15,11 @@ class HomePlaylistCard {
     this.coverUrls = const [],
     this.badge,
     this.accentColor,
+    this.artStyle,
   });
+
+  /// Generativní obal vlastního mixu: daily | genre | mood | year.
+  final String? artStyle;
 
   final String id;
   final String title;
@@ -60,6 +64,7 @@ class HomePlaylistCard {
         coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
         badge: json['badge'] as String?,
         accentColor: json['accentColor'] as String?,
+        artStyle: json['artStyle'] as String?,
       );
 }
 

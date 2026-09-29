@@ -35,7 +35,11 @@ def recent(
     paměť klienta). Necachuje se -- má reagovat hned."""
     user_id, _device_id = current
     listens = session.exec(
-        select(Listen).where(Listen.user_id == user_id).order_by(Listen.played_at.desc()).limit(300)  # type: ignore[attr-defined]
+        select(Listen)
+        # Importovaná historie ze Spotify sem nepatří -- jen co hrálo v appce.
+        .where(Listen.user_id == user_id, (Listen.source.is_(None)) | (Listen.source != "spotify-history"))  # type: ignore[union-attr]
+        .order_by(Listen.played_at.desc())  # type: ignore[attr-defined]
+        .limit(300)
     ).all()
     items: list[dict] = []
     seen: set[str] = set()
