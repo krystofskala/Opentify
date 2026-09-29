@@ -22,6 +22,7 @@ class WavySeekBar extends StatefulWidget {
     this.onChangeEnd,
     this.isPlaying = false,
     this.interactive = true,
+    this.tapToSeek = true,
     this.activeColor = Colors.white,
     this.inactiveColor = const Color(0x4DFFFFFF),
     this.thumbColor = Colors.white,
@@ -38,6 +39,10 @@ class WavySeekBar extends StatefulWidget {
   final ValueChanged<double>? onChangeEnd;
   final bool isPlaying;
   final bool interactive;
+
+  /// `false` (mini přehrávač): posun jen tažením do strany -- klepnutí patří
+  /// rodiči (rozbalení přehrávače), svislé tažení taky (zavření).
+  final bool tapToSeek;
   final Color activeColor;
   final Color inactiveColor;
   final Color thumbColor;
@@ -59,6 +64,12 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
   bool _dragging = false;
   double? _dragValue;
 
+  // Po puštění drží puk na nové poloze, dokud ji přehrávání nedožene (rádio
+  // navazuje nový stream chvíli) -- dřív skočil zpátky na starou polohu a
+  // pak zase dopředu ("blbne", živě nahlášeno).
+  double? _pendingValue;
+  DateTime? _pendingSince;
+
   @override
   void initState() {
     super.initState();
@@ -79,6 +90,12 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
   void didUpdateWidget(covariant WavySeekBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isPlaying != widget.isPlaying) _syncAmplitudeTarget();
+    final pending = _pendingValue;
+    if (pending != null &&
+        ((widget.progress - pending).abs() < 0.015 ||
+            DateTime.now().difference(_pendingSince!) > const Duration(seconds: 4))) {
+      _pendingValue = null;
+    }
   }
 
   void _syncAmplitudeTarget() {
@@ -122,6 +139,8 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     setState(() {
       _dragging = false;
       _dragValue = null;
+      _pendingValue = widget.onChangeEnd == null ? null : value;
+      _pendingSince = DateTime.now();
     });
     _interactionController.reverse();
     _syncAmplitudeTarget();
@@ -130,7 +149,7 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
-    final displayedProgress = _dragging ? (_dragValue ?? widget.progress) : widget.progress;
+    final displayedProgress = _dragging ? (_dragValue ?? widget.progress) : (_pendingValue ?? widget.progress);
 
     Widget bar = LayoutBuilder(
       builder: (context, constraints) {
@@ -164,12 +183,16 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     return SizedBox(
       height: widget.height,
       child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (details) {
-          final box = context.findRenderObject() as RenderBox;
-          _handleDragStart(details.localPosition.dx, box.size.width);
-        },
-        onTapUp: (_) => _handleDragEnd(),
+        // Bez klepnutí na posun průhledné -- klepnutí projde k rodiči.
+        behavior: widget.tapToSeek ? HitTestBehavior.opaque : HitTestBehavior.translucent,
+        onTapDown: widget.tapToSeek
+            ? (details) {
+                final box = context.findRenderObject() as RenderBox;
+                _handleDragStart(details.localPosition.dx, box.size.width);
+              }
+            : null,
+        onTapUp: widget.tapToSeek ? (_) => _handleDragEnd() : null,
+        onTapCancel: widget.tapToSeek ? _handleDragEnd : null,
         onHorizontalDragStart: (details) {
           final box = context.findRenderObject() as RenderBox;
           _handleDragStart(details.localPosition.dx, box.size.width);

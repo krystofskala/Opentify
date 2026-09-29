@@ -224,12 +224,13 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Průběh jako neinteraktivní vlnovka -- s vlastním místem
-                    // nahoře i po stranách, ať nesedí nalepená na hraně kapsle.
+                    // Průběh: tažením do strany jde přetáčet i tady (klepnutí
+                    // dál rozbalí přehrávač, tažení dolů zavře). Vyšší pás =
+                    // větší plocha pro prst, vizuálně stejné místo.
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 10, 22, 2),
+                      padding: const EdgeInsets.fromLTRB(22, 2, 22, 0),
                       child: SizedBox(
-                        height: 14,
+                        height: 26,
                         child: duration.inMilliseconds == 0
                             ? (playback.isBuffering
                                 ? Center(
@@ -247,8 +248,11 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                             : WavySeekBar(
                                 progress: positionMs / duration.inMilliseconds,
                                 isPlaying: playback.isPlaying,
-                                interactive: false,
-                                height: 14,
+                                tapToSeek: false,
+                                onChangeEnd: (value) => ref
+                                    .read(audioPlayerControllerProvider.notifier)
+                                    .seek(Duration(milliseconds: (value * duration.inMilliseconds).round())),
+                                height: 26,
                                 strokeWidth: 2.5,
                                 waveAmplitude: 2.5,
                                 activeColor: fg,
