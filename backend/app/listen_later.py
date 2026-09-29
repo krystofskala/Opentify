@@ -34,6 +34,7 @@ def _payload(session: Session, item: ListenLater) -> dict[str, Any] | None:
         "id": item.id,
         "kind": item.kind,
         "note": item.note,
+        "source": item.source,
         "addedAt": item.added_at.isoformat(),
         "listenedAt": item.listened_at.isoformat() if item.listened_at else None,
     }
@@ -93,7 +94,9 @@ def list_items(user_id: str) -> dict[str, Any]:
         }
 
 
-def add(user_id: str, kind: str, target_id: str, note: str | None) -> dict[str, Any] | None:
+def add(
+    user_id: str, kind: str, target_id: str, note: str | None, source: str | None = None
+) -> dict[str, Any] | None:
     """Přidá (nebo z "Poslechnuto" vrátí zpět) -- stejná věc je v seznamu jednou."""
     with Session(engine) as session:
         model = {"track": Recording, "album": Release, "artist": Artist}[kind]
@@ -111,6 +114,8 @@ def add(user_id: str, kind: str, target_id: str, note: str | None) -> dict[str, 
             item.added_at = utcnow()
         if note is not None:
             item.note = note.strip() or None
+        if source is not None:
+            item.source = source
         session.add(item)
         session.commit()
         session.refresh(item)

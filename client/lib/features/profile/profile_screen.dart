@@ -97,6 +97,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 12),
             _ActionCard(
+              icon: Symbols.graphic_eq_rounded,
+              title: 'Open Shazam',
+              description: 'Pozná skladbu, která zrovna hraje kolem, a uloží ji do Poslechnout později '
+                  'se značkou. Anonymně: Shazamu jde přes VPN jen otisk zvuku.',
+              buttonLabel: 'Poznat skladbu',
+              onPressed: () => context.push('/shazam'),
+            ),
+            const SizedBox(height: 12),
+            _ActionCard(
               icon: Symbols.music_note_rounded,
               title: 'Ladička',
               description: 'Ladička na kytaru -- standardní i alternativní ladění, struna se pozná '

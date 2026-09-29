@@ -53,11 +53,15 @@ class TrackTile extends ConsumerWidget {
     this.selected = false,
     this.onSelectedChanged,
     this.extraMenuActions = const [],
+    this.badge,
   });
 
   final RecordingModel recording;
   final int? leadingIndex;
   final String? subtitle;
+
+  /// Malá značka před podtitulkem (např. „Open Shazam“ v Poslechnout později).
+  final Widget? badge;
 
   /// Volitelný kontext pro `PlayerBar` (Release/Artist/Profil ho znají,
   /// doporučené seznamy na Home ne -- lišta se bez nich obejde, jen ukáže
@@ -185,6 +189,7 @@ class TrackTile extends ConsumerWidget {
           onArtistTap: selectionMode ? null : artistTap,
           selectionMode: selectionMode,
           selected: selected,
+          badge: badge,
         ),
       TrackTileLayout.card => _CardTile(
           recording: recording,
@@ -246,6 +251,7 @@ class _RowTile extends StatefulWidget {
     required this.recording,
     required this.leadingIndex,
     required this.subtitle,
+    this.badge,
     required this.resolvedArtUrl,
     required this.isAvailable,
     required this.isInFlight,
@@ -265,6 +271,7 @@ class _RowTile extends StatefulWidget {
   final RecordingModel recording;
   final int? leadingIndex;
   final String? subtitle;
+  final Widget? badge;
   final String? resolvedArtUrl;
   final bool isAvailable;
   final bool isInFlight;
@@ -372,12 +379,19 @@ class _RowTileState extends State<_RowTile> {
                                 fontWeight: w.isPlaying ? FontWeight.w600 : null,
                               ),
                             ),
-                            _LinkText(
-                              text: w.subtitle ?? w.recording.durationLabel,
-                              onTap: w.onArtistTap,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: onTinted?.withValues(alpha: 0.75) ?? theme.colorScheme.onSurfaceVariant,
-                              ),
+                            Row(
+                              children: [
+                                if (w.badge case final badge?) ...[badge, const SizedBox(width: 6)],
+                                Flexible(
+                                  child: _LinkText(
+                                    text: w.subtitle ?? w.recording.durationLabel,
+                                    onTap: w.onArtistTap,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: onTinted?.withValues(alpha: 0.75) ?? theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),

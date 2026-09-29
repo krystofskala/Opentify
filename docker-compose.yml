@@ -17,6 +17,9 @@ services:
       # fanart.tv (volitelné, zdarma) -- široké fotky interpretů do hlavičky.
       FANART_API_KEY: ${FANART_API_KEY:-}
       DEEZER_API_BASE: https://api.deezer.com
+      # Open Shazam (app/recognize.py) -- dotazy na Shazam VÝHRADNĚ přes
+      # Mullvad (gluetun proxy, kill switch). Prázdná hodnota rozpoznávání vypne.
+      SHAZAM_PROXY: ${SHAZAM_PROXY:-http://gluetun:8888}
       # Výchozí `http://listenbrainz:8080` čeká na vlastní self-hostnutou
       # instanci (viz zakomentovaná `listenbrainz:` služba níž) -- pro reálný
       # účet na veřejném listenbrainz.org přepiš v `.env` na

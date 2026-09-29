@@ -45,3 +45,22 @@ iPhonu (Safari, Tailscale).
 Backend (FastAPI v Dockeru), přístup přes Tailscale (HTTPS),
 Soulseek jen přes VPN, všechny endpointy. Nativní aplikace je jen jiný
 klient nad stejným API.
+
+## Open Shazam in Control Center (added 2026-09-29)
+
+The web app has Open Shazam under Profile (`/shazam`): the phone records ~4–13 s, the
+server (`POST /api/v1/recognize`, `backend/app/recognize.py`) computes a Shazam
+signature and asks Shazam **only through the Mullvad VPN** (gluetun proxy, kill
+switch), and saves the song to "Poslechnout později" with `source="shazam"`
+(badge "Open Shazam").
+
+Native plan:
+- **Control Center button** (iOS 18 `ControlWidget` + `AppIntent`): tap →
+  opens Opentify straight into listening (`opentify://shazam?start=1`), or, if
+  the intent may record in the background, records ~10 s with `AVAudioEngine`
+  and uploads to the same `/recognize` endpoint — no UI needed; a notification
+  shows the result ("Uloženo do Poslechnout později").
+- Also usable from the **Action button** and Lock Screen (same AppIntent).
+- Keep the same privacy model: audio only to our server, only the signature
+  goes to Shazam via VPN. (ShazamKit would be official but talks to Apple
+  directly from the phone with the app's identity — not anonymous.)

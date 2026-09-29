@@ -30,6 +30,7 @@ from app.routes.client_log import client_log_router
 from app.routes.listen_later import listen_later_router
 from app.routes.wrapped import wrapped_router
 from app.routes.radio import radio_router
+from app.routes.recognize import recognize_router
 from app.routes.share import share_router
 from app.routes.playlists import playlists_router
 from app.routes.provisioning import jobs_router, tracks_router
@@ -69,6 +70,7 @@ app.include_router(browse_router, prefix="/api/v1")
 app.include_router(wrapped_router, prefix="/api/v1")
 app.include_router(listen_later_router, prefix="/api/v1")
 app.include_router(client_log_router, prefix="/api/v1")
+app.include_router(recognize_router, prefix="/api/v1")
 
 
 @app.on_event("startup")

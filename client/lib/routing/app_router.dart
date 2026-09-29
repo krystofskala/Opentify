@@ -16,6 +16,7 @@ import '../features/profile/year_in_review_screen.dart';
 import '../features/browse/browse_category_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
@@ -83,6 +84,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/wrapped/:period',
         builder: (context, state) => WrappedStoryScreen(period: state.pathParameters['period']!),
+      ),
+      GoRoute(
+        path: '/shazam',
+        builder: (context, state) => const ShazamScreen(),
       ),
       GoRoute(
         path: '/tuner',

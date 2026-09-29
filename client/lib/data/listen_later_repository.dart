@@ -27,6 +27,7 @@ class LaterItem {
     required this.kind,
     required this.addedAt,
     this.note,
+    this.source,
     this.listenedAt,
     this.track,
     this.album,
@@ -36,6 +37,9 @@ class LaterItem {
   final String id;
   final LaterKind kind;
   final String? note;
+
+  /// Odkud položka přišla: `null` = ručně, `'shazam'` = Open Shazam.
+  final String? source;
   final DateTime addedAt;
   final DateTime? listenedAt;
   final RecordingModel? track;
@@ -47,12 +51,15 @@ class LaterItem {
 
   String get title => track?.title ?? album?.title ?? artist!.name;
 
+  bool get fromShazam => source == 'shazam';
+
   factory LaterItem.fromJson(Map<String, dynamic> j) {
     final artist = j['artist'] as Map<String, dynamic>?;
     return LaterItem(
       id: j['id'] as String,
       kind: _kindFrom(j['kind'] as String),
       note: j['note'] as String?,
+      source: j['source'] as String?,
       addedAt: DateTime.parse(j['addedAt'] as String),
       listenedAt: j['listenedAt'] == null ? null : DateTime.parse(j['listenedAt'] as String),
       track: j['track'] == null ? null : RecordingModel.fromJson(j['track'] as Map<String, dynamic>),

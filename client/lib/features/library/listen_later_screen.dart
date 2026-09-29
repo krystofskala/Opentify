@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+
 import '../../data/listen_later_repository.dart';
 import '../../models/recording_model.dart';
 import '../../state/artwork_provider.dart';
@@ -19,6 +20,7 @@ import '../../state/audio_player_controller.dart';
 import '../../widgets/track_actions.dart' show TrackMenuAction, nowPlayingInfoFor;
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
+import '../shazam/open_shazam_badge.dart';
 
 const _title = 'Poslechnout později';
 const _sourceLabel = 'Poslechnout později';
@@ -184,6 +186,7 @@ class _ListenLaterScreenState extends ConsumerState<ListenLaterScreen> {
                       queueRecordings: visible,
                       sourceLabel: _sourceLabel,
                       subtitle: _subtitle(r.artistName, item.note),
+                      badge: item.fromShazam ? const OpenShazamBadge() : null,
                       selectionMode: _collection.selecting,
                       selected: _collection.isSelected(r.id),
                       onSelectedChanged: (value) => _collection.toggle(r.id, value),

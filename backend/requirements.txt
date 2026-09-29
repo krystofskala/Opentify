@@ -12,3 +12,5 @@ python-multipart==0.0.*
 yt-dlp>=2026.8.19
 # JS runtime pro YouTube "n"-challenge -- bez něj yt-dlp u části videí selhává.
 deno>=2.0
+# Open Shazam (app/recognize.py): otisk zvuku -> Shazam, přes Mullvad VPN.
+shazamio==0.8.*

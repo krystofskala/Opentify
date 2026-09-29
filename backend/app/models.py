@@ -208,6 +208,8 @@ class ListenLater(SQLModel, table=True):
     kind: str  # track | album | artist
     target_id: str = Field(index=True)  # recording / release / artist id
     note: str | None = None
+    # Odkud položka přišla: None = ručně, "shazam" = rozpoznáno v Open Shazamu.
+    source: str | None = None
     added_at: datetime = Field(default_factory=utcnow, index=True)
     listened_at: datetime | None = Field(default=None, index=True)
 

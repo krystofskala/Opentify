@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -35,8 +36,16 @@ class NetImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fallback = placeholder ?? const SizedBox.shrink();
+    final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+    return LayoutBuilder(builder: (context, constraints) {
+      final longest = [constraints.maxWidth, constraints.maxHeight].where((v) => v.isFinite).fold<double>(0, math.max);
+      return _image(fallback, longest > 0 ? decodeBucket(longest * dpr) : null);
+    });
+  }
+
+  Widget _image(Widget fallback, int? decodeSize) {
     return Image(
-      image: netImageProvider(url),
+      image: netImageProvider(url, decodeSize: decodeSize),
       fit: fit,
       alignment: alignment,
       gaplessPlayback: true,
@@ -62,9 +71,26 @@ class NetImage extends StatelessWidget {
 }
 
 /// Provider pro [url] -- na webu rasterizovaný (viz [NetImage]).
-ImageProvider netImageProvider(String url) {
-  final ImageProvider inner = CachedNetworkImageProvider(url);
+///
+/// `decodeSize`: dekódovat jen na tuhle velikost delší strany (px). Obaly
+/// z Deezeru mají 1000×1000 = 4 MB pixelů v paměti; stránka interpreta s
+/// diskografií jich načte desítky a iPhone (Safari) pak appku při otevření
+/// interpreta zamrazil (podezření, viz web/index.html "černá skříňka").
+ImageProvider netImageProvider(String url, {int? decodeSize}) {
+  ImageProvider inner = CachedNetworkImageProvider(url);
+  if (decodeSize != null) {
+    inner = ResizeImage(inner, width: decodeSize, height: decodeSize, policy: ResizeImagePolicy.fit);
+  }
   return kIsWeb ? RasterizedImage(inner) : inner;
+}
+
+/// Velikost dekódování zaokrouhlená nahoru na pár stupňů -- při animaci
+/// (roztahování hlavičky) se tak obrázek nenačítá znovu každý snímek.
+int decodeBucket(double pixels) {
+  for (final size in const [128, 256, 512, 1024]) {
+    if (pixels <= size) return size;
+  }
+  return 2048;
 }
 
 /// Obalí jiný `ImageProvider` a výsledný obrázek jednou převede na
