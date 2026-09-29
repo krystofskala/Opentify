@@ -121,7 +121,8 @@
       setInterval(function () {
         var now = Date.now(), gap = now - last;
         last = now;
-        if (gap > 2500 && document.visibilityState === 'visible') {
+        // Nad minutu = iOS appku uspal (zamčený telefon), ne zadrhnutí.
+        if (gap > 2500 && gap < 60000 && document.visibilityState === 'visible') {
           window.__opentifyNote('stall ' + gap + 'ms');
           window.__opentifyReport('stall', { ms: gap });
         }
@@ -133,7 +134,10 @@
           "var last=Date.now(),info=null,down=false;" +
           "function post(o){try{fetch('" + LOG + "',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(o)})}catch(e){}}" +
           "onmessage=function(e){last=Date.now();info=e.data;if(down){down=false;post({kind:'freeze-recovered',state:info})}};" +
-          "setInterval(function(){if(!info||info.vis!=='visible'||down)return;var gap=Date.now()-last;" +
+          // Uspaný Worker (zamčený telefon -- iOS uspí celou stránku) po
+          // probuzení nesmí nahlásit "zamrznutí": vlastní mezera > 3 s = spal.
+          "var tick=Date.now();setInterval(function(){var now=Date.now();if(now-tick>3000){last=now}tick=now;" +
+          "if(!info||info.vis!=='visible'||down)return;var gap=now-last;" +
           "if(gap>6000){down=true;post({kind:'freeze',silentMs:gap,state:info})}},1000);";
         var worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
         var beat = function () { worker.postMessage(state()); };
