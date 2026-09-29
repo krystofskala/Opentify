@@ -29,7 +29,9 @@ services:
       LOCAL_MUSIC_ROOT: /data/local-music
     volumes:
       - vault-db:/data/db
-      - media-library:/data/media
+      # Stažené skladby na velkém disku (MEDIA_DIR v .env, např. E:/opentify/media),
+      # ne ve virtuálním disku Dockeru na systémovém C:.
+      - ${MEDIA_DIR:-./media}:/data/media
       # Vlastní hudební knihovna (externí HDD/NAS) -- `POST /library/scan` ji
       # projde a zaeviduje jako `available` bez provisioningu. `MUSIC_DIR` je
       # jediná věc, co se mění mezi prostředími (Windows vývoj vs. 24/7 Linux
@@ -45,7 +47,7 @@ services:
       # (progresivní přehrávání, viz routes/provisioning.py:_tail_growing_file
       # a app/providers.py:OnFileLocated). Read-only: `api` soubory jen čte,
       # přesouvá/maže je výhradně `worker`.
-      - slskd-downloads:/data/slskd-downloads:ro
+      - ${SLSKD_DOWNLOADS_HOST_DIR:-./slskd-downloads}:/data/slskd-downloads:ro
     depends_on:
       - redis
     restart: unless-stopped
@@ -80,10 +82,10 @@ services:
       GLUETUN_CONTROL_API_KEY: "${GLUETUN_CONTROL_API_KEY:?chybí v .env}"
     volumes:
       - vault-db:/data/db
-      - media-library:/data/media
+      - ${MEDIA_DIR:-./media}:/data/media
       # Sdílený se `slskd` službou -- worker po dokončení transferu soubor
       # přesune odsud do `media-library` (viz SlskdProvider.fetch).
-      - slskd-downloads:/data/slskd-downloads
+      - ${SLSKD_DOWNLOADS_HOST_DIR:-./slskd-downloads}:/data/slskd-downloads
     depends_on:
       - redis
       - slskd
@@ -180,7 +182,7 @@ services:
       # běžně funguje líp/rychleji.
       SLSKD_SHARED_DIR: ${SLSKD_SHARED_DIR-/data/local-music}
     volumes:
-      - slskd-downloads:/app/downloads
+      - ${SLSKD_DOWNLOADS_HOST_DIR:-./slskd-downloads}:/app/downloads
       - slskd-data:/app/data
       - ${MUSIC_DIR:-./local-music}:/data/local-music:ro
     restart: unless-stopped
@@ -207,9 +209,7 @@ services:
 
 volumes:
   vault-db:
-  media-library:
   redis-data:
-  slskd-downloads:
   slskd-data:
 
 networks:
