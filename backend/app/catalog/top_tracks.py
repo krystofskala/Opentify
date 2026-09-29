@@ -123,7 +123,7 @@ async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
     async def build() -> dict[str, Any]:
         return {"items": await _ids_and_counts(artist_id)}
 
-    cached = await cached_json(f"artist-top:v1:{artist_id}", TOP_TTL_S, build)
+    cached = await cached_json(f"artist-top:v1:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
     result = []
     with Session(engine) as session:
         for item in cached.get("items", []):

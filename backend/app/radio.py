@@ -99,6 +99,13 @@ def create_session(
     old = _sessions.get(session_id or "")
     if old is not None:
         _stop(old)
+    # Každý seek/přeskočení/A-B zakládá novou relaci -- ta stará téhož
+    # zařízení už nikoho nezajímá. Bez tohohle běžely ffmpegy (a stahování
+    # přeskočených skladeb) dál ještě 5 minut za každé klepnutí.
+    for sid, other in list(_sessions.items()):
+        if sid != session_id and other.user_id == user_id and other.device_id == device_id:
+            _sessions.pop(sid, None)
+            _stop(other)
     s = RadioSession(
         id=session_id or uuid.uuid4().hex,
         user_id=user_id,
@@ -157,6 +164,8 @@ def _gc() -> None:
 # který průběžně roste). Čas HLS = čas MP3 proudu, časová osa platí dál.
 
 RADIO_DIR = Path(os.environ.get("RADIO_TMP", "/tmp/opentify-radio"))
+# Relace žijí jen v paměti -- úseky z předchozího běhu API nikdo nepřehraje.
+shutil.rmtree(RADIO_DIR, ignore_errors=True)
 HLS_SEGMENT_S = 4
 HLS_IDLE_STOP_S = 300.0  # nikdo nestahuje 5 min -> výroba se zastaví
 
@@ -402,7 +411,9 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
             waited = 0.0
             while path is None and pending and waited < PROVISION_WAIT_S:
                 chunk = await _silence(1000)
-                written_ms += 1000
+                # Délka z bajtů jako všude jinde -- "1 s" ticha je v MP3
+                # kvůli rámcům/paddingu ~1045 ms a časová osa by ujížděla.
+                written_ms += len(chunk) / BYTES_PER_MS
                 yield chunk, written_ms
                 waited += 1.0
                 path, gain, pending = await asyncio.to_thread(_asset_path_and_gain, rid)

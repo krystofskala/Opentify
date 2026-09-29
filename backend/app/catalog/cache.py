@@ -16,9 +16,17 @@ from app.redis_bus import get_redis
 CACHE_PREFIX = "vault:catalog:cache:"
 
 
+EMPTY_TTL_SECONDS = 10 * 60
+
+
 async def cached_json(
-    key: str, ttl_seconds: int, fetch: Callable[[], Awaitable[Any]]
+    key: str,
+    ttl_seconds: int,
+    fetch: Callable[[], Awaitable[Any]],
+    is_empty: Callable[[Any], bool] | None = None,
 ) -> Any:
+    """`is_empty` -- prázdný výsledek (typicky krátký výpadek zdroje) se
+    uloží jen na `EMPTY_TTL_SECONDS`, ne na celé TTL."""
     r = get_redis()
     cache_key = CACHE_PREFIX + key
     cached = await r.get(cache_key)
@@ -26,5 +34,6 @@ async def cached_json(
         return json.loads(cached)
 
     value = await fetch()
-    await r.set(cache_key, json.dumps(value), ex=ttl_seconds)
+    ttl = EMPTY_TTL_SECONDS if is_empty is not None and is_empty(value) else ttl_seconds
+    await r.set(cache_key, json.dumps(value), ex=ttl)
     return value

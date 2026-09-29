@@ -7,6 +7,9 @@ __pycache__/
 # Výchozí bind-mount cíl pro MUSIC_DIR, když proměnná není v .env nastavená
 # (viz docker-compose.yml) -- Docker složku sám vytvoří, obsah sem nepatří.
 /local-music/
+# Výchozí umístění stažené hudby, když není nastavené MEDIA_DIR / SLSKD_DOWNLOADS_HOST_DIR.
+/media/
+/slskd-downloads/
 
 # Naklonované cizí repo (Musify, GPL-3.0) jen jako referenční zdroj UI/gest
 # patterns -- vlastní git historie, do naší commitovat nepatří.

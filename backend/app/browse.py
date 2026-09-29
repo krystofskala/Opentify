@@ -183,7 +183,7 @@ async def category_page(c: Category) -> dict[str, Any]:
             page.update(_genre_tracks_and_more(c, ids))
         return page
 
-    return await cached_json(f"browse:v2:{c.id}", CATEGORY_TTL_S, build)
+    return await cached_json(f"browse:v2:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
 
 
 async def open_deezer_playlist(deezer_id: str, title_hint: str | None = None) -> str | None:

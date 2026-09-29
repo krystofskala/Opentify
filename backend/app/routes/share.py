@@ -98,15 +98,23 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
             url = f"https://song.link/i/{apple_id}"
 
     if url is None:
-        deezer_id = recording.deezer_id
+        deezer_id = recording.deezer_id or refs.get("shareDeezerId")
         if not deezer_id:
             client = get_deezer_client()
             track = await client.find_track_by_isrc(recording.isrc) if recording.isrc else None
             if not track or track.get("error") or not track.get("id"):
                 track = await client.find_track(artist, recording.title)
-            if track and track.get("id"):
+            # Volné hledání umí vrátit cover/živák -- jen ověřená shoda, a jen
+            # do external_refs: `deezer_id` je dedup klíč ingestu, cizí id by
+            # do téhle nahrávky později slučovalo jiné skladby.
+            if (
+                track
+                and track.get("id")
+                and _same((track.get("artist") or {}).get("name"), artist)
+                and _same(track.get("title"), recording.title)
+            ):
                 deezer_id = str(track["id"])
-                recording.deezer_id = deezer_id
+                refs["shareDeezerId"] = deezer_id
         if not deezer_id:
             raise HTTPException(status_code=404, detail="skladbu se nepodařilo najít pro sdílení")
         url = f"https://song.link/d/{deezer_id}"
@@ -137,15 +145,26 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
         refs["appleMusicId"] = apple_id
         url = f"https://album.link/i/{apple_id}"
     else:
-        deezer_id = release.deezer_id
+        deezer_id = release.deezer_id or refs.get("shareDeezerId")
         if not deezer_id:
             client = get_deezer_client()
             candidates = await client.search_album(artist, release.title) or []
             if not candidates and clean_album_title(release.title) != release.title:
                 candidates = await client.search_album(artist, clean_album_title(release.title)) or []
-            if candidates:
-                deezer_id = str(candidates[0]["id"])
-                release.deezer_id = deezer_id
+            wanted = clean_album_title(release.title)
+            match = next(
+                (
+                    c
+                    for c in candidates
+                    if c.get("id")
+                    and _same((c.get("artist") or {}).get("name"), artist)
+                    and _same(clean_album_title(c.get("title") or ""), wanted)
+                ),
+                None,
+            )
+            if match:
+                deezer_id = str(match["id"])
+                refs["shareDeezerId"] = deezer_id  # ne `deezer_id` -- viz share_recording
         if not deezer_id:
             raise HTTPException(status_code=404, detail="album se nepodařilo najít pro sdílení")
         url = f"https://album.link/d/{deezer_id}"

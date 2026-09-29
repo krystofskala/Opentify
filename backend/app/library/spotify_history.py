@@ -39,7 +39,8 @@ logger = logging.getLogger("uvicorn.error")
 SOURCE = "spotify-history"
 MIN_PLAY_MS = 30_000
 YEAR_TOP = 100
-YEARS = range(2016, 2026)  # 2026 ještě neskončil
+FIRST_YEAR = 2016  # starší roky uživatel nechtěl
+MIN_YEAR_PLAYS = 200  # rok s pár poslechy playlist nedostane
 
 
 def _year_source(year: int) -> str:
@@ -129,28 +130,29 @@ def _playlist_owner() -> str:
 
 
 def build_year_playlists(user_id: str) -> dict[int, int]:
-    """Top skladby každého roku z importovaných poslechů (počet přehrání,
-    při shodě celkový čas)."""
+    """Top skladby každého uzavřeného roku ze VŠECH poslechů -- importovaná
+    historie ze Spotify i poslechy v appce (počet přehrání, při shodě
+    celkový čas). Běží denně jako generátor Domů, takže 1. ledna přibude
+    playlist za právě skončený rok."""
     counts: dict[int, Counter] = defaultdict(Counter)
     time_ms: dict[int, Counter] = defaultdict(Counter)
     total: Counter = Counter()
+    last_year = utcnow().year - 1  # rozběhnutý rok ještě ne
     with Session(engine) as session:
         rows = session.exec(
-            select(Listen.recording_id, Listen.played_at, Listen.duration_played_ms).where(
-                Listen.user_id == user_id, Listen.source == SOURCE
-            )
+            select(Listen.recording_id, Listen.played_at, Listen.duration_played_ms).where(Listen.user_id == user_id)
         ).all()
     for recording_id, played_at, ms in rows:
         year = played_at.year
-        if year not in YEARS:
+        if not FIRST_YEAR <= year <= last_year:
             continue
         counts[year][recording_id] += 1
         time_ms[year][recording_id] += ms or 0
         total[year] += 1
 
     built: dict[int, int] = {}
-    for year in YEARS:
-        if not counts[year]:
+    for year in range(FIRST_YEAR, last_year + 1):
+        if total[year] < MIN_YEAR_PLAYS:
             continue
         ranked = sorted(counts[year], key=lambda r: (-counts[year][r], -time_ms[year][r]))[:YEAR_TOP]
         hours = round(sum(time_ms[year].values()) / 3_600_000)

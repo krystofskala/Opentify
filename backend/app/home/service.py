@@ -71,12 +71,20 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     from app.home import category_mixes as cm
 
     registry.append(("personal:category-mixes", timedelta(hours=1), cm.build_home_category_mixes))
+    registry.append(("personal:years", g.DAILY_TTL, _build_years))
     registry.append(("lb:fresh-releases", g.DAILY_TTL, g.build_new_releases))
     registry.append(("apple:rss:albums", g.DAILY_TTL, g.build_top_albums))
     for spec in g._genre_specs():
         registry.append((spec.source, g.DAILY_TTL, lambda spec=spec: g.build_deezer_playlist(spec, g.DAILY_TTL)))
     registry.append(("deezer:editorial", g.DAILY_TTL, g.build_editorial))
     return registry
+
+
+async def _build_years() -> int:
+    """"Tvoje top skladby <rok>" -- 1. ledna přibude právě skončený rok."""
+    from app.library.spotify_history import build_year_playlists
+
+    return len(await asyncio.to_thread(build_year_playlists, g.HOME_USER_ID))
 
 
 def _last_success(name: str) -> datetime | None:
