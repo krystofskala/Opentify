@@ -124,6 +124,8 @@ class DetailHeroAppBar extends StatelessWidget {
     this.bannerImageUrl,
     this.bannerFallbackUrl,
     this.mosaicUrls = const [],
+    this.artwork,
+    this.artworkBackdrop,
   });
 
   final String title;
@@ -140,6 +142,14 @@ class DetailHeroAppBar extends StatelessWidget {
   final String? bannerImageUrl;
   final String? bannerFallbackUrl;
   final List<String> mosaicUrls;
+
+  /// Vlastní obal místo obrázku (generativní obal vlastních mixů) -- velký
+  /// čtverec na širokém okně, přes celou hlavičku na úzkém.
+  final Widget? artwork;
+
+  /// Varianta [artwork] přes celou hlavičku na úzkém okně (bez nápisů --
+  /// název je v hlavičce zvlášť).
+  final Widget? artworkBackdrop;
 
   /// Výška roztažené hlavičky bez status baru -- stejná na všech detailech.
   static double expandedHeightFor(BuildContext context) {
@@ -452,6 +462,7 @@ class _FadedMedia extends StatelessWidget {
   }
 
   Widget _media(BuildContext context) {
+    if ((hero.artworkBackdrop ?? hero.artwork) case final art?) return art;
     final mosaic = hero.mosaicUrls.toSet().toList();
     if (hero.bannerImageUrl != null) {
       return _WideAware(
@@ -513,7 +524,9 @@ class _WideCover extends StatelessWidget {
     // O stupeň menší poloměr než box kolem (glass_tokens: vnořený obrázek).
     final radius = BorderRadius.circular(circle ? size / 2 : Expressive.cornerLargeIncreased);
     final Widget child;
-    if (hero.thumbnailUrl == null && hero.imageUrl == null && mosaic.length >= 4) {
+    if (hero.artwork != null) {
+      child = hero.artwork!;
+    } else if (hero.thumbnailUrl == null && hero.imageUrl == null && mosaic.length >= 4) {
       child = _Mosaic(urls: mosaic.take(4).toList());
     } else if (url != null) {
       child = NetImage(url: url, placeholder: _GradientArt(icon: hero.placeholderIcon, accent: hero.accent));

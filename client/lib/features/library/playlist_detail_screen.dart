@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../models/playlist_model.dart';
+import '../../widgets/mix_artwork.dart';
 import '../wrapped/wrapped_launch_button.dart';
 import '../../models/recording_model.dart';
 import '../../state/artwork_provider.dart';
@@ -107,6 +108,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   HeroMetaItem(Symbols.schedule_rounded, total),
               ],
               mosaicUrls: detail.coverUrls,
+              // Vlastní mixy (roky, Denní mixy, mixy kategorií): stejný
+              // generativní obal jako na kartě na Domů, ne fotka interpreta.
+              artwork: _mixArtwork(detail),
+              artworkBackdrop: _mixArtwork(detail, labels: false),
               actions: [
                 if (readOnly)
                   HeroAction(
@@ -251,6 +256,26 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       } catch (_) {}
       if (mounted) setState(() => _reordering = false);
     }
+  }
+
+  Widget? _mixArtwork(PlaylistDetailModel detail, {bool labels = true}) {
+    final source = detail.source ?? '';
+    String? group;
+    Color? color;
+    if (source.startsWith('personal:category-mix:')) {
+      final id = source.split(':').last;
+      final category = ref.watch(browseCategoriesProvider).valueOrNull?.where((c) => c.id == id).firstOrNull;
+      group = category?.group;
+      color = category?.color;
+    }
+    final spec = mixArtForSource(
+      source: detail.source,
+      title: detail.title,
+      photos: detail.coverUrls,
+      color: color,
+      categoryGroup: group,
+    );
+    return spec == null ? null : MixArtwork(spec: spec, labels: labels);
   }
 
   /// Štítek nad názvem -- u vlastních mixů podle zdroje (roční top skladby

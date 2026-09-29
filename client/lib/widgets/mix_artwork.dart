@@ -32,14 +32,6 @@ class MixArtSpec {
   final String? eyebrow;
 }
 
-MixArtStyle? _styleFrom(String? raw) => switch (raw) {
-      'daily' => MixArtStyle.daily,
-      'genre' => MixArtStyle.genre,
-      'mood' => MixArtStyle.mood,
-      'year' || 'decade' => MixArtStyle.year,
-      _ => null,
-    };
-
 Color? _hex(String? hex) {
   if (hex == null) return null;
   final value = int.tryParse('FF${hex.replaceFirst('#', '')}', radix: 16);
@@ -47,25 +39,47 @@ Color? _hex(String? hex) {
 }
 
 /// Obal karty, nebo `null` pro obyčejné playlisty (mozaika obalů).
-MixArtSpec? mixArtOf(HomePlaylistCard card) {
-  final source = card.source ?? '';
-  final style = _styleFrom(card.artStyle) ?? (card.dailyMixNumber != null ? MixArtStyle.daily : null);
-  if (style == null) return null;
-  final decade = card.artStyle == 'decade';
-  final headline = switch (style) {
-    MixArtStyle.daily => '${card.dailyMixNumber ?? ''}',
-    MixArtStyle.year when decade => '16–26',
-    MixArtStyle.year => source.split(':').last,
-    _ => card.categoryMixLabel ?? card.title,
-  };
-  return MixArtSpec(
-    style: style,
-    seed: source,
-    headline: headline,
-    color: _hex(card.accentColor),
-    photos: card.coverUrls,
-    eyebrow: decade ? 'DEKÁDA' : null,
-  );
+MixArtSpec? mixArtOf(HomePlaylistCard card) => mixArtForSource(
+      source: card.source,
+      title: card.title,
+      photos: card.coverUrls,
+      color: _hex(card.accentColor),
+      categoryGroup: card.artStyle == 'mood' ? 'mood' : null,
+    );
+
+/// Obal vlastního mixu jen ze zdroje playlistu (`personal:daily-mix:2`,
+/// `personal:year:2019`, `personal:category-mix:jazz`...) -- stejný na kartě
+/// na Domů i v hlavičce playlistu. `null` = obyčejný playlist.
+/// `categoryGroup` (mood/genre) a `color` jen u mixů kategorií.
+MixArtSpec? mixArtForSource({
+  required String? source,
+  required String title,
+  List<String> photos = const [],
+  Color? color,
+  String? categoryGroup,
+}) {
+  final s = source ?? '';
+  final last = s.split(':').last;
+  if (s.startsWith('personal:daily-mix:')) {
+    return MixArtSpec(style: MixArtStyle.daily, seed: s, headline: last, photos: photos);
+  }
+  if (s.startsWith('personal:year:')) {
+    return MixArtSpec(style: MixArtStyle.year, seed: s, headline: last, photos: photos);
+  }
+  if (s.startsWith('personal:decade:')) {
+    return MixArtSpec(style: MixArtStyle.year, seed: s, headline: '16–26', photos: photos, eyebrow: 'DEKÁDA');
+  }
+  if (s.startsWith('personal:category-mix:')) {
+    final i = title.indexOf('· ');
+    return MixArtSpec(
+      style: categoryGroup == 'mood' ? MixArtStyle.mood : MixArtStyle.genre,
+      seed: s,
+      headline: i < 0 ? title : title.substring(i + 2),
+      color: color,
+      photos: photos,
+    );
+  }
+  return null;
 }
 
 /// Generativní obal vlastního mixu -- každý druh mixu vlastní výtvarný
@@ -76,12 +90,15 @@ MixArtSpec? mixArtOf(HomePlaylistCard card) {
 ///   * rok: sloupce ekvalizéru a velký letopočet.
 /// Obsahová vrstva podle glass_tokens.dart -- tón + zrno, žádné sklo.
 class MixArtwork extends StatelessWidget {
-  const MixArtwork({super.key, required this.spec, this.compact = false});
+  const MixArtwork({super.key, required this.spec, this.compact = false, this.labels = true});
 
   final MixArtSpec spec;
 
   /// Malá dlaždice (Rychlý výběr, 56 px) -- bez popisků a fotek.
   final bool compact;
+
+  /// alse = jen kresba bez nápisů (pozadí hlavičky, kde je název zvlášť).
+  final bool labels;
 
   static const _dailyHues = [268.0, 12.0, 196.0, 142.0, 330.0, 38.0];
 
@@ -117,7 +134,7 @@ class MixArtwork extends StatelessWidget {
           children: [
             RepaintBoundary(child: CustomPaint(painter: painter)),
             const RepaintBoundary(child: CustomPaint(painter: GrainPainter())),
-            ..._overlay(context, side),
+            if (labels) ..._overlay(context, side),
           ],
         );
       },
