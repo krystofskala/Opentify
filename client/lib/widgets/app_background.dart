@@ -605,8 +605,10 @@ List<Color> _paletteFor(
   double lit(double base) => dark
       ? (0.40 + (base - 0.40) * spread + brightness01 * 0.3).clamp(0.05, 0.8)
       : (0.84 + (base - 0.84) * spread + brightness01 * 0.12).clamp(0.72, 0.97);
-  Color tone(double dh, double sf, double l) =>
-      HSLColor.fromAHSL(1, (h + dh) % 360, (s * sf).clamp(0.0, 1.0), lit(l)).toColor();
+  Color tone(double dh, double sf, double l) => _keepOkHue(
+        HSLColor.fromAHSL(1, (h + dh) % 360, (s * sf).clamp(0.0, 1.0), lit(l)).toColor(),
+        HSLColor.fromAHSL(1, (h + dh) % 360, hsl.saturation, hsl.lightness).toColor(),
+      );
 
   // Známe skutečné převládající barvy obalu -> paleta z nich: odstín a
   // sytost každého slotu z reálné barvy obalu (převládající barva na
@@ -642,12 +644,17 @@ List<Color> _paletteFor(
       // Tlumené barvy zesílit (×1.6) -- 1:1 přenesená chroma dělala z
       // prachových obalů skoro šedé pozadí (živě nahlášeno).
       final sat = chroma < 0.03 ? 0.03 : math.min(0.85, chroma * 1.6 / room);
-      return HSLColor.fromAHSL(1, src.hue, sat, target).toColor();
+      return _keepOkHue(HSLColor.fromAHSL(1, src.hue, sat, target).toColor(), c);
     }
 
+    // Kontrastní akcent obalu (žlutá kresba na modré) = jedno světlo místo
+    // "nejsvětlejšího" tónu; u tmavého režimu tlumené, ať nekřičí.
+    final accentTone = character?.accent;
+    final glowDark = accentTone != null ? from(accentTone, 0.55) : from(lightest, 0.72);
+    final glowLight = accentTone != null ? from(accentTone, 0.88) : from(t1, 0.93);
     return dark
-        ? [from(darkest, 0.13), from(t0, 0.24), from(t0, 0.42), from(t1, 0.55), from(lightest, 0.72), from(t2, 0.32)]
-        : [from(lightest, 0.95), from(t0, 0.86), from(t0, 0.76), from(t1, 0.72), from(t1, 0.93), from(t2, 0.8)];
+        ? [from(darkest, 0.13), from(t0, 0.24), from(t0, 0.42), from(t1, 0.55), glowDark, from(t2, 0.32)]
+        : [from(lightest, 0.95), from(t0, 0.86), from(t0, 0.76), from(t1, 0.72), glowLight, from(t2, 0.8)];
   }
   // Doplňkové tóny obalu dávají vedlejším slotům (stín, střed) skutečné
   // odstíny z obalu místo syntetického posunu -- sytost a světlost slotů
@@ -714,6 +721,26 @@ const List<Color> _startLightRaw = [
   Color(0xFF8CF0B5),
 ];
 
+/// Vrátí `color` se stejnou světlostí a chromou (OKLCH), ale s OKLCH
+/// odstínem `reference`. HSL zesvětlení posouvá vnímaný odstín -- tmavě
+/// modrý obal (242°) dával v HSL světlejší tóny do fialova (živě
+/// nahlášeno); OKLCH drží odstín tak, jak ho vidí oko. Mimo gamut se
+/// chroma stáhne, odstín zůstane.
+Color _keepOkHue(Color color, Color reference) {
+  final ref = _Lab.fromColor(reference);
+  final refChroma = math.sqrt(ref.a * ref.a + ref.b * ref.b);
+  if (refChroma < 0.02) return color; // šeď nemá odstín, který by šlo držet
+  final lab = _Lab.fromColor(color);
+  final hue = math.atan2(ref.b, ref.a);
+  var chroma = math.sqrt(lab.a * lab.a + lab.b * lab.b);
+  for (var i = 0; i < 24; i++) {
+    final candidate = _Lab(lab.l, chroma * math.cos(hue), chroma * math.sin(hue));
+    if (candidate.inGamut) return candidate.toColor();
+    chroma *= 0.9;
+  }
+  return _Lab(lab.l, 0, 0).toColor();
+}
+
 /// OKLab barva -- míchání v něm nekalí přechody do šeda/hněda jako sRGB.
 class _Lab {
   const _Lab(this.l, this.a, this.b);
@@ -764,6 +791,17 @@ class _Lab {
     final g = ch(-1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc);
     final bl = ch(-0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc);
     return (0xFF << 24 | r << 16 | g << 8 | bl).toSigned(32);
+  }
+
+  bool get inGamut {
+    final l_ = l + 0.3963377774 * a + 0.2158037573 * b;
+    final m_ = l - 0.1055613458 * a - 0.0638541728 * b;
+    final s_ = l - 0.0894841775 * a - 1.2914855480 * b;
+    final lc = l_ * l_ * l_, mc = m_ * m_ * m_, sc = s_ * s_ * s_;
+    bool ok(double v) => v >= -0.001 && v <= 1.001;
+    return ok(4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc) &&
+        ok(-1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc) &&
+        ok(-0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc);
   }
 
   static _Lab lerp(_Lab x, _Lab y, double t) =>

@@ -158,7 +158,10 @@ final supportTonesProvider = FutureProvider.autoDispose.family<List<Color>, Stri
 /// podle zastoupení (≥ 3 % plochy, max 5) -- krémový papír s vínovou
 /// kresbou má dát krémovo-pískové pozadí s tmavě vínovými akcenty, ne
 /// červené pole podle jediné "živé" barvy.
-typedef CoverCharacter = ({double saturation, double lightness, List<Color> tones});
+///
+/// `accent` = malá, ale výrazná kontrastní barva obalu (žlutá kresba na
+/// tmavě modrém) -- pozadí jí dá jedno světlo, jinak by se úplně ztratila.
+typedef CoverCharacter = ({double saturation, double lightness, List<Color> tones, Color? accent});
 
 Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
   return _characterFutures.putIfAbsent(imageUrl, () async {
@@ -184,7 +187,29 @@ Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
         for (final swatch in [...palette.paletteColors]..sort((a, b) => b.population.compareTo(a.population)))
           if (swatch.population >= total * 0.03) swatch.color,
       ].take(5).toList();
-      return (saturation: sat / total, lightness: light / total, tones: tones);
+      double chromaOf(Color c) {
+        final hsl = HSLColor.fromColor(c);
+        return (1 - (2 * hsl.lightness - 1).abs()) * hsl.saturation;
+      }
+
+      Color? accent;
+      if (tones.isNotEmpty && chromaOf(tones.first) >= 0.04) {
+        final mainHue = HSLColor.fromColor(tones.first).hue;
+        var best = 0.0;
+        for (final swatch in palette.paletteColors) {
+          if (swatch.population < total * 0.015) continue;
+          final ch = chromaOf(swatch.color);
+          if (ch < 0.12) continue;
+          final diff = (((HSLColor.fromColor(swatch.color).hue - mainHue + 540) % 360) - 180).abs();
+          if (diff < 60) continue;
+          final score = ch * swatch.population;
+          if (score > best) {
+            best = score;
+            accent = swatch.color;
+          }
+        }
+      }
+      return (saturation: sat / total, lightness: light / total, tones: tones, accent: accent);
     } catch (_) {
       _characterFutures.remove(imageUrl);
       return null;
