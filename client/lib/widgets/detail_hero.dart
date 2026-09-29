@@ -477,7 +477,7 @@ class _HeroFlexible extends StatelessWidget {
   }
 }
 
-/// "Ambientní" hlavička: při přehrávání a ~8 s bez doteku se fotka
+/// "Ambientní" hlavička: při přehrávání a ~5 s bez doteku se fotka
 /// pomalu rozplyne do živého pozadí (zůstane jen slabá stopa), dotek ji
 /// hned vrátí. Rozvržení se nehýbe -- mizí jen obraz, ne místo.
 class _AmbientFade extends ConsumerWidget {
@@ -500,11 +500,12 @@ class _AmbientFade extends ConsumerWidget {
         final target = idle ? _trace : 1.0;
         return TweenAnimationBuilder<double>(
           tween: Tween(end: target),
-          // Pryč pomalu (rozplynutí), zpátky hned (odezva na dotek).
+          // Pryč pomalu (rozplynutí), zpátky plynulým prolnutím -- ne skokem
+          // (živě: "nesmí se objevit hned").
           duration: reduceMotion
               ? Duration.zero
-              : (idle ? const Duration(milliseconds: 2200) : const Duration(milliseconds: 260)),
-          curve: idle ? Curves.easeInOutCubic : Curves.easeOutCubic,
+              : (idle ? const Duration(milliseconds: 2200) : const Duration(milliseconds: 700)),
+          curve: Curves.easeInOutCubic,
           builder: (context, v, child) => v >= 0.999 ? child! : Opacity(opacity: v, child: child),
           child: child,
         );

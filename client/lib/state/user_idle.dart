@@ -8,7 +8,7 @@ import 'package:flutter/widgets.dart';
 class UserIdle {
   const UserIdle._();
 
-  static const idleAfter = Duration(seconds: 8);
+  static const idleAfter = Duration(seconds: 5);
   static final ValueNotifier<bool> idle = ValueNotifier(false);
   static Timer? _timer;
 
