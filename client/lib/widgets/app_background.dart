@@ -287,10 +287,46 @@ class _ShaderPainter extends CustomPainter {
 
   final _AppBackgroundState state;
 
+  // Gradient se počítá v LOGICKÉM rozlišení (na iPhonu 3× hustota = 9×
+  // méně pixelů) do obrázku jednou za snímek -- je měkký, zmenšení není
+  // vidět. Pozadí i `AppBackgroundMirror` (panel přehrávače) pak stejný
+  // obrázek jen vykreslí; dřív se celý shader počítal dvakrát za snímek na
+  // plném rozlišení a appka při nahrávání obrazovky trhala (živě nahlášeno).
+  // Ostré zrno jde přes to jako hotová vrstva ve fyzickém rozlišení.
+  static ui.Image? _image;
+  static int _imageFrame = -1;
+  static Size? _imageSize;
+
   @override
   void paint(Canvas canvas, Size size) {
     final program = state._programReady;
     if (program == null || size.isEmpty) return;
+    final frame = state._frame.value;
+    if (_image == null || _imageFrame != frame || _imageSize != size) {
+      final next = _render(program, size);
+      _image?.dispose();
+      _image = next;
+      _imageFrame = frame;
+      _imageSize = size;
+    }
+    final image = _image!;
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.low,
+    );
+    final dark = state.widget.brightness == Brightness.dark;
+    final grain = _FallbackPainter.grainFor(size, state._pixelRatio, dark);
+    canvas.drawImageRect(
+      grain,
+      Rect.fromLTWH(0, 0, grain.width.toDouble(), grain.height.toDouble()),
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.none,
+    );
+  }
+
+  ui.Image _render(ui.FragmentProgram program, Size size) {
     // Nová instance na každý snímek (předchozí se uvolní) -- přepisování
     // uniformů jedné sdílené instance v CanvasKitu rozbíjelo nahrávání
     // obrázků na GPU (obaly alb se vykreslovaly černě).
@@ -304,7 +340,7 @@ class _ShaderPainter extends CustomPainter {
       ..setFloat(1, size.height)
       ..setFloat(2, state._phase)
       ..setFloat(3, 0.55 * (1 + 0.3 * state._boost) + 0.15 * state._bloom)
-      ..setFloat(4, isDark ? 0.14 : 0.09)
+      ..setFloat(4, 0) // zrno kreslí hotová vrstva ve fyzickém rozlišení
       ..setFloat(5, state._pixelRatio)
       ..setFloat(6, state._bloom)
       ..setFloat(7, isDark ? 1 : 0);
@@ -322,7 +358,12 @@ class _ShaderPainter extends CustomPainter {
         ..setFloat(28 + i * 3, p.b);
     }
     shader.setFloat(44, state._mixAt(now));
-    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder).drawRect(Offset.zero & size, Paint()..shader = shader);
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(size.width.ceil(), size.height.ceil());
+    picture.dispose();
+    return image;
   }
 
   @override
@@ -389,19 +430,24 @@ class _FallbackPainter extends CustomPainter {
       );
     }
 
-    final dpr = state._pixelRatio;
+    final grain = grainFor(size, state._pixelRatio, dark);
+    canvas.drawImageRect(
+      grain,
+      Rect.fromLTWH(0, 0, grain.width.toDouble(), grain.height.toDouble()),
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.none,
+    );
+  }
+
+  /// Předpočítaná vrstva zrna (sdílí ji i shaderová cesta).
+  static ui.Image grainFor(Size size, double dpr, bool dark) {
     final key = '${size.width.round()}x${size.height.round()}@$dpr/$dark';
     if (_grain == null || _grainKey != key) {
       _grain?.dispose();
       _grainKey = key;
       _grain = _buildGrain(size, dpr, dark);
     }
-    canvas.drawImageRect(
-      _grain!,
-      Rect.fromLTWH(0, 0, _grain!.width.toDouble(), _grain!.height.toDouble()),
-      Offset.zero & size,
-      Paint()..filterQuality = FilterQuality.none,
-    );
+    return _grain!;
   }
 
   /// Zrno ve fyzických pixelech (buňky ~1.6 px), trojúhelníkové rozdělení
