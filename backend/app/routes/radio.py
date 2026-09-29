@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -42,15 +42,19 @@ def create(session_id: str, body: CreateBody, current: tuple[str, str] = Depends
 
 
 @radio_router.get("/{session_id}/stream")
-async def stream(session_id: str):
+async def stream(session_id: str, request: Request):
     # Bez autentizační hlavičky -- <audio> ji neposílá; id relace je
     # náhodné a krátkodobé (a API je jen přes Tailscale).
     _check_id(session_id)
     s = await radio.wait_for_session(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail="relace neexistuje")
+    range_header = request.headers.get("range") or ""
+    match = re.match(r"bytes=(\d+)-", range_header)
+    start_byte = int(match.group(1)) if match else 0
+    label = f"range={range_header or '-'} ua={(request.headers.get('user-agent') or '')[:60]}"
     return StreamingResponse(
-        radio.stream(s),
+        radio.stream(s, start_byte, label),
         media_type="audio/mpeg",
         headers={"Cache-Control": "no-store", "Accept-Ranges": "none", "X-Content-Type-Options": "nosniff"},
     )

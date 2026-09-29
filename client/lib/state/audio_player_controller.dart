@@ -435,6 +435,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   List<_RadioSegment> _radioTimeline = const [];
   Timer? _radioPoll;
   Duration? _radioStartPosition;
+  DateTime _radioLastRestart = DateTime.fromMillisecondsSinceEpoch(0);
 
   bool get _radioActive => _radioSession != null;
 
@@ -1419,6 +1420,19 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       isPlaying: playerState.playing,
       isBuffering: _awaitingProvisioning || (loading && !(_radioActive && _player.position > Duration.zero)),
     );
+    if (playerState.processingState == ProcessingState.completed && _radioActive) {
+      // Živý stream "skončil" -- u rádia to znamená spadlé spojení, ne konec
+      // fronty (ten server nepošle, dokud je co hrát). Navázat od aktuální
+      // pozice; opravdový konec = poslední skladba je dohraná.
+      final dur = state.duration;
+      final atEnd = !state.hasNext && dur != null && state.position >= dur - const Duration(seconds: 3);
+      if (!atEnd && DateTime.now().difference(_radioLastRestart) > const Duration(seconds: 5)) {
+        _radioLastRestart = DateTime.now();
+        debugPrint('AudioPlayerController: rádio spadlo, navazuji od ${state.position}');
+        _restartRadio(state.position);
+      }
+      return;
+    }
     if (playerState.processingState == ProcessingState.completed) {
       // Právě přepnuto dřív (`_maybeAdvanceEarly`) -- `completed` patří staré
       // skladbě, jinak by se přeskočilo o dvě.

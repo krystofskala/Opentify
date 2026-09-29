@@ -36,7 +36,8 @@ from app.loudness import gain_for_client
 from app.models import MediaAsset, MediaAssetStatus
 from app.provisioning_service import enqueue, get_or_create_job
 
-logger = logging.getLogger(__name__)
+# Logger uvicornu -- úroveň INFO je v logu kontejneru vidět (diagnostika spojení).
+logger = logging.getLogger("uvicorn.error")
 
 BITRATE_KBPS = 192
 BYTES_PER_MS = BITRATE_KBPS * 1000 / 8 / 1000  # 24 B/ms
@@ -65,7 +66,8 @@ class RadioSession:
     start_offset_ms: float = 0.0
     played_ms: float = 0.0  # co klient opravdu přehrál (čas streamu)
     timeline: list[Segment] = field(default_factory=list)
-    connection: int = 0  # číslo posledního spojení -- starší se ukončí
+    connection: int = 0  # počítadlo spojení
+    owner: int = 0  # spojení, které vlastní časovou osu
     touched: float = field(default_factory=time.monotonic)
 
 
@@ -201,36 +203,72 @@ def _ffmpeg_cmd(path: str, offset_ms: float, gain_db: float | None) -> list[str]
     return cmd
 
 
-async def stream(s: RadioSession):
-    """Async generátor bajtů jednoho spojení. Nové spojení (Safari se občas
-    připojí znovu) začne od skladby, kterou klient naposledy hlásil jako
-    přehrávanou, a to staré se ukončí."""
+_OWNER_AFTER_BYTES = 64 * 1024
+
+
+def _locate(s: RadioSession, target_ms: float) -> tuple[int, float, float]:
+    """Kde ve frontě je čas streamu `target_ms` -> (pozice, offset ve skladbě,
+    čas streamu, od kterého se začne psát)."""
+    for seg in reversed(s.timeline):
+        if seg.start_ms <= target_ms:
+            if seg.duration_ms is not None and target_ms >= seg.start_ms + seg.duration_ms:
+                return seg.queue_pos + 1, 0.0, seg.start_ms + seg.duration_ms
+            return seg.queue_pos, seg.offset_ms + (target_ms - seg.start_ms), target_ms
+    return 0, s.start_offset_ms, 0.0
+
+
+async def stream(s: RadioSession, start_byte: int = 0, label: str = ""):
+    """Async generátor bajtů jednoho spojení.
+
+    Spojení se navzájem NERUŠÍ -- Safari otevírá víc spojení (zkušební dotaz,
+    znovupřipojení při odchodu z appky) a dřívější verze při každém novém
+    spojení ukončila to předchozí; když z něj Safari zrovna přehrával, zvuk
+    dohrál zásobník a zastavil se uprostřed skladby (živě nahlášeno).
+
+    Stream je deterministický podle času: `start_byte` (Range od Safari) se
+    přepočte na čas streamu (CBR) a pokračuje se odtamtud -- navazuje tak
+    přesně na to, co už Safari má. Časovou osu pro klienta vlastní nejnovější
+    spojení, které už opravdu streamuje (> 64 kB), ne krátké zkušební dotazy.
+    """
     s.connection += 1
     me = s.connection
-    # Kde pokračovat: segment, ve kterém je `played_ms` (po znovupřipojení).
-    start_pos, offset = 0, s.start_offset_ms
-    for seg in reversed(s.timeline):
-        if seg.start_ms <= s.played_ms:
-            start_pos = seg.queue_pos
-            offset = seg.offset_ms + (s.played_ms - seg.start_ms)
-            break
-    s.timeline = []
-    # Čas streamu navazuje tam, kam klient došel -- jeho `currentTime` po
-    # znovupřipojení běží dál, ne od nuly.
-    base_ms = s.played_ms
-    written_ms = base_ms
+    local_timeline: list[Segment] = []
+    target_ms = start_byte / BYTES_PER_MS
+    pos, offset, written_ms = _locate(s, target_ms) if start_byte > 0 else (0, s.start_offset_ms, 0.0)
+    if start_byte > 0:
+        # Segmenty před místem navázání zůstávají platné.
+        local_timeline = [seg for seg in s.timeline if seg.start_ms < written_ms]
+    conn_start_ms = written_ms
     started = time.monotonic()
+    sent = 0
+    logger.info("rádio %s spojení #%d start (byte %d -> %.1f s) %s", s.id[:6], me, start_byte, written_ms / 1000, label)
+
+    def publish() -> None:
+        # Nejnovější skutečně streamující spojení vlastní časovou osu.
+        if sent >= _OWNER_AFTER_BYTES and me >= s.owner:
+            s.owner = me
+            s.timeline = local_timeline
 
     async def pace() -> None:
         # Drž náskok max `LEAD_S` před reálným časem od začátku spojení.
-        ahead = (written_ms - base_ms) / 1000 - (time.monotonic() - started)
+        ahead = (written_ms - conn_start_ms) / 1000 - (time.monotonic() - started)
         if ahead > LEAD_S:
             await asyncio.sleep(ahead - LEAD_S)
 
-    pos = start_pos
+    try:
+        async for chunk_info in _produce(s, pos, offset, written_ms, local_timeline):
+            data, written_ms = chunk_info
+            sent += len(data)
+            publish()
+            yield data
+            await pace()
+    finally:
+        logger.info("rádio %s spojení #%d konec po %.1f s (%d kB)", s.id[:6], me, time.monotonic() - started, sent // 1024)
+
+
+async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, timeline: list[Segment]):
+    """Vyrábí MP3 bajty od pozice `pos` ve frontě; yielduje (data, čas streamu po nich)."""
     while pos < len(s.queue):
-        if s.connection != me:
-            return
         rid = s.queue[pos]
         # Další skladbu obstarat dopředu (dokud tahle hraje).
         if pos + 1 < len(s.queue):
@@ -246,11 +284,8 @@ async def stream(s: RadioSession):
             while path is None and pending and waited < PROVISION_WAIT_S:
                 chunk = await _silence(1000)
                 written_ms += 1000
-                yield chunk
-                await pace()
+                yield chunk, written_ms
                 waited += 1.0
-                if s.connection != me:
-                    return
                 path, gain, pending = await asyncio.to_thread(_asset_path_and_gain, rid)
         if path is None:
             logger.info("rádio: %s nejde přehrát, přeskakuji", rid)
@@ -265,7 +300,7 @@ async def stream(s: RadioSession):
             offset_ms=offset,
             track_ms=await asyncio.to_thread(_probe_ms, path),
         )
-        s.timeline.append(seg)
+        timeline.append(seg)
         proc = await asyncio.create_subprocess_exec(
             *_ffmpeg_cmd(path, offset, gain), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
         )
@@ -273,15 +308,12 @@ async def stream(s: RadioSession):
         try:
             assert proc.stdout is not None
             while True:
-                if s.connection != me:
-                    return
                 data = await proc.stdout.read(CHUNK)
                 if not data:
                     break
                 seg_bytes += len(data)
                 written_ms += len(data) / BYTES_PER_MS
-                yield data
-                await pace()
+                yield data, written_ms
         finally:
             if proc.returncode is None:
                 try:
