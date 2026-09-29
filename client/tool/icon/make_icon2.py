@@ -41,6 +41,33 @@ def disc_field():
     return img.filter(ImageFilter.GaussianBlur(S * 0.02))
 
 
+def home_disc_field():
+    """Stejné měkké skvrny jako pozadí Domů (paleta _startDark + _soften),
+    rozložené vyváženě kolem desky -- ne převaha fialové."""
+    import colorsys
+    raw = [(0x2A, 0x10, 0x60), (0x7B, 0x2C, 0xFF), (0xE0, 0x35, 0x9A), (0x12, 0xB5, 0xCB), (0xFF, 0x8A, 0x3D), (0x2B, 0xD6, 0x7B)]
+    hls = [colorsys.rgb_to_hls(*(v / 255 for v in c)) for c in raw]
+    mean_l = sum(h[1] for h in hls) / len(hls)
+    soft = [tuple(int(v * 255) for v in colorsys.hls_to_rgb(h, mean_l + (l - mean_l) * 0.78, s * 0.8)) for h, l, s in hls]
+    indigo, violet, magenta, cyan, orange, green = soft
+    img = Image.new("RGB", (S, S), indigo)
+    blobs = [
+        ((0.30, 0.22), 0.55, violet, 230),
+        ((0.78, 0.25), 0.55, cyan, 235),
+        ((0.20, 0.60), 0.45, green, 220),
+        ((0.80, 0.75), 0.50, magenta, 225),
+        ((0.38, 0.85), 0.45, orange, 215),
+        ((0.55, 0.50), 0.30, violet, 150),
+    ]
+    for (cx, cy), r, col, alpha in blobs:
+        mask = Image.new("L", (S, S), 0)
+        rr = r * S / 2
+        ImageDraw.Draw(mask).ellipse((cx * S - rr, cy * S - rr, cx * S + rr, cy * S + rr), fill=alpha)
+        mask = mask.filter(ImageFilter.GaussianBlur(S * 0.09))
+        img = Image.composite(Image.new("RGB", (S, S), col), img, mask)
+    return img.filter(ImageFilter.GaussianBlur(S * 0.03))
+
+
 def dark_tile():
     top, bottom = np.array([44, 44, 48], np.float32), np.array([20, 20, 23], np.float32)
     t = (yy / S)[..., None]
@@ -65,7 +92,7 @@ def main(out_dir):
     bg = bg * (1 - sh * 0.55)
 
     # Deska = barevný gradient appky (vír) + zrno.
-    colour = np.asarray(disc_field()).astype(np.float32)
+    colour = np.asarray(home_disc_field()).astype(np.float32)
     colour = colour + rng.normal(0, 22, (S, S, 1))
     # Mírné stínování do kraje desky -- objem.
     r = np.sqrt((xx - c) ** 2 + (yy - c) ** 2) / R
@@ -88,9 +115,18 @@ def main(out_dir):
         ImageDraw.Draw(ring).ellipse((c - rr, c - rr, c + rr, c + rr), outline=255, width=max(2, int(S * 0.005)))
         paint(np.asarray(ring.filter(ImageFilter.GaussianBlur(1.0))), (0, 0, 0), 0.18)
 
-    # Velký trojúhelník přehrávání přímo na desce.
+    # Černá díra uprostřed (jako středový otvor desky) s jemným vnitřním stínem.
+    hr = R * 0.36
+    hole = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(hole).ellipse((c - hr, c - hr, c + hr, c + hr), fill=255)
+    hole_a = np.asarray(hole.filter(ImageFilter.GaussianBlur(1.2)))
+    paint(hole_a, (10, 10, 13), 1.0)
+    inner = ImageChops.subtract(hole, ImageChops.offset(hole, 0, int(S * 0.012))).filter(ImageFilter.GaussianBlur(S * 0.008))
+    paint(np.asarray(inner), (255, 255, 255), 0.10)
+
+    # Velký bílý trojúhelník -- přesahuje přes okraj díry do barvy.
     tri = Image.new("L", (S * 2, S * 2), 0)
-    tr = R * 1.15  # plátno 2S -> po zmenšení ~0.58 R
+    tr = R * 0.98  # plátno 2S -> po zmenšení ~0.5 R, přesahuje díru (0.3 R)
     pts = [(S - tr * 0.55, S - tr * 0.78), (S - tr * 0.55, S + tr * 0.78), (S + tr * 0.85, S)]
     ImageDraw.Draw(tri).polygon(pts, fill=255)
     tri = tri.filter(ImageFilter.GaussianBlur(S * 0.03)).point(lambda v: 255 if v > 110 else 0).resize((S, S), Image.LANCZOS)
