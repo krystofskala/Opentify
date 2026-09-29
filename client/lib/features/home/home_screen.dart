@@ -14,6 +14,7 @@ import '../../theme/glass_tokens.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
+import '../../widgets/mix_artwork.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -98,14 +99,16 @@ class _ContinueListening extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               const gap = AppSpacing.xs;
-              final columns = constraints.maxWidth >= 720 ? 4 : 2;
+              // Stejné sloupce jako Rychlý výběr pod tím -- okraje dlaždic
+              // pod sebou lícují (design audit #8).
+              final columns = constraints.maxWidth >= 720 ? 3 : 2;
               final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
               final shape = AppShapes.of(Expressive.cornerMedium);
               return Wrap(
                 spacing: gap,
                 runSpacing: gap,
                 children: [
-                  for (final item in items.take(columns == 4 ? 8 : 6))
+                  for (final item in items.take(6))
                     SizedBox(
                       width: width,
                       height: 56,
@@ -176,11 +179,20 @@ class _ContinueListening extends StatelessWidget {
 Widget _recentArtwork(BuildContext context, RecentContext item) {
   switch (item.kind) {
     case 'playlist':
+      // Vlastní mixy stejným generativním obalem jako na kartě a v
+      // hlavičce -- dřív tu byla mozaika fotek (design audit #1).
       return PlaylistArtwork(
         title: item.title,
         coverUrls: item.imageUrls,
         showTitle: false,
         dailyMixNumber: item.dailyMixNumber,
+        mix: mixArtForSource(
+          source: item.source,
+          title: item.title,
+          photos: item.imageUrls,
+          color: mixHex(item.accentColor),
+          categoryGroup: item.artStyle == 'mood' ? 'mood' : null,
+        ),
       );
     case 'liked':
       final scheme = Theme.of(context).colorScheme;
@@ -332,12 +344,14 @@ class _TrackCardRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
         height: 198,
-        child: ListView.builder(
+        child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          // Jako nadpisy sekcí (md) -- první karta dřív seděla 4 px vlevo.
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           itemCount: recordings.length,
+          separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
           itemBuilder: (context, index) => Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.sm),
+            padding: EdgeInsets.zero,
             child: SizedBox(
               width: 140,
               child: TrackTile(

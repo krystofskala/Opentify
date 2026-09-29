@@ -157,6 +157,8 @@ class RecentContext {
     this.imageUrl,
     this.imageUrls = const [],
     this.source,
+    this.accentColor,
+    this.artStyle,
   });
 
   final String kind; // album | track | playlist | liked | artist
@@ -171,6 +173,10 @@ class RecentContext {
 
   /// `Playlist.source` -- podle něj Denní mix dostane svůj obal.
   final String? source;
+
+  /// Barva a styl generativního obalu (mixy kategorií) -- jako na kartě Domů.
+  final String? accentColor;
+  final String? artStyle;
 
   int? get dailyMixNumber {
     const prefix = 'personal:daily-mix:';
@@ -188,6 +194,8 @@ class RecentContext {
         imageUrl: resolveMediaUrl(json['imageUrl'] as String?),
         imageUrls: resolveMediaUrls((json['imageUrls'] as List<dynamic>? ?? const []).cast<String>()),
         source: json['source'] as String?,
+        accentColor: json['accentColor'] as String?,
+        artStyle: json['artStyle'] as String?,
       );
 }
 

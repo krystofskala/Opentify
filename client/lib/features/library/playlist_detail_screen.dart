@@ -115,7 +115,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               mosaicUrls: detail.coverUrls,
               // Vlastní mixy (roky, Denní mixy, mixy kategorií): stejný
               // generativní obal jako na kartě na Domů, ne fotka interpreta.
-              artwork: mixSpec == null ? null : MixArtwork(spec: mixSpec),
+              // Bez nápisů -- druh a název už říká štítek a titulek vedle (dřív
+              // třikrát "Tvůj mix", design audit #3).
+              artwork: mixSpec == null ? null : MixArtwork(spec: mixSpec, labels: false),
               artworkBackdrop: mixSpec == null ? null : MixArtwork(spec: mixSpec, labels: false),
               actions: [
                 // Rádio z rádia by se jen točilo v kruhu.

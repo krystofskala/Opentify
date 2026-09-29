@@ -304,7 +304,8 @@ def _decade_playlists(ranked: list[str], evergreens: list[str], year_track: dict
             continue
         playlist_id = g._save_playlist(
             owner=g.HOME_USER_ID,
-            source=f"personal:decade:{key}",
+            # Roky ve zdroji -- klient z nich skládá popisek obalu ("16–26").
+            source=f"personal:decade:{FIRST_YEAR}-{DECADE_LAST_YEAR}:{key}",
             title=title,
             description=description,
             kind=PlaylistKind.PERSONAL_MIX,

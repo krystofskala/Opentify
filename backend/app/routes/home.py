@@ -12,7 +12,7 @@ from app.catalog.availability import resolve_artist_name
 from app.db import get_session
 from app.home.generators import _covers_for
 from app.models import Artist, Listen, Playlist, PlaylistItem, Recording, Release
-from app.home.service import get_home, run_generators
+from app.home.service import _accent_for, _art_style, get_home, run_generators
 
 home_router = APIRouter(prefix="/home", tags=["home"])
 
@@ -124,6 +124,9 @@ def _context_item(session: Session, context: str | None) -> dict | None:
             "imageUrl": covers[0] if covers else None,
             "imageUrls": covers[:4],
             "source": playlist.source,
+            # Stejný generativní obal jako karta na Domů (design audit #1).
+            "accentColor": _accent_for(playlist.source),
+            "artStyle": _art_style(playlist.source),
         }
     if kind == "artists":
         artist = session.get(Artist, ident)

@@ -298,10 +298,13 @@ def build_home(user_id: str) -> dict[str, Any]:
             for key, _, _ in _SECTION_ORDER
         }
 
-        quick = [
-            c
-            for c in (cards_by_section["mixes"][:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1])
-        ][:6]
+        # Denní mixy mají vlastní řadu hned pod -- v Rychlém výběru jen jako
+        # záloha, jinak "Denní mix 1" třikrát na první obrazovce (design audit #8).
+        mixes = cards_by_section["mixes"]
+        other_mixes = [c for c in mixes if not (c.source or "").startswith("personal:daily-mix:")]
+        daily = [c for c in mixes if (c.source or "").startswith("personal:daily-mix:")]
+        quick = (other_mixes + daily)[:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1]
+        quick = quick[:6]
         if quick:
             sections.append({"id": "quick_picks", "title": "Rychlý výběr", "type": "quick_picks", "items": [c.model_dump(mode="json", by_alias=True) for c in quick]})
 

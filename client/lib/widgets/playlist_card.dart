@@ -168,7 +168,7 @@ class PlaylistCardView extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.xs),
             if (!card.prefersGradient)
-              Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
+              Text(cardTitle(card), maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
             Text(
               subtitle,
               maxLines: card.prefersGradient ? 2 : 1,
@@ -180,6 +180,19 @@ class PlaylistCardView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Název pod kartou. Obal vlastního mixu už nese druh ("TOP SKLADBY",
+/// "TVŮJ MIX"), pod ním stačí to podstatné -- dřív se uřízl právě letopočet
+/// ("Tvoje top skladby 20…", design audit #2).
+String cardTitle(HomePlaylistCard card) {
+  final s = card.source ?? '';
+  if (s.startsWith('personal:year:')) return 'Top skladby ${s.split(':').last}';
+  if (s.startsWith('personal:category-mix:')) {
+    final i = card.title.indexOf('· ');
+    return i < 0 ? card.title : card.title.substring(i + 2);
+  }
+  return card.title;
 }
 
 IconData _iconFor(String kind) => switch (kind) {

@@ -399,7 +399,7 @@ class _RelatedArtistsSection extends StatelessWidget {
             height: 180,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               itemCount: related.length,
               itemBuilder: (context, index) {
                 final a = related[index];
@@ -437,7 +437,7 @@ class _ReleaseRail extends StatelessWidget {
       height: 190,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
         itemCount: releases.length,
         itemBuilder: (context, index) {
           final release = releases[index];
@@ -515,7 +515,7 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
               height: 190,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 itemCount: visible.length,
                 itemBuilder: (context, index) {
                   final item = visible[index];

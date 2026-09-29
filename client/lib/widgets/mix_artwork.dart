@@ -53,6 +53,8 @@ class MixArtSpec {
   final String? eyebrow;
 }
 
+Color? mixHex(String? hex) => _hex(hex);
+
 Color? _hex(String? hex) {
   if (hex == null) return null;
   final value = int.tryParse('FF${hex.replaceFirst('#', '')}', radix: 16);
@@ -88,7 +90,7 @@ MixArtSpec? mixArtForSource({
     return MixArtSpec(style: MixArtStyle.year, seed: s, headline: last, photos: photos);
   }
   if (s.startsWith('personal:decade:')) {
-    return MixArtSpec(style: MixArtStyle.year, seed: s, headline: '16–26', photos: photos, eyebrow: 'DEKÁDA');
+    return MixArtSpec(style: MixArtStyle.year, seed: s, headline: _decadeLabel(s), photos: photos, eyebrow: 'DEKÁDA');
   }
   // Ostatní vlastní mixy -- styly, které unesou delší název (2 řádky).
   if (s.startsWith('personal:discover-weekly')) {
@@ -135,6 +137,16 @@ MixArtSpec? mixArtForSource({
     );
   }
   return null;
+}
+
+/// `personal:decade:2016-2026:top` -> "16–26" (dřív napevno, od 2027 by lhalo).
+String _decadeLabel(String id) {
+  final years = RegExp(r'(\d{4})').allMatches(id).map((m) => int.parse(m.group(1)!)).toList();
+  if (years.isEmpty) return '10 let';
+  final from = years.first;
+  final to = years.length > 1 ? years.last : from + 10;
+  String two(int y) => (y % 100).toString().padLeft(2, '0');
+  return '${two(from)}–${two(to)}';
 }
 
 /// Generativní obal vlastního mixu -- každý druh mixu vlastní výtvarný
@@ -265,6 +277,13 @@ class MixArtwork extends StatelessWidget {
       case MixArtStyle.mood:
         if (compact) return const [];
         final mood = spec.style == MixArtStyle.mood;
+        // Zalomit jen mezi slovy ("Alternativa /" + "Indie"), nikdy uprostřed
+        // slova -- nejdelší slovo se vejde na řádek, jinak se písmo zmenší
+        // (dřív "Alternativ / a / Indie", design audit #2).
+        final headline = spec.headline.replaceAll(' / ', ' /\n');
+        final longest = headline.split(RegExp(r'\s+')).fold<int>(0, (m, w) => math.max(m, w.length));
+        final width = side * 0.84;
+        final fontSize = math.min(side * 0.15, width / math.max(1, longest * 0.6));
         return [
           if (label != null) label,
           Positioned(
@@ -274,12 +293,12 @@ class MixArtwork extends StatelessWidget {
             top: mood ? null : side * 0.17,
             bottom: mood ? side * 0.08 : null,
             child: Text(
-              spec.headline,
+              headline,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white,
-                fontSize: side * 0.15,
+                fontSize: fontSize,
                 fontWeight: mood ? FontWeight.w700 : FontWeight.w900,
                 fontStyle: mood ? FontStyle.italic : FontStyle.normal,
                 height: 1.05,

@@ -397,10 +397,18 @@ class _RowTileState extends State<_RowTile> {
                         ),
                       ),
                       if (!w.selectionMode) ...[
-                        if (wide && w.recording.durationMs != null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                            child: Text(w.recording.durationLabel, style: theme.textTheme.bodySmall),
+                        // Pevný sloupec -- dřív se objevoval jen u části řádků
+                        // a sloupce pod sebou "skákaly" (design audit #7).
+                        if (wide)
+                          SizedBox(
+                            width: 52,
+                            child: Text(
+                              w.recording.durationMs != null ? w.recording.durationLabel : '–:–',
+                              textAlign: TextAlign.right,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                            ),
                           ),
                         IconButton(
                           icon: Icon(
@@ -599,22 +607,28 @@ class _Trailing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Vždy stejná šířka jako tlačítko (48) -- při stahování se srdíčko
+    // dřív posunulo do strany (design audit #7).
     if (isInFlight) {
-      return SizedBox(
-        width: 24,
-        height: 24,
-        // Podklad + při 0 % točení -- dřív byl kroužek na 0 % neviditelný a
-        // řádek vypadal, jako by u něj žádné tlačítko nebylo.
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          value: pct == null || pct == 0 ? null : pct! / 100,
-          backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
+      return SizedBox.square(
+        dimension: 48,
+        child: Center(
+          child: SizedBox.square(
+            dimension: 24,
+            // Podklad + při 0 % točení -- dřív byl kroužek na 0 % neviditelný a
+            // řádek vypadal, jako by u něj žádné tlačítko nebylo.
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              value: pct == null || pct == 0 ? null : pct! / 100,
+              backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
+            ),
+          ),
         ),
       );
     }
-    if (isAvailable) {
-      return IconButton(icon: const Icon(Symbols.play_circle_rounded), tooltip: 'Přehrát', onPressed: onTap);
-    }
+    // Dostupná skladba: bez ikony (klepnutí na řádek přehraje), jen místo,
+    // ať srdíčka ve všech řádcích lícují.
+    if (isAvailable) return const SizedBox(width: 48, height: 48);
     return IconButton(
       icon: Icon(isFailed ? Symbols.refresh_rounded : Symbols.download_rounded),
       tooltip: isFailed ? 'Zkusit znovu' : 'Obstarat a přehrát',
