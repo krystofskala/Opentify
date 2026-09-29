@@ -17,6 +17,7 @@ nevede na náš server -- nic z něj (adresa, knihovna) se ven nedostane.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,6 +36,12 @@ _http = httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "Opentify/0.1 (per
 def _artist_name(session: Session, artist_id: str | None) -> str:
     artist = session.get(Artist, artist_id) if artist_id else None
     return artist.name if artist else ""
+
+
+def _spotify_search(kind: str, title: str, artist: str) -> str:
+    """Záloha, když Spotify ID nemáme: vyhledání ve Spotify (otevře appku
+    na výsledcích "název interpret"). kind = tracks | albums."""
+    return f"https://open.spotify.com/search/{quote(f'{title} {artist}'.strip(), safe='')}/{kind}"
 
 
 def _same(a: str | None, b: str | None) -> bool:
@@ -123,7 +130,13 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         recording.external_refs = refs
     session.add(recording)
     session.commit()
-    return {"url": url, "title": recording.title, "artistName": artist_name or None}
+    return {
+        "url": url,
+        "title": recording.title,
+        "artistName": artist_name or None,
+        # song.link začínající jinde než u Spotify ho často nedohledá.
+        "spotifySearchUrl": None if spotify_id else _spotify_search("tracks", recording.title, artist),
+    }
 
 
 @share_router.get("/releases/{release_id}")
@@ -173,4 +186,9 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
         release.external_refs = refs
     session.add(release)
     session.commit()
-    return {"url": url, "title": release.title, "artistName": artist_name or None}
+    return {
+        "url": url,
+        "title": release.title,
+        "artistName": artist_name or None,
+        "spotifySearchUrl": _spotify_search("albums", clean_album_title(release.title), artist),
+    }

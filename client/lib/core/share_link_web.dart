@@ -23,7 +23,7 @@ Future<bool> nativeShare(String text, String url) async {
   try {
     final coarse = web.window.matchMedia('(pointer: coarse)').matches;
     if (!coarse || !_navigator.has('share')) return false;
-    await _navigator.share(_ShareData(title: text, text: text, url: url)).toDart;
+    await _navigator.share(_ShareData(title: text.split('\n').first, text: text, url: url)).toDart;
     return true;
   } catch (e) {
     // Uživatel sdílení zrušil (AbortError) -- to je taky "vyřízeno", ne
