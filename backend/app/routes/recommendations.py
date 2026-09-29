@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.auth import get_current_user
@@ -97,3 +98,20 @@ async def community(
 ):
     recordings = await service.community_picks(LISTENBRAINZ_USERNAME, limit)
     return [r.model_dump(by_alias=True) for r in recordings]
+
+
+class RadioStationBody(BaseModel):
+    kind: str
+    id: str
+
+
+@recommendations_router.post("/radio")
+async def radio_station(body: RadioStationBody, current: tuple[str, str] = Depends(get_current_user)):
+    """"Přejít na rádio" -- vytvoří (nebo přegeneruje) playlist podobné
+    hudby podle skladby/alba/playlistu/interpreta (app/home/radio_station.py)."""
+    from app.home.radio_station import StationError, build_station
+
+    try:
+        return await build_station(current[0], body.kind, body.id)
+    except StationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

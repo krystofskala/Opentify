@@ -22,6 +22,7 @@ import '../../widgets/queue_action_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
+import '../../widgets/radio_station.dart';
 
 final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getDiscography(artistId);
@@ -166,6 +167,11 @@ class _ArtistBody extends ConsumerWidget {
               thumbnailUrl: artist.bannerUrl != null ? artist.coverImageUrl : null,
               thumbnailCircle: true,
               actions: [
+                HeroAction(
+                  icon: Symbols.radio_rounded,
+                  tooltip: 'Rádio interpreta',
+                  onPressed: () => goToRadio(context, ref, RadioSeed.artist, artist.id),
+                ),
                 HeroAction(
                   icon: artistLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
                   tooltip: artistLater ? 'Odebrat z Poslechnout později' : 'Prozkoumat později',

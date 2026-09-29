@@ -86,7 +86,21 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
   double? _playerHeight;
   // Tear-off metody je `==` sama se sebou -- `detach` tak pozná svou trasu.
   void _pop() {
-    if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+    // Jen vlastní trasu -- `pop()` zavře vrchní trasu, a kdyby nad
+    // přehrávačem mezitím byla jiná stránka, zavřel by ji (viz
+    // `NowPlayingSheetController.close`).
+    if (mounted && ModalRoute.of(context)?.isCurrent == true) Navigator.of(context).pop();
+  }
+
+  /// Odkaz z přehrávače: zasunout a pak trasu přehrávače NAHRADIT cílovou
+  /// stránkou (jeden krok navigace, viz `NowPlayingSheetController.slideDown`).
+  void _openAfterClose(String location) {
+    final router = GoRouter.of(context);
+    final sheet = _sheet;
+    if (sheet == null) return;
+    sheet.slideDown().then((closed) {
+      if (closed && mounted) router.pushReplacement(location);
+    });
   }
 
   /// Posun karuselu obalů v px (0 = aktuální skladba uprostřed).
@@ -557,10 +571,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
           GestureDetector(
             onTap: nowPlaying.releaseId == null
                 ? null
-                : () {
-                    _sheet?.close();
-                    context.push('/releases/${nowPlaying.releaseId}?track=${nowPlaying.recordingId}');
-                  },
+                : () => _openAfterClose('/releases/${nowPlaying.releaseId}?track=${nowPlaying.recordingId}'),
             child: Text(
               nowPlaying.title,
               textAlign: TextAlign.center,
@@ -574,10 +585,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
             GestureDetector(
               onTap: nowPlaying.artistId == null
                   ? null
-                  : () {
-                      _sheet?.close();
-                      context.push('/artists/${nowPlaying.artistId}');
-                    },
+                  : () => _openAfterClose('/artists/${nowPlaying.artistId}'),
               child: Text(
                 nowPlaying.artistName ?? 'Zobrazit interpreta',
                 textAlign: TextAlign.center,

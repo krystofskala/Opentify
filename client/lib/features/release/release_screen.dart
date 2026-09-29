@@ -18,6 +18,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_actions.dart' show shareWithToast;
 import '../../widgets/track_tile.dart';
+import '../../widgets/radio_station.dart';
 
 final releaseProvider = FutureProvider.autoDispose.family<ReleaseModel, String>((ref, releaseId) {
   return ref.watch(catalogRepositoryProvider).getRelease(releaseId);
@@ -166,6 +167,11 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                   HeroMetaItem(Symbols.schedule_rounded, heroTotalDuration(recordings.map((r) => r.durationMs))!),
               ],
               actions: [
+                HeroAction(
+                  icon: Symbols.radio_rounded,
+                  tooltip: 'Přejít na rádio',
+                  onPressed: () => goToRadio(context, ref, RadioSeed.album, release.id),
+                ),
                 HeroAction(
                   icon: albumLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
                   tooltip: albumLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',

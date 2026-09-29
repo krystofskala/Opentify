@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:go_router/go_router.dart';
@@ -100,7 +102,19 @@ class NowPlayingSheetController {
     if (!dragging && _anim.value < 1 && !_anim.isAnimating) _settle(1, 0);
   }
 
-  void close() => _settle(0, 0);
+  /// Zasunout. Future = `true`, až je přehrávač opravdu zavřený (trasa
+  /// pryč). Odkazy z přehrávače (interpret, album, rádio) otevírat AŽ PAK:
+  /// dřív se nová stránka otevřela hned a zavření přehrávače pak zavřelo
+  /// ji (vrchní trasu) -- neviditelná trasa přehrávače zůstala přes celou
+  /// appku a pohlcovala všechny doteky ("zamrzlo", živě nahlášeno pokaždé
+  /// po klepnutí na interpreta v přehrávači).
+  Future<bool> close() => _settle(0, 0);
+
+  /// Jen vizuálně zasunout a trasu NECHAT -- volající ji hned nahradí
+  /// cílovou stránkou (`pushReplacement`). Zavřít trasu a pak otevřít jinou
+  /// nejde: router zpracuje zavření se zpožděním a novou stránku přepíše
+  /// (živě ověřeno -- interpret se z přehrávače vůbec neotevřel).
+  Future<bool> slideDown() => _settle(0, 0, popRoute: false);
 
   void dragStart(BuildContext context) {
     dragging = true;
@@ -127,15 +141,20 @@ class NowPlayingSheetController {
     _settle(target, v);
   }
 
-  void _settle(double target, double velocity) {
-    final sim = SpringSimulation(_spring, _anim.value, target, velocity)..tolerance = const Tolerance(distance: 0.001, velocity: 0.01);
+  Future<bool> _settle(double target, double velocity, {bool popRoute = true}) {
+    final done = Completer<bool>();
+    final sim = SpringSimulation(_spring, _anim.value, target, velocity)
+      ..tolerance = const Tolerance(distance: 0.001, velocity: 0.01);
     _anim.animateWith(sim).whenCompleteOrCancel(() {
-      if (dragging || _anim.isAnimating) return;
+      if (dragging || _anim.isAnimating) return done.complete(false);
       if (target == 0 && _anim.value <= 0.001) {
         _anim.value = 0;
         final pop = _popRoute;
-        if (pop != null) pop();
+        if (popRoute && pop != null) pop();
+        return done.complete(true);
       }
+      done.complete(false);
     });
+    return done.future;
   }
 }

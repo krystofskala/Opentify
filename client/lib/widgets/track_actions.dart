@@ -17,6 +17,7 @@ import 'add_to_playlist_sheet.dart';
 import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'remove_from_library.dart';
+import 'radio_station.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -213,6 +214,11 @@ class _TrackActionsSheet extends ConsumerWidget {
                     final link = shareLinkAsync.valueOrNull;
                     run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
                   },
+                ),
+                _Item(
+                  icon: Symbols.radio_rounded,
+                  label: 'Přejít na rádio',
+                  onTap: () => run(() => goToRadio(hostContext, ref, RadioSeed.track, recording.id)),
                 ),
                 if (recording.releaseId != null)
                   _Item(

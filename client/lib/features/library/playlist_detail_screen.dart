@@ -18,6 +18,7 @@ import '../../widgets/track_actions.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/radio_station.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -117,6 +118,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               artwork: mixSpec == null ? null : MixArtwork(spec: mixSpec),
               artworkBackdrop: mixSpec == null ? null : MixArtwork(spec: mixSpec, labels: false),
               actions: [
+                // Rádio z rádia by se jen točilo v kruhu.
+                if (!(detail.source?.startsWith('radio:') ?? false))
+                  HeroAction(
+                    icon: Symbols.radio_rounded,
+                    tooltip: 'Přejít na rádio',
+                    onPressed: () => goToRadio(context, ref, RadioSeed.playlist, detail.id),
+                  ),
                 if (readOnly)
                   HeroAction(
                     icon: Symbols.library_add_rounded,

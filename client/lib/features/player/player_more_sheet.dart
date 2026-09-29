@@ -17,6 +17,7 @@ import 'queue_panel.dart';
 import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/radio_station.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -66,25 +67,30 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     final theme = Theme.of(context);
     final accent = playback.accentColor ?? theme.colorScheme.primary;
 
-    // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač.
-    return GlassContainer.frosted(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
-      tint: accent,
-      shadow: false,
-      // Obsah vždy světlý na barevném skle (jako přehrávač), nezávisle na
-      // světlém/tmavém režimu systému.
-      child: Theme(
-        data: buildAppTheme(seed: accent, brightness: Brightness.dark),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),
-            // Scrollovatelné -- s dalšími řádky (normalizace, předvolby rychlosti)
-            // by se sheet na nízkém displeji telefonu jinak přetekl.
-            child: SingleChildScrollView(
+    // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač. Nejvýš
+    // 85 % výšky -- nahoře musí zůstat vidět přehrávač (klepnutím tam se
+    // panel zavře). S dalšími řádky (rádio) jinak přerostl přes celou
+    // obrazovku a nešel zavřít (živě nahlášeno).
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+      child: GlassContainer.frosted(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+        tint: accent,
+        shadow: false,
+        // Obsah vždy světlý na barevném skle (jako přehrávač), nezávisle na
+        // světlém/tmavém režimu systému.
+        child: Theme(
+          data: buildAppTheme(seed: accent, brightness: Brightness.dark),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Úchyt MIMO scroll -- tažení za něj sheet vždy zavře (scroll
+                  // by svislé tažení jinak spolkl).
                   Center(
                     child: Container(
                       width: 40,
@@ -94,133 +100,165 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           color: theme.colorScheme.outlineVariant, borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Symbols.queue_music_rounded),
-                    title: const Text('Fronta'),
-                    subtitle:
-                        playback.queueSourceLabel != null ? Text('Přehráváno z ${playback.queueSourceLabel}') : null,
-                    trailing: const Icon(Symbols.chevron_right_rounded),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      showQueuePanel(context, accentColor: accent);
-                    },
-                  ),
-                  if (playback.nowPlaying != null)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Symbols.playlist_add_rounded),
-                      title: const Text('Přidat do playlistu'),
-                      trailing: const Icon(Symbols.chevron_right_rounded),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        showAddToPlaylistSheet(context, recordingId: playback.nowPlaying!.recordingId);
-                      },
-                    ),
-                  if (playback.nowPlaying != null) _laterTile(context, playback),
-                  if (playback.nowPlaying != null) _shareTile(context, playback),
-                  if (playback.nowPlaying != null) _abRepeatTile(context, playback),
-                  if (playback.nowPlaying != null)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Symbols.close_rounded),
-                      title: const Text('Zavřít přehrávač'),
-                      subtitle: const Text('Zastaví hudbu a vyprázdní frontu'),
-                      onTap: () {
-                        // Nejdřív zasunout velký přehrávač, pak ukončit -- jinak by
-                        // na chvíli ukázal prázdné "Nic nehraje".
-                        final sheet = NowPlayingSheetController.of(context);
-                        final player = ref.read(audioPlayerControllerProvider.notifier);
-                        Navigator.of(context).pop();
-                        sheet.close();
-                        Future.delayed(const Duration(milliseconds: 450), player.dismiss);
-                      },
-                    ),
-                  const Divider(),
-                  const Row(
-                    children: [
-                      Icon(Symbols.speed_rounded),
-                      SizedBox(width: AppSpacing.sm),
-                      Text('Rychlost přehrávání'),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  // Pevné předvolby místo plynulého slideru (vzor z Finampova
-                  // `speed_menu.dart`) -- na mobilu se slider na přesnou hodnotu
-                  // trefuje špatně a mezihodnoty jako 1.1× nikdo nepoužívá.
-                  GlassSegmentedControl<double>(
-                    segments: [
-                      for (final speed in _speeds) GlassSegment(value: speed, label: '${_formatSpeed(speed)}×'),
-                    ],
-                    selected: _speeds.firstWhere((v) => (playback.speed - v).abs() < 0.01, orElse: () => 1.0),
-                    onChanged: controller.setSpeed,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Row(
-                    children: [
-                      const Icon(Symbols.volume_up_rounded),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text('Hlasitost: ${(playback.volume * 100).round()} %'),
-                    ],
-                  ),
-                  Slider(value: playback.volume, onChanged: controller.setVolume),
-                  // Přepínač jen v řádku seznamu (HIG Toggles).
-                  GlassSwitchRow(
-                    leading: const Icon(Symbols.graphic_eq_rounded),
-                    title: 'Normalizace hlasitosti',
-                    subtitle: 'Srovná hlasité a tiché skladby na podobnou úroveň',
-                    value: playback.normalizationEnabled,
-                    onChanged: controller.setNormalizationEnabled,
-                  ),
-                  if (kIsWeb)
-                    GlassSwitchRow(
-                      leading: const Icon(Symbols.lock_rounded),
-                      title: 'Hrát dál na zamčeném displeji',
-                      subtitle: 'Fronta jako jeden nepřetržitý stream (pro iPhone). Projeví se od další skladby.',
-                      value: controller.radioModeEnabled,
-                      onChanged: (v) async {
-                        await controller.setRadioMode(v);
-                        if (mounted) setState(() {});
-                      },
-                    ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text('Uspávač', style: theme.textTheme.titleSmall),
-                  const SizedBox(height: AppSpacing.xs),
-                  if (playback.sleepTimerEndAt != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      child: Row(
+                  Flexible(
+                    // Scrollovatelné -- s dalšími řádky (normalizace, předvolby rychlosti)
+                    // by se sheet na nízkém displeji telefonu jinak přetekl.
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(_isFading(playback.sleepTimerEndAt!)
-                              ? 'Ztlumuje se...'
-                              : 'Zbývá ${_formatRemaining(playback.sleepTimerEndAt!)}'),
-                          const Spacer(),
-                          GlassButton(
-                              label: 'Zrušit',
-                              style: GlassButtonStyle.plain,
-                              compact: true,
-                              onPressed: controller.cancelSleepTimer),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Symbols.queue_music_rounded),
+                            title: const Text('Fronta'),
+                            subtitle: playback.queueSourceLabel != null
+                                ? Text('Přehráváno z ${playback.queueSourceLabel}')
+                                : null,
+                            trailing: const Icon(Symbols.chevron_right_rounded),
+                            onTap: () {
+                              Navigator.of(context).pop();
+                              showQueuePanel(context, accentColor: accent);
+                            },
+                          ),
+                          if (playback.nowPlaying != null)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Symbols.playlist_add_rounded),
+                              title: const Text('Přidat do playlistu'),
+                              trailing: const Icon(Symbols.chevron_right_rounded),
+                              onTap: () {
+                                Navigator.of(context).pop();
+                                showAddToPlaylistSheet(context, recordingId: playback.nowPlaying!.recordingId);
+                              },
+                            ),
+                          if (playback.nowPlaying != null) _laterTile(context, playback),
+                          if (playback.nowPlaying != null)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Symbols.radio_rounded),
+                              title: const Text('Přejít na rádio'),
+                              subtitle: const Text('Podobná hudba podle téhle skladby'),
+                              trailing: const Icon(Symbols.chevron_right_rounded),
+                              onTap: () {
+                                // Přehrávač zasunout, rádio se otevře pod ním.
+                                final sheet = NowPlayingSheetController.of(context);
+                                final id = playback.nowPlaying!.recordingId;
+                                final closed = Completer<bool>();
+                                goToRadio(context, ref, RadioSeed.track, id,
+                                    openAfter: closed.future, replaceTop: true);
+                                Navigator.of(context).pop();
+                                closed.complete(sheet.slideDown());
+                              },
+                            ),
+                          if (playback.nowPlaying != null) _shareTile(context, playback),
+                          if (playback.nowPlaying != null) _abRepeatTile(context, playback),
+                          if (playback.nowPlaying != null)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Symbols.close_rounded),
+                              title: const Text('Zavřít přehrávač'),
+                              subtitle: const Text('Zastaví hudbu a vyprázdní frontu'),
+                              onTap: () {
+                                // Nejdřív zasunout velký přehrávač, pak ukončit -- jinak by
+                                // na chvíli ukázal prázdné "Nic nehraje".
+                                final sheet = NowPlayingSheetController.of(context);
+                                final player = ref.read(audioPlayerControllerProvider.notifier);
+                                Navigator.of(context).pop();
+                                sheet.close();
+                                Future.delayed(const Duration(milliseconds: 450), player.dismiss);
+                              },
+                            ),
+                          const Divider(),
+                          const Row(
+                            children: [
+                              Icon(Symbols.speed_rounded),
+                              SizedBox(width: AppSpacing.sm),
+                              Text('Rychlost přehrávání'),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          // Pevné předvolby místo plynulého slideru (vzor z Finampova
+                          // `speed_menu.dart`) -- na mobilu se slider na přesnou hodnotu
+                          // trefuje špatně a mezihodnoty jako 1.1× nikdo nepoužívá.
+                          GlassSegmentedControl<double>(
+                            segments: [
+                              for (final speed in _speeds) GlassSegment(value: speed, label: '${_formatSpeed(speed)}×'),
+                            ],
+                            selected: _speeds.firstWhere((v) => (playback.speed - v).abs() < 0.01, orElse: () => 1.0),
+                            onChanged: controller.setSpeed,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Row(
+                            children: [
+                              const Icon(Symbols.volume_up_rounded),
+                              const SizedBox(width: AppSpacing.sm),
+                              Text('Hlasitost: ${(playback.volume * 100).round()} %'),
+                            ],
+                          ),
+                          Slider(value: playback.volume, onChanged: controller.setVolume),
+                          // Přepínač jen v řádku seznamu (HIG Toggles).
+                          GlassSwitchRow(
+                            leading: const Icon(Symbols.graphic_eq_rounded),
+                            title: 'Normalizace hlasitosti',
+                            subtitle: 'Srovná hlasité a tiché skladby na podobnou úroveň',
+                            value: playback.normalizationEnabled,
+                            onChanged: controller.setNormalizationEnabled,
+                          ),
+                          if (kIsWeb)
+                            GlassSwitchRow(
+                              leading: const Icon(Symbols.lock_rounded),
+                              title: 'Hrát dál na zamčeném displeji',
+                              subtitle:
+                                  'Fronta jako jeden nepřetržitý stream (pro iPhone). Projeví se od další skladby.',
+                              value: controller.radioModeEnabled,
+                              onChanged: (v) async {
+                                await controller.setRadioMode(v);
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text('Uspávač', style: theme.textTheme.titleSmall),
+                          const SizedBox(height: AppSpacing.xs),
+                          if (playback.sleepTimerEndAt != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                              child: Row(
+                                children: [
+                                  Text(_isFading(playback.sleepTimerEndAt!)
+                                      ? 'Ztlumuje se...'
+                                      : 'Zbývá ${_formatRemaining(playback.sleepTimerEndAt!)}'),
+                                  const Spacer(),
+                                  GlassButton(
+                                      label: 'Zrušit',
+                                      style: GlassButtonStyle.plain,
+                                      compact: true,
+                                      onPressed: controller.cancelSleepTimer),
+                                ],
+                              ),
+                            ),
+                          Wrap(
+                            spacing: AppSpacing.xs,
+                            runSpacing: AppSpacing.xs,
+                            children: [
+                              for (final minutes in [5, 15, 30, 45, 60])
+                                GlassButton(
+                                  label: '$minutes min',
+                                  compact: true,
+                                  onPressed: () => controller.startSleepTimer(Duration(minutes: minutes)),
+                                ),
+                              GlassButton(
+                                label: 'Konec skladby',
+                                compact: true,
+                                onPressed: playback.duration == null
+                                    ? null
+                                    : () => controller.startSleepTimer(playback.duration! - playback.position),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
-                  Wrap(
-                    spacing: AppSpacing.xs,
-                    runSpacing: AppSpacing.xs,
-                    children: [
-                      for (final minutes in [5, 15, 30, 45, 60])
-                        GlassButton(
-                          label: '$minutes min',
-                          compact: true,
-                          onPressed: () => controller.startSleepTimer(Duration(minutes: minutes)),
-                        ),
-                      GlassButton(
-                        label: 'Konec skladby',
-                        compact: true,
-                        onPressed: playback.duration == null
-                            ? null
-                            : () => controller.startSleepTimer(playback.duration! - playback.position),
-                      ),
-                    ],
                   ),
                 ],
               ),
