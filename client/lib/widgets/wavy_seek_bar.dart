@@ -263,18 +263,10 @@ class _WavySeekBarPainter extends CustomPainter {
       return;
     }
 
-    // Obálka amplitudy jen na ZAČÁTKU baru (plynulý náběh přes ~jednu
-    // vlnovou délku). Ke konci u puku vlna plnou amplitudou -- konec se
-    // hýbe s vlnou (Google styl). `x` je absolutní, ať vlna při posunu
-    // playheadu "neplave" spolu s ním.
-    final length = endX - startX;
-    final ramp = math.min(wavelength, length / 2);
-    double envelope(double x) {
-      final t = ((x - startX) / ramp).clamp(0.0, 1.0);
-      return t * t * (3 - 2 * t);
-    }
-
-    double yAt(double x) => centerY + amplitude * envelope(x) * math.sin((x / wavelength) * 2 * math.pi + phase);
+    // Plná amplituda po celé délce (Google styl) -- začátek ani konec u puku
+    // se nesrovnávají do středu (živě nahlášeno). `x` je absolutní, ať vlna
+    // při posunu playheadu "neplave" spolu s ním.
+    double yAt(double x) => centerY + amplitude * math.sin((x / wavelength) * 2 * math.pi + phase);
 
     final path = Path()..moveTo(startX, yAt(startX));
     const sampleStep = 2.0;
