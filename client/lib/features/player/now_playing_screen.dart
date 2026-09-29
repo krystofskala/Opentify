@@ -636,6 +636,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(_formatDuration(playback.position), style: const TextStyle(color: Colors.white70)),
+                _abBadge(playback, accent),
                 Text(_formatDuration(duration), style: const TextStyle(color: Colors.white70)),
               ],
             ),
@@ -711,6 +712,34 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Štítek běžícího A-B opakování (nastavuje se v menu "⋮"); klepnutí vypne.
+  Widget _abBadge(AudioPlayerState playback, Color accent) {
+    final ab = ref.watch(abRepeatProvider);
+    if (ab == null || ab.recordingId != playback.nowPlaying?.recordingId) return const SizedBox.shrink();
+    final label =
+        ab.b == null ? 'A ${_formatDuration(ab.a)} → ?' : 'A-B ${_formatDuration(ab.a)}–${_formatDuration(ab.b!)}';
+    return GestureDetector(
+      onTap: () => ref.read(abRepeatProvider.notifier).state = null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Symbols.repeat_rounded, size: 14, color: accent),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            const Icon(Symbols.close_rounded, size: 14, color: Colors.white70),
+          ],
+        ),
       ),
     );
   }

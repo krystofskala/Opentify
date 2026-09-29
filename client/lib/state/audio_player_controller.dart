@@ -286,6 +286,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       state = state.copyWith(position: position);
       _maybeWarmUpNext(position);
       _trackScrobble(position);
+      if (_maybeLoopAb(position)) return;
       _maybeAdvanceEarly(position);
     });
     _player.durationStream.listen((duration) {
@@ -762,6 +763,22 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// když je další skladba už stažená, přepnout ~0,6 s PŘED koncem, dokud
   /// audio ještě hraje (konec skladby bývá ticho). Jinak zůstává běžné
   /// přepnutí po `completed`.
+  /// A-B opakování: po dosažení bodu B skok zpět na A (jen pro skladbu, na
+  /// které se body nastavily; jinou skladbou se samo zruší).
+  bool _maybeLoopAb(Duration position) {
+    final ab = _ref.read(abRepeatProvider);
+    if (ab == null) return false;
+    final current = state.nowPlaying?.recordingId;
+    if (ab.recordingId != current) {
+      _ref.read(abRepeatProvider.notifier).state = null;
+      return false;
+    }
+    final b = ab.b;
+    if (b == null || position < b) return false;
+    unawaited(seek(ab.a));
+    return true;
+  }
+
   static const _earlyAdvanceWindow = Duration(milliseconds: 600);
   String? _earlyAdvancedFrom;
   DateTime? _earlyAdvancedAt;
@@ -1265,6 +1282,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     super.dispose();
   }
 }
+
+/// A-B opakování aktuální skladby: `a` nastaveno, `b` ještě ne = čeká se na
+/// druhý bod; obojí = smyčka běží. `null` = vypnuto.
+typedef AbRepeat = ({String recordingId, Duration a, Duration? b});
+
+final abRepeatProvider = StateProvider<AbRepeat?>((ref) => null);
 
 final audioPlayerControllerProvider = StateNotifierProvider<AudioPlayerController, AudioPlayerState>((ref) {
   return AudioPlayerController(ref.watch(realtimeClientProvider), ref);
