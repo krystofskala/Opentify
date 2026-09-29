@@ -4,14 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/audio_player_controller.dart';
 import 'accent_color.dart';
 
-/// Hraje něco? Skladba je načtená a buď hraje, nebo se právě načítá/bufferuje
-/// (přepnutí na další skladbu na chvíli shodí `isPlaying` -- to se za pauzu
-/// nepočítá, jinak by barva při rychlém přeskakování problikávala na barvu
-/// otevřeného alba).
+/// Je přehrávač otevřený (skladba načtená -- hraje i na pauze)? Pak barvu
+/// appky určuje skladba (viz [EffectiveAccent], pravidlo 1).
 final trackIsPlayingProvider = Provider<bool>((ref) {
-  return ref.watch(audioPlayerControllerProvider.select(
-    (s) => s.nowPlaying != null && (s.isPlaying || s.isBuffering),
-  ));
+  return ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying != null));
 });
 
 /// Obrázky otevřených detailů (souběžně se `screenAccentStackProvider`, ze
@@ -42,18 +38,17 @@ final screenImageStackProvider =
 typedef AccentSource = ({Color? accent, String? imageUrl});
 
 /// JEDINÝ zdroj barvy appky (seed M3 tématu, zrnité pozadí, tónování
-/// hlaviček, přehrávač) -- pořadí priorit podle uživatele:
+/// hlaviček, přehrávač). Pravidla (podle uživatele, sjednocená po několika
+/// úpravách):
 ///
-///   1. barva PRÁVĚ HRAJÍCÍ skladby -- vyhrává vždy, i nad otevřeným
-///      albem/interpretem/playlistem;
-///   2. když nic nehraje (pauza/stop): barva otevřené obrazovky (album,
-///      interpret, playlist);
-///   3. jinak naposledy platná barva (návrat na Domů nic nepřebarví);
-///   4. `null` na začátku relace a po zavření přehrávače -> pestré výchozí
-///      pozadí.
+///   1. přehrávač je otevřený (skladba načtená -- hraje i na pauze):
+///      vždy barva skladby, i nad otevřeným albem/interpretem/playlistem;
+///   2. přehrávač je zavřený: barva otevřené obrazovky (album, interpret,
+///      playlist);
+///   3. jinak výchozí barvy (`null` -> pestré výchozí pozadí).
 ///
-/// Dokud barva nově hrající skladby není spočítaná (`accentColor == null`),
-/// drží se předchozí barva -- žádné probliknutí přes výchozí/albovou.
+/// Dokud barva nové skladby není spočítaná (`accentColor == null`), drží se
+/// předchozí barva -- žádné probliknutí přes výchozí/albovou.
 class EffectiveAccent extends StateNotifier<AccentSource> {
   EffectiveAccent(this._ref) : super((accent: null, imageUrl: null)) {
     _recompute();
@@ -61,34 +56,28 @@ class EffectiveAccent extends StateNotifier<AccentSource> {
     // extrakce barvy v přehrávači), takže zápis stavu tady je bezpečný.
     _ref.listen<Color?>(activeScreenAccentProvider, (_, __) => _recompute());
     _ref.listen(screenImageStackProvider, (_, __) => _recompute());
-    _ref.listen<bool>(trackIsPlayingProvider, (_, __) => _recompute());
+    _ref.listen<bool>(audioPlayerControllerProvider.select((s) => s.nowPlaying != null), (_, __) => _recompute());
     _ref.listen<Color?>(audioPlayerControllerProvider.select((s) => s.accentColor), (_, __) => _recompute());
-    // Zavřený přehrávač (stažení mini přehrávače dolů): zapomenout
-    // "naposledy platnou" barvu -- zpět na výchozí barvy, dokud je zas
-    // neurčí hrající skladba nebo otevřená obrazovka.
-    _ref.listen<bool>(audioPlayerControllerProvider.select((s) => s.nowPlaying != null), (had, has) {
-      if (had == true && !has) {
-        state = (accent: null, imageUrl: null);
-        _recompute();
-      }
-    });
   }
 
   final Ref _ref;
 
   void _recompute() {
-    AccentSource next = state;
-    if (_ref.read(trackIsPlayingProvider)) {
-      final playback = _ref.read(audioPlayerControllerProvider);
-      if (playback.accentColor != null) {
-        next = (accent: playback.accentColor, imageUrl: playback.nowPlaying?.artworkUrl);
-      }
+    final playback = _ref.read(audioPlayerControllerProvider);
+    AccentSource next;
+    if (playback.nowPlaying != null) {
+      // 1. Otevřený přehrávač -- barva skladby (dokud se nespočítá, drží se
+      // dosavadní).
+      next = playback.accentColor != null
+          ? (accent: playback.accentColor, imageUrl: playback.nowPlaying!.artworkUrl)
+          : state;
     } else {
+      // 2./3. Bez přehrávače -- otevřená obrazovka, jinak výchozí barvy.
       final screen = _ref.read(activeScreenAccentProvider);
-      if (screen != null) {
-        final images = _ref.read(screenImageStackProvider);
-        next = (accent: screen, imageUrl: images.isEmpty ? null : images.last.value);
-      }
+      final images = _ref.read(screenImageStackProvider);
+      next = screen != null
+          ? (accent: screen, imageUrl: images.isEmpty ? null : images.last.value)
+          : (accent: null, imageUrl: null);
     }
     if (next != state) state = next;
   }
