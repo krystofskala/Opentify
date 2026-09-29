@@ -75,13 +75,22 @@ class RadioSession:
     hls_task: asyncio.Task | None = None
     hls_touched: float = field(default_factory=time.monotonic)  # poslední stažení playlistu/úseku
     hls_done: bool = False
+    # A-B opakování: úsek první skladby se řadí pořád dokola (plynulá smyčka
+    # bez nového streamu při každém opakování).
+    ab_start_ms: float | None = None
+    ab_end_ms: float | None = None
 
 
 _sessions: dict[str, RadioSession] = {}
 
 
 def create_session(
-    user_id: str, device_id: str | None, queue: list[str], position_ms: float, session_id: str | None = None
+    user_id: str,
+    device_id: str | None,
+    queue: list[str],
+    position_ms: float,
+    session_id: str | None = None,
+    ab: tuple[float, float] | None = None,
 ) -> RadioSession:
     """`session_id` volí klient -- stream (`<audio src>`) tak může spustit
     hned v obsluze klepnutí a relaci založit souběžně (iOS pustí zvuk jen
@@ -97,6 +106,8 @@ def create_session(
         queue=list(queue),
         start_offset_ms=max(0.0, position_ms),
     )
+    if ab is not None and ab[1] - ab[0] >= 1000:
+        s.ab_start_ms, s.ab_end_ms = ab
     _sessions[s.id] = s
     s.hls_task = asyncio.get_running_loop().create_task(_run_hls(s))
     return s
@@ -298,10 +309,12 @@ def _probe_ms(path: str) -> float | None:
         return None
 
 
-def _ffmpeg_cmd(path: str, offset_ms: float, gain_db: float | None) -> list[str]:
+def _ffmpeg_cmd(path: str, offset_ms: float, gain_db: float | None, length_ms: float | None = None) -> list[str]:
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
     if offset_ms > 0:
         cmd += ["-ss", f"{offset_ms / 1000:.3f}"]
+    if length_ms is not None:
+        cmd += ["-t", f"{length_ms / 1000:.3f}"]
     cmd += ["-i", path, "-vn", "-sn", "-dn", "-ac", "2", "-ar", "44100"]
     if gain_db:
         cmd += ["-af", f"volume={gain_db:.2f}dB"]
@@ -399,6 +412,9 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
             offset = 0.0
             continue
 
+        looping = pos == 0 and s.ab_start_ms is not None and s.ab_end_ms is not None
+        if looping:
+            offset = s.ab_start_ms or 0.0
         seg = Segment(
             recording_id=rid,
             queue_pos=pos,
@@ -407,8 +423,9 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
             track_ms=await asyncio.to_thread(_probe_ms, path),
         )
         timeline.append(seg)
+        length = (s.ab_end_ms - s.ab_start_ms) if looping and s.ab_end_ms and s.ab_start_ms is not None else None
         proc = await asyncio.create_subprocess_exec(
-            *_ffmpeg_cmd(path, offset, gain), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            *_ffmpeg_cmd(path, offset, gain, length), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
         )
         seg_bytes = 0
         try:
@@ -428,5 +445,7 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
                     pass
             await proc.wait()
         seg.duration_ms = seg_bytes / BYTES_PER_MS
+        if looping and seg_bytes > 0:
+            continue  # A-B: stejný úsek znovu (pos zůstává 0)
         pos += 1
         offset = 0.0

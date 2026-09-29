@@ -94,8 +94,25 @@ class TrackCollectionController extends ChangeNotifier {
 }
 
 const _diacritics = {
-  'á': 'a', 'č': 'c', 'ď': 'd', 'é': 'e', 'ě': 'e', 'í': 'i', 'ň': 'n', 'ó': 'o', 'ř': 'r', 'š': 's',
-  'ť': 't', 'ú': 'u', 'ů': 'u', 'ý': 'y', 'ž': 'z', 'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
+  'á': 'a',
+  'č': 'c',
+  'ď': 'd',
+  'é': 'e',
+  'ě': 'e',
+  'í': 'i',
+  'ň': 'n',
+  'ó': 'o',
+  'ř': 'r',
+  'š': 's',
+  'ť': 't',
+  'ú': 'u',
+  'ů': 'u',
+  'ý': 'y',
+  'ž': 'z',
+  'ä': 'a',
+  'ö': 'o',
+  'ü': 'u',
+  'ß': 'ss',
 };
 
 /// Lowercase bez diakritiky -- "prilis" najde "Příliš".
@@ -152,6 +169,8 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
   ConsumerState<TrackCollectionToolbar> createState() => _TrackCollectionToolbarState();
 }
 
+const _filterMinTracks = 20;
+
 class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar> {
   late final TextEditingController _filter = TextEditingController(text: widget.controller.query);
 
@@ -197,8 +216,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
 
     if (c.selecting) {
       final count = c.selected.length;
-      final allSelected = widget.visibleTracks.isNotEmpty &&
-          widget.visibleTracks.every((r) => c.isSelected(r.id));
+      final allSelected = widget.visibleTracks.isNotEmpty && widget.visibleTracks.every((r) => c.isSelected(r.id));
       return Padding(
         padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xxs),
         // Lišta výběru je plovoucí (akce nad seznamem) -- sklo + stín.
@@ -207,45 +225,45 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
           shadow: true,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
           child: Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          children: [
-            GlassIconButton(
-              icon: Symbols.close_rounded,
-              tooltip: 'Zrušit výběr',
-              style: GlassButtonStyle.plain,
-              onPressed: () => c.setSelecting(false),
-            ),
-            Text('$count vybráno', style: theme.textTheme.titleSmall),
-            GlassButton(
-              label: allSelected ? 'Zrušit vše' : 'Vybrat vše',
-              icon: allSelected ? Symbols.deselect_rounded : Symbols.select_all_rounded,
-              style: GlassButtonStyle.plain,
-              compact: true,
-              onPressed: () => c.selectAll(widget.visibleTracks),
-            ),
-            GlassButton(
-              label: 'Do fronty',
-              icon: Symbols.queue_music_rounded,
-              compact: true,
-              onPressed: count == 0 ? null : _addSelectedToQueue,
-            ),
-            GlassButton(
-              label: 'Do playlistu',
-              icon: Symbols.playlist_add_rounded,
-              compact: true,
-              onPressed: count == 0 ? null : _addSelectedToPlaylist,
-            ),
-            if (widget.onRemoveSelected != null)
-              GlassButton(
-                label: widget.removeLabel,
-                icon: Symbols.delete_rounded,
-                compact: true,
-                destructive: true,
-                onPressed: count == 0 ? null : _removeSelected,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
+            children: [
+              GlassIconButton(
+                icon: Symbols.close_rounded,
+                tooltip: 'Zrušit výběr',
+                style: GlassButtonStyle.plain,
+                onPressed: () => c.setSelecting(false),
               ),
-          ],
+              Text('$count vybráno', style: theme.textTheme.titleSmall),
+              GlassButton(
+                label: allSelected ? 'Zrušit vše' : 'Vybrat vše',
+                icon: allSelected ? Symbols.deselect_rounded : Symbols.select_all_rounded,
+                style: GlassButtonStyle.plain,
+                compact: true,
+                onPressed: () => c.selectAll(widget.visibleTracks),
+              ),
+              GlassButton(
+                label: 'Do fronty',
+                icon: Symbols.queue_music_rounded,
+                compact: true,
+                onPressed: count == 0 ? null : _addSelectedToQueue,
+              ),
+              GlassButton(
+                label: 'Do playlistu',
+                icon: Symbols.playlist_add_rounded,
+                compact: true,
+                onPressed: count == 0 ? null : _addSelectedToPlaylist,
+              ),
+              if (widget.onRemoveSelected != null)
+                GlassButton(
+                  label: widget.removeLabel,
+                  icon: Symbols.delete_rounded,
+                  compact: true,
+                  destructive: true,
+                  onPressed: count == 0 ? null : _removeSelected,
+                ),
+            ],
           ),
         ),
       );
@@ -277,18 +295,23 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
           Row(
             children: [
               // Inline filtr v obsahu -- plochá kapsle, ne sklo (HIG Materials).
-              Expanded(
-                child: GlassSearchField(
-                  controller: _filter,
-                  hintText: 'Filtrovat skladby…',
-                  glass: false,
-                  compact: true,
-                  showCancel: false,
-                  leadingIcon: Symbols.filter_list_rounded,
-                  onChanged: (value) => c.query = value,
-                  onCleared: () => setState(() => c.query = ''),
+              // Jen u delších seznamů (Oblíbené, velké playlisty) -- u alba o
+              // pár skladbách působil jako nefunkční prvek navíc (živě nahlášeno).
+              if (widget.allTracks.length < _filterMinTracks && c.query.isEmpty)
+                const Spacer()
+              else
+                Expanded(
+                  child: GlassSearchField(
+                    controller: _filter,
+                    hintText: 'Filtrovat skladby…',
+                    glass: false,
+                    compact: true,
+                    showCancel: false,
+                    leadingIcon: Symbols.filter_list_rounded,
+                    onChanged: (value) => c.query = value,
+                    onCleared: () => setState(() => c.query = ''),
+                  ),
                 ),
-              ),
               const SizedBox(width: AppSpacing.xs),
               PopupMenuButton<TrackSort>(
                 tooltip: 'Řazení',

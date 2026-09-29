@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 // skrytý, ať nekoliduje s naším (viz níže).
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart' show ImperativeRouteMatch;
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -300,6 +301,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (_priming || _radioActive) return; // délku v rádiu dává časová osa
       state = state.copyWith(duration: duration);
     });
+    _installMediaHandlers();
+    addListener(_syncMediaSession, fireImmediately: false);
+    _ref.listen<AbRepeat?>(abRepeatProvider, _onAbChanged);
+  }
+
+  final MediaSessionBridge _mediaSession = MediaSessionBridge();
+
+  /// Tlačítka zamykací obrazovky. Znovu i po spuštění rádia -- Safari je při
+  /// změně zdroje (živý stream) přepíše na ±10 s.
+  void _installMediaHandlers() {
     _mediaSession.setHandlers(
       onPlay: () => unawaited(_setPlaying(true)),
       onPause: () => unawaited(_setPlaying(false)),
@@ -307,10 +318,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       onPrevious: () => unawaited(previous()),
       onSeek: (position) => unawaited(seek(position)),
     );
-    addListener(_syncMediaSession, fireImmediately: false);
   }
 
-  final MediaSessionBridge _mediaSession = MediaSessionBridge();
   String? _mediaSessionKey;
   bool? _mediaSessionPlaying;
   Duration? _mediaSessionDuration;
@@ -483,9 +492,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _radioStartPosition = position;
     final api = _ref.read(apiClientProvider);
     final ids = [info.recordingId, for (final i in _upcomingOrder()) state.queue[i].recordingId];
-    unawaited(api.putJson('/radio/$sid', body: {'recordingIds': ids, 'positionMs': position.inMilliseconds}).then<void>(
-        (_) {},
-        onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e')));
+    // A-B opakování této skladby -> smyčku plynule vyrábí server.
+    final ab = _ref.read(abRepeatProvider);
+    final abActive = ab != null && ab.recordingId == info.recordingId && ab.b != null;
+    unawaited(api.putJson('/radio/$sid', body: {
+      'recordingIds': ids,
+      'positionMs': position.inMilliseconds,
+      if (abActive) 'abStartMs': ab.a.inMilliseconds,
+      if (abActive) 'abEndMs': ab.b!.inMilliseconds,
+    }).then<void>((_) {}, onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e')));
     _radioPoll?.cancel();
     _radioPoll = Timer.periodic(const Duration(seconds: 2), (_) => unawaited(_pollRadio()));
     // Plynulá pozice: Safari u HLS hlásí `currentTime` jen po kouskách, tečka
@@ -518,7 +533,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (info == null) return;
     final url = _startRadio(info, position);
     state = state.copyWith(position: position);
-    unawaited(_player.setUrl(url).then<void>((_) {}, onError: (Object e) => debugPrint('rádio setUrl: $e')));
+    unawaited(_player
+        .setUrl(url)
+        .then<void>((_) => _installMediaHandlers(), onError: (Object e) => debugPrint('rádio setUrl: $e')));
     unawaited(_player.play().catchError((Object e) => debugPrint('rádio play: $e')));
   }
 
@@ -615,7 +632,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   String? _currentRoute() {
     try {
-      return _ref.read(appRouterProvider).routerDelegate.currentConfiguration.uri.path;
+      // Detail (playlist, album...) se otevírá `push` nad záložkou -- pak je
+      // v konfiguraci jako `ImperativeRouteMatch` a `uri` celé konfigurace
+      // hlásí jen záložku ("/library"); poslechy pak neměly playlist.
+      final config = _ref.read(appRouterProvider).routerDelegate.currentConfiguration;
+      final last = config.isEmpty ? null : config.last;
+      if (last is ImperativeRouteMatch) return last.matches.uri.path;
+      return config.uri.path;
     } catch (_) {
       return null;
     }
@@ -990,9 +1013,22 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       return false;
     }
     final b = ab.b;
-    if (b == null || position < b) return false;
+    // V rádiu smyčku vyrábí server (seek = nový stream při každém opakování
+    // skákal i ve zvuku -- živě nahlášeno).
+    if (_radioActive || b == null || position < b) return false;
     unawaited(seek(ab.a));
     return true;
+  }
+
+  /// Zapnutí/vypnutí A-B v rádiu -> nový stream (se smyčkou / bez ní).
+  void _onAbChanged(AbRepeat? previous, AbRepeat? next) {
+    if (!_radioActive || state.nowPlaying == null) return;
+    final id = state.nowPlaying!.recordingId;
+    if (next != null && next.b != null && next.recordingId == id && previous?.b != next.b) {
+      _restartRadio(next.a);
+    } else if (next == null && previous?.b != null && previous?.recordingId == id) {
+      _restartRadio(state.position);
+    }
   }
 
   static const _earlyAdvanceWindow = Duration(milliseconds: 600);
@@ -1294,6 +1330,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // nevrátí na výchozí hodnoty.
       await _player.setSpeed(state.speed);
       _applyVolume();
+      if (_radioActive) _installMediaHandlers();
       _realtime.playbackPlay(info.recordingId);
       _recordRecentlyPlayed(info);
       _beginScrobble(info.recordingId);

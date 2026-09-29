@@ -19,6 +19,9 @@ _ID = re.compile(r"^[a-f0-9]{16,64}$")
 class CreateBody(BaseModel):
     recordingIds: list[str]
     positionMs: float = 0
+    # A-B opakování první skladby (ms) -- server úsek řadí pořád dokola.
+    abStartMs: float | None = None
+    abEndMs: float | None = None
 
 
 class QueueBody(BaseModel):
@@ -37,7 +40,8 @@ async def create(session_id: str, body: CreateBody, current: tuple[str, str] = D
     if not body.recordingIds:
         raise HTTPException(status_code=400, detail="prázdná fronta")
     user_id, device_id = current
-    radio.create_session(user_id, device_id, body.recordingIds, body.positionMs, session_id=session_id)
+    ab = (body.abStartMs, body.abEndMs) if body.abStartMs is not None and body.abEndMs is not None else None
+    radio.create_session(user_id, device_id, body.recordingIds, body.positionMs, session_id=session_id, ab=ab)
     return {"sessionId": session_id}
 
 

@@ -39,6 +39,14 @@ class _WebMediaSession implements MediaSessionBridge {
       final seconds = d.seekTime;
       onSeek(Duration(milliseconds: (seconds * 1000).round()));
     });
+    // U živého streamu (rádio, HLS) nabízel iOS na zamykací obrazovce ±10 s
+    // místo další/předchozí skladby (živě nahlášeno) -- akce posunu výslovně
+    // zrušit, ať zbydou jen předchozí/další.
+    for (final name in ['seekbackward', 'seekforward']) {
+      try {
+        _session?.setActionHandler(name, null);
+      } catch (_) {}
+    }
   }
 
   @override
