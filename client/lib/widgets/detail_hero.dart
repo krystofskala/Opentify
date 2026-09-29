@@ -179,6 +179,17 @@ class DetailHeroAppBar extends StatelessWidget {
   static double _wideCoverSize(double width) => width >= 1200 ? 260 : 220;
   static const double _wideBoxPadding = 24;
 
+  /// Bez fotky/obalu -- hlavička je jen náš symbol (Oblíbené, Poslechnout
+  /// později...). Na telefonu se pak kreslí jen ikona bez barevné plochy a
+  /// přes celou výšku prosvítá živé pozadí appky.
+  bool get _iconOnly =>
+      artwork == null &&
+      artworkBackdrop == null &&
+      bannerImageUrl == null &&
+      imageUrl == null &&
+      mosaicUrls.isEmpty &&
+      bannerFallbackUrl == null;
+
   /// Malý obrázek do sbalené lišty.
   String? get _barThumb =>
       thumbnailUrl ?? imageUrl ?? (mosaicUrls.isNotEmpty ? mosaicUrls.first : null) ?? bannerFallbackUrl;
@@ -289,6 +300,7 @@ class _HeroFlexible extends StatelessWidget {
     // pozadím a malým názvem se objeví až u horního okraje.
     final titleT = (1 - collapse / 0.55).clamp(0.0, 1.0);
     final barT = ((collapse - 0.72) / 0.28).clamp(0.0, 1.0);
+    final iconOnly = hero._iconOnly && !wide;
 
     return ClipRect(
       child: Stack(
@@ -317,33 +329,34 @@ class _HeroFlexible extends StatelessWidget {
                       left: 0,
                       right: 0,
                       height: imageHeight,
-                      child: _FadedMedia(hero: hero, darken: collapse * 0.45),
+                      child: _FadedMedia(hero: hero, darken: iconOnly ? 0 : collapse * 0.45),
                     ),
                   ],
                 ),
               ),
             ),
           // Ztmavení pod status barem a kroužky -- čitelnost na světlých fotkách.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: top + kToolbarHeight + 24,
-            child: const IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x66000000), Color(0x00000000)],
+          if (!iconOnly)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: top + kToolbarHeight + 24,
+              child: const IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x66000000), Color(0x00000000)],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
           // Závoj pod informačním blokem v barvě plochy -- text `onSurface`
           // je čitelný nad jakoukoliv fotkou, v tmavém i světlém režimu.
-          if (titleT > 0 && !wide)
+          if (titleT > 0 && !wide && !iconOnly)
             Positioned(
               left: 0,
               right: 0,
@@ -491,7 +504,7 @@ class _FadedMedia extends StatelessWidget {
           url: single, alignment: const Alignment(0, -0.4), accent: hero.accent, icon: hero.placeholderIcon);
     }
     if (hero.bannerFallbackUrl != null) return _Blurred(url: hero.bannerFallbackUrl!, accent: hero.accent);
-    return _GradientArt(icon: hero.placeholderIcon, accent: hero.accent);
+    return _GradientArt(icon: hero.placeholderIcon, accent: hero.accent, bare: true);
   }
 }
 
@@ -705,13 +718,28 @@ class _Mosaic extends StatelessWidget {
 /// Bez obrázku (Oblíbené, prázdný playlist): tónovaný gradient s velkou
 /// ikonou -- navržená plocha, ne šedý placeholder.
 class _GradientArt extends StatelessWidget {
-  const _GradientArt({required this.icon, required this.accent});
+  const _GradientArt({required this.icon, required this.accent, this.bare = false});
 
   final IconData icon;
   final Color? accent;
 
+  /// Jen ikona, bez barevné plochy (hlavička bez obrázku na telefonu).
+  final bool bare;
+
   @override
   Widget build(BuildContext context) {
+    if (bare) {
+      return Align(
+        alignment: const Alignment(0.55, -0.15),
+        child: Icon(
+          icon,
+          size: 132,
+          fill: 1,
+          color: Colors.white.withValues(alpha: 0.92),
+          shadows: [Shadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 32, offset: const Offset(0, 10))],
+        ),
+      );
+    }
     final scheme = Theme.of(context).colorScheme;
     final base = accent ?? scheme.primary;
     final hsl = HSLColor.fromColor(base);

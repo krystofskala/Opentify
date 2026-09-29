@@ -390,6 +390,16 @@ class _FallbackPainter extends CustomPainter {
   static int _cachedFrame = -1;
   static Size? _cachedSize;
 
+  // Síť vzniká 30× za sekundu. Neuvolněné `Vertices` žijí ve WASM paměti
+  // CanvasKitu, dokud je nesebere GC -- Safari to dělá velmi líně, paměť za
+  // desítky minut přehrávání nabobtnala a iOS pak appku při navigaci
+  // (načítání obalů) zmrazil (živě nahlášeno: "zamrzne, musím restartovat").
+  // Uvolňují se ručně, se zpožděním pár snímků, ať je nepoužívá rozpracovaný
+  // snímek.
+  static final List<ui.Vertices> _retired = [];
+  static ui.Gradient? _vignette;
+  static Size? _vignetteSize;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
@@ -401,6 +411,10 @@ class _FallbackPainter extends CustomPainter {
     // síť se počítá jen jednou za snímek.
     final frame = state._frame.value;
     if (_cachedFrame != frame || _cachedSize != size || _cachedVertices == null) {
+      if (_cachedVertices case final old?) _retired.add(old);
+      while (_retired.length > 3) {
+        _retired.removeAt(0).dispose();
+      }
       _cachedVertices = _mesh.build(
         size,
         palette,
@@ -418,16 +432,17 @@ class _FallbackPainter extends CustomPainter {
     if (dark) {
       // Jen jemné ztmavení okrajů kvůli hloubce -- dřívější silná vinětka
       // dělala z okrajů tu "tmavou podlahu".
-      canvas.drawRect(
-        Offset.zero & size,
-        Paint()
-          ..shader = ui.Gradient.radial(
-            size.center(Offset.zero),
-            size.longestSide * 0.8,
-            [Colors.transparent, Colors.black.withValues(alpha: 0.14)],
-            const [0.55, 1],
-          ),
-      );
+      // Jeden gradient na velikost okna, ne nový každý snímek (viz `_retired`).
+      if (_vignette == null || _vignetteSize != size) {
+        _vignetteSize = size;
+        _vignette = ui.Gradient.radial(
+          size.center(Offset.zero),
+          size.longestSide * 0.8,
+          [Colors.transparent, Colors.black.withValues(alpha: 0.14)],
+          const [0.55, 1],
+        );
+      }
+      canvas.drawRect(Offset.zero & size, Paint()..shader = _vignette);
     }
 
     final grain = grainFor(size, state._pixelRatio, dark);
@@ -585,8 +600,12 @@ class _FlowMesh {
     final deepWeight = dark ? 0.95 : 0.6;
     if (_size != size) _layout(size);
     final short = size.shortestSide;
-    final ax = size.width / short * 1.5;
-    final ay = size.height / short * 1.5;
+    // Na telefonu hustší pole: se stejným měřítkem jako desktop zabrala
+    // jedna barevná skvrna skoro celou šířku a prolínání bylo málo vidět
+    // (živě nahlášeno). Desktop (kratší strana ≥ 600) beze změny.
+    final density = 1.5 * (600 / short).clamp(1.0, 1.45);
+    final ax = size.width / short * density;
+    final ay = size.height / short * density;
     final vx = _cols + 1;
 
     for (var j = 0; j <= _rows; j++) {

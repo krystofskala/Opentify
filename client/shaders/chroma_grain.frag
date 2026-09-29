@@ -57,8 +57,9 @@ float fbm(vec2 p) {
 
 // Lissajousova dráha jednoho barevného bodu; frekvence jsou celé násobky
 // W0, takže je celý pohyb periodický a Dart může fázi bezešvě zabalit.
-vec2 lissa(float t, float fx, float fy, float ph, float aspect) {
-    return vec2(0.46 * aspect * sin(W0 * fx * t + ph), 0.40 * cos(W0 * fy * t + ph * 1.7));
+// `ext` = polovina plochy v souřadnicích `p` -- dráhy pokryjí celou plochu.
+vec2 lissa(float t, float fx, float fy, float ph, vec2 ext) {
+    return vec2(0.92 * ext.x * sin(W0 * fx * t + ph), 0.80 * ext.y * cos(W0 * fy * t + ph * 1.7));
 }
 
 vec3 glow(vec3 col, vec3 c, vec2 p, vec2 center, float radius, float strength) {
@@ -67,13 +68,13 @@ vec3 glow(vec3 col, vec3 c, vec2 p, vec2 center, float radius, float strength) {
     return mix(col, c, clamp(w * strength, 0.0, 1.0));
 }
 
-vec3 scene(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4, vec3 c5, vec2 pw, float t, float aspect, float band) {
+vec3 scene(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4, vec3 c5, vec2 pw, float t, vec2 ext, float band) {
     vec3 col = c0;
-    col = glow(col, c1, pw, lissa(t, 10.0, 7.0, 0.0, aspect), 0.62, 0.95);
-    col = glow(col, c2, pw, lissa(t, 6.0, 11.0, 2.1, aspect), 0.48, 0.90);
-    col = glow(col, c3, pw, lissa(t, 13.0, 9.0, 4.2, aspect), 0.40, 0.85);
-    col = glow(col, c5, pw, lissa(t, 8.0, 14.0, 1.3, aspect), 0.34, 0.80);
-    col = glow(col, c4, pw, lissa(t, 11.0, 6.0, 5.4, aspect), 0.22 + 0.06 * uBloom, 0.55 + 0.35 * uBloom);
+    col = glow(col, c1, pw, lissa(t, 10.0, 7.0, 0.0, ext), 0.62, 0.95);
+    col = glow(col, c2, pw, lissa(t, 6.0, 11.0, 2.1, ext), 0.48, 0.90);
+    col = glow(col, c3, pw, lissa(t, 13.0, 9.0, 4.2, ext), 0.40, 0.85);
+    col = glow(col, c5, pw, lissa(t, 8.0, 14.0, 1.3, ext), 0.34, 0.80);
+    col = glow(col, c4, pw, lissa(t, 11.0, 6.0, 5.4, ext), 0.22 + 0.06 * uBloom, 0.55 + 0.35 * uBloom);
     return mix(col, c4, band * band * 0.24);
 }
 
@@ -81,7 +82,15 @@ void main() {
     vec2 frag = FlutterFragCoord().xy;
     vec2 uv = frag / uSize;
     float aspect = uSize.x / uSize.y;
-    vec2 p = vec2((uv.x - 0.5) * aspect, uv.y - 0.5);
+    // Měřítko skvrn: geometrický průměr stran, nejvýš výška. Na desktopu
+    // (na šířku) beze změny; na vysokém úzkém telefonu dřív jedna skvrna
+    // zabrala celou šířku a barvy se slily do jedné -- teď se jich vejde
+    // ~1.7x víc (živě nahlášeno: "na mobilu je prolínání málo vidět").
+    float norm = min(uSize.y, sqrt(uSize.x * uSize.y) * 0.85);
+    vec2 ext = 0.5 * uSize / norm;
+    vec2 p = (frag - 0.5 * uSize) / norm;
+    // Původní souřadnice (výška = 1) pro vinětaci a přebarvovací ostrůvky.
+    vec2 p0 = vec2((uv.x - 0.5) * aspect, uv.y - 0.5);
     float t = uTime;
 
     // Tekuté pokřivení prostoru (2 fbm = 4 vyhodnocení šumu).
@@ -97,21 +106,21 @@ void main() {
 
     // Vrstvené měkké záře -- velké "bokeh" skvrny i roztažené tekuté tvary
     // -- pro novou i předchozí paletu (tvary stejné, jen barvy).
-    vec3 col = scene(uC0, uC1, uC2, uC3, uC4, uC5, pw, t, aspect, band);
+    vec3 col = scene(uC0, uC1, uC2, uC3, uC4, uC5, pw, t, ext, band);
 
     // Změna palety: každé zrnko se přebarví ve vlastní chvíli (náhodný práh
     // zrnka + měkké ostrůvky), takže to vypadá, že zrno postupně mění barvu
     // -- ne jako prolnutí celé plochy najednou.
     vec2 cell = floor(frag * uPixelRatio / 1.6);
     if (uMix < 0.999) {
-        vec3 prev = scene(uP0, uP1, uP2, uP3, uP4, uP5, pw, t, aspect, band);
-        float th = 0.55 * hash(mod(cell, 283.0) + 11.0) + 0.45 * noise(p * 2.2 + 3.0);
+        vec3 prev = scene(uP0, uP1, uP2, uP3, uP4, uP5, pw, t, ext, band);
+        float th = 0.55 * hash(mod(cell, 283.0) + 11.0) + 0.45 * noise(p0 * 2.2 + 3.0);
         float m = smoothstep(th - 0.08, th + 0.08, uMix * 1.16 - 0.08);
         col = mix(prev, col, m);
     }
 
     // Tmavý režim: jemná vinětace pro hloubku; světlý bez ní.
-    float vig = smoothstep(0.35, 1.05, length(p * vec2(0.8, 1.0)));
+    float vig = smoothstep(0.35, 1.05, length(p0 * vec2(0.8, 1.0)));
     col *= mix(1.0, mix(1.0, 0.78, vig), uDark);
     col += uBloom * 0.04;
 
