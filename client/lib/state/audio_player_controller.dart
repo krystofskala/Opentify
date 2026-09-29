@@ -680,8 +680,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       }
     }
     if (seg == null) {
-      // Časová osa ještě nedorazila -- ukaž, odkud se začalo.
-      state = state.copyWith(position: (_radioStartPosition ?? Duration.zero) + streamPosition);
+      // Skladba ve streamu ještě nezačala (časová osa nedorazila, nebo server
+      // posílá ticho, dokud se skladba stahuje) -- pozice zůstává, odkud se
+      // začalo. Dřív se k ní přičítal čas streamu: ticho při stahování se
+      // počítalo jako přehraná skladba a navázání streamu (pauza, výpadek)
+      // ji pak pustilo od té pozice -- chyběl začátek (živě nahlášeno).
+      state = state.copyWith(position: _radioStartPosition ?? Duration.zero);
       return;
     }
     final switching = state.nowPlaying?.recordingId != seg.recordingId;
