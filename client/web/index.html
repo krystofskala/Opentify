@@ -7,7 +7,7 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="Vlastní hudební knihovna a streaming.">
-  <meta name="theme-color" content="#120a1f">
+  <meta name="theme-color" content="#0b0c0f">
 
   <!-- iOS: po "Přidat na plochu" běží přes celou obrazovku jako appka -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -31,7 +31,7 @@
     html, body {
       margin: 0;
       height: 100%;
-      background: #120a1f;
+      background: #0b0c0f;
       overflow: hidden;
     }
     /* Flutter kreslí přes celou obrazovku (i pod hodiny a home indikátor),
@@ -41,28 +41,19 @@
       position: fixed;
       inset: 0;
     }
+    /* Úvodní animace: z téměř černé se s přibývajícím zrnem postupně
+       "vyzrní" gradient -- stejné barvy jako pozadí appky na startu, takže
+       se po prvním snímku Flutteru plynule prolne. */
     #splash {
       position: fixed;
       inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: opacity 300ms ease;
+      transition: opacity 600ms ease;
       pointer-events: none;
     }
-    #splash img {
-      width: 96px;
-      height: 96px;
-      border-radius: 22px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-      animation: pulse 1.6s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); opacity: 0.9; }
-      50% { transform: scale(1.06); opacity: 1; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      #splash img { animation: none; }
+    #splash canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
   </style>
 </head>
@@ -92,14 +83,115 @@
       window.addEventListener('orientationchange', function () { setTimeout(fit, 250); });
     })();
   </script>
-  <div id="splash"><img src="icons/Icon-192.png" alt=""></div>
+  <div id="splash"><canvas></canvas></div>
   <script>
-    window.addEventListener('flutter-first-frame', function () {
+    // Úvodní animace: z téměř černé se s přibývajícím zrnem postupně objeví
+    // gradient -- barvy = výchozí paleta pozadí appky (widgets/app_background
+    // _startDark včetně _soften), takže přechod na Flutter je plynulý.
+    (function () {
       var splash = document.getElementById('splash');
-      if (!splash) return;
-      splash.style.opacity = '0';
-      setTimeout(function () { splash.remove(); }, 350);
-    });
+      var canvas = splash.querySelector('canvas');
+      var ctx = canvas.getContext('2d');
+      // Zrno aspoň 2×2 CSS px (na telefonu je vidět); na velké obrazovce
+      // hrubší, ať výpočet nikdy nepřesáhne ~120k pixelů na snímek (jinak
+      // blokuje stránku a zpomalí start samotné appky).
+      var SCALE = Math.max(2, Math.ceil(Math.sqrt(window.innerWidth * window.innerHeight / 120000)));
+      // Předpočítaná tabulka náhodných čísel -- Math.random per pixel je drahý.
+      var RN = new Float32Array(1 << 16);
+      for (var ri = 0; ri < RN.length; ri++) RN[ri] = Math.random();
+      var rOff = 0;
+      var base = [11, 12, 15];
+      var raw = ['#2A1060', '#7B2CFF', '#E0359A', '#12B5CB', '#FF8A3D', '#2BD67B'];
+
+      function hexToHsl(hex) {
+        var r = parseInt(hex.substr(1, 2), 16) / 255, g = parseInt(hex.substr(3, 2), 16) / 255, b = parseInt(hex.substr(5, 2), 16) / 255;
+        var max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, h = 0, s = 0;
+        if (max !== min) {
+          var d = max - min;
+          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+          h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+          h /= 6;
+        }
+        return [h, s, l];
+      }
+      function hslToRgb(h, s, l) {
+        function f(p, q, t) { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; }
+        if (s === 0) return [l * 255, l * 255, l * 255];
+        var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+        return [f(p, q, h + 1 / 3) * 255, f(p, q, h) * 255, f(p, q, h - 1 / 3) * 255];
+      }
+      var hsl = raw.map(hexToHsl);
+      var meanL = hsl.reduce(function (a, c) { return a + c[2]; }, 0) / hsl.length;
+      var palette = hsl.map(function (c) { return hslToRgb(c[0], c[1] * 0.8, meanL + (c[2] - meanL) * 0.78); });
+      // Plochy barev: [x, y, poloměr] v podílech obrazovky.
+      var blobs = [[0.15, 0.2, 0.7], [0.85, 0.15, 0.6], [0.2, 0.75, 0.65], [0.8, 0.8, 0.6], [0.5, 0.45, 0.5], [0.9, 0.5, 0.45]];
+      var order = [1, 2, 3, 4, 5, 0];
+
+      var w, h, grad, img;
+      function build() {
+        w = Math.ceil(window.innerWidth / SCALE);
+        h = Math.ceil(window.innerHeight / SCALE);
+        canvas.width = w;
+        canvas.height = h;
+        var off = document.createElement('canvas');
+        off.width = w; off.height = h;
+        var o = off.getContext('2d');
+        o.fillStyle = 'rgb(' + palette[0].map(Math.round).join(',') + ')';
+        o.fillRect(0, 0, w, h);
+        blobs.forEach(function (bl, i) {
+          var c = palette[order[i]].map(Math.round).join(',');
+          var r = bl[2] * Math.max(w, h);
+          var g = o.createRadialGradient(bl[0] * w, bl[1] * h, 0, bl[0] * w, bl[1] * h, r);
+          g.addColorStop(0, 'rgba(' + c + ',0.9)');
+          g.addColorStop(1, 'rgba(' + c + ',0)');
+          o.fillStyle = g;
+          o.fillRect(0, 0, w, h);
+        });
+        grad = o.getImageData(0, 0, w, h).data;
+        img = ctx.createImageData(w, h);
+      }
+      build();
+
+      var start = performance.now();
+      var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var running = true;
+      var last = 0;
+      function frame(now) {
+        if (!running) return;
+        requestAnimationFrame(frame);
+        if (now - last < 33) return; // ~30 fps stačí, šetří CPU pro start appky
+        last = now;
+        var t = reduced ? 1 : Math.min(1, (now - start) / 1600);
+        var reveal = t * t * (3 - 2 * t); // smoothstep
+        var grain = 10 + 38 * reveal; // zrna přibývá s gradientem
+        var d = img.data;
+        var mask = RN.length - 1;
+        rOff = (rOff + 7919) & mask;
+        var k = rOff;
+        for (var i = 0; i < d.length; i += 4) {
+          var a = RN[k]; k = (k + 1) & mask;
+          var b = RN[k]; k = (k + 3) & mask;
+          var shown = a < reveal ? 1 : b * reveal * 0.6;
+          var n = (RN[(k * 13) & mask] - 0.5) * grain;
+          d[i] = base[0] + (grad[i] - base[0]) * shown + n;
+          d[i + 1] = base[1] + (grad[i + 1] - base[1]) * shown + n;
+          d[i + 2] = base[2] + (grad[i + 2] - base[2]) * shown + n;
+          d[i + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+      }
+      requestAnimationFrame(frame);
+      window.addEventListener('resize', build);
+
+      window.addEventListener('flutter-first-frame', function () {
+        // Nech animaci aspoň doběhnout, pak prolnout do appky.
+        var wait = Math.max(0, 1200 - (performance.now() - start));
+        setTimeout(function () {
+          splash.style.opacity = '0';
+          setTimeout(function () { running = false; splash.remove(); }, 650);
+        }, wait);
+      });
+    })();
   </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
