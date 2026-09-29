@@ -29,6 +29,26 @@ class MixArtSpec {
   final Color? color;
   final List<String> photos;
 
+  static const _dailyHues = [268.0, 12.0, 196.0, 142.0, 330.0, 38.0];
+
+  /// Hlavní odstín obalu (ze stejného zdroje kreslí [MixArtwork]).
+  double get hue {
+    if (color case final c?) return HSLColor.fromColor(c).hue;
+    switch (style) {
+      case MixArtStyle.daily:
+        final n = int.tryParse(headline) ?? 1;
+        return _dailyHues[(n - 1) % _dailyHues.length];
+      case MixArtStyle.year:
+        final y = int.tryParse(headline) ?? 0;
+        return (y * 47 + 20) % 360;
+      default:
+        return (_seedOf(seed) % 360).toDouble();
+    }
+  }
+
+  /// Barva stránky/pozadí odpovídající obalu (ne fotce první skladby).
+  Color get accent => HSLColor.fromAHSL(1, hue, 0.6, 0.5).toColor();
+
   /// Popisek nahoře místo výchozího ("DENNÍ MIX", "TOP SKLADBY"...).
   final String? eyebrow;
 }
@@ -132,24 +152,10 @@ class MixArtwork extends StatelessWidget {
   /// Malá dlaždice (Rychlý výběr, 56 px) -- bez popisků a fotek.
   final bool compact;
 
-  /// alse = jen kresba bez nápisů (pozadí hlavičky, kde je název zvlášť).
+  /// `false` = jen kresba bez nápisů (pozadí hlavičky, kde je název zvlášť).
   final bool labels;
 
-  static const _dailyHues = [268.0, 12.0, 196.0, 142.0, 330.0, 38.0];
-
-  double get _hue {
-    if (spec.color case final c?) return HSLColor.fromColor(c).hue;
-    switch (spec.style) {
-      case MixArtStyle.daily:
-        final n = int.tryParse(spec.headline) ?? 1;
-        return _dailyHues[(n - 1) % _dailyHues.length];
-      case MixArtStyle.year:
-        final y = int.tryParse(spec.headline) ?? 0;
-        return (y * 47 + 20) % 360;
-      default:
-        return (_seedOf(spec.seed) % 360).toDouble();
-    }
-  }
+  double get _hue => spec.hue;
 
   @override
   Widget build(BuildContext context) {

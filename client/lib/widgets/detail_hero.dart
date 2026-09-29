@@ -16,9 +16,14 @@ import 'net_image.dart';
 /// `screenAccentStackProvider` (globální seed + gradient pozadí) po dobu, co
 /// je obrazovka otevřená. Sdílené pro Album/Interpret/Playlist.
 class ScreenAccent extends ConsumerStatefulWidget {
-  const ScreenAccent({super.key, required this.imageUrl, required this.builder});
+  const ScreenAccent({super.key, required this.imageUrl, required this.builder, this.color});
 
   final String? imageUrl;
+
+  /// Pevná barva obrazovky místo barvy z obrázku (generativní obal
+  /// vlastního mixu -- barva stránky má odpovídat obalu, ne fotce první
+  /// skladby).
+  final Color? color;
   final Widget Function(BuildContext context, Color? accent) builder;
 
   @override
@@ -54,17 +59,23 @@ class _ScreenAccentState extends ConsumerState<ScreenAccent> {
 
   @override
   Widget build(BuildContext context) {
-    final url = widget.imageUrl;
-    final accent =
-        url == null ? null : (ref.watch(screenAccentColorProvider(url)).valueOrNull ?? cachedAccentColor(url));
+    final fixed = widget.color;
+    final url = fixed != null ? null : widget.imageUrl;
+    final accent = fixed ??
+        (url == null ? null : (ref.watch(screenAccentColorProvider(url)).valueOrNull ?? cachedAccentColor(url)));
     // Zapisuje se, až když je barva známá -- do té doby zůstává platná
     // barva předchozí obrazovky (žádné probliknutí přes výchozí fialovou).
     if (accent != null) {
       Future.microtask(() {
         if (!mounted) return;
         // Obrázek dřív než barva -- `EffectiveAccent` pak přečte dvojici
-        // barva + obrázek stejné obrazovky (doplňkové tóny obalu).
-        _images.set(_owner, url!);
+        // barva + obrázek stejné obrazovky (doplňkové tóny obalu). Pevná
+        // barva obrázek nemá -- doplňkové tóny se dopočítají z barvy.
+        if (url != null) {
+          _images.set(_owner, url);
+        } else {
+          _images.remove(_owner);
+        }
         _stack.set(_owner, accent);
       });
     }

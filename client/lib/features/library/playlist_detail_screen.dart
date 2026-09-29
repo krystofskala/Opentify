@@ -82,8 +82,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             ? null
             : ref.watch(recordingArtworkProvider((releaseId: first.releaseId, artistId: first.artistId))).valueOrNull;
 
+    final mixSpec = _mixSpec(detail);
     return ScreenAccent(
       imageUrl: cover,
+      // Vlastní mix: barva stránky podle generativního obalu, ne fotky
+      // první skladby.
+      color: mixSpec?.accent,
       builder: (context, accent) => Scaffold(
         bottomNavigationBar: const PlayerBar(),
         body: CustomScrollView(
@@ -110,8 +114,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               mosaicUrls: detail.coverUrls,
               // Vlastní mixy (roky, Denní mixy, mixy kategorií): stejný
               // generativní obal jako na kartě na Domů, ne fotka interpreta.
-              artwork: _mixArtwork(detail),
-              artworkBackdrop: _mixArtwork(detail, labels: false),
+              artwork: mixSpec == null ? null : MixArtwork(spec: mixSpec),
+              artworkBackdrop: mixSpec == null ? null : MixArtwork(spec: mixSpec, labels: false),
               actions: [
                 if (readOnly)
                   HeroAction(
@@ -258,7 +262,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     }
   }
 
-  Widget? _mixArtwork(PlaylistDetailModel detail, {bool labels = true}) {
+  MixArtSpec? _mixSpec(PlaylistDetailModel detail) {
     final source = detail.source ?? '';
     String? group;
     Color? color;
@@ -268,14 +272,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       group = category?.group;
       color = category?.color;
     }
-    final spec = mixArtForSource(
+    return mixArtForSource(
       source: detail.source,
       title: detail.title,
       photos: detail.coverUrls,
       color: color,
       categoryGroup: group,
     );
-    return spec == null ? null : MixArtwork(spec: spec, labels: labels);
   }
 
   /// Štítek nad názvem -- u vlastních mixů podle zdroje (roční top skladby
