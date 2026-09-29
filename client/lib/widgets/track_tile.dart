@@ -587,7 +587,13 @@ class _Trailing extends StatelessWidget {
       return SizedBox(
         width: 24,
         height: 24,
-        child: CircularProgressIndicator(strokeWidth: 2, value: pct == null ? null : pct! / 100),
+        // Podklad + při 0 % točení -- dřív byl kroužek na 0 % neviditelný a
+        // řádek vypadal, jako by u něj žádné tlačítko nebylo.
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          value: pct == null || pct == 0 ? null : pct! / 100,
+          backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
+        ),
       );
     }
     if (isAvailable) {

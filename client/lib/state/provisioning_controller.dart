@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/realtime_event.dart';
@@ -70,6 +72,49 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
       realtimeEventsProvider,
       (previous, next) => next.whenData(_handleEvent),
     );
+    _watchdog = Timer.periodic(const Duration(seconds: 5), (_) => _checkStalled());
+  }
+
+  // Pojistka proti propásnuté WS zprávě (iOS spojení na pozadí přeruší):
+  // skladba pak navždy "stahovala" na 0 % a u řádku nebylo nic, pomohl až
+  // restart appky (živě nahlášeno). Když se stav stahované skladby přes
+  // `_stallAfter` nezměnil, zeptat se serveru přes REST (provision je
+  // idempotentní -- existující job jen vrátí, hotovou skladbu vrátí jako
+  // AVAILABLE). Max `_maxRechecks` pokusů na skladbu.
+  static const _stallAfter = Duration(seconds: 10);
+  static const _maxRechecks = 6;
+  late final Timer _watchdog;
+  final Map<String, DateTime> _lastChange = {};
+  final Map<String, int> _rechecks = {};
+  final Set<String> _checking = {};
+
+  Future<void> _checkStalled() async {
+    final now = DateTime.now();
+    for (final entry in state.entries) {
+      final id = entry.key;
+      if (!entry.value.isInFlight || entry.value.status == 'STREAMING' || _checking.contains(id)) continue;
+      final last = _lastChange[id];
+      if (last == null || now.difference(last) < _stallAfter) continue;
+      final count = _rechecks[id] ?? 0;
+      if (count >= _maxRechecks) continue;
+      _rechecks[id] = count + 1;
+      _checking.add(id);
+      try {
+        final result = await _repo.provision(id);
+        if (result.job != null) _jobIdToRecordingId[result.job!.id] = id;
+        final job = result.job;
+        final status = result.streamUrl != null ? 'AVAILABLE' : (job?.status ?? result.status);
+        final current = state[id];
+        // Změnilo se něco mezitím přes WS? Pak nepřepisovat.
+        if (current != null && current.isInFlight) {
+          _update(id, (s) => s.copyWith(status: status, streamUrl: result.streamUrl));
+        }
+      } catch (_) {
+        // Síť -- zkusí se příště.
+      } finally {
+        _checking.remove(id);
+      }
+    }
   }
 
   final ProvisioningRepository _repo;
@@ -180,11 +225,17 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
 
   void _update(String recordingId, TrackProvisioningState Function(TrackProvisioningState) transform) {
     final current = state[recordingId] ?? const TrackProvisioningState.idle();
-    state = {...state, recordingId: transform(current)};
+    final next = transform(current);
+    if (next.status != current.status || next.pct != current.pct) {
+      _lastChange[recordingId] = DateTime.now();
+    }
+    if (!next.isInFlight) _rechecks.remove(recordingId);
+    state = {...state, recordingId: next};
   }
 
   @override
   void dispose() {
+    _watchdog.cancel();
     _subscription.close();
     super.dispose();
   }
