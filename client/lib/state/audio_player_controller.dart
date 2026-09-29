@@ -438,6 +438,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   DateTime _radioLastRestart = DateTime.fromMillisecondsSinceEpoch(0);
 
   bool get _radioActive => _radioSession != null;
+  final bool _nativeHls = supportsNativeHls();
 
   /// Pořadí dalších skladeb po té aktuální (indexy do fronty) -- stejná
   /// logika jako `nextIndex`, jen dopředu celá (shuffle, opakování).
@@ -482,7 +483,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e')));
     _radioPoll?.cancel();
     _radioPoll = Timer.periodic(const Duration(seconds: 2), (_) => unawaited(_pollRadio()));
-    return '${api.baseUrl}/radio/$sid/stream';
+    // Safari: HLS (stahuje ho systémový přehrávač i na pozadí); jinde MP3.
+    return _nativeHls ? '${api.baseUrl}/radio/$sid/index.m3u8' : '${api.baseUrl}/radio/$sid/stream';
   }
 
   void _stopRadio() {

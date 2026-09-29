@@ -1,5 +1,14 @@
 import 'package:web/web.dart' as web;
 
+bool supportsNativeHls() {
+  try {
+    final audio = web.HTMLAudioElement();
+    return audio.canPlayType('application/vnd.apple.mpegurl').isNotEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
 bool shouldUseRadioStream() {
   try {
     final href = web.window.location.href;

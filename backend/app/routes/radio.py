@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from app import radio
@@ -31,7 +31,7 @@ def _check_id(session_id: str) -> None:
 
 
 @radio_router.put("/{session_id}")
-def create(session_id: str, body: CreateBody, current: tuple[str, str] = Depends(get_current_user)):
+async def create(session_id: str, body: CreateBody, current: tuple[str, str] = Depends(get_current_user)):
     """Založí (nebo nahradí) relaci s id od klienta."""
     _check_id(session_id)
     if not body.recordingIds:
@@ -80,6 +80,38 @@ def timeline(session_id: str, playedMs: float | None = None):
             for seg in s.timeline
         ]
     }
+
+
+@radio_router.get("/{session_id}/index.m3u8")
+async def hls_playlist(session_id: str):
+    """HLS playlist pro iOS (viz app/radio.py -- AVPlayer stahuje i na pozadí)."""
+    _check_id(session_id)
+    s = await radio.wait_for_session(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="relace neexistuje")
+    text = await radio.hls_playlist(s)
+    if text is None:
+        raise HTTPException(status_code=503, detail="stream se ještě připravuje")
+    return Response(
+        content=text,
+        media_type="application/vnd.apple.mpegurl",
+        headers={"Cache-Control": "no-cache, no-store"},
+    )
+
+
+_SEGMENT = re.compile(r"^seg\d{5}\.ts$")
+
+
+@radio_router.get("/{session_id}/{name}")
+def hls_segment(session_id: str, name: str):
+    _check_id(session_id)
+    if not _SEGMENT.match(name):
+        raise HTTPException(status_code=404, detail="neznámý soubor")
+    s = radio.get_session(session_id)
+    path = radio.hls_segment_path(s, name) if s is not None else None
+    if path is None:
+        raise HTTPException(status_code=404, detail="úsek neexistuje")
+    return FileResponse(path, media_type="video/mp2t", headers={"Cache-Control": "public, max-age=3600"})
 
 
 @radio_router.put("/{session_id}/queue")

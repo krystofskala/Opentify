@@ -25,9 +25,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlmodel import Session
 
@@ -69,6 +72,9 @@ class RadioSession:
     connection: int = 0  # počítadlo spojení
     owner: int = 0  # spojení, které vlastní časovou osu
     touched: float = field(default_factory=time.monotonic)
+    hls_task: asyncio.Task | None = None
+    hls_touched: float = field(default_factory=time.monotonic)  # poslední stažení playlistu/úseku
+    hls_done: bool = False
 
 
 _sessions: dict[str, RadioSession] = {}
@@ -81,6 +87,9 @@ def create_session(
     hned v obsluze klepnutí a relaci založit souběžně (iOS pustí zvuk jen
     přímo po klepnutí, ne až po síťovém dotazu)."""
     _gc()
+    old = _sessions.get(session_id or "")
+    if old is not None:
+        _stop(old)
     s = RadioSession(
         id=session_id or uuid.uuid4().hex,
         user_id=user_id,
@@ -89,7 +98,14 @@ def create_session(
         start_offset_ms=max(0.0, position_ms),
     )
     _sessions[s.id] = s
+    s.hls_task = asyncio.get_running_loop().create_task(_run_hls(s))
     return s
+
+
+def _stop(s: RadioSession) -> None:
+    if s.hls_task is not None and not s.hls_task.done():
+        s.hls_task.cancel()
+    shutil.rmtree(RADIO_DIR / s.id, ignore_errors=True)
 
 
 async def wait_for_session(session_id: str, timeout_s: float = 8.0) -> RadioSession | None:
@@ -114,7 +130,97 @@ def get_session(session_id: str) -> RadioSession | None:
 def _gc() -> None:
     now = time.monotonic()
     for sid in [k for k, v in _sessions.items() if now - v.touched > SESSION_TTL_S]:
-        _sessions.pop(sid, None)
+        s = _sessions.pop(sid, None)
+        if s is not None:
+            _stop(s)
+
+
+# --- HLS (iOS) --------------------------------------------------------------
+#
+# Obyčejný MP3 stream v <audio> stahuje Safari ve webové stránce -- iOS jí po
+# odchodu z appky síť uspí; spojení zavřel po 4 s, dohrál ~20 s zásobníku a
+# zastavil (živě v logu). HLS v Safari stahuje systémový přehrávač
+# (AVPlayer), který běží i na pozadí a se zamčeným displejem -- stejně jako
+# Apple Music nebo internetová rádia. Jeden výrobce na relaci převádí souvislý
+# MP3 proud z `_produce` na HLS (AAC v MPEG-TS, 4s úseky, playlist typu EVENT,
+# který průběžně roste). Čas HLS = čas MP3 proudu, časová osa platí dál.
+
+RADIO_DIR = Path(os.environ.get("RADIO_TMP", "/tmp/opentify-radio"))
+HLS_SEGMENT_S = 4
+HLS_IDLE_STOP_S = 300.0  # nikdo nestahuje 5 min -> výroba se zastaví
+
+
+async def _run_hls(s: RadioSession) -> None:
+    d = RADIO_DIR / s.id
+    d.mkdir(parents=True, exist_ok=True)
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "mp3", "-i", "pipe:0",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+        "-f", "hls", "-hls_time", str(HLS_SEGMENT_S), "-hls_list_size", "0", "-hls_playlist_type", "event",
+        "-hls_segment_filename", str(d / "seg%05d.ts"), str(d / "index.m3u8"),
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    timeline: list[Segment] = []
+    s.timeline = timeline
+    started = time.monotonic()
+    logger.info("rádio %s HLS start", s.id[:6])
+    try:
+        assert proc.stdin is not None
+        async for data, written_ms in _produce(s, 0, s.start_offset_ms, 0.0, timeline):
+            proc.stdin.write(data)
+            await proc.stdin.drain()
+            ahead = written_ms / 1000 - (time.monotonic() - started)
+            if ahead > LEAD_S:
+                await asyncio.sleep(ahead - LEAD_S)
+            if time.monotonic() - s.hls_touched > HLS_IDLE_STOP_S:
+                logger.info("rádio %s HLS: nikdo neposlouchá, končím", s.id[:6])
+                break
+        proc.stdin.close()
+        await proc.wait()
+        s.hls_done = True
+        logger.info("rádio %s HLS konec (%.0f s)", s.id[:6], time.monotonic() - started)
+    except asyncio.CancelledError:
+        logger.info("rádio %s HLS zrušeno", s.id[:6])
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("rádio %s HLS chyba: %s", s.id[:6], exc)
+    finally:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.wait()
+
+
+async def hls_playlist(s: RadioSession, wait_s: float = 15.0) -> str | None:
+    """Playlist s `EXT-X-START` na začátek -- jinak by Safari u "živého"
+    playlistu začal až u konce (live edge) a přeskočil začátek skladby."""
+    s.hls_touched = time.monotonic()
+    path = RADIO_DIR / s.id / "index.m3u8"
+    waited = 0.0
+    while waited < wait_s:
+        if path.exists():
+            text = path.read_text()
+            if "#EXTINF" in text:
+                lines = text.splitlines()
+                out = []
+                for line in lines:
+                    out.append(line)
+                    if line.startswith("#EXT-X-VERSION") or (line == "#EXTM3U" and not any(
+                        l.startswith("#EXT-X-VERSION") for l in lines
+                    )):
+                        out.append("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES")
+                return "\n".join(out) + "\n"
+        await asyncio.sleep(0.25)
+        waited += 0.25
+    return None
+
+
+def hls_segment_path(s: RadioSession, name: str) -> Path | None:
+    s.hls_touched = time.monotonic()
+    path = RADIO_DIR / s.id / name
+    return path if path.is_file() else None
 
 
 def update_upcoming(s: RadioSession, upcoming: list[str]) -> None:
