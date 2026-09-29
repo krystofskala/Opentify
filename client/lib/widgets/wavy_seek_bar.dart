@@ -233,7 +233,9 @@ class _WavySeekBarPainter extends CustomPainter {
 
     // Vlní JEN odehraná část (Android 13 / PixelPlay styl) -- zbytek je vždy
     // rovná čára, nezávisle na tom, jestli se hraje.
-    _drawWave(canvas, 0, (thumbX - gap).clamp(0.0, size.width), centerY, amplitude, activeColor);
+    // Vlna vede AŽ DO puku (jako Google/Android 13): její konec se s vlnou
+    // hýbe a puk se kreslí přes něj -- dřív se před pukem srovnala do čáry.
+    _drawWave(canvas, 0, thumbX.clamp(0.0, size.width), centerY, amplitude, activeColor);
     _drawFlat(canvas, (thumbX + gap).clamp(0.0, size.width), size.width, centerY, inactiveColor);
 
     final thumbPaint = Paint()..color = thumbColor;
@@ -261,32 +263,25 @@ class _WavySeekBarPainter extends CustomPainter {
       return;
     }
 
-    // Obálka amplitudy: na začátku baru a těsně před pukem plynule klesá k
-    // nule (smoothstep přes ~jednu vlnovou délku), takže vlna do rovné
-    // čáry za pukem přechází měkce, ne ostrým zlomem. `x` je absolutní, ať
-    // vlna při posunu playheadu "neplave" spolu s ním.
+    // Obálka amplitudy jen na ZAČÁTKU baru (plynulý náběh přes ~jednu
+    // vlnovou délku). Ke konci u puku vlna plnou amplitudou -- konec se
+    // hýbe s vlnou (Google styl). `x` je absolutní, ať vlna při posunu
+    // playheadu "neplave" spolu s ním.
     final length = endX - startX;
     final ramp = math.min(wavelength, length / 2);
     double envelope(double x) {
-      final fromStart = ((x - startX) / ramp).clamp(0.0, 1.0);
-      final toEnd = ((endX - x) / ramp).clamp(0.0, 1.0);
-      double smooth(double t) => t * t * (3 - 2 * t);
-      return smooth(fromStart) * smooth(toEnd);
+      final t = ((x - startX) / ramp).clamp(0.0, 1.0);
+      return t * t * (3 - 2 * t);
     }
 
-    final path = Path();
+    double yAt(double x) => centerY + amplitude * envelope(x) * math.sin((x / wavelength) * 2 * math.pi + phase);
+
+    final path = Path()..moveTo(startX, yAt(startX));
     const sampleStep = 2.0;
-    var first = true;
-    for (double x = startX; x < endX; x += sampleStep) {
-      final y = centerY + amplitude * envelope(x) * math.sin((x / wavelength) * 2 * math.pi + phase);
-      if (first) {
-        path.moveTo(x, y);
-        first = false;
-      } else {
-        path.lineTo(x, y);
-      }
+    for (double x = startX + sampleStep; x < endX; x += sampleStep) {
+      path.lineTo(x, yAt(x));
     }
-    path.lineTo(endX, centerY);
+    path.lineTo(endX, yAt(endX));
     canvas.drawPath(path, paint);
   }
 
