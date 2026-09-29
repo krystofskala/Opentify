@@ -55,6 +55,21 @@ class DeezerClient:
             return None
         return data
 
+    async def track(self, track_id: str) -> dict[str, Any] | None:
+        """Jedna skladba -- s čerstvým `preview` (30s ukázka; odkaz je
+        podepsaný a po čase vyprší, proto se necachuje dlouho)."""
+
+        async def fetch() -> dict[str, Any]:
+            result = await self._get(f"/track/{track_id}")
+            if result is None:
+                raise DeezerUnavailable(track_id)
+            return result
+
+        try:
+            return await cached_json(f"dz:track:{track_id}", 10 * 60, fetch)
+        except (DeezerUnavailable, httpx.HTTPError):
+            return None
+
     async def find_track_by_isrc(self, isrc: str) -> dict[str, Any] | None:
         cache_key = f"dz:isrc:{isrc}"
 

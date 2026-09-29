@@ -204,6 +204,12 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
     top_new = max(new_artists, key=lambda a: artist_ms[a], default=None)
 
     ranked_tracks = sorted(track_plays, key=lambda r: (-track_plays[r], -track_ms[r]))
+    # Nejhranější skladba každého interpreta -- hraje pod jeho obrazovkou.
+    artist_top_track: dict[str, str] = {}
+    for rid in ranked_tracks:
+        a = artist_of.get(rid)
+        if a and a not in artist_top_track:
+            artist_top_track[a] = rid
 
     def minutes(ms: float) -> int:
         return int(round(ms / 60000))
@@ -220,7 +226,8 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
                 "artistsCount": len(artist_ms),
                 "tracksCount": len(track_plays),
                 "topArtists": [
-                    _artist_info(session, a) | {"minutes": minutes(artist_ms[a]), "plays": artist_plays[a]}
+                    _artist_info(session, a)
+                    | {"minutes": minutes(artist_ms[a]), "plays": artist_plays[a], "trackId": artist_top_track.get(a)}
                     for a in top_artists[:5]
                 ],
                 "topTracks": [
@@ -239,7 +246,10 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
                 ],
                 "newArtists": len(new_artists),
                 "topNewArtist": (
-                    _artist_info(session, top_new) | {"minutes": minutes(artist_ms[top_new])} if top_new else None
+                    _artist_info(session, top_new)
+                    | {"minutes": minutes(artist_ms[top_new]), "trackId": artist_top_track.get(top_new)}
+                    if top_new
+                    else None
                 ),
                 "peakHour": hour_plays.most_common(1)[0][0],
                 "hours": [hour_plays.get(h, 0) for h in range(24)],
@@ -317,8 +327,47 @@ async def period_stats(user_id: str, period: str) -> dict[str, Any] | None:
     current = _local(_now()).year
     finished = period != DECADE and int(period) < current
     # Uzavřený rok se nemění (týden cache); rozběhnutý rok a dekáda po dnech.
-    key = f"wrapped:v1:{user_id}:{period}" + ("" if finished else f":{pm._day_key()}")
+    key = f"wrapped:v3:{user_id}:{period}" + ("" if finished else f":{pm._day_key()}")
     return await cached_json(key, 7 * 24 * 3600 if finished else 24 * 3600, lambda: _stats(user_id, period))
+
+
+SNIPPET_START_SHARE = 0.33  # třetina skladby -- obvykle už refrén, ne intro
+SNIPPET_MIN_START_MS = 20_000
+
+
+async def snippet(recording_id: str) -> dict[str, Any] | None:
+    """Úryvek skladby pod obrazovku Wrappedu: stažená skladba z knihovny
+    (od třetiny), jinak 30s ukázka z Deezeru (veřejné CDN, nic se
+    nestahuje). `None` = není co pustit."""
+    from app.catalog.artwork import _normalize, primary_artist_name
+    from app.catalog.deezer import get_deezer_client
+    from app.models import MediaAsset, MediaAssetStatus
+
+    def local() -> tuple[dict[str, Any] | None, tuple[str | None, str, str]]:
+        with Session(engine) as session:
+            rec = session.get(Recording, recording_id)
+            if rec is None:
+                return None, (None, "", "")
+            asset = session.get(MediaAsset, recording_id)
+            artist = session.get(Artist, rec.artist_id) if rec.artist_id else None
+            dz = rec.deezer_id or (rec.external_refs or {}).get("shareDeezerId")
+            if asset is not None and asset.status == MediaAssetStatus.AVAILABLE:
+                length = rec.duration_ms or asset.waveform_duration_ms or 0
+                start = max(SNIPPET_MIN_START_MS, int(length * SNIPPET_START_SHARE)) if length > 60_000 else 0
+                return {"url": f"/api/v1/tracks/{recording_id}/stream", "startMs": start}, (dz, "", "")
+            return None, (dz, artist.name if artist else "", rec.title)
+
+    found, (dz_id, artist_name, title) = await asyncio.to_thread(local)
+    if found is not None:
+        return found
+    dz = get_deezer_client()
+    if not dz_id and artist_name and title:
+        hit = await dz.find_track(primary_artist_name(artist_name), title)
+        if hit and _normalize((hit.get("title") or "")).startswith(_normalize(title)[:12]):
+            dz_id = str(hit.get("id") or "") or None
+    track = await dz.track(dz_id) if dz_id else None
+    preview = (track or {}).get("preview")
+    return {"url": preview, "startMs": 0} if preview else None
 
 
 async def warm_all() -> int:

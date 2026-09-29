@@ -7,9 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/share_image.dart';
+import '../../state/audio_player_controller.dart';
 import '../../data/wrapped_repository.dart';
 import '../../state/artwork_provider.dart';
 import '../../state/providers.dart';
@@ -138,11 +140,14 @@ TextStyle _text(double size, FontWeight weight, {double opacity = 1, double heig
 /// Jedna obrazovka: pozadí + obsah (obsah dostává `active`, aby animace
 /// běžely, až je obrazovka vidět).
 class _Slide {
-  const _Slide({required this.style, required this.hue, required this.build});
+  const _Slide({required this.style, required this.hue, required this.build, this.trackId});
 
   final MixArtStyle style;
   final double hue;
   final Widget Function(bool active) build;
+
+  /// Skladba, jejíž úryvek hraje pod obrazovkou (`null` = hraje dál předchozí).
+  final String? trackId;
 }
 
 class _Story extends ConsumerStatefulWidget {
@@ -169,19 +174,54 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   int _index = 0;
   bool _sharing = false;
 
+  // --- Hudba pod obrazovkami (vlastní přehrávač, hlavní se pozastaví) ---
+  final _audio = AudioPlayer();
+  late final AudioPlayerController _mainPlayer = ref.read(audioPlayerControllerProvider.notifier);
+  late final WrappedRepository _repo = ref.read(wrappedRepositoryProvider);
+  final Map<String, Future<({String url, Duration start})?>> _snippets = {};
+  bool _mainWasPlaying = false;
+
+  /// iOS pustí zvuk až po klepnutí -- do té doby se úryvek jen připraví.
+  bool _audioUnlocked = false;
+  bool _muted = false;
+  String? _currentTrack;
+  int _audioToken = 0;
+  Timer? _fade;
+
   @override
   void initState() {
     super.initState();
     _progress.forward();
     _scheduleRender();
+    if (ref.read(audioPlayerControllerProvider).isPlaying) {
+      _mainWasPlaying = true;
+      unawaited(_mainPlayer.togglePlayPause());
+    }
+    // Na PC projde autoplay (stránka otevřená klepnutím); iOS ho odmítne a
+    // zvuk se odemkne prvním klepnutím do příběhu.
+    _audioUnlocked = true;
+    _playSlideAudio(0);
   }
 
   @override
   void dispose() {
     _renderTimer?.cancel();
+    _fade?.cancel();
+    _audio.dispose();
     _progress.dispose();
     _page.dispose();
+    if (_mainWasPlaying) unawaited(_mainPlayer.togglePlayPause());
     super.dispose();
+  }
+
+  void _close() {
+    // Hlavní přehrávač obnovit ještě v obsluze klepnutí (iOS).
+    unawaited(_audio.pause());
+    if (_mainWasPlaying) {
+      _mainWasPlaying = false;
+      unawaited(_mainPlayer.togglePlayPause());
+    }
+    context.pop();
   }
 
   void _go(int index) {
@@ -189,7 +229,26 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
       if (index >= _slides.length) _progress.stop();
       return;
     }
-    _page.jumpToPage(index);
+    _page.animateToPage(index, duration: const Duration(milliseconds: 650), curve: Curves.easeInOutCubic);
+  }
+
+  void _onTap(TapUpDetails d, double frameW) {
+    if (!_audioUnlocked && !_muted) {
+      // První klepnutí odemkne zvuk (iOS) -- play() musí být přímo tady.
+      _audioUnlocked = true;
+      unawaited(_audio.play().catchError((_) {}));
+    }
+    _go(d.localPosition.dx < frameW * 0.3 ? _index - 1 : _index + 1);
+  }
+
+  void _toggleMute() {
+    setState(() => _muted = !_muted);
+    if (_muted) {
+      unawaited(_audio.pause());
+    } else {
+      _audioUnlocked = true;
+      unawaited(_audio.play().catchError((_) {}));
+    }
   }
 
   void _onPage(int index) {
@@ -199,6 +258,51 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
       ..value = 0;
     if (index < _slides.length - 1) _progress.forward();
     _scheduleRender();
+    _playSlideAudio(index);
+  }
+
+  /// Plynulé ztišení/zesílení (iOS hlasitost webu nemění -- tam jen střih).
+  Future<void> _fadeTo(double target, Duration duration) {
+    _fade?.cancel();
+    final start = _audio.volume;
+    const steps = 12;
+    var step = 0;
+    final done = Completer<void>();
+    _fade = Timer.periodic(duration ~/ steps, (timer) {
+      step++;
+      unawaited(_audio.setVolume(start + (target - start) * step / steps));
+      if (step >= steps) {
+        timer.cancel();
+        if (!done.isCompleted) done.complete();
+      }
+    });
+    return done.future;
+  }
+
+  Future<void> _playSlideAudio(int index) async {
+    String? trackId;
+    for (var i = index; i >= 0 && trackId == null; i--) {
+      trackId = _slides[i].trackId;
+    }
+    if (trackId == null || trackId == _currentTrack) return;
+    _currentTrack = trackId;
+    final token = ++_audioToken;
+    final snippet = await (_snippets[trackId] ??= _repo.snippet(trackId));
+    if (!mounted || token != _audioToken || snippet == null) return;
+    if (_audio.playing) await _fadeTo(0, const Duration(milliseconds: 350));
+    if (!mounted || token != _audioToken) return;
+    try {
+      await _audio.setUrl(snippet.url, initialPosition: snippet.start);
+    } catch (_) {
+      return;
+    }
+    if (!mounted || token != _audioToken || _muted || !_audioUnlocked) return;
+    await _audio.setVolume(0);
+    unawaited(_audio.play().catchError((_) {
+      // Autoplay odmítnut (iOS) -- odemkne se prvním klepnutím.
+      _audioUnlocked = false;
+    }));
+    unawaited(_fadeTo(1, const Duration(milliseconds: 900)));
   }
 
   void _scheduleRender() {
@@ -265,7 +369,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
                 children: [
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTapUp: (d) => _go(d.localPosition.dx < frameW * 0.3 ? _index - 1 : _index + 1),
+                    onTapUp: (d) => _onTap(d, frameW),
                     onLongPressStart: (_) => _progress.stop(),
                     onLongPressEnd: (_) {
                       if (!last) _progress.forward();
@@ -274,9 +378,36 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
                       controller: _page,
                       onPageChanged: _onPage,
                       itemCount: _slides.length,
-                      itemBuilder: (context, i) => RepaintBoundary(
-                        key: _keys[i],
-                        child: _SlideFrame(slide: _slides[i], active: i == _index, stats: stats),
+                      // Přechod "kostkou" jako Instagram stories: obrazovky se
+                      // otáčejí kolem společné hrany, odvrácená strana tmavne.
+                      itemBuilder: (context, i) => AnimatedBuilder(
+                        animation: _page,
+                        builder: (context, child) {
+                          var page = _index.toDouble();
+                          if (_page.hasClients && _page.position.haveDimensions) page = _page.page ?? page;
+                          final delta = (i - page).clamp(-1.0, 1.0);
+                          return Transform(
+                            alignment: delta > 0 ? Alignment.centerLeft : Alignment.centerRight,
+                            transform: Matrix4.identity()
+                              ..setEntry(3, 2, 0.0012)
+                              ..rotateY(-delta * math.pi / 2),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                child!,
+                                if (delta != 0)
+                                  IgnorePointer(
+                                    child: ColoredBox(color: Colors.black.withValues(alpha: delta.abs() * 0.6)),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                        // Sdílený obrázek = jen tahle vrstva (bez otočení a ztmavení).
+                        child: RepaintBoundary(
+                          key: _keys[i],
+                          child: _SlideFrame(slide: _slides[i], active: i == _index, stats: stats),
+                        ),
                       ),
                     ),
                   ),
@@ -295,8 +426,16 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
                               ),
                               const Spacer(),
                               IconButton(
+                                tooltip: _muted ? 'Zapnout zvuk' : 'Ztlumit',
+                                onPressed: _toggleMute,
+                                icon: Icon(
+                                  _muted ? Symbols.volume_off_rounded : Symbols.volume_up_rounded,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              IconButton(
                                 tooltip: 'Zavřít',
-                                onPressed: () => context.pop(),
+                                onPressed: _close,
                                 icon: const Icon(Symbols.close_rounded, color: Colors.white),
                               ),
                             ],
@@ -539,10 +678,13 @@ List<_Slide> _buildSlides(WrappedStats s) {
   final baseHue = s.isDecade ? 36.0 : ((int.tryParse(s.label) ?? 0) * 47 + 20) % 360.0;
   double hue(int shift) => (baseHue + shift) % 360;
   final days = (s.totalMinutes / 1440).floor();
+  String? t(int i) => i < s.topTracks.length ? s.topTracks[i].id : null;
+  String? a(int i) => i < s.topArtists.length ? s.topArtists[i].trackId : null;
   final slides = <_Slide>[
     _Slide(
       style: MixArtStyle.year,
       hue: hue(0),
+      trackId: t(0),
       build: (a) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -581,6 +723,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
     _Slide(
       style: MixArtStyle.mood,
       hue: hue(40),
+      trackId: t(1) ?? t(0),
       build: (a) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -610,6 +753,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.genre,
         hue: hue(-30),
+        trackId: a(0),
         build: (a) {
           final top = s.topArtists.first;
           return Column(
@@ -650,6 +794,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.daily,
         hue: hue(-60),
+        trackId: a(1),
         build: (a) => _RankList(
           active: a,
           title: 'Tvoji top interpreti',
@@ -667,6 +812,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.mood,
         hue: hue(80),
+        trackId: t(0),
         build: (a) {
           final top = s.topTracks.first;
           return Column(
@@ -714,6 +860,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.daily,
         hue: hue(120),
+        trackId: t(2),
         build: (a) => _RankList(
           active: a,
           title: 'Tvoje top skladby',
@@ -731,6 +878,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.year,
         hue: hue(160),
+        trackId: s.eras.isEmpty ? null : s.eras.first.track.id,
         build: (a) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -767,6 +915,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.genre,
         hue: hue(200),
+        trackId: s.evergreens.isEmpty ? null : s.evergreens.first.id,
         build: (a) => _RankList(
           active: a,
           title: 'Nesmrtelné',
@@ -785,6 +934,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
       _Slide(
         style: MixArtStyle.genre,
         hue: hue(-100),
+        trackId: t(3),
         build: (a) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -824,6 +974,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
     _Slide(
       style: MixArtStyle.daily,
       hue: hue(150),
+      trackId: s.topNewArtist?.trackId ?? t(4),
       build: (a) => Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -876,6 +1027,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
     _Slide(
       style: MixArtStyle.year,
       hue: hue(-150),
+      trackId: a(2),
       build: (a) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -924,6 +1076,7 @@ List<_Slide> _buildSlides(WrappedStats s) {
     _Slide(
       style: MixArtStyle.year,
       hue: hue(0),
+      trackId: t(0),
       build: (a) => _Summary(stats: s, active: a),
     ),
   ];

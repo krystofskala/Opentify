@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../models/playlist_model.dart';
+import '../wrapped/wrapped_launch_button.dart';
 import '../../models/recording_model.dart';
 import '../../state/artwork_provider.dart';
 import '../../state/providers.dart';
@@ -132,6 +133,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   ),
                 )
               else ...[
+                if (wrappedPeriodForSource(detail.source) case final period?)
+                  SliverToBoxAdapter(child: WrappedLaunchCard(period: period)),
                 SliverToBoxAdapter(
                   child: ListenableBuilder(
                     listenable: _collection,

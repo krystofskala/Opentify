@@ -41,7 +41,14 @@ class WrappedIndex {
 }
 
 class WrappedArtist {
-  const WrappedArtist({required this.id, required this.name, this.imageUrl, this.minutes = 0, this.plays = 0});
+  const WrappedArtist({
+    required this.id,
+    required this.name,
+    this.imageUrl,
+    this.minutes = 0,
+    this.plays = 0,
+    this.trackId,
+  });
 
   final String id;
   final String name;
@@ -49,12 +56,16 @@ class WrappedArtist {
   final int minutes;
   final int plays;
 
+  /// Nejhranější skladba interpreta v období -- hraje pod jeho obrazovkou.
+  final String? trackId;
+
   factory WrappedArtist.fromJson(Map<String, dynamic> j) => WrappedArtist(
         id: j['id'] as String,
         name: j['name'] as String? ?? '?',
         imageUrl: resolveMediaUrl(j['imageUrl'] as String?),
         minutes: j['minutes'] as int? ?? 0,
         plays: j['plays'] as int? ?? 0,
+        trackId: j['trackId'] as String?,
       );
 }
 
@@ -220,4 +231,18 @@ class WrappedRepository {
   /// První výpočet roku může trvat ~10 s (zařazování interpretů do žánrů);
   /// server ho pak drží v cache.
   Future<WrappedStats> stats(String period) async => WrappedStats.fromJson(await _api.getJson('/wrapped/$period'));
+
+  /// Úryvek skladby: stažená z knihovny (od refrénu), jinak 30s ukázka.
+  Future<({String url, Duration start})?> snippet(String recordingId) async {
+    try {
+      final j = await _api.getJson('/wrapped/snippet/$recordingId');
+      var url = j['url'] as String;
+      // Cesta ze serveru je od kořene ("/api/v1/...") -- přes baseUrl API.
+      const prefix = '/api/v1';
+      if (url.startsWith(prefix)) url = '${_api.baseUrl}${url.substring(prefix.length)}';
+      return (url: url, start: Duration(milliseconds: j['startMs'] as int? ?? 0));
+    } catch (_) {
+      return null;
+    }
+  }
 }
