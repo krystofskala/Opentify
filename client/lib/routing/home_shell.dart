@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../widgets/glass/glass.dart';
 import '../widgets/glass/liquid_glass.dart';
+import '../widgets/now_playing_sheet.dart' show HiddenUnderPlayer;
 import '../widgets/player_bar.dart';
 
 /// Bottom-nav shell pro čtyři hlavní destinace (Domů/Hledat/Knihovna/Profil) --
@@ -29,8 +30,9 @@ class HomeShell extends StatelessWidget {
   Widget build(BuildContext context) {
     // `LiquidScope` + `LiquidSource.page`: obsah stránky pod lištami jde
     // zachytit pro sklo s lomem (Profil › Vzhled › "Lom skla (test)").
-    return LiquidScope(
-        child: Scaffold(
+    return HiddenUnderPlayer(
+        child: LiquidScope(
+            child: Scaffold(
       extendBody: true,
       body: LiquidSource.page(child: navigationShell),
       // Na širokém okně plovoucí skupina (přehrávač + tab bar) uprostřed s
@@ -59,7 +61,7 @@ class HomeShell extends StatelessWidget {
           ),
         ),
       ),
-    ));
+    )));
   }
 }
 

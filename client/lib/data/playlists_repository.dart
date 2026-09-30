@@ -70,7 +70,11 @@ class PlaylistsRepository {
   /// Odkaz na Spotify playlist/album/skladbu -> playlist v knihovně
   /// (backend stáhne obsah přes VPN, viz `app/library/spotify_link.py`).
   Future<SpotifyLinkImport> importSpotifyLink(String url) async {
-    final json = await _api.postJson('/library/import/spotify-link', body: {'url': url});
+    final json = await _api.postJson(
+      '/library/import/spotify-link',
+      body: {'url': url},
+      timeout: const Duration(minutes: 3),
+    );
     if (json['kind'] == 'track') {
       final rec = json['recording'];
       return SpotifyLinkImport.track(rec == null ? null : RecordingModel.fromJson(rec as Map<String, dynamic>));
@@ -156,4 +160,5 @@ class SpotifyLinkImport {
 
 /// Je v textu odkaz na Spotify (playlist, album, skladba, krátký odkaz)?
 bool looksLikeSpotifyLink(String text) =>
-    RegExp(r'open\.spotify\.com/|spotify:(playlist|album|track):|spotify\.link/').hasMatch(text);
+    RegExp(r'^\s*(https?://)?(open\.spotify\.com/(intl-[a-z-]+/)?(playlist|album|track)/|spotify\.link/|spotify:(playlist|album|track):)\S*\s*$')
+        .hasMatch(text);

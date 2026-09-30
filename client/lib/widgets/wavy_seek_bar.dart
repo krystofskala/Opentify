@@ -83,6 +83,12 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
       value: widget.isPlaying && !_dragging ? 1 : 0,
     );
     _interactionController = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    // Rovná čára (pauza) nemá co vlnit -- fáze stojí, ať se nepřekresluje
+    // 60x za vteřinu naprázdno.
+    _ampController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) _phaseController.stop();
+    });
+    if (_ampController.value == 0) _phaseController.stop();
     _syncAmplitudeTarget();
   }
 
@@ -100,6 +106,7 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
 
   void _syncAmplitudeTarget() {
     final target = widget.isPlaying && !_dragging ? 1.0 : 0.0;
+    if (target > 0 && !_phaseController.isAnimating) _phaseController.repeat();
     if ((_ampController.value - target).abs() > 0.001) {
       _ampController.animateTo(target, curve: Curves.easeInOut);
     }
@@ -154,22 +161,24 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     Widget bar = LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        return AnimatedBuilder(
-          animation: Listenable.merge([_phaseController, _ampController, _interactionController]),
-          builder: (context, _) => CustomPaint(
-            size: Size(width, widget.height),
-            painter: _WavySeekBarPainter(
-              progress: displayedProgress,
-              phase: _phaseController.value * 2 * math.pi,
-              amplitudeFraction: _ampController.value,
-              interactionFraction: _interactionController.value,
-              activeColor: widget.activeColor,
-              inactiveColor: widget.inactiveColor,
-              thumbColor: widget.thumbColor,
-              strokeWidth: widget.strokeWidth,
-              thumbRadius: widget.thumbRadius,
-              wavelength: widget.wavelength,
-              maxAmplitude: widget.waveAmplitude,
+        return RepaintBoundary(
+          child: AnimatedBuilder(
+            animation: Listenable.merge([_phaseController, _ampController, _interactionController]),
+            builder: (context, _) => CustomPaint(
+              size: Size(width, widget.height),
+              painter: _WavySeekBarPainter(
+                progress: displayedProgress,
+                phase: _phaseController.value * 2 * math.pi,
+                amplitudeFraction: _ampController.value,
+                interactionFraction: _interactionController.value,
+                activeColor: widget.activeColor,
+                inactiveColor: widget.inactiveColor,
+                thumbColor: widget.thumbColor,
+                strokeWidth: widget.strokeWidth,
+                thumbRadius: widget.thumbRadius,
+                wavelength: widget.wavelength,
+                maxAmplitude: widget.waveAmplitude,
+              ),
             ),
           ),
         );

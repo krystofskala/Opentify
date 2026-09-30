@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/api_client.dart';
 import '../data/playlists_repository.dart';
 import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
@@ -15,7 +18,7 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
   messenger?.showSnackBar(
-    const SnackBar(content: Text('Načítám ze Spotify…'), duration: Duration(seconds: 30)),
+    const SnackBar(content: Text('Načítám odkaz…'), duration: Duration(minutes: 3)),
   );
   try {
     final result = await ref.read(playlistsRepositoryProvider).importSpotifyLink(url.trim());
@@ -24,8 +27,15 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
       // Jedna skladba: rovnou pustit (stáhne se, když ještě není).
       final rec = result.recording;
       if (rec == null) throw Exception('Skladbu se nepodařilo najít.');
-      ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlayingInfoFor(rec), sourceLabel: 'Spotify');
-      messenger?.showSnackBar(SnackBar(content: Text('Hraje: ${rec.title}')));
+      void play() =>
+          ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlayingInfoFor(rec), sourceLabel: 'Sdílená skladba');
+      // Safari po await už nemusí brát přehrání jako gesto uživatele --
+      // zkusí se hned, a kdyby to zablokoval, snackbar má tlačítko.
+      play();
+      messenger?.showSnackBar(SnackBar(
+        content: Text(rec.title),
+        action: SnackBarAction(label: 'Přehrát', onPressed: play),
+      ));
       return;
     }
     ref.invalidate(myPlaylistsProvider);
@@ -41,10 +51,12 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
     router.push('/playlists/${result.id}');
   } catch (e) {
     messenger?.hideCurrentSnackBar();
-    final detail = e.toString();
-    messenger?.showSnackBar(SnackBar(
-      content: Text(detail.contains('Spotify') ? detail.replaceFirst(RegExp(r'^[^:]*:\s*'), '') : 'Import ze Spotify se nepovedl.'),
-    ));
+    final detail = switch (e) {
+      ApiException(:final detail?) => detail,
+      TimeoutException() => 'Import trvá moc dlouho, zkus to za chvíli znovu.',
+      _ => 'Odkaz se nepodařilo načíst.',
+    };
+    messenger?.showSnackBar(SnackBar(content: Text(detail)));
   }
 }
 

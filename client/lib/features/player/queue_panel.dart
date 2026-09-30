@@ -33,7 +33,9 @@ class _QueuePanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final playback = ref.watch(audioPlayerControllerProvider);
+    // Jen fronta, ne pozice -- jinak by se celý seznam přestavoval 5x za vteřinu.
+    final playback = ref.watch(audioPlayerControllerProvider
+        .select((s) => (queue: s.queue, queueIndex: s.queueIndex, queueSourceLabel: s.queueSourceLabel)));
 
     return DraggableScrollableSheet(
       initialChildSize: 0.75,
@@ -87,7 +89,7 @@ class QueueView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final playback = ref.watch(audioPlayerControllerProvider);
+    final playback = ref.watch(audioPlayerControllerProvider.select((s) => (queue: s.queue, queueIndex: s.queueIndex)));
     if (playback.queue.isEmpty) {
       return const Center(child: Text('Fronta je prázdná.', style: TextStyle(color: Colors.white70)));
     }

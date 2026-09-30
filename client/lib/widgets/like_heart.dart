@@ -37,12 +37,18 @@ class LikeHeart extends ConsumerWidget {
         behavior: HitTestBehavior.opaque,
         onTap: () async {
           HapticFeedback.selectionClick();
-          if (disliked) await ref.read(dislikedProvider.notifier).toggle(recordingId);
-          await ref.read(likedSongsControllerProvider.notifier).toggle(recordingId);
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          // Server lajkem zlomené srdce sám spraví -- tady jen místně.
+          if (disliked) ref.read(dislikedProvider.notifier).forget(recordingId);
+          final ok = await ref.read(likedSongsControllerProvider.notifier).setLiked(recordingId, disliked || !liked);
+          if (!ok && disliked) ref.read(dislikedProvider.notifier).restore(recordingId);
+          if (!ok) messenger?.showSnackBar(const SnackBar(content: Text('Oblíbené se nepodařilo uložit.')));
         },
-        onLongPress: () {
+        onLongPress: () async {
           HapticFeedback.mediumImpact();
-          ref.read(dislikedProvider.notifier).toggle(recordingId);
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          final ok = await ref.read(dislikedProvider.notifier).toggle(recordingId);
+          if (!ok) messenger?.showSnackBar(const SnackBar(content: Text('Nepodařilo se uložit.')));
         },
         child: SizedBox.square(
           dimension: 48,

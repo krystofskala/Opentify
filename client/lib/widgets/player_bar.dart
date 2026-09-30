@@ -172,7 +172,10 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    final playback = ref.watch(audioPlayerControllerProvider);
+    // Přestavět jen při změně skladby/stavu, ne při každém posunu pozice
+    // (ten kreslí jen vlnovka níž, `_MiniSeek`).
+    ref.watch(audioPlayerControllerProvider.select(playerChromeKey));
+    final playback = ref.read(audioPlayerControllerProvider);
     final nowPlaying = playback.nowPlaying;
     if (nowPlaying == null) return const SizedBox.shrink();
 
@@ -181,8 +184,6 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
     // okamžik přes `primary`, které se zrovna samo animuje).
     final targetAccent = playback.accentColor ?? ref.watch(effectiveAccentProvider) ?? theme.colorScheme.primary;
     final duration = playback.duration ?? Duration.zero;
-    final positionMs =
-        playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
     final hasError = playback.error != null;
     final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
     final isProvisioning = provisioningState?.isInFlight ?? false;
@@ -247,18 +248,24 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                                     ),
                                   )
                                 : const SizedBox.shrink())
-                            : WavySeekBar(
-                                progress: positionMs / duration.inMilliseconds,
-                                isPlaying: playback.isPlaying,
-                                tapToSeek: false,
-                                onChangeEnd: (value) => ref
-                                    .read(audioPlayerControllerProvider.notifier)
-                                    .seek(Duration(milliseconds: (value * duration.inMilliseconds).round())),
-                                height: 26,
-                                strokeWidth: 2.5,
-                                waveAmplitude: 2.5,
-                                activeColor: fg,
-                                inactiveColor: fg.withValues(alpha: 0.3),
+                            : Consumer(
+                                builder: (context, ref, _) {
+                                  final position = ref.watch(audioPlayerControllerProvider.select((s) => s.position));
+                                  final ms = duration.inMilliseconds;
+                                  return WavySeekBar(
+                                    progress: position.inMilliseconds.clamp(0, ms) / ms,
+                                    isPlaying: playback.isPlaying,
+                                    tapToSeek: false,
+                                    onChangeEnd: (value) => ref
+                                        .read(audioPlayerControllerProvider.notifier)
+                                        .seek(Duration(milliseconds: (value * ms).round())),
+                                    height: 26,
+                                    strokeWidth: 2.5,
+                                    waveAmplitude: 2.5,
+                                    activeColor: fg,
+                                    inactiveColor: fg.withValues(alpha: 0.3),
+                                  );
+                                },
                               ),
                       ),
                     ),

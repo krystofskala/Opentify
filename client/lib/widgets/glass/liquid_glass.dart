@@ -65,29 +65,44 @@ class LiquidCapture {
   Rect? _rect; // zachycený výřez (globálně, logické px)
   final List<ui.Image> _retired = [];
   bool _scheduled = false;
-  Duration _lastCapture = Duration.zero;
+  Timer? _wait;
+  DateTime _lastCapture = DateTime.fromMillisecondsSinceEpoch(0);
   bool _disposed = false;
 
   static const double _margin = 40;
-  static const Duration _interval = Duration(milliseconds: 32);
+  // ~24 fps: pozadí se hýbe pomalu a obsah pod lištou je o snímek pozadu
+  // tak jako tak. Dřív 32 ms a "moc brzy" si vynucovalo každý snímek
+  // (scheduleFrame) -- appka pak kreslila 60 fps i v klidu.
+  static const Duration _interval = Duration(milliseconds: 42);
+
+  // Ostrý výřez stačí do 2x (Retina 3x je pod rozmazaným sklem k ničemu),
+  // rozmazaný v polovičním rozlišení -- čte se přes UV, takže sedí dál.
+  static const double _maxRatio = 2;
 
   bool get ready => _sharp != null && _rect != null;
 
   void _schedule() {
     if (_scheduled || _disposed || _glasses.isEmpty) return;
     _scheduled = true;
-    SchedulerBinding.instance.addPostFrameCallback((timeStamp) {
+    final wait = _interval - DateTime.now().difference(_lastCapture);
+    if (wait > Duration.zero) {
+      // Počkat časovačem, ne vynucenými snímky.
+      _wait = Timer(wait, _captureNextFrame);
+    } else {
+      _captureNextFrame();
+    }
+  }
+
+  void _captureNextFrame() {
+    _wait = null;
+    if (_disposed) return;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       _scheduled = false;
       if (_disposed || _glasses.isEmpty) return;
-      if (timeStamp - _lastCapture < _interval) {
-        // Příliš brzy -- zkusit v dalším snímku (pozadí jede ~30 fps).
-        SchedulerBinding.instance.scheduleFrame();
-        _schedule();
-        return;
-      }
-      _lastCapture = timeStamp;
+      _lastCapture = DateTime.now();
       _capture();
     });
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   void _capture() {
@@ -100,8 +115,9 @@ class LiquidCapture {
     final bgSource = _background;
     if (union == null || bgSource == null) return;
     final view = ui.PlatformDispatcher.instance.views.first;
-    final dpr = view.devicePixelRatio;
-    final screen = Offset.zero & (view.physicalSize / dpr);
+    final viewDpr = view.devicePixelRatio;
+    final dpr = math.min(viewDpr, _maxRatio);
+    final screen = Offset.zero & (view.physicalSize / viewDpr);
     final rect = union.inflate(_margin).intersect(screen);
     if (rect.isEmpty) return;
     final bg = bgSource.capture(rect, dpr);
@@ -129,15 +145,17 @@ class LiquidCapture {
     for (final g in _glasses) {
       sigma = math.max(sigma, g.blurSigma);
     }
+    final bw = math.max(1, w ~/ 2), bh = math.max(1, h ~/ 2);
     final r2 = ui.PictureRecorder();
     final c2 = Canvas(r2);
+    c2.scale(bw / w, bh / h);
     c2.drawImage(
       sharp,
       Offset.zero,
       Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: sigma * dpr, sigmaY: sigma * dpr, tileMode: TileMode.clamp),
     );
     final p2 = r2.endRecording();
-    final blurred = p2.toImageSync(w, h);
+    final blurred = p2.toImageSync(bw, bh);
     p2.dispose();
     // Staré obrázky ještě může používat rozpracovaný snímek -- uvolnit se zpožděním.
     if (_sharp != null) _retired.add(_sharp!);
@@ -155,6 +173,7 @@ class LiquidCapture {
 
   void dispose() {
     _disposed = true;
+    _wait?.cancel();
     _sharp?.dispose();
     _blurred?.dispose();
     for (final i in _retired) {

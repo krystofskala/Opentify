@@ -1,10 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../core/reduced_motion.dart';
 import '../theme/accent_color.dart' show CoverCharacter, accentTransitionDuration, isAchromatic;
@@ -54,7 +54,7 @@ class AppBackground extends StatefulWidget {
   State<AppBackground> createState() => _AppBackgroundState();
 }
 
-class _AppBackgroundState extends State<AppBackground> with SingleTickerProviderStateMixin {
+class _AppBackgroundState extends State<AppBackground> {
   static final Future<ui.FragmentProgram?> _program = _loadProgram();
   static bool _loggedPath = false;
 
@@ -70,7 +70,10 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
     }
   }
 
-  late final Ticker _ticker;
+  // Časovač místo Tickeru: Ticker si říká o KAŽDÝ snímek displeje (120 Hz
+  // na ProMotion) a na webu se pak celá scéna rasterizuje pokaždé, i když
+  // pozadí kreslí jen 30 fps. Časovač vyžádá snímek jen, když je co kreslit.
+  Timer? _ticker;
   final Stopwatch _clock = Stopwatch()..start();
   final ValueNotifier<int> _frame = ValueNotifier(0);
   ui.FragmentProgram? _programReady;
@@ -123,7 +126,6 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
     _from = palette;
     _to = palette;
     _guests = _guestsFor(widget.selectedAccent, widget.brightness, widget.character, _to);
-    _ticker = createTicker(_onTick);
     _program.then((program) {
       if (!mounted) return;
       if (!_loggedPath) {
@@ -235,19 +237,23 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
 
   void _wake() {
     if (widget.hidden) {
-      if (_ticker.isActive) _ticker.stop();
+      _stopTicker();
       return;
     }
-    if (!_ticker.isActive) {
+    if (_ticker == null) {
       _lastPaintAt = _now;
-      _ticker.start();
+      _ticker = Timer.periodic(const Duration(microseconds: 33333), _onTick);
     }
   }
 
-  void _onTick(Duration _) {
+  void _stopTicker() {
+    _ticker?.cancel();
+    _ticker = null;
+  }
+
+  void _onTick(Timer _) {
     final now = _now;
     final dt = now - _lastPaintAt;
-    if (dt < 1 / 30 - 0.002) return; // 30 fps strop
     _lastPaintAt = now;
     final step = math.min(dt, 0.1);
 
@@ -268,7 +274,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
 
     // Animuje se nepřetržitě (30 fps strop výš); zastaví se jen při
     // systémovém "omezit pohyb" nebo když je pozadí skryté.
-    if (_reducedMotion && !_tweening(now)) _ticker.stop();
+    if (_reducedMotion && !_tweening(now)) _stopTicker();
   }
 
   bool _onScroll(ScrollNotification notification) {
@@ -286,7 +292,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
 
   @override
   void dispose() {
-    _ticker.dispose();
+    _stopTicker();
     _frame.dispose();
     _lastShader?.dispose();
     super.dispose();

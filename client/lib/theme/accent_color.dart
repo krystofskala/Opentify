@@ -11,13 +11,13 @@ import 'package:palette_generator/palette_generator.dart';
 /// dívá, pro hlavičky Release/Artist -- nezávisle na tom, co zrovna hraje).
 /// Dřív žila jen jako privátní metoda `AudioPlayerController`u; teď ji
 /// potřebují oba případy, tak je to samostatná funkce.
-Future<Color?> extractAccentColor(String imageUrl, {Size size = const Size(120, 120)}) {
+Future<Color?> extractAccentColor(String imageUrl) {
   // Jedna analýza na URL za běh appky -- návrat na už viděné album/interpreta
   // pak barvu má okamžitě (žádné probliknutí přes výchozí barvu, než se
   // obal znovu stáhne a zanalyzuje).
   return _accentFutures.putIfAbsent(
       imageUrl,
-      () => _extract(imageUrl, size).then((color) {
+      () => _extract(imageUrl).then((color) {
             if (color == null) {
               // Neúspěch necachovat natrvalo -- backend obrázky doplňuje
               // průběžně, příští pokus už může uspět.
@@ -30,18 +30,33 @@ Future<Color?> extractAccentColor(String imageUrl, {Size size = const Size(120, 
 }
 
 final Map<String, Future<Color?>> _accentFutures = {};
+
+/// Jedna analýza obalu pro všechny tři pohledy (akcent, podpůrné tóny,
+/// charakter) -- dřív si ho každý dekódoval a procházel v plném rozlišení
+/// zvlášť. Zmenšený na 96 px už při dekódování, na barvy to stačí.
+Future<PaletteGenerator> _paletteFor(String imageUrl) {
+  final future = _paletteFutures.putIfAbsent(
+    imageUrl,
+    () => PaletteGenerator.fromImageProvider(
+      ResizeImage(CachedNetworkImageProvider(imageUrl), width: 96, height: 96, policy: ResizeImagePolicy.fit),
+      maximumColorCount: 16,
+    ),
+  );
+  // Neúspěch neukládat (obal se může doplnit později); hotové palety drží
+  // jejich vlastní cache výš, tahle mapa je jen na souběžné dotazy.
+  future.whenComplete(() => _paletteFutures.remove(imageUrl)).ignore();
+  return future;
+}
+
+final Map<String, Future<PaletteGenerator>> _paletteFutures = {};
 final Map<String, Color> _accentCache = {};
 
 /// Už spočítaná barva pro URL (synchronně), nebo `null`, pokud ještě ne.
 Color? cachedAccentColor(String? imageUrl) => imageUrl == null ? null : _accentCache[imageUrl];
 
-Future<Color?> _extract(String imageUrl, Size size) async {
+Future<Color?> _extract(String imageUrl) async {
   try {
-    final palette = await PaletteGenerator.fromImageProvider(
-      CachedNetworkImageProvider(imageUrl),
-      size: size,
-      maximumColorCount: 16,
-    );
+    final palette = await _paletteFor(imageUrl);
     return pickAccent(palette);
   } catch (_) {
     // Obal se nepodařilo stáhnout/zanalyzovat -- volající použije svůj fallback.
@@ -115,11 +130,7 @@ const supportHueRange = 40.0;
 Future<List<Color>> extractSupportTones(String imageUrl) {
   return _supportFutures.putIfAbsent(imageUrl, () async {
     try {
-      final palette = await PaletteGenerator.fromImageProvider(
-        CachedNetworkImageProvider(imageUrl),
-        size: const Size(120, 120),
-        maximumColorCount: 16,
-      );
+      final palette = await _paletteFor(imageUrl);
       final main = pickAccent(palette);
       if (main == null || isAchromatic(main)) return const <Color>[];
       final mainHue = HSLColor.fromColor(main).hue;
@@ -177,11 +188,7 @@ typedef CoverCharacter = ({
 Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
   return _characterFutures.putIfAbsent(imageUrl, () async {
     try {
-      final palette = await PaletteGenerator.fromImageProvider(
-        CachedNetworkImageProvider(imageUrl),
-        size: const Size(120, 120),
-        maximumColorCount: 16,
-      );
+      final palette = await _paletteFor(imageUrl);
       var total = 0;
       var sat = 0.0;
       var light = 0.0;

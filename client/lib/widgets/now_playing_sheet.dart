@@ -158,3 +158,53 @@ class NowPlayingSheetController {
     return done.future;
   }
 }
+
+/// Obsah pod rozbaleným přehrávačem: když ho panel úplně zakrývá (a nic se
+/// nehýbe), přestane se kreslit a jeho animace stojí -- web nemá raster
+/// cache, takže by se jinak celá stránka pod přehrávačem dál kreslila
+/// každý snímek pozadí. Při prvním pohybu panelu je hned zpátky (stav drží).
+class HiddenUnderPlayer extends StatefulWidget {
+  const HiddenUnderPlayer({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<HiddenUnderPlayer> createState() => _HiddenUnderPlayerState();
+}
+
+class _HiddenUnderPlayerState extends State<HiddenUnderPlayer> {
+  NowPlayingSheetController? _sheet;
+  bool _covered = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final sheet = context.getInheritedWidgetOfExactType<_NowPlayingSheetScope>()?.controller;
+    if (sheet != _sheet) {
+      _sheet?._anim.removeListener(_update);
+      _sheet?._anim.removeStatusListener(_onStatus);
+      _sheet = sheet;
+      sheet?._anim.addListener(_update);
+      sheet?._anim.addStatusListener(_onStatus);
+    }
+  }
+
+  void _onStatus(AnimationStatus _) => _update();
+
+  void _update() {
+    final sheet = _sheet;
+    final covered = sheet != null && sheet._anim.value >= 1 && !sheet._anim.isAnimating && !sheet.dragging;
+    if (covered != _covered && mounted) setState(() => _covered = covered);
+  }
+
+  @override
+  void dispose() {
+    _sheet?._anim.removeListener(_update);
+    _sheet?._anim.removeStatusListener(_onStatus);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      TickerMode(enabled: !_covered, child: Offstage(offstage: _covered, child: widget.child));
+}

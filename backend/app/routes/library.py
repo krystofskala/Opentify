@@ -35,10 +35,10 @@ from sqlmodel import Session, select
 
 from app.auth import get_current_user
 from app.catalog.availability import compute_availability, resolve_artist_name
-from app.catalog.schemas import CamelModel, RecordingOut
+from app.catalog.schemas import Availability, CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
-from app.library.dislikes import disliked_ids, send_feedback_later
+from app.library.dislikes import disliked_ids, purge_from_snapshots, send_feedback_later
 from app.library.spotify_link import SpotifyLinkError, import_spotify_link
 from app.library.spotify_import import (
     LIKED_SONGS_SOURCE,
@@ -130,32 +130,35 @@ def local_tracks(
     `source_provider in (local, musicbrainz-local)`, takže stažené/obstarané
     skladby v knihovně nikdy neskončily, i když je appka měla reálně na
     disku a šly rovnou přehrát -- odsud "proč to nemám v knihovně"."""
-    base_query = select(MediaAsset).where(_IN_LIBRARY)
-    total = len(session.exec(base_query).all())
-    assets = session.exec(
-        base_query.order_by(MediaAsset.updated_at.desc()).offset(offset).limit(limit)
+    total = session.exec(select(func.count()).select_from(MediaAsset).where(_IN_LIBRARY)).one()
+    # Jeden dotaz (asset + nahrávka + interpret) místo tří na každý řádek.
+    rows = session.exec(
+        select(Recording, Artist.name)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .outerjoin(Artist, Artist.id == Recording.artist_id)
+        .where(_IN_LIBRARY)
+        .order_by(MediaAsset.updated_at.desc())
+        .offset(offset)
+        .limit(limit)
     ).all()
 
-    items: list[RecordingOut] = []
-    for asset in assets:
-        recording = session.get(Recording, asset.recording_id)
-        if recording is None:
-            continue
-        items.append(
-            RecordingOut(
-                id=recording.id,
-                mbid=recording.mbid,
-                release_id=recording.release_id,
-                artist_id=recording.artist_id,
-                artist_name=resolve_artist_name(session, recording.artist_id),
-                title=recording.title,
-                duration_ms=recording.duration_ms,
-                isrc=recording.isrc,
-                track_number=recording.track_number,
-                availability=compute_availability(session, recording.id),
-                preview_url=recording.external_refs.get("previewUrl"),
-            )
+    items = [
+        RecordingOut(
+            id=recording.id,
+            mbid=recording.mbid,
+            release_id=recording.release_id,
+            artist_id=recording.artist_id,
+            artist_name=artist_name,
+            title=recording.title,
+            duration_ms=recording.duration_ms,
+            isrc=recording.isrc,
+            track_number=recording.track_number,
+            # Filtr `_IN_LIBRARY` = soubor je na disku a přehratelný.
+            availability=Availability.AVAILABLE,
+            preview_url=recording.external_refs.get("previewUrl"),
         )
+        for recording, artist_name in rows
+    ]
 
     return {"total": total, "items": [i.model_dump(by_alias=True) for i in items]}
 
@@ -488,7 +491,12 @@ async def import_spotify(
     user_id, _device_id = current
     raw = await file.read()
     try:
-        result = import_spotify_library(session, user_id, raw)
+        # Stovky skladeb do DB -- mimo event loop, ať mezitím hraje hudba.
+        def run():
+            with Session(engine) as own:
+                return import_spotify_library(own, user_id, raw)
+
+        result = await asyncio.to_thread(run)
     except (json.JSONDecodeError, zipfile.BadZipFile) as exc:
         raise HTTPException(
             status_code=400,
@@ -611,7 +619,7 @@ def liked_songs(
 
 
 @library_router.post("/liked-songs/{recording_id}")
-def like_song(
+async def like_song(
     recording_id: str,
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
@@ -638,6 +646,16 @@ def like_song(
         position = (top - 1) if top is not None else 0
         session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         session.commit()
+    # Oblíbená skladba nemůže mít zároveň zlomené srdce (klepnutí na
+    # zlomené srdce ho spraví a dá do Oblíbených).
+    dislikes = session.exec(
+        select(RecordingDislike).where(RecordingDislike.user_id == user_id, RecordingDislike.recording_id == recording_id)
+    ).all()
+    if dislikes:
+        for row in dislikes:
+            session.delete(row)
+        session.commit()
+        send_feedback_later(recording_id, 0)
     return {"recordingId": recording_id, "liked": True}
 
 
@@ -662,7 +680,8 @@ async def dislike_song(
         raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
     if recording_id not in disliked_ids(session, user_id):
         session.add(RecordingDislike(user_id=user_id, recording_id=recording_id))
-        session.commit()
+    purge_from_snapshots(session, recording_id)
+    session.commit()
     unlike_song(recording_id, session=session, current=current)
     send_feedback_later(recording_id, -1)
     return {"recordingId": recording_id, "disliked": True}

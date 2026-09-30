@@ -20,7 +20,7 @@ import httpx
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import GLOBAL_PLAYLIST_OWNER, Recording, RecordingDislike
+from app.models import GLOBAL_PLAYLIST_OWNER, Playlist, PlaylistItem, PlaylistKind, Recording, RecordingDislike
 
 logger = logging.getLogger(__name__)
 LB_API = os.environ.get("LISTENBRAINZ_SUBMIT_BASE_URL", "https://api.listenbrainz.org")
@@ -63,8 +63,45 @@ async def send_feedback(recording_id: str, score: int) -> None:
         logger.warning("LB feedback nešel: %s", exc)
 
 
+def purge_from_snapshots(session: Session, recording_id: str) -> int:
+    """Zlomené srdce platí hned, ne až při dalším přegenerování: skladba
+    zmizí z už uložených mixů, rádií a žebříčků. Vlastní playlisty a
+    historie (roční top skladby, dekáda) zůstávají, jak jsou."""
+    rows = session.exec(
+        select(PlaylistItem)
+        .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+        .where(
+            PlaylistItem.recording_id == recording_id,
+            Playlist.kind != PlaylistKind.USER,
+            ~Playlist.source.startswith("personal:year:"),
+            ~Playlist.source.startswith("personal:decade:"),
+        )
+    ).all()
+    for row in rows:
+        session.delete(row)
+    return len(rows)
+
+
+# Poslední odeslání pro každou skladbu: rychlé zlomit/spravit musí na LB
+# dorazit ve stejném pořadí, jinak by tam mohlo zůstat "hate".
+_last_feedback: dict[str, asyncio.Task] = {}
+
+
+async def _send_after(previous: asyncio.Task | None, recording_id: str, score: int) -> None:
+    if previous is not None:
+        try:
+            await previous
+        except Exception:  # noqa: BLE001 -- best effort
+            pass
+    await send_feedback(recording_id, score)
+
+
 def send_feedback_later(recording_id: str, score: int) -> None:
     try:
-        asyncio.get_running_loop().create_task(send_feedback(recording_id, score))
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        pass
+        return
+    previous = _last_feedback.get(recording_id)
+    task = loop.create_task(_send_after(previous, recording_id, score))
+    _last_feedback[recording_id] = task
+    task.add_done_callback(lambda t: _last_feedback.get(recording_id) is t and _last_feedback.pop(recording_id, None))

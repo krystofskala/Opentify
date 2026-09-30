@@ -6,7 +6,11 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import FastAPI, WebSocket
+import logging
+
+import httpx
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.catalog.artwork import artwork_backfill_loop, artwork_progress
@@ -37,6 +41,25 @@ from app.routes.provisioning import jobs_router, tracks_router
 from app.routes.recommendations import recommendations_router
 
 app = FastAPI(title="Vault API", version="0.1.0")
+
+
+# Výpadek/limit cizí služby (MusicBrainz 503, Deezer timeout...) není chyba
+# serveru: 502/504 s českou hláškou místo holé 500, ať klient ukáže
+# "zkus to znovu" a ne "něco se rozbilo".
+@app.exception_handler(httpx.HTTPStatusError)
+async def _upstream_status(_request: Request, exc: httpx.HTTPStatusError) -> JSONResponse:
+    logging.getLogger(__name__).warning("upstream %s: HTTP %s", exc.request.url.host, exc.response.status_code)
+    return JSONResponse(status_code=502, content={"detail": "Zdroj dat teď neodpovídá, zkus to za chvíli."})
+
+
+@app.exception_handler(httpx.TimeoutException)
+async def _upstream_timeout(_request: Request, exc: httpx.TimeoutException) -> JSONResponse:
+    return JSONResponse(status_code=504, content={"detail": "Zdroj dat neodpověděl včas, zkus to za chvíli."})
+
+
+@app.exception_handler(httpx.TransportError)
+async def _upstream_down(_request: Request, exc: httpx.TransportError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": "Zdroj dat je nedostupný, zkus to za chvíli."})
 
 # Flutter web klient (client/) běží při vývoji na jiném originu než backend
 # (`flutter run -d chrome` má vlastní dev server port), takže bez CORS by

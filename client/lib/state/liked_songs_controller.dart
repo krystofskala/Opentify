@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/library_repository.dart';
+import 'audio_player_controller.dart';
 import 'providers.dart';
 
 /// Množina `recordingId` v "Liked Songs" -- sdílený stav napříč appkou (Home,
@@ -27,25 +28,48 @@ class LikedSongsController extends StateNotifier<AsyncValue<Set<String>>> {
 
   bool isLiked(String recordingId) => state.valueOrNull?.contains(recordingId) ?? false;
 
+  /// Po chybě načtení (server spal) zkusí seznam znovu -- jinak by srdíčka
+  /// zůstala mrtvá až do restartu appky.
+  Future<void> retryIfFailed() async {
+    if (state.hasError) await _load();
+  }
+
   /// Optimistická aktualizace -- srdíčko se přepne okamžitě, HTTP request
   /// běží na pozadí. Při chybě se stav vrátí zpátky, ať UI nelže o tom, co
-  /// je fakt uložené na serveru.
-  Future<void> toggle(String recordingId) async {
-    final current = state.valueOrNull;
-    if (current == null) return; // ještě se nenačetlo/chyba -- není z čeho vycházet
-    final wasLiked = current.contains(recordingId);
-    final optimistic = {...current};
-    wasLiked ? optimistic.remove(recordingId) : optimistic.add(recordingId);
-    state = AsyncValue.data(optimistic);
+  /// je fakt uložené na serveru. Vrací false, když se to nepovedlo.
+  Future<bool> toggle(String recordingId) async => setLiked(recordingId, !isLiked(recordingId));
 
+  Future<bool> setLiked(String recordingId, bool liked) async {
+    await retryIfFailed();
+    final current = state.valueOrNull;
+    if (current == null) return false; // ještě se nenačetlo -- není z čeho vycházet
+    if (current.contains(recordingId) == liked) return true;
+    state = AsyncValue.data(liked ? {...current, recordingId} : ({...current}..remove(recordingId)));
     try {
-      if (wasLiked) {
-        await _repo.unlikeSong(recordingId);
-      } else {
+      if (liked) {
         await _repo.likeSong(recordingId);
+      } else {
+        await _repo.unlikeSong(recordingId);
       }
+      return true;
     } catch (_) {
-      state = AsyncValue.data(current); // rollback
+      final now = state.valueOrNull ?? current;
+      state = AsyncValue.data(liked ? ({...now}..remove(recordingId)) : {...now, recordingId}); // rollback
+      return false;
+    }
+  }
+
+  void setLocal(String recordingId) {
+    final current = state.valueOrNull;
+    if (current != null) state = AsyncValue.data({...current, recordingId});
+  }
+
+  /// Jen místní stav -- server to už udělal sám (zlomené srdce odebírá
+  /// z Oblíbených).
+  void forget(String recordingId) {
+    final current = state.valueOrNull;
+    if (current != null && current.contains(recordingId)) {
+      state = AsyncValue.data({...current}..remove(recordingId));
     }
   }
 }
@@ -74,23 +98,38 @@ class DislikedController extends StateNotifier<Set<String>> {
 
   bool isDisliked(String recordingId) => state.contains(recordingId);
 
-  /// Zlomí srdce (a odebere z Oblíbených), nebo ho zase spraví.
-  Future<void> toggle(String recordingId) async {
+  /// Zlomí srdce (a odebere z Oblíbených), nebo ho zase spraví. Vrací
+  /// false, když se to na serveru nepovedlo (stav se vrátí).
+  Future<bool> toggle(String recordingId) async {
     final was = state.contains(recordingId);
     state = was ? ({...state}..remove(recordingId)) : {...state, recordingId};
+    final liked = _ref.read(likedSongsControllerProvider.notifier);
+    final wasLiked = liked.isLiked(recordingId);
+    // Server při zlomení srdce odebere i z Oblíbených -- tady jen místně.
+    if (!was) {
+      liked.forget(recordingId);
+      _ref.read(audioPlayerControllerProvider.notifier).dropUpcoming(recordingId);
+    }
     try {
       if (was) {
         await _repo.undislikeSong(recordingId);
       } else {
-        if (_ref.read(likedSongsControllerProvider.notifier).isLiked(recordingId)) {
-          await _ref.read(likedSongsControllerProvider.notifier).toggle(recordingId);
-        }
         await _repo.dislikeSong(recordingId);
       }
+      return true;
     } catch (_) {
       state = was ? {...state, recordingId} : ({...state}..remove(recordingId));
+      if (!was && wasLiked) liked.setLocal(recordingId);
+      return false;
     }
   }
+
+  /// Jen místní stav -- server zlomené srdce zrušil sám (lajk ho spraví).
+  void forget(String recordingId) {
+    if (state.contains(recordingId)) state = {...state}..remove(recordingId);
+  }
+
+  void restore(String recordingId) => state = {...state, recordingId};
 }
 
 final dislikedProvider = StateNotifierProvider<DislikedController, Set<String>>((ref) {

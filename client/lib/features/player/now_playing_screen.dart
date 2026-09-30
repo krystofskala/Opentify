@@ -140,6 +140,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   void dispose() {
     _sheet?.detach(_pop);
     _carousel.dispose();
+    _lyricsAnim.dispose();
     super.dispose();
   }
 
@@ -232,7 +233,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   @override
   Widget build(BuildContext context) {
-    final playback = ref.watch(audioPlayerControllerProvider);
+    // Pozice (5x za vteřinu) přestavuje jen vlnovku a časy (`_SeekRow`),
+    // ne celý přehrávač.
+    ref.watch(audioPlayerControllerProvider.select(playerChromeKey));
+    final playback = ref.read(audioPlayerControllerProvider);
     final nowPlaying = playback.nowPlaying;
     final theme = Theme.of(context);
     final targetAccent = playback.accentColor ?? ref.watch(effectiveAccentProvider) ?? theme.colorScheme.primary;
@@ -782,6 +786,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     int? provisioningPct,
   ) {
     final controller = ref.read(audioPlayerControllerProvider.notifier);
+    final abBadge = _abBadge(playback, accent);
     // Stejné sklo jako mini přehrávač a tab bar (tón, rozmazání, lem).
     return GlassContainer(
       rim: true,
@@ -790,24 +795,32 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          WavySeekBar(
-            progress: duration.inMilliseconds == 0 ? 0 : positionMs / duration.inMilliseconds,
-            isPlaying: playback.isPlaying,
-            onChangeEnd: duration.inMilliseconds == 0
-                ? null
-                : (value) => controller.seek(Duration(milliseconds: (value * duration.inMilliseconds).round())),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Consumer(builder: (context, positionRef, _) {
+            final position = positionRef.watch(audioPlayerControllerProvider.select((s) => s.position));
+            final ms = duration.inMilliseconds;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(_formatDuration(playback.position), style: const TextStyle(color: Colors.white70)),
-                _abBadge(playback, accent),
-                Text(_formatDuration(duration), style: const TextStyle(color: Colors.white70)),
+                WavySeekBar(
+                  progress: ms == 0 ? 0 : position.inMilliseconds.clamp(0, ms) / ms,
+                  isPlaying: playback.isPlaying,
+                  onChangeEnd:
+                      ms == 0 ? null : (value) => controller.seek(Duration(milliseconds: (value * ms).round())),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_formatDuration(position), style: const TextStyle(color: Colors.white70)),
+                      abBadge,
+                      Text(_formatDuration(duration), style: const TextStyle(color: Colors.white70)),
+                    ],
+                  ),
+                ),
               ],
-            ),
-          ),
+            );
+          }),
           // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
           // spodní řádek přimáčknutý).
           const SizedBox(height: 6),
@@ -821,8 +834,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               ),
               IconButton(
                 icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
-                onPressed:
-                    playback.hasPrevious || playback.position > const Duration(seconds: 3) ? controller.previous : null,
+                // Bez předchozí skladby `previous()` přetočí na začátek.
+                onPressed: controller.previous,
               ),
               // M3 Expressive: play = "cookie" tvar, pauza = squircle --
               // tvar pružinou morfuje se stavem.

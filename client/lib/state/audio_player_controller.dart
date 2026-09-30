@@ -628,12 +628,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // A-B opakování této skladby -> smyčku plynule vyrábí server.
     final ab = _ref.read(abRepeatProvider);
     final abActive = ab != null && ab.recordingId == info.recordingId && ab.b != null;
-    unawaited(api.putJson('/radio/$sid', body: {
+    // Úpravy fronty (`_radioSyncUpcoming`) se řetězí ZA založení relace --
+    // jinak by rychlé přidání do fronty mohlo dorazit dřív a ztratit se.
+    _radioSync = api.putJson('/radio/$sid', body: {
       'recordingIds': ids,
       'positionMs': position.inMilliseconds,
       if (abActive) 'abStartMs': ab.a.inMilliseconds,
       if (abActive) 'abEndMs': ab.b!.inMilliseconds,
-    }).then<void>((_) {}, onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e')));
+    }).then<void>((_) {}, onError: (Object e) => debugPrint('AudioPlayerController: rádio se nezaložilo: $e'));
     _radioPoll?.cancel();
     _radioPoll = Timer.periodic(const Duration(seconds: 2), (_) => unawaited(_pollRadio()));
     // Plynulá pozice: Safari u HLS hlásí `currentTime` jen po kouskách, tečka
@@ -718,10 +720,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final sid = _radioSession;
     if (!_radioActive || sid == null) return;
     final ids = [for (final i in _upcomingOrder()) state.queue[i].recordingId];
-    unawaited(_ref
-        .read(apiClientProvider)
-        .putJson('/radio/$sid/queue', body: {'upcoming': ids}).then<void>((_) {}, onError: (Object _) {}));
+    final api = _ref.read(apiClientProvider);
+    // Za předchozí PUT (založení / minulá úprava), ať pořadí na serveru
+    // odpovídá pořadí úprav.
+    _radioSync = _radioSync.then<void>((_) async {
+      if (_radioSession != sid) return;
+      try {
+        await api.putJson('/radio/$sid/queue', body: {'upcoming': ids});
+      } catch (_) {}
+    });
   }
+
+  Future<void> _radioSync = Future.value();
 
   /// Pozice ve streamu -> co hraje a kde ve skladbě.
   void _onRadioPosition(Duration streamPosition, {bool measured = false}) {
@@ -960,6 +970,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
     state = state.copyWith(queue: newQueue, queueIndex: newCurrentIndex, shuffleOrder: newShuffleOrder);
     _radioSyncUpcoming();
+  }
+
+  /// Zlomené srdce: skladba zmizí ze zbytku fronty (právě hrající se
+  /// nepřeruší -- na to je "Další").
+  void dropUpcoming(String recordingId) {
+    for (var i = state.queue.length - 1; i >= 0; i--) {
+      if (i != state.queueIndex && state.queue[i].recordingId == recordingId) removeFromQueue(i);
+    }
   }
 
   /// Vloží skladbu hned za právě hrající, bez přerušení aktuálního
@@ -1691,6 +1709,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> dismiss() async {
     if (state.nowPlaying == null) return;
     _stopRadio();
+    // Zavřený přehrávač nemá co uspávat -- jinak by časovač později tiše
+    // ztlumil hlasitost další, nově puštěné skladby.
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _cancelFade();
     _restoredIdle = false;
     _realtime.playbackPause();
     try {
@@ -1890,6 +1913,29 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 typedef AbRepeat = ({String recordingId, Duration a, Duration? b});
 
 final abRepeatProvider = StateProvider<AbRepeat?>((ref) => null);
+
+/// Všechno ze stavu přehrávače kromě pozice -- pro `select` u widgetů,
+/// které se mají přestavět při změně skladby/stavu, ale ne 5x za vteřinu
+/// s každým posunem pozice (tu si kreslí jen vlnovka / časy).
+Object playerChromeKey(AudioPlayerState s) => (
+      s.nowPlaying,
+      s.accentColor,
+      s.duration,
+      s.error,
+      s.isBuffering,
+      s.isPlaying,
+      s.queue,
+      s.queueIndex,
+      s.shuffleEnabled,
+      s.shuffleOrder,
+      s.repeatMode,
+      s.speed,
+      s.volume,
+      s.sleepTimerEndAt,
+      s.queueSourceLabel,
+      s.normalizationEnabled,
+      s.recentlyPlayed,
+    );
 
 final audioPlayerControllerProvider = StateNotifierProvider<AudioPlayerController, AudioPlayerState>((ref) {
   return AudioPlayerController(ref.watch(realtimeClientProvider), ref);

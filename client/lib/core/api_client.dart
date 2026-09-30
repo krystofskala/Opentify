@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -11,9 +12,24 @@ class ApiException implements Exception {
   final int statusCode;
   final String body;
 
+  /// FastAPI `{"detail": "..."}` -> čitelná hláška pro UI (nebo null).
+  String? get detail {
+    try {
+      final json = jsonDecode(body);
+      final d = json is Map ? json['detail'] : null;
+      return d is String && d.isNotEmpty ? d : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   String toString() => 'ApiException($statusCode): $body';
 }
+
+/// Běžné volání nesmí viset donekonečna (Tailscale výpadek, uspaný
+/// server) -- UI pak ukáže chybu s Opakovat místo věčného načítání.
+const _defaultTimeout = Duration(seconds: 45);
 
 /// Tenký HTTP wrapper nad `docs/openapi.yaml` — base URL + dev auth hlavičky
 /// na jednom místě, JSON (de)serializaci řeší až repository vrstva
@@ -45,44 +61,50 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> getJson(String path, {Map<String, String>? query}) async {
-    final response = await _http.get(_uri(path, query), headers: _headers);
+    final response = await _http.get(_uri(path, query), headers: _headers).timeout(_defaultTimeout);
     return _decode(response) as Map<String, dynamic>;
   }
 
   Future<List<dynamic>> getJsonList(String path, {Map<String, String>? query}) async {
-    final response = await _http.get(_uri(path, query), headers: _headers);
+    final response = await _http.get(_uri(path, query), headers: _headers).timeout(_defaultTimeout);
     return _decode(response) as List<dynamic>;
   }
 
-  Future<Map<String, dynamic>> postJson(String path, {Object? body}) async {
-    final response = await _http.post(
-      _uri(path, null),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
+  Future<Map<String, dynamic>> postJson(String path, {Object? body, Duration timeout = _defaultTimeout}) async {
+    final response = await _http
+        .post(
+          _uri(path, null),
+          headers: _headers,
+          body: body == null ? null : jsonEncode(body),
+        )
+        .timeout(timeout);
     return _decode(response) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> putJson(String path, {Object? body}) async {
-    final response = await _http.put(
-      _uri(path, null),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
+    final response = await _http
+        .put(
+          _uri(path, null),
+          headers: _headers,
+          body: body == null ? null : jsonEncode(body),
+        )
+        .timeout(_defaultTimeout);
     return _decode(response) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> patchJson(String path, {Object? body}) async {
-    final response = await _http.patch(
-      _uri(path, null),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
+    final response = await _http
+        .patch(
+          _uri(path, null),
+          headers: _headers,
+          body: body == null ? null : jsonEncode(body),
+        )
+        .timeout(_defaultTimeout);
     return _decode(response) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>?> deleteJson(String path) async {
-    final response = await _http.delete(_uri(path, null), headers: _headers);
+    final response = await _http.delete(_uri(path, null), headers: _headers).timeout(_defaultTimeout);
     return _decode(response) as Map<String, dynamic>?;
   }
 

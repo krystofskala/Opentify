@@ -138,11 +138,14 @@ Future<void> showCharitySheet(BuildContext context, String artistName) {
                 trailing: const Icon(Symbols.open_in_new_rounded),
                 onTap: () async {
                   final messenger = ScaffoldMessenger.maybeOf(context);
+                  // Safari otevře novou kartu jen přímo z klepnutí -- proto
+                  // nejdřív odkaz, věnování do schránky až potom.
+                  final opened = openExternal(c.url);
                   try {
                     await Clipboard.setData(ClipboardData(text: dedication));
                     messenger?.showSnackBar(SnackBar(content: Text('Zkopírováno: $dedication')));
                   } catch (_) {}
-                  await openExternal(c.url);
+                  await opened;
                 },
               ),
           ],

@@ -121,6 +121,16 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     _dragVelocity = 0;
   }
 
+  // Zrušené tažení (gesto vyhrál někdo jiný, systémové přerušení) nesmí
+  // přepnout tab -- kapka se jen vrátí na aktuální.
+  void _onDragCancel() {
+    if (!_dragging) return;
+    _dragging = false;
+    _springLift(0);
+    _springPos(widget.selectedIndex.toDouble(), _settle, _dragVelocity);
+    _dragVelocity = 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -145,7 +155,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                 onHorizontalDragStart: _onDragStart,
                 onHorizontalDragUpdate: _onDragUpdate,
                 onHorizontalDragEnd: _onDragEnd,
-                onHorizontalDragCancel: () => _onDragEnd(DragEndDetails()),
+                onHorizontalDragCancel: _onDragCancel,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
