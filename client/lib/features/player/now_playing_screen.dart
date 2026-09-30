@@ -868,62 +868,47 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
           // spodní řádek přimáčknutý).
           const SizedBox(height: 6),
-          // Úzké iPhony (mini/SE): řada se raději zmenší, než aby přetekla.
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: SizedBox(
-              width: 340,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  IconButton(
-                    icon: Icon(Symbols.shuffle_rounded,
-                        color: playback.shuffleEnabled ? accent : Colors.white54, size: 22),
-                    tooltip: 'Náhodné přehrávání',
-                    onPressed: controller.toggleShuffle,
-                  ),
-                  // Bez předchozí skladby `previous()` přetočí na začátek.
-                  ExpressiveSkipButton(forward: false, onPressed: () => _skip(forward: false)),
-                  // M3 Expressive: play = "cookie" tvar, pauza = squircle --
-                  // tvar pružinou morfuje se stavem.
-                  GlassPressable(
-                    onPressed: playback.isBuffering ? null : controller.togglePlayPause,
-                    shape: const CircleBorder(),
-                    semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
-                    child: ExpressiveMorph(
-                      size: 76,
-                      color: Colors.white,
-                      shape: playback.isPlaying
-                          ? const ExpressiveShape.squircle()
-                          : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
-                      child: playback.isBuffering
-                          ? (isProvisioning && provisioningPct != null
-                              ? SizedBox.square(
-                                  dimension: 40,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 3, color: accent, value: provisioningPct / 100),
-                                )
-                              : ExpressiveLoadingIndicator(size: 40, color: accent))
-                          : Icon(
-                              playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
-                              size: 44,
-                              color: accent,
-                            ),
-                    ),
-                  ),
-                  ExpressiveSkipButton(forward: true, onPressed: playback.hasNext ? () => _skip(forward: true) : null),
-                  IconButton(
-                    icon: Icon(
-                      playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
-                      color: playback.repeatMode == RepeatMode.off ? Colors.white54 : accent,
-                      size: 22,
-                    ),
-                    tooltip: 'Opakování',
-                    onPressed: controller.cycleRepeatMode,
-                  ),
-                ],
+          // Spojená skupina Předchozí · Přehrát · Další (M3 Expressive, jako
+          // PixelPlay) uprostřed, náhodně/opakování malé po stranách.
+          Row(
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Symbols.shuffle_rounded, color: playback.shuffleEnabled ? accent : Colors.white54, size: 22),
+                tooltip: 'Náhodné přehrávání',
+                onPressed: controller.toggleShuffle,
               ),
-            ),
+              Expanded(
+                child: ExpressivePlayerGroup(
+                  isPlaying: playback.isPlaying,
+                  // Bez předchozí skladby `previous()` přetočí na začátek.
+                  onPrevious: () => _skip(forward: false),
+                  onPlayPause: playback.isBuffering ? null : controller.togglePlayPause,
+                  onNext: playback.hasNext ? () => _skip(forward: true) : null,
+                  playColor: Colors.white,
+                  playIconColor: accent,
+                  playChild: playback.isBuffering
+                      ? (isProvisioning && provisioningPct != null
+                          ? SizedBox.square(
+                              dimension: 34,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 3, color: accent, value: provisioningPct / 100),
+                            )
+                          : ExpressiveLoadingIndicator(size: 36, color: accent))
+                      : null,
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
+                  color: playback.repeatMode == RepeatMode.off ? Colors.white54 : accent,
+                  size: 22,
+                ),
+                tooltip: 'Opakování',
+                onPressed: controller.cycleRepeatMode,
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           // Text a fronta vždy na dosah pod ovládáním (jako Apple Music);
