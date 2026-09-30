@@ -1,10 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:material_symbols_icons/symbols.dart';
+import 'package:flutter/physics.dart';
 
 import '../../theme/glass_tokens.dart';
 import '../glass_container.dart';
-import 'glass_pressable.dart';
-import 'glass_segmented_control.dart';
 
 class GlassTabItem {
   const GlassTabItem({required this.icon, required this.label});
@@ -17,16 +17,16 @@ class GlassTabItem {
   final String label;
 }
 
-/// Plovoucí skleněný tab bar (kapsle) s posuvnou zvýrazněnou kapslí.
-/// HIG Tab bars (https://developer.apple.com/design/human-interface-guidelines/tab-bars):
-/// "A tab bar floats above content at the bottom of the screen. Its items
-/// rest on a Liquid Glass background that allows content beneath to peek
-/// through." Jen navigace, žádné akce; popisky vždy; barva popisků
-/// `onSurface` (ne akcent -- "Avoid applying a similar color to tab labels
-/// and content layer backgrounds").
+/// Plovoucí skleněný tab bar jako v iOS 26 (Apple Music, živé screenshoty):
+/// výběr je skleněná kapka, kterou jde chytit a táhnout. Při tažení kapka
+/// povyroste nad lištu, ikony pod ní zvětší a obarví barvou akcentu,
+/// podle rychlosti se natahuje ve směru pohybu; po puštění pružinou
+/// doskočí na nejbližší tab a zapadne zpět do lišty. Klepnutí na tab ji
+/// tam pošle s malým "hopem". Pod kapkou je vždy barevná kopie řádku, takže
+/// se tab barví plynule, jak přes něj kapka jede.
 /// Rozměry: `GlassTokens.tabBarHeight`, okraje `floatingMargin`, mezera
 /// nad safe area `floatingBottomGap`.
-class GlassTabBar extends StatelessWidget {
+class GlassTabBar extends StatefulWidget {
   const GlassTabBar({super.key, required this.items, required this.selectedIndex, required this.onSelected});
 
   final List<GlassTabItem> items;
@@ -34,68 +34,238 @@ class GlassTabBar extends StatelessWidget {
   final ValueChanged<int> onSelected;
 
   @override
+  State<GlassTabBar> createState() => _GlassTabBarState();
+}
+
+class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin {
+  // Poloha kapky v jednotkách tabů (0 = první), pružinou.
+  late final AnimationController _pos = AnimationController.unbounded(vsync: this, value: widget.selectedIndex.toDouble());
+  // 0 = v liště, 1 = zvednutá nad lištu (tažení).
+  late final AnimationController _lift = AnimationController.unbounded(vsync: this);
+  bool _dragging = false;
+  double _itemWidth = 1;
+
+  static final SpringDescription _follow = SpringDescription.withDampingRatio(mass: 1, stiffness: 700, ratio: 0.82);
+  static final SpringDescription _settle = SpringDescription.withDampingRatio(mass: 1, stiffness: 380, ratio: 0.72);
+  static final SpringDescription _liftSpring = SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 0.62);
+
+  @override
+  void didUpdateWidget(GlassTabBar old) {
+    super.didUpdateWidget(old);
+    if (!_dragging && widget.selectedIndex != old.selectedIndex && (_pos.value - widget.selectedIndex).abs() > 0.01) {
+      _springPos(widget.selectedIndex.toDouble(), _settle);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pos.dispose();
+    _lift.dispose();
+    super.dispose();
+  }
+
+  void _springPos(double target, SpringDescription spring) {
+    _pos.animateWith(SpringSimulation(spring, _pos.value, target, _pos.velocity));
+  }
+
+  void _springLift(double target) {
+    _lift.animateWith(SpringSimulation(_liftSpring, _lift.value, target, _lift.velocity));
+  }
+
+  double _slotAt(double x) => (x / _itemWidth - 0.5).clamp(0.0, widget.items.length - 1.0);
+
+  void _select(int index) {
+    _springPos(index.toDouble(), _settle);
+    if (index != widget.selectedIndex) widget.onSelected(index);
+  }
+
+  void _onTapUp(TapUpDetails d) {
+    final index = _slotAt(d.localPosition.dx).round();
+    // Malý hop: kapka povyskočí a hned zapadne.
+    _lift.animateWith(SpringSimulation(_liftSpring, _lift.value, 0, 6));
+    _select(index);
+  }
+
+  void _onDragStart(DragStartDetails d) {
+    _dragging = true;
+    _springLift(1);
+    _springPos(_slotAt(d.localPosition.dx), _follow);
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) => _springPos(_slotAt(d.localPosition.dx), _follow);
+
+  void _onDragEnd(DragEndDetails d) {
+    _dragging = false;
+    // Kam kapka "doletí" podle rychlosti hodu, pak nejbližší tab.
+    final fling = (d.primaryVelocity ?? 0) / _itemWidth * 0.12;
+    final index = (_pos.value + fling).round().clamp(0, widget.items.length - 1);
+    _springLift(0);
+    _select(index);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final accent = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
     // 12 px NAD skutečným spodním insetem (home indikátor iPhonu).
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    const h = GlassTokens.tabBarHeight;
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset + GlassTokens.floatingBottomGap),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: GlassTokens.floatingMargin),
-        child: GlassContainer(
-          borderRadius: const BorderRadius.all(Radius.circular(GlassTokens.tabBarHeight / 2)),
-          shadow: true,
-          rim: true,
-          child: SizedBox(
-            height: GlassTokens.tabBarHeight,
+        child: SizedBox(
+          height: h,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              _itemWidth = width / widget.items.length;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapUp: _onTapUp,
+                onHorizontalDragStart: _onDragStart,
+                onHorizontalDragUpdate: _onDragUpdate,
+                onHorizontalDragEnd: _onDragEnd,
+                onHorizontalDragCancel: () => _onDragEnd(DragEndDetails()),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    GlassContainer(
+                      borderRadius: const BorderRadius.all(Radius.circular(h / 2)),
+                      shadow: true,
+                      rim: true,
+                      child: SizedBox(
+                        height: h,
+                        width: width,
+                        child: _row(theme, accent: null),
+                      ),
+                    ),
+                    // Kapka výběru nad lištou (smí přesahovat při zvednutí).
+                    AnimatedBuilder(
+                      animation: Listenable.merge([_pos, _lift]),
+                      builder: (context, _) => _drop(theme, accent, isDark, width),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Řádek tabů. `accent == null` = běžné barvy (lišta), jinak barevná,
+  /// vyplněná verze pro to, co je pod kapkou.
+  Widget _row(ThemeData theme, {required Color? accent}) {
+    return Row(
+      children: [
+        for (var i = 0; i < widget.items.length; i++)
+          Expanded(
+            child: Semantics(
+              button: true,
+              selected: i == widget.selectedIndex,
+              label: widget.items[i].label,
+              onTap: accent == null ? () => _select(i) : null,
+              excludeSemantics: true,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    widget.items[i].icon,
+                    size: 24,
+                    fill: accent == null ? 0 : 1,
+                    color: accent ?? theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.items[i].label,
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 11,
+                      fontWeight: accent == null ? FontWeight.w500 : FontWeight.w700,
+                      color: accent ?? theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _drop(ThemeData theme, Color accent, bool isDark, double width) {
+    const h = GlassTokens.tabBarHeight;
+    const pad = 5.0;
+    final lift = _lift.value;
+    // Natažení ve směru pohybu podle rychlosti (jako kapka).
+    final speed = (_pos.velocity.abs() * 0.05).clamp(0.0, 0.28);
+    final baseW = _itemWidth - 2 * pad, baseH = h - 2 * pad;
+    final w = baseW * (1 + 0.28 * lift) * (1 + speed);
+    final hh = baseH * (1 + 0.42 * lift) * (1 - speed * 0.45);
+    final cx = (_pos.value + 0.5) * _itemWidth;
+    const cy = h / 2;
+    final left = cx - w / 2, top = cy - hh / 2;
+    // Obsah pod kapkou: barevná kopie řádku, zvětšená kolem středu kapky.
+    final magnify = 1 + 0.22 * lift.clamp(0.0, 1.5);
+    final radius = BorderRadius.circular(hh / 2);
+    return Positioned(
+      left: left,
+      top: top,
+      width: w,
+      height: hh,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            boxShadow: lift > 0.05
+                ? [BoxShadow(color: Colors.black.withValues(alpha: 0.28 * lift.clamp(0.0, 1.0)), blurRadius: 18, offset: const Offset(0, 6))]
+                : null,
+          ),
+          child: ClipRRect(
+            borderRadius: radius,
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                AnimatedAlign(
-                  alignment: slideAlignment(selectedIndex, items.length),
-                  duration: Expressive.spatialDefault.duration,
-                  curve: Expressive.spatialDefault,
-                  child: FractionallySizedBox(
-                    widthFactor: 1 / items.length,
-                    heightFactor: 1,
-                    child: const Padding(padding: EdgeInsets.all(5), child: SelectedCapsule()),
+                // Sklo kapky: v klidu jemné (jako dřív), zvednuté čiré.
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Colors.white.withValues(
+                      alpha: (isDark ? 0.12 : 0.6) * (1 - lift.clamp(0.0, 1.0)) + 0.06 * lift.clamp(0.0, 1.0),
+                    ),
                   ),
                 ),
-                Row(
-                  children: [
-                    for (var i = 0; i < items.length; i++)
-                      Expanded(
-                        child: GlassPressable(
-                          onPressed: () => onSelected(i),
-                          shape: const StadiumBorder(),
-                          semanticLabel: items[i].label,
-                          selected: i == selectedIndex,
-                          highlightColor: Colors.transparent,
-                          minSize: const Size(0, GlassTokens.minHitTarget),
-                          child: SizedBox(
-                            height: GlassTokens.tabBarHeight,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                i == selectedIndex
-                                    ? VariedIcon.varied(items[i].icon, fill: 1, size: 24, color: theme.colorScheme.onSurface)
-                                    : Icon(items[i].icon, size: 24, color: theme.colorScheme.onSurfaceVariant),
-                                const SizedBox(height: 2),
-                                Text(
-                                  items[i].label,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    fontSize: 11,
-                                    fontWeight: i == selectedIndex ? FontWeight.w700 : FontWeight.w500,
-                                    color: i == selectedIndex
-                                        ? theme.colorScheme.onSurface
-                                        : theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                Positioned(
+                  left: -left,
+                  top: -top,
+                  width: width,
+                  height: h,
+                  child: Transform.scale(
+                    scale: magnify,
+                    origin: Offset(cx - width / 2, cy - h / 2),
+                    child: ExcludeSemantics(child: _row(theme, accent: accent)),
+                  ),
+                ),
+                // Světelný lem: nahoře jasnější, zvednutá kapka výraznější.
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: radius,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.18 + 0.32 * math.min(1.0, lift)),
+                        width: 1,
                       ),
-                  ],
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.center,
+                        colors: [Colors.white.withValues(alpha: 0.10 + 0.12 * math.min(1.0, lift)), Colors.transparent],
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
