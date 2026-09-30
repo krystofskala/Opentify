@@ -43,6 +43,16 @@ async def create_listen(body: ListenIn, current: tuple[str, str] = Depends(get_c
     )
     if listen_id is None:
         raise HTTPException(status_code=404, detail="nahrávka nenalezena")
+    # Poslech = skladba v knihovně profilu (app/library/entries.py).
+    from app.db import engine
+    from app.library.entries import add_to_library
+    from sqlmodel import Session
+
+    def add() -> None:
+        with Session(engine) as session:
+            add_to_library(session, user_id, body.recording_id)
+
+    await asyncio.to_thread(add)
     return {"id": listen_id}
 
 

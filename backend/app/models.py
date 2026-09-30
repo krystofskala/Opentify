@@ -240,6 +240,17 @@ class InviteCode(SQLModel, table=True):
     used_at: datetime | None = None
 
 
+class LibraryEntry(SQLModel, table=True):
+    """Skladba v knihovně profilu (ne admina -- ten má všechno stažené).
+    Přidá se, když si ji profil pustí, stáhne nebo lajkne; soubor je
+    sdílený, odebrání maže jen tenhle řádek."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    recording_id: str = Field(index=True)
+    added_at: datetime = Field(default_factory=utcnow)
+
+
 class CollectionProgress(SQLModel, table=True):
     """Kde uživatel v albu/playlistu skončil -- sdílené mezi zařízeními
     ("Pokračovat" na mobilu po přehrávání na PC). `route` = stránka alba /

@@ -39,6 +39,8 @@ from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import Availability, CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
+from app.library.entries import add_to_library
+from app.library.entries import remove_from_library as remove_entry
 from app.library.dislikes import disliked_ids, purge_from_snapshots, send_feedback_later
 from app.library.spotify_link import SpotifyLinkError, import_spotify_link
 from app.library.spotify_import import (
@@ -50,6 +52,8 @@ from app.library.spotify_import import (
 from app.models import (
     Artist,
     CollectionProgress,
+    LibraryEntry,
+    ProvisioningJob,
     MediaAsset,
     MediaAssetStatus,
     Playlist,
@@ -77,6 +81,36 @@ _IN_LIBRARY = and_(
     MediaAsset.status == MediaAssetStatus.AVAILABLE,
     or_(MediaAsset.hidden_from_library.is_(None), MediaAsset.hidden_from_library.is_(False)),  # type: ignore[union-attr]
 )
+
+
+def _in_library(user_id: str):
+    """Knihovna profilu: admin = všechno stažené (soubory jsou jeho
+    kurátorství), ostatní profily = jen skladby, které si sami pustili,
+    stáhli nebo lajkli (`LibraryEntry`). Soubory jsou sdílené."""
+    if user_id == ADMIN_ID:
+        # Všechno stažené KROMĚ skladeb, které stáhl jen jiný profil -- ty
+        # adminovi v knihovně nepatří, dokud si je sám nepustí/nelajkne.
+        foreign_only = (
+            select(ProvisioningJob.recording_id)
+            .where(ProvisioningJob.requested_by_user_id != ADMIN_ID)
+            .where(
+                ProvisioningJob.recording_id.not_in(  # type: ignore[attr-defined]
+                    select(ProvisioningJob.recording_id).where(ProvisioningJob.requested_by_user_id == ADMIN_ID)
+                )
+            )
+            .where(
+                ProvisioningJob.recording_id.not_in(  # type: ignore[attr-defined]
+                    select(LibraryEntry.recording_id).where(LibraryEntry.user_id == ADMIN_ID)
+                )
+            )
+        )
+        return and_(_IN_LIBRARY, MediaAsset.recording_id.not_in(foreign_only))  # type: ignore[attr-defined]
+    return and_(
+        _IN_LIBRARY,
+        MediaAsset.recording_id.in_(  # type: ignore[attr-defined]
+            select(LibraryEntry.recording_id).where(LibraryEntry.user_id == user_id)
+        ),
+    )
 
 
 def _progress_dict(p: ScanProgress) -> dict:
@@ -124,7 +158,7 @@ def local_tracks(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """"Moje knihovna" -- cokoliv `AVAILABLE` na disku, ať už z lokálního
     skenu (`POST /library/scan`), nebo dřív obstarané přes
@@ -132,13 +166,13 @@ def local_tracks(
     `source_provider in (local, musicbrainz-local)`, takže stažené/obstarané
     skladby v knihovně nikdy neskončily, i když je appka měla reálně na
     disku a šly rovnou přehrát -- odsud "proč to nemám v knihovně"."""
-    total = session.exec(select(func.count()).select_from(MediaAsset).where(_IN_LIBRARY)).one()
+    total = session.exec(select(func.count()).select_from(MediaAsset).where(_in_library(current[0]))).one()
     # Jeden dotaz (asset + nahrávka + interpret) místo tří na každý řádek.
     rows = session.exec(
         select(Recording, Artist.name)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .outerjoin(Artist, Artist.id == Recording.artist_id)
-        .where(_IN_LIBRARY)
+        .where(_in_library(current[0]))
         .order_by(MediaAsset.updated_at.desc())
         .offset(offset)
         .limit(limit)
@@ -155,7 +189,7 @@ def local_tracks(
             duration_ms=recording.duration_ms,
             isrc=recording.isrc,
             track_number=recording.track_number,
-            # Filtr `_IN_LIBRARY` = soubor je na disku a přehratelný.
+            # Filtr `_in_library(current[0])` = soubor je na disku a přehratelný.
             availability=Availability.AVAILABLE,
             preview_url=recording.external_refs.get("previewUrl"),
         )
@@ -168,7 +202,7 @@ def local_tracks(
 @library_router.get("/local-albums")
 def local_albums(
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """Alba seskupená z lokální knihovny -- jeden SQL dotaz místo N+1 dotazů
     z klienta (viz `LocalLibraryScreen` záložka "Alba"). Vrací jen alba, ke
@@ -185,7 +219,7 @@ def local_albums(
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Release.artist_id)
-        .where(_IN_LIBRARY)
+        .where(_in_library(current[0]))
         .group_by(Release.id)
         .order_by(Artist.name, Release.title)
     ).all()
@@ -206,7 +240,7 @@ def local_albums(
 @library_router.get("/local-artists")
 def local_artists(
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """Interpreti seskupení z lokální knihovny -- viz `local_albums`, stejný
     princip (jeden GROUP BY dotaz, ne N+1 z klienta)."""
@@ -214,7 +248,7 @@ def local_artists(
         select(Artist.id, Artist.name, Artist.images, func.count(func.distinct(Recording.id)))
         .join(Recording, Recording.artist_id == Artist.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .where(_IN_LIBRARY)
+        .where(_in_library(current[0]))
         .group_by(Artist.id)
         .order_by(Artist.name)
     ).all()
@@ -276,7 +310,7 @@ def search_library(
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Recording.artist_id, isouter=True)
         .join(Release, Release.id == Recording.release_id, isouter=True)
-        .where(_IN_LIBRARY)
+        .where(_in_library(current[0]))
     ).all()
     # Skóre bere lepší z "název je hlavní pole" a "interpret je hlavní pole"
     # -- dotaz "radiohead" jinak řadil skladbu *pojmenovanou* "Radiohead" od
@@ -338,7 +372,7 @@ def _local_recording_out(session: Session, recording: Recording) -> RecordingOut
 @library_router.get("/genres")
 def local_genres(
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """Žánry napříč lokální knihovnou (MusicBrainz genre tagy na albech, viz
     `CatalogService._enrich_release_genres` -- doplňují se líně při otevření
@@ -351,7 +385,7 @@ def local_genres(
         select(Release.genres, func.count(func.distinct(Recording.id)))
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .where(_IN_LIBRARY)
+        .where(_in_library(current[0]))
         .group_by(Release.id)
     ).all()
 
@@ -370,7 +404,7 @@ def local_genres(
 def local_by_genre(
     genre: str,
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """Lokální skladby, jejichž album nese daný žánr -- `genre` je přesný
     MusicBrainz genre název (viz `/library/genres`), ne fulltextové hledání."""
@@ -382,7 +416,7 @@ def local_by_genre(
         select(Recording)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .where(
-            _IN_LIBRARY,
+            _in_library(current[0]),
             Recording.release_id.in_(matching_release_ids),
         )
     ).all()
@@ -393,7 +427,7 @@ def local_by_genre(
 @library_router.get("/czech")
 def local_czech(
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """Skladby interpretů s MusicBrainz `country == "CZ"` (viz
     `CatalogService._enrich_artist_country`, líné doplnění při otevření
@@ -402,7 +436,7 @@ def local_czech(
         select(Recording)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Recording.artist_id)
-        .where(_IN_LIBRARY, Artist.country == "CZ")
+        .where(_in_library(current[0]), Artist.country == "CZ")
     ).all()
     items = [_local_recording_out(session, r) for r in recordings]
     return {"total": len(items), "items": [i.model_dump(by_alias=True) for i in items]}
@@ -460,10 +494,14 @@ def _remove_from_library(session: Session, recording_id: str, dry_run: bool = Fa
 def remove_track(
     recording_id: str,
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(require_admin),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """"Odebrat z knihovny" -- neodebírá z Oblíbených ani z playlistů (to
-    jsou samostatné akce), jen z "Moje knihovna"."""
+    jsou samostatné akce), jen z "Moje knihovna". Jiný profil než admin
+    maže jen svou položku, sdílený soubor zůstává."""
+    if current[0] != ADMIN_ID:
+        removed = remove_entry(session, current[0], recording_id)
+        return {"recordingId": recording_id, "result": "hidden" if removed else "not_in_library", "freedBytes": 0}
     return _remove_from_library(session, recording_id)
 
 
@@ -472,10 +510,17 @@ def remove_tracks(
     body: RemoveTracksBody,
     dry_run: bool = Query(default=False, alias="dryRun"),
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(require_admin),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
     """`?dryRun=true` -- jen spočítá, co by se stalo (kolik MB se uvolní, co
     se jen skryje), pro potvrzovací sheet v klientovi. Nic nemění."""
+    if current[0] != ADMIN_ID:
+        # Jiný profil: jen z jeho knihovny, soubory (sdílené) zůstávají.
+        results = []
+        for rid in body.recording_ids[:500]:
+            removed = True if dry_run else remove_entry(session, current[0], rid)
+            results.append({"recordingId": rid, "result": "hidden" if removed else "not_in_library", "freedBytes": 0})
+        return {"removed": len(results), "freedBytes": 0, "results": results}
     results = [_remove_from_library(session, rid, dry_run) for rid in body.recording_ids[:500]]
     return {
         "removed": sum(1 for r in results if r["result"] != "not_in_library"),
@@ -676,6 +721,7 @@ async def like_song(
         session.commit()
         if user_id == ADMIN_ID:
             send_feedback_later(recording_id, 0)
+    add_to_library(session, user_id, recording_id)
     return {"recordingId": recording_id, "liked": True}
 
 
