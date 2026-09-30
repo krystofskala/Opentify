@@ -520,13 +520,32 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                 style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 2),
               ),
               if (sourceLabel != null)
-                Text(
-                  sourceLabel,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
-                ),
+                Builder(builder: (context) {
+                  // Odkud hraje = odkaz na tu stránku (playlist, album...).
+                  final route = ref.read(audioPlayerControllerProvider.notifier).queueContext;
+                  final label = Text(
+                    sourceLabel,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      decoration: route == null ? null : TextDecoration.underline,
+                      decorationColor: Colors.white.withValues(alpha: 0.5),
+                    ),
+                  );
+                  if (route == null) return label;
+                  return Semantics(
+                    link: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _openAfterClose(route),
+                      child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: label),
+                    ),
+                  );
+                }),
             ],
           ),
         ),

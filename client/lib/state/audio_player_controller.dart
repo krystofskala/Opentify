@@ -785,6 +785,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// poslechu" na Domů pak ukáže i playlist, ne jen album skladby.
   String? _queueContext;
 
+  /// Stránka, odkud se fronta spustila, pokud je to detail (playlist, album,
+  /// interpret, kategorie...) -- "Přehrává se · X" v přehrávači na ni odkazuje.
+  /// Kořeny záložek (Domů, Hledat, Knihovna, Profil) nevrací.
+  String? get queueContext {
+    final route = _queueContext;
+    if (route == null || route.isEmpty) return null;
+    const roots = {'/', '/search', '/library', '/profile', '/home'};
+    return roots.contains(route) ? null : route;
+  }
+
   String? _currentRoute() {
     try {
       // Detail (playlist, album...) se otevírá `push` nad záložkou -- pak je
