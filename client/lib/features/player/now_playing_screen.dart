@@ -309,6 +309,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           final panelHeight = size.height - topInset;
           final panelTop = topInset + (1 - v) * panelHeight;
           const radius = BorderRadius.vertical(top: Radius.circular(Expressive.cornerExtraLarge));
+          // Během vysouvání (jako Oznamovací centrum v iOS) je panel sklo
+          // s lomem nad appkou: obsah pod ním je vidět, s výškou se víc
+          // rozmazává a těsně před horní hranou se rozplyne do pozadí
+          // přehrávače (`veil`). Úplně nahoře už jen neprůhledné pozadí.
+          final veil = Curves.easeInCubic.transform(((v - 0.55) / 0.45).clamp(0.0, 1.0));
+          final shellCapture = LiquidScope.shell;
+          final glassy = v < 0.999 && shellCapture != null;
           return Stack(
             children: [
               Positioned.fill(
@@ -322,9 +329,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: radius,
+                    // Stín jen pod neprůhledným panelem -- přes průhledné
+                    // sklo by prosvítal jako šedá skvrna.
                     boxShadow: [
                       BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.35), blurRadius: 30, offset: const Offset(0, -4)),
+                          color: Colors.black.withValues(alpha: 0.35 * veil),
+                          blurRadius: 30,
+                          offset: const Offset(0, -4)),
                     ],
                   ),
                   child: ClipRRect(
@@ -340,13 +351,28 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             // Živý gradient appky (už v barvě skladby) přesně na
                             // svém místě na obrazovce -- obsah stránky pod panelem
                             // je tím úplně zakrytý, barvy a pohyb prosvítají.
-                            Positioned(
-                              top: -panelTop,
-                              left: 0,
-                              width: size.width,
-                              height: size.height,
-                              child: const AppBackgroundMirror(),
-                            ),
+                            if (glassy)
+                              Positioned.fill(
+                                child: LiquidCaptureScope(
+                                  capture: shellCapture,
+                                  child: GlassContainer(
+                                    liquid: true,
+                                    rim: true,
+                                    borderRadius: radius,
+                                    blurSigma: lerpDouble(4, 22, v)!,
+                                    fit: StackFit.expand,
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              ),
+                            if (veil > 0)
+                              Positioned(
+                                top: -panelTop,
+                                left: 0,
+                                width: size.width,
+                                height: size.height,
+                                child: Opacity(opacity: veil, child: const AppBackgroundMirror()),
+                              ),
                             MediaQuery.removePadding(context: context, removeTop: true, child: child!),
                           ],
                         ),

@@ -28,15 +28,27 @@ class LiquidScope extends StatefulWidget {
   static LiquidCapture? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<_LiquidScopeData>()?.capture;
 
+  /// Zachytávání hlavní appky (`HomeShell`) -- pro panel přehrávače při
+  /// vysouvání, který je samostatná trasa nad shellem.
+  static LiquidCapture? get shell => _LiquidScopeState._shell;
+
   @override
   State<LiquidScope> createState() => _LiquidScopeState();
 }
 
 class _LiquidScopeState extends State<LiquidScope> {
+  static LiquidCapture? _shell;
   final LiquidCapture _capture = LiquidCapture();
 
   @override
+  void initState() {
+    super.initState();
+    _shell = _capture;
+  }
+
+  @override
   void dispose() {
+    if (_shell == _capture) _shell = null;
     _capture.dispose();
     super.dispose();
   }
