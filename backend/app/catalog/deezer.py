@@ -87,6 +87,12 @@ class DeezerClient:
         return await cached_json(cache_key, SEARCH_TTL_SECONDS, fetch)
 
     async def search_artist(self, name: str, limit: int = 5) -> list[dict[str, Any]]:
+        # Tátova kapela Kontrast: stejně pojmenovaných kapel je na Deezeru víc
+        # -- nikdy nepřiřazovat cizí diskografii/fotku/skladby.
+        from app.catalog.artwork import _is_protected
+
+        if _is_protected(name):
+            return []
         cache_key = f"dz:search_artist:{name}:{limit}"
 
         async def fetch() -> dict[str, Any] | None:

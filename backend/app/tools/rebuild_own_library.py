@@ -67,17 +67,22 @@ def _norm(text: str | None) -> str:
     return unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower().strip()
 
 
+def nfc(value: str | None) -> str | None:
+    return unicodedata.normalize("NFC", value) if value else value
+
+
 def fix_text(value: str | None, path: str) -> str | None:
     """Štítek zapsaný v cp1250, přečtený jako latin1 ("Zemì" -> "Země").
     Silné znaky (ø ì ù ò...) = oprava vždy; jen "è" = oprava, když opravený
     text lépe sedí na název souboru/složky (francouzské "Crème" zůstane)."""
     if not value:
         return value
+    value = nfc(value)
     chars = set(value)
     if not (chars & _STRONG or chars & _WEAK):
         return value
     try:
-        fixed = value.encode("latin1").decode("cp1250")
+        fixed = nfc(value.encode("latin1").decode("cp1250"))
     except (UnicodeEncodeError, UnicodeDecodeError):
         return value
     if chars & _STRONG:
@@ -98,8 +103,21 @@ def _albumartist(path: Path) -> str | None:
 
 
 def _folder_album_name(folder: str) -> str:
-    name = folder.rstrip("/").rsplit("/", 1)[-1]
-    return re.sub(r"[_]+", " ", name).strip()
+    """Čistý název složky: bez "l Audio l 320Kbps l ..." a podtržítek."""
+    name = nfc(folder.rstrip("/").rsplit("/", 1)[-1]) or ""
+    name = re.split(r"\s+l\s+", name)[0]
+    name = re.sub(r"[_]+", " ", name).strip()
+    return name
+
+
+def _folder_artist_album(folder: str) -> tuple[str | None, str]:
+    """"Seafret - Give Me Something [EP] (2014)" -> ("Seafret", "Give Me Something [EP]")."""
+    name = _folder_album_name(folder)
+    if " - " in name:
+        artist, album = name.split(" - ", 1)
+        album = re.sub(r"\s*\((19|20)\d{2}\)\s*$", "", album).strip()
+        return artist.strip() or None, album or name
+    return None, name
 
 
 def plan() -> list[dict]:
@@ -130,14 +148,14 @@ def plan() -> list[dict]:
         if not p.exists():
             continue
         tags = _read_tags(p)
-        title = fix_text(tags.title, path) or _PREFIX.sub("", p.stem).replace("_", " ").strip()
+        title = fix_text(tags.title, path) or nfc(_PREFIX.sub("", p.stem).replace("_", " ").strip())
         artist = fix_text(tags.artist, path)
         folders[str(p.parent)].append({
             "old": rid,
             "path": path,
             "title": title.strip(),
             "artist": _real(artist),
-            "album": (fix_text(tags.album, path) or "").strip() or None,
+            "album": _real(fix_text(tags.album, path)) and (fix_text(tags.album, path) or "").strip(),
             "albumartist": _real(fix_text(_albumartist(p), path)),
             "track": tags.track_number,
             "duration": tags.duration_ms,
@@ -146,7 +164,8 @@ def plan() -> list[dict]:
     out: list[dict] = []
     for folder, files in folders.items():
         albums = Counter(f["album"] for f in files if f["album"])
-        majority = albums.most_common(1)[0][0] if albums else _folder_album_name(folder)
+        folder_artist, folder_album = _folder_artist_album(folder)
+        majority = albums.most_common(1)[0][0] if albums else folder_album
         keep = {a for a, n in albums.items() if n >= 2}
         for f in files:
             f["release"] = f["album"] if f["album"] in keep else majority
@@ -163,7 +182,7 @@ def plan() -> list[dict]:
             elif artists:
                 release_artist = artists.most_common(1)[0][0]
             else:
-                release_artist = _folder_album_name(folder)
+                release_artist = folder_artist or _folder_album_name(folder)
             for f in group:
                 f["release_artist"] = release_artist
                 f["artist"] = f["artist"] or release_artist
@@ -257,6 +276,72 @@ def apply(items: list[dict]) -> Counter:
     return stats
 
 
+_COMPILATION = re.compile(
+    r"best of|greatest|very best|collection|hits|anthology|výběr|to nejlepší|\b(19|20)\d{2}\s*-\s*(19|20)\d{2}\b",
+    re.IGNORECASE,
+)
+_GENERIC = {"folk", "once", "dope mix", "local-music", "unknown album", "mp"}
+
+
+def _is_compilation(release_title: str, release_artist: str, track_artists: int) -> bool:
+    return (
+        release_artist == VARIOUS
+        or track_artists > 2
+        or bool(_COMPILATION.search(release_title))
+        or _norm(release_title) in _GENERIC
+    )
+
+
+def compilations_to_playlists() -> list[str]:
+    """Výběry, soundtracky a mixy nejsou alba: z každé takové "složky-alba"
+    vlastní playlist (pod jejím názvem), skladby pak album nemají."""
+    from app.auth import ADMIN_ID
+    from app.models import Artist, Playlist, PlaylistKind, Release
+
+    made = []
+    with Session(engine) as session:
+        assets = session.exec(select(MediaAsset).where(MediaAsset.source_provider == "local")).all()
+        by_release: dict[str, list[tuple[Recording, str]]] = defaultdict(list)
+        for asset in assets:
+            rec = session.get(Recording, asset.recording_id)
+            if rec is not None and rec.release_id:
+                by_release[rec.release_id].append((rec, asset.storage_path or ""))
+        for release_id, tracks in by_release.items():
+            release = session.get(Release, release_id)
+            if release is None:
+                continue
+            artist = session.get(Artist, release.artist_id)
+            artist_name = artist.name if artist else ""
+            if any(p in _norm(release.title) or p in _norm(artist_name) for p in PROTECTED):
+                continue
+            if not _is_compilation(release.title, artist_name, len({r.artist_id for r, _ in tracks})):
+                continue
+            title = "Volné skladby" if _norm(release.title) in {"local-music", "mp"} else release.title
+            playlist = session.exec(
+                select(Playlist).where(
+                    Playlist.owner_user_id == ADMIN_ID, Playlist.kind == PlaylistKind.USER, Playlist.title == title
+                )
+            ).first()
+            if playlist is None:
+                playlist = Playlist(owner_user_id=ADMIN_ID, title=title, kind=PlaylistKind.USER, description="Z tvé hudby")
+                session.add(playlist)
+                session.commit()
+                session.refresh(playlist)
+            existing = {i.recording_id for i in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all()}
+            ordered = sorted(tracks, key=lambda t: (t[0].track_number or 999, t[1]))
+            for pos, (rec, _path) in enumerate(ordered):
+                if rec.id not in existing:
+                    session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rec.id, position=pos))
+                rec.release_id = None
+                session.add(rec)
+            session.commit()
+            if not session.exec(select(Recording).where(Recording.release_id == release_id)).first():
+                session.delete(release)
+                session.commit()
+            made.append(f"{title} ({len(tracks)})")
+    return made
+
+
 def main() -> None:
     items = plan()
     releases = Counter((f["release_artist"], f["release"]) for f in items)
@@ -271,6 +356,7 @@ def main() -> None:
     if "--apply" in sys.argv:
         print("záloha:", backup())
         print("hotovo:", dict(apply(items)))
+        print("playlisty z výběrů:", compilations_to_playlists())
 
 
 if __name__ == "__main__":
