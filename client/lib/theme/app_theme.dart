@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
+import '../widgets/app_background.dart' show AppBackgroundMirror;
 import 'accent_color.dart' show isAchromatic;
 import 'design_tokens.dart';
 import 'shapes.dart';
@@ -143,15 +144,94 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
     // (Chrome na PC) trhal -- snímkuje celé stránky (živě nahlášeno).
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.android: _SoftRisePageTransitionsBuilder(),
-        TargetPlatform.windows: _SoftRisePageTransitionsBuilder(),
-        TargetPlatform.macOS: _SoftRisePageTransitionsBuilder(),
-        TargetPlatform.linux: _SoftRisePageTransitionsBuilder(),
-        TargetPlatform.fuchsia: _SoftRisePageTransitionsBuilder(),
+        TargetPlatform.iOS: _OpaqueWhileMoving(CupertinoPageTransitionsBuilder()),
+        TargetPlatform.android: _OpaqueWhileMoving(_SoftRisePageTransitionsBuilder()),
+        TargetPlatform.windows: _OpaqueWhileMoving(_SoftRisePageTransitionsBuilder()),
+        TargetPlatform.macOS: _OpaqueWhileMoving(_SoftRisePageTransitionsBuilder()),
+        TargetPlatform.linux: _OpaqueWhileMoving(_SoftRisePageTransitionsBuilder()),
+        TargetPlatform.fuchsia: _OpaqueWhileMoving(_SoftRisePageTransitionsBuilder()),
       },
     ),
   );
+}
+
+/// Stránky jsou průhledné (skrz prosvítá živé pozadí appky), takže při
+/// přechodu byly vidět obě přes sebe -- text přes text. Během pohybu
+/// dostane příchozí stránka pod sebe kopii pozadí (`AppBackgroundMirror`)
+/// a tím zakryje tu pod ní; v klidu nic navíc nekreslí.
+class _OpaqueWhileMoving extends PageTransitionsBuilder {
+  const _OpaqueWhileMoving(this.inner);
+
+  final PageTransitionsBuilder inner;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    // První stránka (bez předchozí) se nezakrývá -- pod ní nic není.
+    final backed = route.isFirst ? child : _BackdropWhileAnimating(animation: animation, child: child);
+    return inner.buildTransitions(route, context, animation, secondaryAnimation, backed);
+  }
+}
+
+class _BackdropWhileAnimating extends StatefulWidget {
+  const _BackdropWhileAnimating({required this.animation, required this.child});
+
+  final Animation<double> animation;
+  final Widget child;
+
+  @override
+  State<_BackdropWhileAnimating> createState() => _BackdropWhileAnimatingState();
+}
+
+class _BackdropWhileAnimatingState extends State<_BackdropWhileAnimating> {
+  bool _moving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.animation.addStatusListener(_onStatus);
+    _moving = widget.animation.isAnimating;
+  }
+
+  @override
+  void didUpdateWidget(_BackdropWhileAnimating old) {
+    super.didUpdateWidget(old);
+    if (old.animation != widget.animation) {
+      old.animation.removeStatusListener(_onStatus);
+      widget.animation.addStatusListener(_onStatus);
+    }
+  }
+
+  void _onStatus(AnimationStatus status) {
+    // Tažení zpět od okraje (iOS) jede bez stavu "animuje" -- hodnota < 1
+    // znamená, že stránka není celá na místě.
+    final moving = status == AnimationStatus.forward || status == AnimationStatus.reverse || widget.animation.value < 1;
+    if (moving != _moving && mounted) setState(() => _moving = moving);
+  }
+
+  @override
+  void dispose() {
+    widget.animation.removeStatusListener(_onStatus);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Stejný strom v obou stavech (jen se přidá/ubere spodní vrstva), ať se
+    // stránka při dojetí nepřestavuje.
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        if (_moving) const Positioned.fill(child: AppBackgroundMirror()),
+        KeyedSubtree(key: const ValueKey('page'), child: widget.child),
+      ],
+    );
+  }
 }
 
 /// Nová obrazovka se prolne a dojede o 24 px zespodu (ease-out), stará pod

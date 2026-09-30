@@ -331,7 +331,12 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
         } else if (notification is ScrollEndNotification) {
           _resumeTimer?.cancel();
           _resumeTimer = Timer(const Duration(seconds: 3), () {
-            if (mounted) setState(() => _userScrolling = false);
+            if (!mounted) return;
+            setState(() => _userScrolling = false);
+            // Zpátky na aktuální řádek hned, ne až s dalším řádkem textu.
+            if (_currentIndex >= 0) {
+              WidgetsBinding.instance.addPostFrameCallback((_) => _scrollTo(_currentIndex, animate: true));
+            }
           });
         }
         return false;
@@ -385,9 +390,13 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
           tween: Tween(end: sigma),
           duration: const Duration(milliseconds: 450),
           curve: Curves.easeOutCubic,
-          builder: (context, blur, child) => blur < 0.05
-              ? child!
-              : ImageFiltered(imageFilter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur), child: child),
+          // Stejný strom s rozmazáním i bez (`enabled`) -- přepínání typu
+          // widgetu řádek znovu stavělo a text probliknul.
+          builder: (context, blur, child) => ImageFiltered(
+            enabled: blur >= 0.05,
+            imageFilter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+            child: child,
+          ),
           child: AnimatedDefaultTextStyle(
             duration: const Duration(milliseconds: 350),
             style: TextStyle(

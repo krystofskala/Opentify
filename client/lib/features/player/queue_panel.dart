@@ -145,6 +145,14 @@ class _QueueListState extends ConsumerState<_QueueList> {
     final queue = widget.queue;
     final currentIndex = widget.currentIndex;
     final upcomingCount = queue.length - currentIndex - 1;
+    // Stálé klíče řádků (instance položky + pořadí duplicit), ne index --
+    // po odebrání/přesunu se jinak přestavovaly všechny řádky pod ním
+    // a posunutý řádek přeskočil bez animace.
+    final seen = <int, int>{};
+    final ids = [
+      for (final info in queue)
+        '${identityHashCode(info)}:${seen[identityHashCode(info)] = (seen[identityHashCode(info)] ?? 0) + 1}',
+    ];
 
     return CustomScrollView(
       controller: widget.scrollController,
@@ -162,7 +170,7 @@ class _QueueListState extends ConsumerState<_QueueList> {
               final info = queue[queueIndex];
               final group = info.groupId;
               final row = _dismissible(
-                key: ValueKey('${info.recordingId}_$queueIndex'),
+                key: ValueKey(ids[queueIndex]),
                 onDismissed: () => controller.removeFromQueue(queueIndex),
                 child: _QueueRow(
                   info: info,
@@ -177,7 +185,7 @@ class _QueueListState extends ConsumerState<_QueueList> {
               final isStart = queueIndex == currentIndex + 1 || queue[queueIndex - 1].groupId != group;
               final expanded = _expanded.contains(group);
               if (!isStart) {
-                return expanded ? row : SizedBox.shrink(key: ValueKey('hidden_${info.recordingId}_$queueIndex'));
+                return expanded ? row : SizedBox.shrink(key: ValueKey('hidden_${ids[queueIndex]}'));
               }
               var count = 0;
               while (queueIndex + count < queue.length && queue[queueIndex + count].groupId == group) {
@@ -193,20 +201,32 @@ class _QueueListState extends ConsumerState<_QueueList> {
               );
               if (!expanded) {
                 return _dismissible(
-                  key: ValueKey('group_${group}_$queueIndex'),
+                  key: ValueKey('group_${ids[queueIndex]}'),
                   label: 'Odebrat vše',
                   onDismissed: () => controller.removeGroup(group),
                   child: header,
                 );
               }
               return Column(
-                key: ValueKey('groupopen_${group}_$queueIndex'),
+                key: ValueKey('groupopen_${ids[queueIndex]}'),
                 mainAxisSize: MainAxisSize.min,
                 children: [header, row],
               );
             },
             onReorderItem: (oldIndex, newIndex) {
-              controller.reorderQueue(currentIndex + 1 + oldIndex, currentIndex + 1 + newIndex);
+              final from = currentIndex + 1 + oldIndex;
+              final to = currentIndex + 1 + newIndex;
+              final group = queue[from].groupId;
+              // Sbalený blok táhne celou skupinu, ne jen první skladbu.
+              if (group != null && !_expanded.contains(group) && (from == currentIndex + 1 || queue[from - 1].groupId != group)) {
+                var count = 0;
+                while (from + count < queue.length && queue[from + count].groupId == group) {
+                  count++;
+                }
+                controller.reorderRange(from, count, to);
+              } else {
+                controller.reorderQueue(from, to);
+              }
             },
           ),
         ],

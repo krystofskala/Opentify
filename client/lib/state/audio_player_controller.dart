@@ -954,6 +954,23 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _radioSyncUpcoming();
   }
 
+  /// Přesune celý sbalený blok (album/playlist přidaný najednou) --
+  /// `newIndex` jako u `reorderQueue` (poloha po vyjmutí JEDNÉ položky).
+  /// Jen v části "Další ve frontě" (za právě hrající skladbou).
+  void reorderRange(int start, int count, int newIndex) {
+    final q = state.queue;
+    if (count <= 1) return reorderQueue(start, newIndex);
+    if (start <= state.queueIndex || start + count > q.length) return;
+    // Cíl uvnitř samotného bloku = žádný pohyb.
+    if (newIndex >= start && newIndex < start + count) return;
+    final block = q.sublist(start, start + count);
+    final rest = [...q]..removeRange(start, start + count);
+    final insertAt = (newIndex > start ? newIndex - count + 1 : newIndex).clamp(state.queueIndex + 1, rest.length);
+    rest.insertAll(insertAt, block);
+    state = state.copyWith(queue: rest, shuffleEnabled: false);
+    _radioSyncUpcoming();
+  }
+
   /// Odebere skladbu z fronty (swipe ve frontě). Právě hrající se odebrat
   /// nedá -- na to je "Další". Zamíchané pořadí se přepočítá (indexy za
   /// odebranou se posunou o jednu).

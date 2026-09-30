@@ -569,7 +569,10 @@ class GrainPainter extends CustomPainter {
 
   /// Zrno jako opakovaná dlaždice (výplň pro `Paint.shader`) -- sdílí ji
   /// i `paintGrainShape` (tvary na dlaždicích Hledat, hlavička, Wrapped).
-  static Shader shader() {
+  static Shader shader() => _shader ??= _makeShader();
+  static Shader? _shader;
+
+  static Shader _makeShader() {
     final image = _image ??= _build();
     final matrix = Float64List(16)
       ..[0] = 0.5

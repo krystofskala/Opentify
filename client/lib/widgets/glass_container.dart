@@ -223,8 +223,14 @@ class GlassContainer extends StatelessWidget {
   static final Map<(Color, Brightness), ThemeData> _flippedThemes = {};
 
   static ThemeData _themeFor(Color seed, Brightness brightness) {
-    if (_flippedThemes.length > 24) _flippedThemes.clear();
-    return _flippedThemes.putIfAbsent((seed, brightness), () => buildAppTheme(seed: seed, brightness: brightness));
+    // Během přebarvení (2,8 s) je `primary` každý snímek jiná barva -- bez
+    // zaokrouhlení se celý motiv (`ColorScheme.fromSeed`) počítal znovu pro
+    // každé sklo v každém snímku. 16 stupňů na kanál: pár motivů na přechod,
+    // rozdíl v tónu textu okem nepoznat.
+    int q(double v) => ((v * 15).round() * 17);
+    final key = Color.fromARGB(255, q(seed.r), q(seed.g), q(seed.b));
+    if (_flippedThemes.length > 48) _flippedThemes.clear();
+    return _flippedThemes.putIfAbsent((key, brightness), () => buildAppTheme(seed: key, brightness: brightness));
   }
 
   /// Tón skla v barvě skladby: tmavý odstín v tmavém režimu, světlý ve

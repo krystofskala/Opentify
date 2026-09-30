@@ -231,6 +231,26 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     }
   }
 
+  /// Tlačítka Další/Předchozí posunou obal stejnou animací jako přejetí
+  /// prstem (dřív obal jen skokem přeskočil).
+  Future<void> _skip({required bool forward}) async {
+    final playback = ref.read(audioPlayerControllerProvider);
+    final controller = ref.read(audioPlayerControllerProvider.notifier);
+    final slides = forward
+        ? playback.hasNext
+        : playback.previousIndex != null && playback.position <= const Duration(seconds: 3);
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (!slides || reduce || _carousel.isAnimating) {
+      forward ? await controller.next() : await controller.previous();
+      return;
+    }
+    const spring = SpringDescription(mass: 1, stiffness: 420, damping: 38);
+    await _carousel.animateWith(SpringSimulation(spring, _carousel.value, forward ? -_carouselWidth : _carouselWidth, 0));
+    if (!mounted) return;
+    forward ? await controller.next() : await controller.previous();
+    if (mounted) _carousel.value = 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Pozice (5x za vteřinu) přestavuje jen vlnovku a časy (`_SeekRow`),
@@ -835,7 +855,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               IconButton(
                 icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
                 // Bez předchozí skladby `previous()` přetočí na začátek.
-                onPressed: controller.previous,
+                onPressed: () => _skip(forward: false),
               ),
               // M3 Expressive: play = "cookie" tvar, pauza = squircle --
               // tvar pružinou morfuje se stavem.
@@ -866,7 +886,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               ),
               IconButton(
                 icon: const Icon(Symbols.skip_next_rounded, color: Colors.white, size: 34),
-                onPressed: playback.hasNext ? controller.next : null,
+                onPressed: playback.hasNext ? () => _skip(forward: true) : null,
               ),
               IconButton(
                 icon: Icon(

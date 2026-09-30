@@ -92,17 +92,19 @@ class _FunShapes extends StatefulWidget {
 }
 
 class _FunShapesState extends State<_FunShapes> with SingleTickerProviderStateMixin {
-  late final AnimationController _spin = AnimationController(vsync: this, duration: const Duration(seconds: 9));
+  // Jedna otočka při zobrazení, pak klid -- nekonečná smyčka nutila web
+  // překreslovat celou obrazovku 60x za vteřinu, dokud byl Profil otevřený.
+  late final AnimationController _spin = AnimationController(vsync: this, duration: const Duration(milliseconds: 2600));
+  late final Animation<double> _turn = CurvedAnimation(parent: _spin, curve: Curves.easeInOutCubic);
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    if (reduceMotion) {
-      _spin.stop();
-    } else if (!_spin.isAnimating) {
-      _spin.repeat();
-    }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+      if (!reduceMotion) _spin.forward();
+    });
   }
 
   @override
@@ -115,9 +117,11 @@ class _FunShapesState extends State<_FunShapes> with SingleTickerProviderStateMi
   Widget build(BuildContext context) {
     return SizedBox.square(
       dimension: 76,
-      child: AnimatedBuilder(
-        animation: _spin,
-        builder: (context, _) => CustomPaint(painter: _FunShapesPainter(widget.hue, _spin.value)),
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: _turn,
+          builder: (context, _) => CustomPaint(painter: _FunShapesPainter(widget.hue, _turn.value)),
+        ),
       ),
     );
   }

@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../core/api_client.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'glass/expressive_shapes.dart';
+import 'glass/glass.dart';
 
 /// Jednotné stavové widgety (nadpis sekce, prázdno, chyba, načítání) pro
 /// celou appku -- dřív si každá obrazovka psala vlastní `_SectionHeader`/
@@ -143,10 +147,23 @@ class ErrorState extends StatelessWidget {
   final VoidCallback? onRetry;
   final bool compact;
 
+  /// Lidská věta místo syrové výjimky ("ApiException(502): {...}").
   String get _detail {
-    final raw = error?.toString();
-    if (raw == null) return '';
-    return raw.length > 160 ? '${raw.substring(0, 160)}…' : raw;
+    final e = error;
+    if (e == null) return '';
+    if (e is TimeoutException) return 'Server neodpověděl včas.';
+    if (e is ApiException) {
+      final d = e.detail;
+      if (d != null) return d;
+      if (e.statusCode >= 500) return 'Server má potíže (${e.statusCode}).';
+      if (e.statusCode == 404) return 'Tohle už neexistuje.';
+      return 'Chyba ${e.statusCode}.';
+    }
+    final raw = e.toString();
+    if (raw.contains('ClientException') || raw.contains('XMLHttpRequest') || raw.contains('SocketException')) {
+      return 'Nejde se spojit se serverem – je zapnutý Tailscale?';
+    }
+    return '';
   }
 
   @override
@@ -154,7 +171,13 @@ class ErrorState extends StatelessWidget {
     final theme = Theme.of(context);
     final retry = onRetry == null
         ? null
-        : TextButton.icon(onPressed: onRetry, icon: const Icon(Symbols.refresh_rounded), label: const Text('Zkusit znovu'));
+        : GlassButton(
+            label: 'Zkusit znovu',
+            icon: Symbols.refresh_rounded,
+            style: GlassButtonStyle.tonal,
+            compact: true,
+            onPressed: onRetry,
+          );
     if (compact) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
@@ -174,14 +197,18 @@ class ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Symbols.cloud_off_rounded, size: 48, color: theme.colorScheme.error),
+            Icon(Symbols.cloud_off_rounded, size: 48, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(height: AppSpacing.sm),
-            Text(message, textAlign: TextAlign.center, style: theme.textTheme.bodyLarge),
+            Text(message, textAlign: TextAlign.center, style: theme.textTheme.titleMedium),
             if (_detail.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.xxs),
-              Text(_detail, textAlign: TextAlign.center, style: theme.textTheme.bodySmall),
+              Text(
+                _detail,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
             ],
-            if (retry != null) ...[const SizedBox(height: AppSpacing.sm), retry],
+            if (retry != null) ...[const SizedBox(height: AppSpacing.md), retry],
           ],
         ),
       ),
