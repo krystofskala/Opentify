@@ -22,7 +22,9 @@ from sqlmodel import Session, select
 from app.library.spotify_import import LIKED_SONGS_SOURCE
 from app.models import Artist, Listen, ListenLater, Playlist, PlaylistItem, PlaylistKind, Recording, Release
 
-TMM_HEADER = ["Track name", "Artist name", "Album", "Playlist name", "Type", "ISRC"]
+# Stejné sloupce jako vlastní CSV export TuneMyMusic (ten určitě přijme);
+# "Spotify - id" = přesná skladba bez hledání podle názvu.
+TMM_HEADER = ["Track name", "Artist name", "Album", "Playlist name", "Type", "ISRC", "Spotify - id"]
 TOP_TRACKS = 500
 
 
@@ -85,6 +87,7 @@ class _Lookup:
             "artist": self.artist(rec.artist_id),
             "album": self.album(rec.release_id),
             "isrc": rec.isrc or "",
+            "spotifyId": (rec.external_refs or {}).get("spotifyId") or "",
             "recordingId": rec.id,
         }
 
@@ -94,7 +97,7 @@ def _chunks(items: list[str], size: int = 900) -> list[list[str]]:
 
 
 def _tmm_rows(tracks: list[dict], playlist: str) -> list[list[str]]:
-    return [[t["title"], t["artist"], t["album"], playlist, "Playlist", t["isrc"]] for t in tracks]
+    return [[t["title"], t["artist"], t["album"], playlist, "Playlist", t["isrc"], t["spotifyId"]] for t in tracks]
 
 
 def _csv(rows: list[list[str]], header: list[str]) -> bytes:
