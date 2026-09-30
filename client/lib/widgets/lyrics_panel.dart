@@ -10,8 +10,8 @@ import '../data/lyrics_repository.dart';
 import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
 import '../theme/glass_tokens.dart';
-import 'glass_container.dart';
 import 'glass/expressive_shapes.dart';
+import 'glass/glass.dart';
 
 final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>((ref, recordingId) {
   return ref.watch(lyricsRepositoryProvider).getLyrics(recordingId);
@@ -25,11 +25,8 @@ final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>(
 /// karaoke po písmenech (to by vyžadovalo slovní časování, které LRCLIB
 /// běžně nenabízí).
 Future<void> showLyricsPanel(BuildContext context, {required String recordingId, required Color accentColor}) {
-  return showModalBottomSheet(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return showGlassSheet(
+    context,
     builder: (context) => _LyricsPanel(recordingId: recordingId, accentColor: accentColor),
   );
 }

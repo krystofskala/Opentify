@@ -11,6 +11,7 @@ import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
 import 'glass/glass.dart';
+import '../core/cz_plural.dart';
 
 /// Import z odkazu na Spotify: průběh, pak otevře nový playlist a řekne,
 /// kolik skladeb se našlo (a jestli Spotify dal jen prvních 100).
@@ -27,8 +28,9 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
       // Jedna skladba: rovnou pustit (stáhne se, když ještě není).
       final rec = result.recording;
       if (rec == null) throw Exception('Skladbu se nepodařilo najít.');
-      void play() =>
-          ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlayingInfoFor(rec), sourceLabel: 'Sdílená skladba');
+      void play() => ref
+          .read(audioPlayerControllerProvider.notifier)
+          .playTrack(nowPlayingInfoFor(rec), sourceLabel: 'Sdílená skladba');
       // Safari po await už nemusí brát přehrání jako gesto uživatele --
       // zkusí se hned, a kdyby to zablokoval, snackbar má tlačítko.
       play();
@@ -39,9 +41,8 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
       return;
     }
     ref.invalidate(myPlaylistsProvider);
-    final count = result.matched == result.total
-        ? '${result.total} skladeb'
-        : '${result.matched} z ${result.total} skladeb';
+    final count =
+        result.matched == result.total ? songsCount(result.total) : '${result.matched} z ${result.total} skladeb';
     messenger?.showSnackBar(SnackBar(
       content: Text(
         '„${result.title}“ je v Knihovně › Sdílené ($count).'
@@ -75,15 +76,20 @@ Future<void> showSpotifyLinkDialog(BuildContext context, WidgetRef ref) async {
   final url = await showDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('Přidat ze Spotify'),
+      title: const Text('Přidat z odkazu'),
       content: TextField(
         controller: controller,
         autofocus: controller.text.isEmpty,
-        decoration: const InputDecoration(hintText: 'Odkaz na playlist, album nebo skladbu'),
+        decoration: const InputDecoration(hintText: 'Odkaz ze Spotify na playlist, album nebo skladbu'),
         onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
+        GlassButton(
+          label: 'Zrušit',
+          style: GlassButtonStyle.plain,
+          compact: true,
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         GlassButton(
           label: 'Přidat',
           style: GlassButtonStyle.prominent,

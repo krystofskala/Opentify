@@ -4,6 +4,7 @@
 library;
 
 export '../glass_container.dart';
+export 'glass_back_button.dart';
 export 'glass_button.dart';
 export 'glass_pressable.dart';
 export 'glass_search_field.dart';

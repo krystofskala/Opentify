@@ -12,6 +12,7 @@ import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'radio_station.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
+import '../core/cz_plural.dart';
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -105,7 +106,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
       }).catchError((Object _) => toast('Nepodařilo se načíst skladby, zkus to znovu'));
     }
 
-    String songs(int n) => n == 1 ? '1 skladba' : (n >= 2 && n <= 4 ? '$n skladby' : '$n skladeb');
+    String songs(int n) => songsCount(n);
 
     return SafeArea(
       child: GlassSheet(
@@ -225,7 +226,7 @@ Future<void> showPlayOptions(BuildContext context, {required String title, requi
   final container = ProviderScope.containerOf(context, listen: false);
   final controller = container.read(audioPlayerControllerProvider.notifier);
   final messenger = ScaffoldMessenger.maybeOf(context);
-  String songs(int n) => n == 1 ? '1 skladba' : (n >= 2 && n <= 4 ? '$n skladby' : '$n skladeb');
+  String songs(int n) => songsCount(n);
   void toast(String text) =>
       messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
   return showGlassSheet<void>(

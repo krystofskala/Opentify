@@ -92,7 +92,7 @@ class _ConfirmRemoveSheet extends StatelessWidget {
         (
           Symbols.visibility_off_rounded,
           single
-              ? 'Je z tvé vlastní hudební složky -- soubor zůstane, jen se skryje z knihovny.'
+              ? 'Je z tvé vlastní hudební složky – soubor zůstane, jen se skryje z knihovny.'
               : '${preview.hidden} ${_plural(preview.hidden, 'skladba z tvé vlastní složky se jen skryje, soubor zůstane', 'skladby z tvé vlastní složky se jen skryjí, soubory zůstanou', 'skladeb z tvé vlastní složky se jen skryje, soubory zůstanou')}.',
         ),
       (

@@ -16,6 +16,7 @@ import '../../widgets/playlist_card.dart' show PlaylistArtwork;
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_link_import.dart';
 import '../../widgets/state_views.dart';
+import '../../core/cz_plural.dart';
 
 String _playlists(int n) => n == 1
     ? 'playlist'
@@ -126,7 +127,7 @@ class SharedPlaylistsScreen extends ConsumerWidget {
                   placeholderIcon: Symbols.queue_music_rounded,
                   artwork: PlaylistArtwork(title: p.title, coverUrls: p.coverUrls, showTitle: false),
                   title: p.title,
-                  subtitle: '${p.description ?? 'Ze Spotify'} · ${p.itemCount} skladeb',
+                  subtitle: '${p.description ?? 'Ze Spotify'} · ${songsCount(p.itemCount)}',
                   onTap: () => context.push('/playlists/${p.id}'),
                   onLongPress: () => showCollectionActions(
                     context,

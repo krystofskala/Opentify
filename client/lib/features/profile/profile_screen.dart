@@ -92,7 +92,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             _ActionCard(
               icon: Symbols.equalizer_rounded,
               title: 'Wrapped',
-              description: 'Tvoje roky v hudbě od 2016 -- minuty, interpreti, skladby a žánry, '
+              description: 'Tvoje roky v hudbě od 2016 – minuty, interpreti, skladby a žánry, '
                   'každou obrazovku jde sdílet jako obrázek. Zůstávají napořád.',
               buttonLabel: 'Otevřít',
               onPressed: () => context.push('/wrapped'),
@@ -110,7 +110,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             _ActionCard(
               icon: Symbols.music_note_rounded,
               title: 'Ladička',
-              description: 'Ladička na kytaru -- standardní i alternativní ladění, struna se pozná '
+              description: 'Ladička na kytaru – standardní i alternativní ladění, struna se pozná '
                   'sama. Zvuk z mikrofonu zůstává v zařízení, nic se neodesílá.',
               buttonLabel: 'Ladit',
               onPressed: () => context.push('/tuner'),
@@ -122,7 +122,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               description:
                   'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
                   'v .env), spáruje je na MusicBrainz podle tagů (ne podle jména '
-                  'souboru/složky) a dotáhne obaly. Běží na pozadí -- MusicBrainz '
+                  'souboru/složky) a dotáhne obaly. Běží na pozadí – MusicBrainz '
                   'dovolí jen 1 dotaz za sekundu, u větší knihovny to chvíli potrvá.',
               buttonLabel: scanStatus.valueOrNull?.isRunning == true ? 'Skenuji…' : 'Skenovat knihovnu',
               onPressed: scanStatus.valueOrNull?.isRunning == true ? null : () => _startScan(context),
@@ -382,7 +382,7 @@ class _AppearanceCard extends ConsumerWidget {
           const SizedBox(height: 8),
           _GlassSlider(
             title: 'Síla tónu',
-            subtitle: 'Jak moc je sklo zabarvené -- silnější tón líp odliší lišty od pozadí.',
+            subtitle: 'Jak moc je sklo zabarvené – silnější tón líp odliší lišty od pozadí.',
             left: 'Slabý',
             right: 'Silný',
             provider: glassTintProvider,

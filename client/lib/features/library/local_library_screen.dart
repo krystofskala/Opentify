@@ -10,6 +10,8 @@ import '../../data/playlists_repository.dart' show PlaylistSummaryModel;
 import '../../models/recording_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../theme/shapes.dart';
+import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
@@ -24,6 +26,7 @@ import '../../widgets/track_tile.dart';
 import '../../widgets/view_mode_toggle.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../widgets/collection_actions.dart';
+import '../../core/cz_plural.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -123,7 +126,8 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
                     child: searching
                         ? GlassSegmentedControl<LibrarySearchScope>(
                             segments: [
-                              for (final s in LibrarySearchScope.values) GlassSegment(value: s, label: _scopeLabels[s]!),
+                              for (final s in LibrarySearchScope.values)
+                                GlassSegment(value: s, label: _scopeLabels[s]!),
                             ],
                             selected: _scope,
                             onChanged: (s) => setState(() => _scope = s),
@@ -255,7 +259,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
     if (_items.isEmpty) {
       return const EmptyState(
         icon: Symbols.library_music_rounded,
-        message: 'Zatím žádné skladby -- spusť sken v Profilu, nebo si nějakou přehraj '
+        message: 'Zatím žádné skladby – spusť sken v Profilu, nebo si nějakou přehraj '
             'z Hledání (stažené skladby se sem přidávají samy).',
       );
     }
@@ -287,7 +291,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   child: Text(
                     _collection.isModified && _items.length < _total
                         ? 'Načítám celou knihovnu… ${_items.length}/$_total'
-                        : '$_total skladeb',
+                        : songsCount(_total),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -394,7 +398,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
     return albums.when(
       data: (items) {
         if (items.isEmpty) {
-          return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba -- spusť sken v Profilu.');
+          return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba – spusť sken v Profilu.');
         }
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localAlbumsProvider),
@@ -423,7 +427,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                       final album = items[index];
                       return MediaCard(
                         title: album.title,
-                        subtitle: '${album.artistName} · ${album.trackCount} skladeb',
+                        subtitle: '${album.artistName} · ${songsCount(album.trackCount)}',
                         imageUrl: album.coverImageUrl,
                         artworkKey: (releaseId: album.id, artistId: album.artistId),
                         onTap: () => context.push('/releases/${album.id}'),
@@ -450,7 +454,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                       return MediaCard(
                         layout: MediaCardLayout.row,
                         title: album.title,
-                        subtitle: '${album.artistName} · ${album.trackCount} skladeb',
+                        subtitle: '${album.artistName} · ${songsCount(album.trackCount)}',
                         imageUrl: album.coverImageUrl,
                         artworkKey: (releaseId: album.id, artistId: album.artistId),
                         onTap: () => context.push('/releases/${album.id}'),
@@ -501,7 +505,8 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
     return artists.when(
       data: (items) {
         if (items.isEmpty) {
-          return const EmptyState(icon: Symbols.person_rounded, message: 'Zatím žádní interpreti -- spusť sken v Profilu.');
+          return const EmptyState(
+              icon: Symbols.person_rounded, message: 'Zatím žádní interpreti – spusť sken v Profilu.');
         }
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localArtistsProvider),
@@ -532,7 +537,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                         shape: MediaCardShape.circle,
                         placeholderIcon: Symbols.person_rounded,
                         title: artist.name,
-                        subtitle: '${artist.trackCount} skladeb',
+                        subtitle: songsCount(artist.trackCount),
                         imageUrl: artist.imageUrl,
                         artworkKey: (releaseId: null, artistId: artist.id),
                         onTap: () => context.push('/artists/${artist.id}'),
@@ -553,7 +558,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                         shape: MediaCardShape.circle,
                         placeholderIcon: Symbols.person_rounded,
                         title: artist.name,
-                        subtitle: '${artist.trackCount} skladeb',
+                        subtitle: songsCount(artist.trackCount),
                         imageUrl: artist.imageUrl,
                         artworkKey: (releaseId: null, artistId: artist.id),
                         onTap: () => context.push('/artists/${artist.id}'),
@@ -595,7 +600,11 @@ class _PlaylistsTab extends ConsumerWidget {
           onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
+          GlassButton(
+              label: 'Zrušit',
+              style: GlassButtonStyle.plain,
+              compact: true,
+              onPressed: () => Navigator.of(context).pop()),
           GlassButton(
             label: 'Vytvořit',
             style: GlassButtonStyle.prominent,
@@ -641,8 +650,8 @@ class _PlaylistsTab extends ConsumerWidget {
         title: playlist.title,
         // Sdílené: autor ze Spotify ("Ze Spotify · jméno").
         subtitle: playlist.isShared && playlist.description != null
-            ? '${playlist.description} · ${playlist.itemCount} skladeb'
-            : '$who · ${playlist.itemCount} skladeb',
+            ? '${playlist.description} · ${songsCount(playlist.itemCount)}'
+            : '$who · ${songsCount(playlist.itemCount)}',
         onTap: () => context.push('/playlists/${playlist.id}'),
         onLongPress: () => showCollectionActions(
           context,
@@ -654,15 +663,28 @@ class _PlaylistsTab extends ConsumerWidget {
       );
     }
 
-    return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _createPlaylist(context, ref),
-        icon: const Icon(Symbols.add_rounded),
-        label: const Text('Nový playlist'),
+    // "Nový playlist…" jako první řádek seznamu (jako Apple Music) -- dřív
+    // plovoucí tlačítko, které zakrývalo poslední playlist a vedle skla
+    // lišty působilo cize.
+    final scheme = Theme.of(context).colorScheme;
+    final create = MediaCard(
+      layout: MediaCardLayout.row,
+      placeholderIcon: Symbols.add_rounded,
+      artwork: DecoratedBox(
+        decoration: ShapeDecoration(shape: AppShapes.of(Expressive.cornerMedium), color: scheme.secondaryContainer),
+        child: Center(child: Icon(Symbols.add_rounded, size: 32, color: scheme.onSecondaryContainer)),
       ),
+      title: 'Nový playlist…',
+      onTap: () => _createPlaylist(context, ref),
+    );
+
+    return Scaffold(
       body: playlists.when(
         data: (all) {
-          final own = [for (final p in all) if (!p.isShared) p];
+          final own = [
+            for (final p in all)
+              if (!p.isShared) p
+          ];
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(myPlaylistsProvider);
@@ -672,12 +694,7 @@ class _PlaylistsTab extends ConsumerWidget {
               padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
               children: [
                 liked,
-                if (own.isEmpty)
-                  const EmptyState(
-                    compact: true,
-                    icon: Symbols.queue_music_rounded,
-                    message: 'Zatím žádné vlastní playlisty -- založ první tlačítkem vpravo dole.',
-                  ),
+                create,
                 for (final p in own) card(p),
               ],
             ),

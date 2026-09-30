@@ -16,6 +16,7 @@ import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
+import '../../core/cz_plural.dart';
 
 const _title = 'Oblíbené skladby';
 
@@ -78,7 +79,7 @@ class LikedSongsCard extends ConsumerWidget {
                   children: [
                     Text(_title, style: theme.textTheme.titleLarge?.copyWith(color: scheme.onPrimaryContainer)),
                     Text(
-                      count == null ? 'Playlist' : 'Playlist · $count skladeb',
+                      count == null ? 'Playlist' : 'Playlist · ${songsCount(count)}',
                       style:
                           theme.textTheme.bodyMedium?.copyWith(color: scheme.onPrimaryContainer.withValues(alpha: 0.8)),
                     ),
@@ -121,7 +122,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
             content:
-                Text(tracks.length == 1 ? 'Odebráno z oblíbených' : '${tracks.length} skladeb odebráno z oblíbených')),
+                Text(tracks.length == 1 ? 'Odebráno z oblíbených' : 'Z oblíbených odebráno: ${songsCount(tracks.length)}')),
       );
     }
   }
@@ -165,7 +166,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                       child: EmptyState(
                         icon: Symbols.favorite_rounded,
                         message:
-                            'Zatím nic -- klepni na srdíčko u skladby, nebo naimportuj Liked Songs ze Spotify v Profilu.',
+                            'Zatím nic – klepni na srdíčko u skladby, nebo naimportuj Liked Songs ze Spotify v Profilu.',
                       ),
                     )
                   else

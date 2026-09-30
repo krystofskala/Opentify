@@ -362,7 +362,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
               String? status;
               Color? statusColor;
               if (hasError) {
-                status = 'Nepodařilo se přehrát -- klepni pro nový pokus';
+                status = 'Nepodařilo se přehrát – klepni pro nový pokus';
                 statusColor = Colors.redAccent;
               } else if (isProvisioning) {
                 status = provisioningState!.statusLabel;

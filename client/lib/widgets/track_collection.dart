@@ -9,6 +9,7 @@ import 'add_to_playlist_sheet.dart';
 import 'glass/glass.dart';
 import 'queue_action_bar.dart';
 import 'track_actions.dart';
+import '../core/cz_plural.dart';
 
 enum TrackSort { original, title, artist, duration }
 
@@ -196,7 +197,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
       player.addToQueue(nowPlayingInfoFor(r, artworkUrl: widget.albumArtUrl, artistNameFallback: widget.artistName));
     }
     ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text('${tracks.length} skladeb přidáno do fronty')));
+        ?.showSnackBar(SnackBar(content: Text('Do fronty: ${songsCount(tracks.length)}')));
     widget.controller.setSelecting(false);
   }
 

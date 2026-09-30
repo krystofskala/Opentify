@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../data/listen_later_repository.dart';
 import 'audio_player_controller.dart';
 import 'providers.dart';
+import '../widgets/glass/glass.dart';
 
 final listenLaterRepositoryProvider = Provider<ListenLaterRepository>(
   (ref) => ListenLaterRepository(ref.watch(apiClientProvider)),
@@ -118,8 +119,16 @@ Future<void> editLaterNote(BuildContext context, ListenLaterController controlle
         onSubmitted: (value) => Navigator.of(context).pop(value),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Zrušit')),
-        FilledButton(onPressed: () => Navigator.of(context).pop(text.text), child: const Text('Uložit')),
+        GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop()),
+        GlassButton(
+            label: 'Uložit',
+            style: GlassButtonStyle.prominent,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(text.text)),
       ],
     ),
   );

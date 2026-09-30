@@ -220,7 +220,9 @@ class _ConnectedSegments<T> extends StatelessWidget {
                   AnimatedSize(
                     duration: Motion.enter.duration,
                     curve: Motion.enter,
-                    child: isSelected && !iconsOnly
+                    // Fajfka jen u ≤ 3 segmentů bez vlastní ikony -- u víc se
+                    // text při výběru posouvá a řádek přetéká.
+                    child: isSelected && !iconsOnly && segment.icon == null && segments.length <= 3
                         ? Padding(
                             padding: const EdgeInsets.only(right: 6),
                             child: Icon(Symbols.check_rounded, size: 18, color: fg),

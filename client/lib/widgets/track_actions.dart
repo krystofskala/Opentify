@@ -51,11 +51,8 @@ Future<void> showTrackActionsSheet(
   String? artistNameFallback,
   List<TrackMenuAction> extraActions = const [],
 }) {
-  return showModalBottomSheet(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return showGlassSheet(
+    context,
     builder: (sheetContext) => _TrackActionsSheet(
       recording: recording,
       artworkUrl: artworkUrl,
@@ -81,7 +78,7 @@ Future<void> shareWithToast(
   try {
     final link = ready ?? await load();
     final outcome = await shareLink(link);
-    if (outcome == ShareOutcome.copied) toast('Odkaz zkopírován -- otevře se v jakékoliv hudební appce');
+    if (outcome == ShareOutcome.copied) toast('Odkaz zkopírován – otevře se v jakékoliv hudební appce');
     if (outcome == ShareOutcome.failed) toast('Odkaz se nepodařilo zkopírovat: ${link.url}');
   } catch (_) {
     toast('Skladbu se nepodařilo najít pro sdílení');

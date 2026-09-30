@@ -15,6 +15,7 @@ import '../theme/selected_accent.dart';
 import 'glass/expressive_shapes.dart';
 import 'glass_container.dart';
 import 'net_image.dart';
+import '../core/cz_plural.dart';
 
 /// Dopočítá barvu nálady obrázku detailové obrazovky a zapíše ji do
 /// `screenAccentStackProvider` (globální seed + gradient pozadí) po dobu, co
@@ -1399,7 +1400,7 @@ String heroUpdatedLabel(DateTime at) {
 }
 
 /// "1 skladba / 3 skladby / 40 skladeb".
-String heroTrackCount(int n) => '$n ${n == 1 ? 'skladba' : (n >= 2 && n <= 4) ? 'skladby' : 'skladeb'}';
+String heroTrackCount(int n) => songsCount(n);
 
 /// Plovoucí tlačítko nad obrázkem -- tmavý průsvitný kroužek (čitelný na
 /// světlé fotce i na skleněné liště). Bez vlastního rozmazání: leží nad
@@ -1437,7 +1438,7 @@ class _HeroCircleButton extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
-          child: SizedBox.square(dimension: 40, child: Icon(icon, color: Colors.white, size: 22)),
+          child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),
         ),
       ),
     );

@@ -19,6 +19,7 @@ import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/radio_station.dart';
+import '../../core/cz_plural.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -147,7 +148,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   hasScrollBody: false,
                   child: EmptyState(
                     icon: Symbols.queue_music_rounded,
-                    message: 'Playlist je zatím prázdný -- přidej skladby přes „Přidat do playlistu“ '
+                    message: 'Playlist je zatím prázdný – přidej skladby přes „Přidat do playlistu“ '
                         'v nabídce u skladby (dlouhý stisk nebo ⋯).',
                   ),
                 )
@@ -257,7 +258,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         await repo.removeItem(widget.playlistId, id);
       }
       messenger?.showSnackBar(
-          SnackBar(content: Text(ids.length == 1 ? 'Skladba odebrána' : '${ids.length} skladeb odebráno')));
+          SnackBar(content: Text(ids.length == 1 ? 'Skladba odebrána' : 'Odebráno: ${songsCount(ids.length)}')));
     } catch (e) {
       messenger?.showSnackBar(SnackBar(content: Text('Odebrání selhalo: $e')));
     } finally {
@@ -362,7 +363,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         title: const Text('Smazat playlist?'),
         content: const Text('Tohle nejde vrátit zpátky.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Zrušit')),
+          GlassButton(
+              label: 'Zrušit',
+              style: GlassButtonStyle.plain,
+              compact: true,
+              onPressed: () => Navigator.of(context).pop(false)),
           GlassButton(
               label: 'Smazat', destructive: true, compact: true, onPressed: () => Navigator.of(context).pop(true)),
         ],

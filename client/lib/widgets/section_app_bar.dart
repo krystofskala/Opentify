@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'glass/glass_back_button.dart';
+
 /// Sdílený vzhled AppBaru -- nahrazuje 5 různých ad hoc přístupů napříč
 /// obrazovkami (Home/Profil holý `AppBar`, Library `AppBar`+`TabBar`, Search
 /// s `TextField` natvrdo v `title`, Release bez AppBaru vůbec na úspěšné
@@ -18,7 +20,10 @@ class SectionAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     // Lišta zůstává průhledná i při scrollu -- obsah se u horní hrany
     // rozplyne (`TopFadeScrollBehavior`), žádný šedý skleněný pruh.
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
     return AppBar(
+      automaticallyImplyLeading: false,
+      leading: canPop ? const Center(child: GlassBackButton()) : null,
       title: Text(title),
       actions: actions,
       bottom: bottom,

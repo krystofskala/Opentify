@@ -10,6 +10,7 @@ import 'media_card.dart';
 import 'state_views.dart';
 import 'track_tile.dart';
 import '../routing/home_shell.dart' show navBottomInset;
+import '../core/cz_plural.dart';
 
 const _librarySourceLabel = 'Hledání v knihovně';
 
@@ -101,7 +102,7 @@ class LibrarySearchResults extends ConsumerWidget {
               for (final p in data.playlists)
                 MediaCard(
                   title: p.title,
-                  subtitle: '${p.itemCount} skladeb',
+                  subtitle: songsCount(p.itemCount),
                   placeholderIcon: Symbols.queue_music_rounded,
                   onTap: () => context.push('/playlists/${p.id}'),
                 ),
@@ -149,7 +150,7 @@ class LibrarySearchResults extends ConsumerWidget {
         shape: MediaCardShape.circle,
         placeholderIcon: Symbols.person_rounded,
         title: a.name,
-        subtitle: '${a.trackCount} skladeb',
+        subtitle: songsCount(a.trackCount),
         imageUrl: a.imageUrl,
         artworkKey: (releaseId: null, artistId: a.id),
         onTap: () => context.push('/artists/${a.id}'),

@@ -12,6 +12,8 @@ Future<T?> showGlassSheet<T>(BuildContext context, {required WidgetBuilder build
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     elevation: 0,
+    // Jedna animace pro všechny sheety (pružné vysunutí, rychlé zasunutí).
+    sheetAnimationStyle: Motion.sheet,
     builder: builder,
   );
 }

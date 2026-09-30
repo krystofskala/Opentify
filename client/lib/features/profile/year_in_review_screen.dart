@@ -37,7 +37,7 @@ class YearInReviewScreen extends ConsumerWidget {
         data: (data) => data.isEmpty
             ? const EmptyState(
                 icon: Symbols.equalizer_rounded,
-                message: 'Zatím nemáme dost poslechové historie na roční souhrn -- '
+                message: 'Zatím nemáme dost poslechové historie na roční souhrn – '
                     'ListenBrainz statistiku spočítá, jakmile budeš mít víc poslechů.',
               )
             : _YearInReviewBody(data: data),

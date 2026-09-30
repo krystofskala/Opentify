@@ -353,7 +353,7 @@ class _SearchHistoryView extends ConsumerWidget {
 }
 
 String _errorMessage(Object error) => error is ApiException && error.statusCode == 503
-    ? 'MusicBrainz je teď přetížený -- zkus to za chvíli znovu.'
+    ? 'MusicBrainz je teď přetížený – zkus to za chvíli znovu.'
     : 'Hledání se nepovedlo.';
 
 /// "Vše" -- tři nezávislé sekce, každá s "Zobrazit vše" do svého filtru.

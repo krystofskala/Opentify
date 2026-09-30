@@ -6,6 +6,7 @@ import '../state/providers.dart';
 import 'glass/glass.dart';
 import 'state_views.dart';
 import 'glass/expressive_shapes.dart';
+import '../core/cz_plural.dart';
 
 /// Bottom sheet "Přidat do playlistu" -- seznam vlastních playlistů + řádek
 /// na založení nového rovnou z místa. Jedna skladba (`recordingId`, přehrávač/
@@ -13,11 +14,8 @@ import 'glass/expressive_shapes.dart';
 /// seznamu skladeb).
 Future<void> showAddToPlaylistSheet(BuildContext context, {String? recordingId, List<String>? recordingIds}) {
   final ids = recordingIds ?? [if (recordingId != null) recordingId];
-  return showModalBottomSheet(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return showGlassSheet(
+    context,
     builder: (context) => _AddToPlaylistSheet(recordingIds: ids),
   );
 }
@@ -76,7 +74,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
 
   void _confirm(ScaffoldMessengerState? messenger, String playlistTitle) {
     final count = widget.recordingIds.length;
-    final what = count == 1 ? 'Skladba přidána' : '$count skladeb přidáno';
+    final what = count == 1 ? 'Skladba přidána' : 'Přidáno: ${songsCount(count)}';
     messenger?.showSnackBar(SnackBar(content: Text('$what do „$playlistTitle“')));
   }
 
@@ -95,7 +93,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
               children: [
                 Text(
                   widget.recordingIds.length > 1
-                      ? 'Přidat ${widget.recordingIds.length} skladeb do playlistu'
+                      ? 'Přidat ${songsCount(widget.recordingIds.length)} do playlistu'
                       : 'Přidat do playlistu',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
@@ -123,7 +121,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                   data: (items) => items.isEmpty
                       ? const Padding(
                           padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Text('Zatím žádné playlisty -- založ první výš.'),
+                          child: Text('Zatím žádné playlisty – založ první výš.'),
                         )
                       : ConstrainedBox(
                           constraints: const BoxConstraints(maxHeight: 320),
@@ -135,7 +133,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                               return ListTile(
                                 leading: const Icon(Symbols.queue_music_rounded),
                                 title: Text(playlist.title),
-                                subtitle: Text('${playlist.itemCount} skladeb'),
+                                subtitle: Text(songsCount(playlist.itemCount)),
                                 onTap: () => _addTo(playlist.id, playlist.title),
                               );
                             },

@@ -311,7 +311,25 @@ class _RowTileState extends State<_RowTile> {
       leading = SizedBox(
         width: 44,
         height: 44,
-        child: Checkbox(value: w.selected, onChanged: (_) => w.onTap?.call()),
+        // Kulaté zaškrtnutí jako výběr v Apple Music/Fotkách (ne hranatý
+        // materiálový checkbox).
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: w.selected ? theme.colorScheme.primary : Colors.transparent,
+              border: Border.all(
+                color: w.selected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+                width: 1.5,
+              ),
+            ),
+            child: w.selected ? Icon(Symbols.check_rounded, size: 16, weight: 600, color: theme.colorScheme.onPrimary) : null,
+          ),
+        ),
       );
     } else if (w.leadingIndex != null) {
       leading = SizedBox(

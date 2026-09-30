@@ -56,7 +56,7 @@ class HomeScreen extends ConsumerWidget {
               if (sections.isEmpty)
                 const EmptyState(
                   icon: Symbols.home_rounded,
-                  message: 'Domů se zatím připravuje -- žebříčky a mixy se generují na pozadí, zkus to za pár minut.',
+                  message: 'Domů se zatím připravuje – žebříčky a mixy se generují na pozadí, zkus to za pár minut.',
                 ),
               // Úplně nahoře: na co navázat (poslední poslouchaná alba).
               if (recent.isNotEmpty) _ContinueListening(items: recent),

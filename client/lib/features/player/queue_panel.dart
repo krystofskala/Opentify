@@ -6,8 +6,9 @@ import '../../state/artwork_provider.dart';
 import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../theme/glass_tokens.dart';
-import '../../widgets/glass_container.dart';
 import '../../widgets/net_image.dart';
+import '../../core/cz_plural.dart';
+import '../../widgets/glass/glass.dart';
 
 /// Fronta přehrávání jako bottom sheet -- stejný `DraggableScrollableSheet`
 /// vzor jako `showLyricsPanel` (dvě různé navigační stylizace pro dvě
@@ -16,13 +17,8 @@ import '../../widgets/net_image.dart';
 /// `queueIndex`, ve stylu Finampova `queue_list.dart` -- historie (skladby
 /// před `queueIndex`) se nezobrazuje, jen aktuální + co je před ní.
 Future<void> showQueuePanel(BuildContext context, {required Color accentColor}) {
-  return showModalBottomSheet(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    // Plynulé vysunutí pružinou (výchozí materiálová animace byla useknutá).
-    sheetAnimationStyle: Motion.sheet,
+  return showGlassSheet(
+    context,
     builder: (context) => _QueuePanel(accentColor: accentColor),
   );
 }
@@ -241,7 +237,7 @@ class _GroupHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final songs = count == 1 ? '1 skladba' : (count <= 4 ? '$count skladby' : '$count skladeb');
+    final songs = songsCount(count);
     return Material(
       color: Colors.white.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(AppRadii.md),

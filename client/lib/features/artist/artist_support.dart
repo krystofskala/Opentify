@@ -93,7 +93,7 @@ class _Link extends StatelessWidget {
 const _charities = [
   (
     name: 'Nadace Život umělce',
-    about: 'Česká nadace -- pomáhá umělcům v nouzi, seniorům i mladým.',
+    about: 'Česká nadace – pomáhá umělcům v nouzi, seniorům i mladým.',
     url: 'https://www.nadace-zivot-umelce.cz/',
   ),
   (
@@ -103,7 +103,7 @@ const _charities = [
   ),
   (
     name: 'MusiCares',
-    about: 'Americká charita Grammy -- zdraví a sociální pomoc hudebníkům.',
+    about: 'Americká charita Grammy – zdraví a sociální pomoc hudebníkům.',
     url: 'https://www.musicares.org/',
   ),
 ];
@@ -123,7 +123,7 @@ Future<void> showCharitySheet(BuildContext context, String artistName) {
             Text('Charita jménem: $artistName', style: theme.textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
-              'Vyber charitu -- otevře se její stránka pro dary. Věnování „$dedication“ se '
+              'Vyber charitu – otevře se její stránka pro dary. Věnování „$dedication“ se '
               'zkopíruje, vlož ho do poznámky k daru (pole "na počest / věnování"). Dar je '
               'oficiálně od tebe, jméno interpreta je v jeho věnování.',
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),

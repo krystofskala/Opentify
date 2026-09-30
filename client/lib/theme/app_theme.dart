@@ -94,16 +94,50 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       labelStyle: TextStyle(color: colorScheme.onSecondaryContainer, fontWeight: FontWeight.w600),
       iconTheme: IconThemeData(color: colorScheme.onSecondaryContainer, size: 18, weight: 300, grade: 0),
     ),
+    // Hlášky jako tmavá skleněná kapsle v obou režimech (Apple styl) --
+    // v tmavém režimu dřív svítila bílá `inverseSurface` jako cizí prvek.
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: colorScheme.inverseSurface.withValues(alpha: 0.9),
+      backgroundColor: brightness == Brightness.dark
+          ? const Color(0xEB2A2A30)
+          : colorScheme.inverseSurface.withValues(alpha: 0.92),
+      contentTextStyle: base.textTheme.bodyMedium?.copyWith(
+        fontFamily: 'Nunito',
+        fontWeight: FontWeight.w600,
+        color: brightness == Brightness.dark ? Colors.white : colorScheme.onInverseSurface,
+      ),
+      actionTextColor: brightness == Brightness.dark ? colorScheme.primaryFixedDim : colorScheme.inversePrimary,
       shape: const StadiumBorder(),
       elevation: 0,
+    ),
+    // Jeden jezdec v celé appce (hlasitost, nastavení skla): tenká dráha
+    // a bílý kulatý úchyt jako v iOS, bez materiálového "halo".
+    sliderTheme: SliderThemeData(
+      trackHeight: 4,
+      activeTrackColor: colorScheme.primary,
+      inactiveTrackColor: colorScheme.onSurface.withValues(alpha: 0.15),
+      thumbColor: Colors.white,
+      overlayShape: SliderComponentShape.noOverlay,
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 11, elevation: 3, pressedElevation: 4),
+      trackShape: const RoundedRectSliderTrackShape(),
     ),
     bottomSheetTheme: const BottomSheetThemeData(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl))),
     ),
-    dialogTheme: DialogThemeData(shape: AppShapes.lg),
+    // Dialogy ve stejném tónu jako skleněné panely (ne M3 fialovo-šedý
+    // `surfaceContainerHigh` s tónováním).
+    dialogTheme: DialogThemeData(
+      shape: AppShapes.lg,
+      backgroundColor: brightness == Brightness.dark ? const Color(0xF51E1E22) : const Color(0xF5F7F7FA),
+      surfaceTintColor: Colors.transparent,
+      titleTextStyle: base.textTheme.titleLarge?.copyWith(
+        fontFamily: 'Nunito',
+        fontSize: 22,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.5,
+        color: colorScheme.onSurface,
+      ),
+    ),
     // Přechody mezi obrazovkami: na iOS nativní (gesto zpět od okraje), jinde
     // jemné prolnutí s krátkým posunem vzhůru. Výchozí "zoom" přechod na webu
     // (Chrome na PC) trhal -- snímkuje celé stránky (živě nahlášeno).

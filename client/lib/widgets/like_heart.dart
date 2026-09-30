@@ -26,7 +26,7 @@ class LikeHeart extends ConsumerWidget {
     final disliked = ref.watch(dislikedProvider.select((s) => s.contains(recordingId)));
     final base = color ?? IconTheme.of(context).color ?? Theme.of(context).colorScheme.onSurfaceVariant;
     final (icon, fill, tint, label) = disliked
-        ? (Symbols.heart_broken_rounded, 1.0, base.withValues(alpha: 0.75), 'Nelíbí se mi -- podrž pro zrušení')
+        ? (Symbols.heart_broken_rounded, 1.0, base.withValues(alpha: 0.75), 'Nelíbí se mi – podrž pro zrušení')
         : liked
             ? (Symbols.favorite_rounded, 1.0, Colors.redAccent, 'Odebrat z oblíbených')
             : (Symbols.favorite_border_rounded, 0.0, base, 'Přidat do oblíbených (podrž = nelíbí se mi)');

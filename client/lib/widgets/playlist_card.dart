@@ -8,6 +8,7 @@ import '../theme/shapes.dart';
 import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'mix_artwork.dart';
+import '../core/cz_plural.dart';
 
 /// Obal playlistu: mozaika 2×2 z prvních čtyř obalů (1 obal = přes celou
 /// plochu), nebo -- u žánrů/nálad, případně bez obalů -- tónovaný zrnitý
@@ -130,7 +131,7 @@ class PlaylistCardView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final shape = AppShapes.of(Expressive.cornerLarge);
-    final subtitle = card.description ?? '${card.itemCount} skladeb';
+    final subtitle = card.description ?? songsCount(card.itemCount);
     return SizedBox(
       width: width,
       child: GlassPressable(

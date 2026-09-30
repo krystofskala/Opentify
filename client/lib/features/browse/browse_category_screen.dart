@@ -19,6 +19,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import 'browse_grid.dart' show categoryIcon;
 import '../../widgets/collection_actions.dart';
+import '../../core/cz_plural.dart';
 
 /// Stránka jedné kategorie z Procházet: playlisty (redakční Deezer), u žánrů
 /// i populární skladby, alba a interpreti. Barva kategorie tónuje appku.
@@ -96,7 +97,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
           expandedHeight: 170 + top,
           backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
-          leading: IconButton(icon: const Icon(Symbols.arrow_back_rounded), onPressed: () => context.pop()),
+          leading: Center(child: GlassBackButton(onPressed: () => context.pop())),
           flexibleSpace: FlexibleSpaceBar(
             titlePadding: const EdgeInsetsDirectional.only(start: 56, bottom: 14),
             title: Text(c.title, style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -375,7 +376,7 @@ class _PlaylistTile extends StatelessWidget {
           Text(playlist.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
           if (playlist.trackCount != null)
             Text(
-              '${playlist.trackCount} skladeb',
+              songsCount(playlist.trackCount!),
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
         ],

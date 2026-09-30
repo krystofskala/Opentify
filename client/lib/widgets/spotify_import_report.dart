@@ -6,17 +6,15 @@ import '../data/library_repository.dart';
 import '../theme/design_tokens.dart';
 import 'state_views.dart';
 import '../theme/glass_tokens.dart';
-import 'glass_container.dart';
+import '../core/cz_plural.dart';
+import 'glass/glass.dart';
 
 /// Souhrn po importu Spotify exportu -- po playlistech: kolik skladeb,
 /// kolik jde přehrát hned (`inLibrary`), kolik se přeskočilo (epizody
 /// podcastů, položky bez interpreta/názvu). Klik otevře playlist.
 Future<void> showSpotifyImportReport(BuildContext context, SpotifyImportResult result) {
-  return showModalBottomSheet<void>(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return showGlassSheet<void>(
+    context,
     builder: (sheetContext) => DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.6,
@@ -58,8 +56,8 @@ class _ImportReport extends StatelessWidget {
                 spacing: AppSpacing.xs,
                 runSpacing: AppSpacing.xs,
                 children: [
-                  _Stat(icon: Symbols.queue_music_rounded, label: '${result.playlistsImported} playlistů'),
-                  _Stat(icon: Symbols.music_note_rounded, label: '${result.matched} skladeb'),
+                  _Stat(icon: Symbols.queue_music_rounded, label: playlistsCount(result.playlistsImported)),
+                  _Stat(icon: Symbols.music_note_rounded, label: songsCount(result.matched)),
                   _Stat(icon: Symbols.play_circle_rounded, label: '$playable hned k přehrání'),
                   if (result.skipped > 0) _Stat(icon: Symbols.block_rounded, label: '${result.skipped} přeskočeno'),
                 ],
@@ -84,7 +82,7 @@ class _ImportReport extends StatelessWidget {
             title: Text(p.title, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(
               [
-                '${p.matched} skladeb',
+                (songsCount(p.matched)),
                 '${p.inLibrary} v knihovně',
                 if (p.skipped > 0) '${p.skipped} přeskočeno',
               ].join(' · '),

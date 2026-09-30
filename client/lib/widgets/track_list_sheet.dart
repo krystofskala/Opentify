@@ -17,11 +17,8 @@ Future<void> showTrackListSheet(
   List<RecordingModel>? recordings,
   Future<List<RecordingModel>> Function(WidgetRef ref)? load,
 }) {
-  return showModalBottomSheet(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return showGlassSheet(
+    context,
     builder: (context) => _TrackListSheet(title: title, recordings: recordings, load: load),
   );
 }

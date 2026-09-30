@@ -26,13 +26,8 @@ import '../../widgets/radio_station.dart';
 /// `sleep_timer_menu.dart` jsou taky samostatné menu, ne natvrdo v hlavním
 /// přehrávači).
 Future<void> showPlayerMoreSheet(BuildContext context) {
-  return showModalBottomSheet(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    // Plynulé vysunutí pružinou (výchozí materiálová animace byla useknutá).
-    sheetAnimationStyle: Motion.sheet,
+  return showGlassSheet(
+    context,
     builder: (context) => const _PlayerMoreSheet(),
   );
 }
@@ -357,7 +352,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
 
   static const _speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
 
-  String _formatSpeed(double speed) => speed == speed.roundToDouble() ? speed.toStringAsFixed(1) : speed.toString();
+  // Česky desetinná čárka: 1×, 1,25×, 1,5×.
+  String _formatSpeed(double speed) =>
+      (speed == speed.roundToDouble() ? speed.toStringAsFixed(0) : speed.toString()).replaceAll('.', ',');
 
   bool _isFading(DateTime endAt) {
     final remaining = endAt.difference(DateTime.now());
