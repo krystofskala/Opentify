@@ -114,6 +114,9 @@ class LiquidCapture {
   // se zrovna kreslí (zakrytá/offstage stránka obrázek nevrátí).
   final List<RenderLiquidSource> _pages = [];
   final Set<RenderLiquidGlass> _glasses = {};
+  // Obsah skel (text, vlnka...) -- při zachytávání se skryje taky, jinak by
+  // sklo na okraji lámalo svůj vlastní obsah (duch vlnky u mini přehrávače).
+  final Set<RenderLiquidHide> _hideables = {};
   ui.Image? _sharp;
   ui.Image? _blurred;
   Rect? _rect; // zachycený výřez (globálně, logické px)
@@ -180,6 +183,9 @@ class LiquidCapture {
     for (final g in _glasses) {
       g._hiddenForCapture(true);
     }
+    for (final h in _hideables) {
+      h._hiddenForCapture(true);
+    }
     final ui.Image? bg;
     ui.Image? pg;
     try {
@@ -191,6 +197,9 @@ class LiquidCapture {
     } finally {
       for (final g in _glasses) {
         g._hiddenForCapture(false);
+      }
+      for (final h in _hideables) {
+        h._hiddenForCapture(false);
       }
     }
     if (bg == null) {
@@ -607,5 +616,61 @@ class RenderLiquidGlass extends RenderBox {
     // Při prolínání s obyčejným rozmazáním průhlednost podle `mix`.
     canvas.drawRect(Offset.zero & size, Paint()..shader = shader..color = Color.fromRGBO(0, 0, 0, mix));
     canvas.restore();
+  }
+}
+
+
+/// Obsah skla, který se při zachytávání na okamžik skryje (viz
+/// `LiquidCapture._hideables`).
+class LiquidHide extends SingleChildRenderObjectWidget {
+  const LiquidHide({super.key, required this.capture, super.child});
+
+  final LiquidCapture capture;
+
+  @override
+  RenderLiquidHide createRenderObject(BuildContext context) => RenderLiquidHide(capture);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderLiquidHide renderObject) => renderObject.capture = capture;
+}
+
+class RenderLiquidHide extends RenderProxyBox {
+  RenderLiquidHide(this._capture);
+
+  LiquidCapture _capture;
+  set capture(LiquidCapture value) {
+    if (value == _capture) return;
+    if (attached) _capture._hideables.remove(this);
+    _capture = value;
+    if (attached) _capture._hideables.add(this);
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _capture._hideables.add(this);
+  }
+
+  @override
+  void detach() {
+    _capture._hideables.remove(this);
+    super.detach();
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => child != null;
+
+  void _hiddenForCapture(bool hidden) {
+    final l = layer;
+    if (l is OpacityLayer) l.alpha = hidden ? 0 : 255;
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null) {
+      layer = null;
+      return;
+    }
+    layer = context.pushOpacity(offset, 255, super.paint, oldLayer: layer as OpacityLayer?);
   }
 }

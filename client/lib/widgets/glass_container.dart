@@ -191,7 +191,7 @@ class GlassContainer extends StatelessWidget {
                 saturation: saturation,
               ),
             ),
-            content,
+            LiquidHide(capture: liquidCapture, child: content),
           ] else if (rim) ...[
             // Lem čte ostrý obsah pod hranou; rozmazání je až za ním.
             Positioned.fill(child: GlassRim(borderRadius: borderRadius)),
