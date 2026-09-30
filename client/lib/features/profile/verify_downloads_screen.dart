@@ -27,6 +27,8 @@ class VerifyItem {
         verdict = j['verdict'] as String? ?? 'mismatch',
         gotTitle = j['gotTitle'] as String?,
         gotArtist = j['gotArtist'] as String?,
+        expectedMs = j['expectedMs'] as int?,
+        actualMs = j['actualMs'] as int?,
         ownFile = j['ownFile'] as bool? ?? false,
         review = j['review'] as String?;
 
@@ -39,8 +41,15 @@ class VerifyItem {
   final String verdict;
   final String? gotTitle;
   final String? gotArtist;
+  final int? expectedMs;
+  final int? actualMs;
   final bool ownFile;
   final String? review;
+}
+
+String _mmss(int ms) {
+  final s = (ms / 1000).round();
+  return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
 final verifyReportProvider = FutureProvider.autoDispose<List<VerifyItem>>((ref) async {
@@ -122,8 +131,8 @@ class _VerifyDownloadsScreenState extends ConsumerState<VerifyDownloadsScreen> {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: Text(
-                    '${songsCount(items.length)} k projití. Shazam u nich slyší jinou skladbu, nebo soubor '
-                    'nejde přečíst. Pusť si ji a rozhodni: je to dobře, nebo má Shazam pravdu – pak se skladba '
+                    '${songsCount(items.length)} k projití. Shazam u nich slyší jinou skladbu, délka souboru '
+                    'nesedí, nebo soubor nejde přečíst. Pusť si ji a rozhodni: je to dobře, nebo má Shazam pravdu – pak se skladba '
                     'stáhne znovu z jiného výsledku. Kontrast '
                     'a tvoje vlastní hudba zůstávají beze změny.',
                     style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -171,9 +180,14 @@ class _VerifyRow extends ConsumerWidget {
     final muted = theme.colorScheme.onSurfaceVariant;
     final art =
         ref.watch(recordingArtworkProvider((releaseId: item.releaseId, artistId: item.artistId))).valueOrNull;
-    final heard = item.verdict == 'broken'
-        ? 'Soubor nejde přečíst'
-        : 'Shazam slyší: ${item.gotTitle ?? '?'} – ${item.gotArtist ?? '?'}';
+    final lengths = item.expectedMs != null && item.actualMs != null
+        ? 'soubor ${_mmss(item.actualMs!)}, má být ${_mmss(item.expectedMs!)}'
+        : null;
+    final heard = switch (item.verdict) {
+      'broken' => 'Soubor nejde přečíst',
+      'suspect' => 'Délka nesedí ($lengths), Shazam nepoznal',
+      _ => 'Shazam slyší: ${item.gotTitle ?? '?'} – ${item.gotArtist ?? '?'}${lengths != null ? ' · $lengths' : ''}',
+    };
     final redownloading = state == 'redownload';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),

@@ -898,14 +898,20 @@ _VERIFY_LOCK = asyncio.Lock()
 
 
 def _read_verify_report() -> dict[str, dict]:
-    try:
-        return json.loads(_VERIFY_REPORT.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    from app.library.download_check import read_report
+
+    return read_report()
 
 
 def _write_verify_report(report: dict[str, dict]) -> None:
-    _VERIFY_REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=1))
+    # Pod zámkem a jen změněné položky -- worker mezitím mohl zapsat
+    # výsledek kontroly jiného stažení.
+    from app.library.download_check import update_report
+
+    def change(current: dict[str, dict]) -> None:
+        current.update(report)
+
+    update_report(change)
 
 
 @library_router.get("/verify-report")
@@ -918,7 +924,7 @@ def verify_report(
     report = _read_verify_report()
     items = []
     for rid, e in report.items():
-        if e.get("verdict") not in ("mismatch", "broken") or e.get("review") in ("ok", "relabeled"):
+        if e.get("verdict") not in ("mismatch", "broken", "suspect") or e.get("review") in ("ok", "relabeled"):
             continue
         rec = session.get(Recording, rid)
         path = e.get("path")
@@ -934,11 +940,31 @@ def verify_report(
             "gotTitle": e.get("gotTitle"),
             "gotArtist": e.get("gotArtist"),
             "provider": e.get("provider"),
+            "expectedMs": e.get("expectedMs"),
+            "actualMs": e.get("actualMs"),
             "ownFile": own,
             "review": e.get("review"),
         })
     items.sort(key=lambda i: (i["review"] is not None, (i["artist"] or "").lower(), (i["title"] or "").lower()))
     return {"items": items}
+
+
+@library_router.post("/verify/{recording_id}")
+async def verify_now(recording_id: str, _current: tuple[str, str] = Depends(require_admin)):
+    """"Něco nesedí?" z přehrávače: délka + Shazam pro jednu skladbu hned.
+    Výsledek se zapíše i do přehledu kontroly; nic se samo nemění."""
+    from app.library.download_check import check_recording
+    from app.recognize import RecognizeError
+
+    try:
+        entry = await check_recording(recording_id, manual=True)
+    except RecognizeError as exc:
+        raise HTTPException(status_code=502, detail=f"Shazam teď neodpovídá: {exc}")
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Skladba ještě není stažená na serveru.")
+    path = entry.get("path")
+    own = not (path and Path(path).resolve().is_relative_to(MEDIA_ROOT.resolve()))
+    return {**{k: entry.get(k) for k in ("verdict", "gotTitle", "gotArtist", "expectedMs", "actualMs", "durationOff")}, "ownFile": own}
 
 
 @library_router.post("/verify-report/{recording_id}/ok")

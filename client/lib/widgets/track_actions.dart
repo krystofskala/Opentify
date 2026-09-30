@@ -18,6 +18,8 @@ import 'remove_from_library.dart';
 import 'radio_station.dart';
 import '../state/library_scope.dart';
 import '../state/offline_controller.dart';
+import '../state/auth_controller.dart';
+import 'verify_track_sheet.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -267,6 +269,13 @@ class _TrackActionsSheet extends ConsumerWidget {
                     label: 'Odebrat z knihovny',
                     destructive: true,
                     onTap: () => run(() => confirmRemoveFromLibrary(hostContext, [recording])),
+                  ),
+                // Admin: špatně stažená skladba? Shazam ji poslechne na serveru.
+                if (ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
+                  _Item(
+                    icon: Symbols.graphic_eq_rounded,
+                    label: 'Něco nesedí? Zkontrolovat Shazamem',
+                    onTap: () => run(() => checkTrackWithShazam(hostContext, ref, recording)),
                   ),
                 for (final action in extraActions)
                   _Item(

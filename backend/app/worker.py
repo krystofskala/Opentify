@@ -112,6 +112,16 @@ def _schedule_loudness(recording_id: str) -> None:
     task.add_done_callback(_loudness_tasks.discard)
 
 
+def _schedule_download_check(recording_id: str) -> None:
+    """Délka souboru vs katalog, podezřelé ještě přes Shazam (viz
+    app/library/download_check.py). Fire-and-forget jako loudness."""
+    from app.library.download_check import check_after_download
+
+    task = asyncio.create_task(check_after_download(recording_id))
+    _loudness_tasks.add(task)
+    task.add_done_callback(_loudness_tasks.discard)
+
+
 # ---------------------------------------------------------------------
 # Sync DB pomocníci (volané přes asyncio.to_thread)
 # ---------------------------------------------------------------------
@@ -594,6 +604,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         # Až PO `track.available` a fire-and-forget -- analýza nesmí zdržet
         # start přehrávání ani job označit jako selhaný.
         _schedule_loudness(ctx["recording_id"])
+        _schedule_download_check(ctx["recording_id"])
 
     except Exception as exc:  # noqa: BLE001 - chceme zachytit *cokoliv* z providera
         logger.exception("provisioning jobu %s selhalo (pokus %s/%s)", job_id, ctx["attempts"], ctx["max_attempts"])

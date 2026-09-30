@@ -83,6 +83,9 @@ services:
       YTDLP_PROXY: ${YTDLP_PROXY:-}
       GLUETUN_CONTROL_URL: http://gluetun:8000
       GLUETUN_CONTROL_API_KEY: "${GLUETUN_CONTROL_API_KEY:?chybí v .env}"
+      # Kontrola podezřelých stažení Shazamem (app/library/download_check.py)
+      # -- stejně jako u api VÝHRADNĚ přes Mullvad.
+      SHAZAM_PROXY: ${SHAZAM_PROXY:-http://gluetun:8888}
     volumes:
       - vault-db:/data/db
       - ${MEDIA_DIR:-./media}:/data/media
