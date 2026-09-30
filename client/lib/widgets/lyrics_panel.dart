@@ -262,12 +262,11 @@ class LyricsFollowButton extends ConsumerWidget {
     return IconButton(
       tooltip: follow ? 'Vypnout sledování textu' : 'Zapnout sledování textu',
       style: IconButton.styleFrom(
-        foregroundColor: follow ? color : color.withValues(alpha: 0.6),
-        backgroundColor: follow ? color.withValues(alpha: 0.16) : Colors.transparent,
+        foregroundColor: follow ? color.withValues(alpha: 0.9) : color.withValues(alpha: 0.5),
         fixedSize: const Size.square(44),
       ),
       icon: Icon(
-        follow ? Symbols.sync_rounded : Symbols.sync_disabled_rounded,
+        follow ? Symbols.subtitles_rounded : Symbols.subtitles_off_rounded,
         size: 22,
         semanticLabel: follow ? 'Sledování textu zapnuté' : 'Sledování textu vypnuté',
       ),
