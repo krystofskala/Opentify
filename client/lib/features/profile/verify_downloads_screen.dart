@@ -123,7 +123,8 @@ class _VerifyDownloadsScreenState extends ConsumerState<VerifyDownloadsScreen> {
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: Text(
                     '${songsCount(items.length)} k projití. Shazam u nich slyší jinou skladbu, nebo soubor '
-                    'nejde přečíst. Pusť si ji a rozhodni – znovu se stáhne z jiného výsledku. Kontrast '
+                    'nejde přečíst. Pusť si ji a rozhodni: je to dobře, nebo má Shazam pravdu – pak se skladba '
+                    'stáhne znovu z jiného výsledku. Kontrast '
                     'a tvoje vlastní hudba zůstávají beze změny.',
                     style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
@@ -216,11 +217,12 @@ class _VerifyRow extends ConsumerWidget {
                     spacing: AppSpacing.xs,
                     runSpacing: AppSpacing.xs,
                     children: [
-                      GlassButton(label: 'Je to v pořádku', icon: Symbols.check_rounded, compact: true, onPressed: onOk),
+                      // Dvě jasné volby: soubor sedí, nebo Shazam má pravdu (= špatný soubor).
+                      GlassButton(label: 'Je to dobře', icon: Symbols.check_rounded, compact: true, onPressed: onOk),
                       if (onRedownload != null)
                         GlassButton(
-                          label: 'Stáhnout znovu',
-                          icon: Symbols.refresh_rounded,
+                          label: 'Shazam má pravdu',
+                          icon: Symbols.graphic_eq_rounded,
                           compact: true,
                           onPressed: onRedownload,
                         )

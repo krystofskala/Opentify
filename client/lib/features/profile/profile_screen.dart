@@ -120,7 +120,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               icon: Symbols.fact_check_rounded,
               title: 'Kontrola stažených',
               description: 'Skladby, u kterých Shazam slyší něco jiného, než by měly být. '
-                  'Pusť si je a rozhodni: je to v pořádku, nebo stáhnout znovu.',
+                  'Pusť si je a rozhodni: je to dobře, nebo má Shazam pravdu.',
               buttonLabel: 'Projít',
               onPressed: () => context.push('/verify-downloads'),
             ),
