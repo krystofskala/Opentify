@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
-from app.auth import get_current_user
+from app.auth import ADMIN_ID, get_current_user, require_admin
 from app.utils import utcnow
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import Availability, CamelModel, RecordingOut
@@ -95,7 +95,7 @@ def _progress_dict(p: ScanProgress) -> dict:
 
 
 @library_router.post("/scan")
-async def scan(_current: tuple[str, str] = Depends(get_current_user)):
+async def scan(_current: tuple[str, str] = Depends(require_admin)):
     progress = get_scan_progress()
     if progress.status == "running":
         # Už jeden běží (např. po refreshi stránky) -- jen vrať jeho stav,
@@ -460,7 +460,7 @@ def _remove_from_library(session: Session, recording_id: str, dry_run: bool = Fa
 def remove_track(
     recording_id: str,
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    _current: tuple[str, str] = Depends(require_admin),
 ):
     """"Odebrat z knihovny" -- neodebírá z Oblíbených ani z playlistů (to
     jsou samostatné akce), jen z "Moje knihovna"."""
@@ -472,7 +472,7 @@ def remove_tracks(
     body: RemoveTracksBody,
     dry_run: bool = Query(default=False, alias="dryRun"),
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    _current: tuple[str, str] = Depends(require_admin),
 ):
     """`?dryRun=true` -- jen spočítá, co by se stalo (kolik MB se uvolní, co
     se jen skryje), pro potvrzovací sheet v klientovi. Nic nemění."""
@@ -657,7 +657,8 @@ async def like_song(
         for row in dislikes:
             session.delete(row)
         session.commit()
-        send_feedback_later(recording_id, 0)
+        if user_id == ADMIN_ID:
+            send_feedback_later(recording_id, 0)
     return {"recordingId": recording_id, "liked": True}
 
 
@@ -685,7 +686,8 @@ async def dislike_song(
     purge_from_snapshots(session, recording_id)
     session.commit()
     unlike_song(recording_id, session=session, current=current)
-    send_feedback_later(recording_id, -1)
+    if user_id == ADMIN_ID:  # ListenBrainz účet je adminův
+        send_feedback_later(recording_id, -1)
     return {"recordingId": recording_id, "disliked": True}
 
 
@@ -701,7 +703,8 @@ async def undislike_song(
     ).all():
         session.delete(row)
     session.commit()
-    send_feedback_later(recording_id, 0)
+    if user_id == ADMIN_ID:
+        send_feedback_later(recording_id, 0)
     return {"recordingId": recording_id, "disliked": False}
 
 
@@ -748,7 +751,7 @@ def _write_verify_report(report: dict[str, dict]) -> None:
 @library_router.get("/verify-report")
 def verify_report(
     session: Session = Depends(get_session),
-    _current: tuple[str, str] = Depends(get_current_user),
+    _current: tuple[str, str] = Depends(require_admin),
 ):
     """Podezřelé skladby z kontroly (Shazam slyší jinou skladbu, soubor nejde
     přečíst) k ručnímu projití v appce. Nic se samo nemaže ani nemění."""
@@ -779,7 +782,7 @@ def verify_report(
 
 
 @library_router.post("/verify-report/{recording_id}/ok")
-async def verify_mark_ok(recording_id: str, _current: tuple[str, str] = Depends(get_current_user)):
+async def verify_mark_ok(recording_id: str, _current: tuple[str, str] = Depends(require_admin)):
     """"Je to v pořádku" -- z přehledu zmizí, při další kontrole se neukáže."""
     async with _VERIFY_LOCK:
         report = _read_verify_report()
@@ -793,7 +796,7 @@ async def verify_mark_ok(recording_id: str, _current: tuple[str, str] = Depends(
 @library_router.post("/verify-report/{recording_id}/redownload")
 async def verify_redownload(
     recording_id: str,
-    current: tuple[str, str] = Depends(get_current_user),
+    current: tuple[str, str] = Depends(require_admin),
 ):
     """"Stáhnout znovu": smaže stažený soubor a stáhne skladbu znovu z jiného
     výsledku (přeskočí dřívější výběr). Vlastní hudba (mimo MEDIA_ROOT) ani
@@ -830,7 +833,7 @@ async def verify_redownload(
 
 
 @library_router.post("/verify-report/{recording_id}/relabel")
-async def verify_relabel(recording_id: str, _current: tuple[str, str] = Depends(get_current_user)):
+async def verify_relabel(recording_id: str, _current: tuple[str, str] = Depends(require_admin)):
     """"Shazam má pravdu" u VLASTNÍ hudby: soubor je v pořádku, jen ho sken
     přiřadil ke špatné skladbě (živě: Marsyas vedený jako Aleš Procházka).
     Soubor se nemění -- přeřadí se k interpretovi a skladbě, kterou slyší

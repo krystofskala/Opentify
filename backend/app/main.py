@@ -24,6 +24,7 @@ from app.loudness import backfill_loop
 from app.realtime import redis_listener, websocket_endpoint
 from app.recommendations.listenbrainz import close_listenbrainz_client, close_listenbrainz_public_client
 from app.routes.artwork import artwork_router
+from app.routes.auth import auth_router
 from app.routes.catalog import catalog_router
 from app.routes.home import home_router
 from app.routes.library import library_router
@@ -77,6 +78,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(tracks_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
@@ -122,6 +124,12 @@ def health() -> dict:
 
 @app.websocket("/ws")
 async def ws_route(websocket: WebSocket, user_id: str = "demo-user") -> None:
-    # TODO: nahradit `user_id` query parametrem ověřením device JWT z
-    # `?token=`, viz docs/asyncapi.yaml.
-    await websocket_endpoint(websocket, user_id)
+    # Profil podle klíče zařízení (cookie jde s WS handshakem), ne podle
+    # `user_id` z URL -- ten by šel podvrhnout.
+    from app.auth import resolve_user
+
+    _user, acting = resolve_user(websocket)  # type: ignore[arg-type]
+    if acting is None:
+        await websocket.close(code=4401)
+        return
+    await websocket_endpoint(websocket, acting.id)

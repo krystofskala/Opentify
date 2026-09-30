@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 from sqlmodel import Session, select
 
+from app.auth import ADMIN_ID
 from app.db import engine
 from app.models import Artist, Listen, Recording, Release
 from app.utils import utcnow
@@ -132,6 +133,9 @@ async def submit_pending() -> int:
         pending = session.exec(
             select(Listen)
             .where(Listen.lb_submitted_at.is_(None), Listen.lb_attempts < _MAX_ATTEMPTS)  # type: ignore[union-attr]
+            # ListenBrainz účet je adminův -- poslechy ostatních profilů tam
+            # nepatří.
+            .where(Listen.user_id == ADMIN_ID)
             .order_by(Listen.played_at)
             .limit(_BATCH)
         ).all()

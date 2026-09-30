@@ -208,6 +208,38 @@ class RecordingDislike(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class AppUser(SQLModel, table=True):
+    """Profil v appce. Admin (`demo-user` -- všechna dosavadní data) může
+    zakládat další profily a přepínat se na ně (viz app/auth.py)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    name: str
+    role: str = "user"  # "admin" | "user"
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class AuthToken(SQLModel, table=True):
+    """Přihlášení zařízení -- dlouhodobý klíč (v DB jen jeho SHA-256)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    token_hash: str = Field(index=True, unique=True)
+    user_id: str = Field(index=True)
+    label: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    last_used_at: datetime | None = None
+
+
+class InviteCode(SQLModel, table=True):
+    """Jednorázová pozvánka: otevřený odkaz vymění kód za klíč zařízení."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    code_hash: str = Field(index=True, unique=True)
+    user_id: str = Field(index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+    used_at: datetime | None = None
+
+
 class CollectionProgress(SQLModel, table=True):
     """Kde uživatel v albu/playlistu skončil -- sdílené mezi zařízeními
     ("Pokračovat" na mobilu po přehrávání na PC). `route` = stránka alba /

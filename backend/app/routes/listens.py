@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
-from app.auth import get_current_user
+from app.auth import ADMIN_ID, get_current_user
 from app.catalog.schemas import CamelModel
 from app.db import get_session
 from app.listens import record_listen, submit_playing_now
@@ -47,8 +47,10 @@ async def create_listen(body: ListenIn, current: tuple[str, str] = Depends(get_c
 
 
 @listens_router.post("/playing-now")
-async def playing_now(body: PlayingNowIn, _current: tuple[str, str] = Depends(get_current_user)):
-    asyncio.create_task(submit_playing_now(body.recording_id))
+async def playing_now(body: PlayingNowIn, current: tuple[str, str] = Depends(get_current_user)):
+    # "Právě hraje" na ListenBrainz jen za admina (jeho účet).
+    if current[0] == ADMIN_ID:
+        asyncio.create_task(submit_playing_now(body.recording_id))
     return {"ok": True}
 
 

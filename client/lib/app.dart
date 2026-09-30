@@ -11,6 +11,7 @@ import 'theme/accent_color.dart' show AnimatedAccent, accentTransitionCurve, acc
 import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
+import 'widgets/auth_gate.dart';
 import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
 
@@ -96,7 +97,7 @@ class OpentifyApp extends ConsumerWidget {
                 // všude; čtečka obrazovky je dostane dál.
                 child: TooltipVisibility(
                   visible: false,
-                  child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
+                  child: NowPlayingSheetHost(child: AuthGate(child: child ?? const SizedBox.shrink())),
                 ),
               ),
             ),

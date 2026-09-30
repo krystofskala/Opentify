@@ -17,6 +17,7 @@ import '../../widgets/surface_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_import_report.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
+import 'profiles_section.dart';
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -75,6 +76,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+            // Admin jedná za jiný profil -- pruh se "Zpět na můj".
+            const ActingAsBanner(),
             const _AppearanceCard(),
             const SizedBox(height: 12),
             _ActionCard(
@@ -115,6 +118,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               buttonLabel: 'Ladit',
               onPressed: () => context.push('/tuner'),
             ),
+            const SizedBox(height: 12),
+            // Profily (jen admin; ostatní sekci nevidí).
+            const ProfilesSection(),
             const SizedBox(height: 12),
             _ActionCard(
               icon: Symbols.fact_check_rounded,
