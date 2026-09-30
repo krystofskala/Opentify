@@ -325,7 +325,9 @@ class RenderLiquidSource extends RenderRepaintBoundary {
   /// Výřez `global` (logické px) jako obrázek, nebo `null`.
   ui.Image? capture(Rect global, double pixelRatio) {
     final offsetLayer = layer as OffsetLayer?;
-    if (offsetLayer == null || !attached || !hasSize) return null;
+    // Nekreslená (offstage/zakrytá) stránka má ve vrstvě starý obraz --
+    // nebrat ho.
+    if (offsetLayer == null || !offsetLayer.attached || !attached || !hasSize) return null;
     final origin = localToGlobal(Offset.zero);
     final local = global.shift(-origin).intersect(Offset.zero & size);
     if (local.isEmpty) return null;
@@ -566,7 +568,10 @@ class RenderLiquidGlass extends RenderBox {
     final program = _program;
     final sharp = _capture._sharp, blurred = _capture._blurred, rect = _capture._rect;
     if (program == null || sharp == null || blurred == null || rect == null) {
-      canvas.drawRRect(rrect, Paint()..color = fill.withValues(alpha: math.max(fill.a, 0.55)));
+      // První snímek ještě není zachycený: obyčejné rozmazání se stejnou
+      // výplní (dřív 55% šedá plocha -- sheet vyjel tmavě šedý a čiré sklo
+      // přehrávače se na okamžik "zatónovalo", živě nahlášeno).
+      if (mix >= 1) _paintBlurFallback(context, offset, rrect, 1);
       return;
     }
     // Nová instance na každý snímek (jako pozadí) -- sdílená instance
