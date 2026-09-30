@@ -93,6 +93,14 @@ def _parse_track_number(raw: str | None) -> int | None:
         return None  # vinyl/kazetová strana jako "A1" apod. — bez číselného pořadí
 
 
+
+# Prodejci nosičů/streamů, které MusicBrainz občas vede i jako "merch".
+_RETAILERS = (
+    "cdjapan", "amazon.", "itunes.", "music.apple", "hmv.", "yesasia", "tower.jp", "play-asia",
+    "jpopsuki", "ebay.", "walmart.", "target.com", "barnesandnoble", "bol.com", "fnac.", "jpc.de",
+    "recordstoreday", "7digital", "qobuz", "beatport", "junodownload", "emp.",
+)
+
 class CatalogService:
     def __init__(
         self,
@@ -641,7 +649,18 @@ class CatalogService:
 
         name = quote_plus(artist.name)
         concerts = first("bandsintown", "songkick")
-        shop = first("merchandise", "online merchandise", "purchase for mail-order")
+        # Jen skutečný merch interpreta. "purchase for mail-order" jsou na
+        # MusicBrainz obchody s nosiči (CDJapan, Amazon...) -- ne obchod
+        # kapely (živě: Twenty One Pilots -> CDJapan s blokací přístupu).
+        shops = [
+            url
+            for t in ("merchandise", "online merchandise")
+            for url in by_type.get(t, [])
+            if not any(r in url.lower() for r in _RETAILERS)
+        ]
+        # Oficiální obchod ("shop."/"store."/"merch") před ostatními.
+        shops.sort(key=lambda u: 0 if any(k in u.lower() for k in ("shop", "store", "merch")) else 1)
+        shop = shops[0] if shops else None
         return {
             "web": first("official homepage"),
             "bandcamp": first("bandcamp") or None,
