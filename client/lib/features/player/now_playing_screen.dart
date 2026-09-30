@@ -321,7 +321,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           final glassy = v < 0.999;
           return Stack(
             children: [
-              Positioned.fill(
+              // Ztmavení appky jen NAD panelem -- pod panelem by ho sklo při
+              // rychlém pohybu (obyčejné rozmazání) bralo s sebou a oproti
+              // lomu (ten ho nevidí) blikalo tmavě/světle.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: panelTop + Expressive.cornerExtraLarge,
                 child: IgnorePointer(child: ColoredBox(color: Colors.black.withValues(alpha: 0.4 * v))),
               ),
               Positioned(

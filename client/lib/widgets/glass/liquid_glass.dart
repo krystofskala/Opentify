@@ -486,47 +486,82 @@ class RenderLiquidGlass extends RenderBox {
   // obyčejné rozmazání, lom až ~150 ms po zastavení (živě nahlášeno).
   // V nativní appce (Impeller, bez zpoždění) se dá vypnout.
   static const bool _calmWhileFast = kIsWeb;
-  static const double _fastPx = 4;
-  static const Duration _settle = Duration(milliseconds: 150);
+  // Hystereze podle RYCHLOSTI (px/s), ne posunu za snímek -- pomalý tah
+  // prstem má lom nechat (dřív se vypínal i při něm a sklo blikalo).
+  static const double _fastSpeed = 1600;
+  static const double _calmSpeed = 700;
+  static const Duration _settle = Duration(milliseconds: 140);
+  // Přechod lom <-> rozmazání se prolíná, ne přepíná.
+  static const double _fadeSeconds = 0.16;
   Rect? _prevRect;
-  DateTime _lastFast = DateTime.fromMillisecondsSinceEpoch(0);
+  int _prevAt = 0;
+  bool _fast = false;
+  DateTime _calmSince = DateTime.fromMillisecondsSinceEpoch(0);
+  double _mix = 1; // 1 = lom, 0 = obyčejné rozmazání
+  int _mixAt = 0;
   Timer? _settleTimer;
 
-  bool _updateMotion(Rect now) {
+  void _updateMotion(Rect now) {
+    final t = DateTime.now().microsecondsSinceEpoch;
     final prev = _prevRect;
+    final dt = (t - _prevAt) / 1e6;
     _prevRect = now;
-    if (!_calmWhileFast || prev == null) return false;
-    final moved = (now.topLeft - prev.topLeft).distance + (now.size.width - prev.size.width).abs() +
-        (now.size.height - prev.size.height).abs();
-    final t = DateTime.now();
-    if (moved > _fastPx) _lastFast = t;
-    final fast = t.difference(_lastFast) < _settle;
-    if (fast) {
-      // Po zastavení se samo překreslí zpátky na lom.
+    _prevAt = t;
+    if (!_calmWhileFast) return;
+    if (prev != null && dt > 0 && dt < 0.25) {
+      final moved = (now.topLeft - prev.topLeft).distance +
+          (now.size.width - prev.size.width).abs() +
+          (now.size.height - prev.size.height).abs();
+      final speed = moved / dt;
+      if (speed > _fastSpeed) {
+        _fast = true;
+        _calmSince = DateTime.now();
+      } else if (speed > _calmSpeed) {
+        _calmSince = DateTime.now();
+      }
+    }
+    if (_fast && DateTime.now().difference(_calmSince) > _settle) _fast = false;
+    // Plynulý posun `_mix` k cíli.
+    final target = _fast ? 0.0 : 1.0;
+    final mixDt = _mixAt == 0 ? 0.0 : (t - _mixAt) / 1e6;
+    _mixAt = t;
+    final step = (mixDt / _fadeSeconds).clamp(0.0, 1.0);
+    _mix = target > _mix ? math.min(target, _mix + step) : math.max(target, _mix - step);
+    if (_fast || _mix != target) {
+      // Dokud se nepřelije / nevrátí, překreslovat (i když se sklo už nehýbe).
       _settleTimer?.cancel();
-      _settleTimer = Timer(_settle + const Duration(milliseconds: 20), () {
+      _settleTimer = Timer(const Duration(milliseconds: 16), () {
         if (attached) markNeedsPaint();
       });
     }
-    return fast;
+  }
+
+  void _paintBlurFallback(PaintingContext context, Offset offset, RRect rrect, double opacity) {
+    void paintBlur(PaintingContext ctx, Offset off) {
+      ctx.pushClipRRect(needsCompositing, off, Offset.zero & size, rrect.shift(-offset), (c2, o2) {
+        c2.pushLayer(
+          BackdropFilterLayer(filter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma)),
+          (c, o) => c.canvas.drawRect(o & size, Paint()..color = fill),
+          o2,
+        );
+      });
+    }
+
+    if (opacity >= 0.999) {
+      paintBlur(context, offset);
+    } else {
+      context.pushOpacity(offset, (opacity * 255).round(), (ctx, off) => paintBlur(ctx, off));
+    }
   }
 
   void _paintGlass(PaintingContext context, Offset offset) {
     globalRect = localToGlobal(Offset.zero) & size;
-    final fast = _updateMotion(globalRect!);
+    _updateMotion(globalRect!);
     _capture._schedule();
     final rrect = RRect.fromRectAndRadius(offset & size, Radius.circular(math.min(radius, size.shortestSide / 2)));
-    if (fast) {
-      // Obyčejné sklo: rozmazání pozadí + výplň, oříznuté do tvaru.
-      context.pushClipRRect(needsCompositing, offset, Offset.zero & size, rrect.shift(-offset), (ctx, off) {
-        ctx.pushLayer(
-          BackdropFilterLayer(filter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma)),
-          (c, o) => c.canvas.drawRect(o & size, Paint()..color = fill),
-          off,
-        );
-      });
-      return;
-    }
+    final mix = _mix;
+    if (mix < 1) _paintBlurFallback(context, offset, rrect, 1);
+    if (mix <= 0.001) return;
     final canvas = context.canvas;
     final program = _program;
     final sharp = _capture._sharp, blurred = _capture._blurred, rect = _capture._rect;
@@ -564,7 +599,8 @@ class RenderLiquidGlass extends RenderBox {
     shader.setImageSampler(1, blurred);
     canvas.save();
     canvas.translate(offset.dx, offset.dy);
-    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+    // Při prolínání s obyčejným rozmazáním průhlednost podle `mix`.
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader..color = Color.fromRGBO(0, 0, 0, mix));
     canvas.restore();
   }
 }
