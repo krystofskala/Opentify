@@ -16,6 +16,9 @@ import 'widgets/top_fade_scroll_behavior.dart';
 
 const _defaultSeed = Colors.deepPurple;
 
+/// Pro hlášky mimo konkrétní obrazovku (např. navázání z jiného zařízení).
+final appMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
 class OpentifyApp extends ConsumerWidget {
   const OpentifyApp({super.key});
 
@@ -28,9 +31,15 @@ class OpentifyApp extends ConsumerWidget {
     final accent = ref.watch(effectiveAccentProvider);
     final seed = accent ?? _defaultSeed;
     final isPlaying = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
+    ref.listen<String?>(playerNoticeProvider, (_, message) {
+      if (message == null) return;
+      appMessengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
+      ref.read(playerNoticeProvider.notifier).state = null;
+    });
 
     return MaterialApp.router(
       title: 'Opentify',
+      scaffoldMessengerKey: appMessengerKey,
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(seed: seed, brightness: Brightness.light),
       darkTheme: buildAppTheme(seed: seed, brightness: Brightness.dark),

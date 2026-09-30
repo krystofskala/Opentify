@@ -394,6 +394,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       index: s.queueIndex,
       total: s.queue.length,
       positionMs: s.position.inMilliseconds,
+      deviceId: null,
+      updatedAt: null,
     ));
   }
 
@@ -1722,6 +1724,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Hrající skladba ještě nemá svou barvu (drží se barva předchozí) --
   /// spočítat znovu.
   void _refreshAccentIfMissing() {
+    // Rozposlouchaná alba/playlisty z jiných zařízení.
+    unawaited(_ref.read(collectionProgressProvider.notifier).refresh());
     // Obal hrající skladby: nepovedené analýzy (tóny, charakter) znovu.
     final art = state.nowPlaying?.artworkUrl;
     if (art != null) {
@@ -1818,8 +1822,38 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     } catch (_) {}
   }
 
+  /// Pokračování z pauzy v albu/playlistu, ve kterém uživatel mezitím
+  /// pokročil na JINÉM zařízení: navázat tam (novější pozice), ne pustit
+  /// starou a přepsat s ní tu novou. `true` = navázáno.
+  Future<bool> _continueFromOtherDevice() async {
+    final route = _queueContext;
+    final np = state.nowPlaying;
+    if (np == null || _player.playing || !CollectionProgressController.isCollection(route)) return false;
+    final progress = _ref.read(collectionProgressProvider.notifier);
+    // PC (ne Safari na iPhonu -- tam by čekání na síť zablokovalo přehrání
+    // z klepnutí; stav se tam obnoví při návratu do appky): krátce ověřit
+    // se serverem, i když se okno mezitím neschovalo.
+    if (!_nativeHls) {
+      await progress.refresh().timeout(const Duration(milliseconds: 1500), onTimeout: () {});
+    }
+    final other = progress.newerFromOtherDevice(route!);
+    if (other == null) return false;
+    final samePlace =
+        other.recordingId == np.recordingId && (other.positionMs - state.position.inMilliseconds).abs() < 8000;
+    if (samePlace) return false;
+    final index = state.queue.indexWhere((i) => i.recordingId == other.recordingId);
+    if (index < 0) return false;
+    _restoredIdle = false;
+    _resumeAt = Duration(milliseconds: other.positionMs);
+    _resumeFor = other.recordingId;
+    _ref.read(playerNoticeProvider.notifier).state = 'Navazuju tam, kde jsi skončil na jiném zařízení';
+    await _playAtIndex(index);
+    return true;
+  }
+
   Future<void> togglePlayPause() async {
     if (state.nowPlaying == null) return;
+    if (!_player.playing && await _continueFromOtherDevice()) return;
     if (_restoredIdle) {
       // Obnovený přehrávač po znovuotevření appky -- zdroj ještě není
       // načtený; spustit skladbu od uložené pozice.
@@ -2001,6 +2035,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 typedef AbRepeat = ({String recordingId, Duration a, Duration? b});
 
 final abRepeatProvider = StateProvider<AbRepeat?>((ref) => null);
+
+/// Krátké oznámení přehrávače pro UI (snackbar), např. navázání z jiného
+/// zařízení. UI ho zobrazí a vynuluje.
+final playerNoticeProvider = StateProvider<String?>((ref) => null);
 
 /// Všechno ze stavu přehrávače kromě pozice -- pro `select` u widgetů,
 /// které se mají přestavět při změně skladby/stavu, ale ne 5x za vteřinu

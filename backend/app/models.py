@@ -208,6 +208,24 @@ class RecordingDislike(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class CollectionProgress(SQLModel, table=True):
+    """Kde uživatel v albu/playlistu skončil -- sdílené mezi zařízeními
+    ("Pokračovat" na mobilu po přehrávání na PC). `route` = stránka alba /
+    playlistu v appce; `device_id` = kdo zapsal naposled (jiné zařízení pak
+    pozná, že má navázat, ne přepsat)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    route: str = Field(index=True)
+    recording_id: str
+    title: str = ""
+    idx: int = 0
+    total: int = 0
+    position_ms: int = 0
+    device_id: str | None = None
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class ListenLater(SQLModel, table=True):
     """"Poslechnout později" -- skladba, album nebo interpret, na které teď
     není nálada. Po poslechnutí se samo označí `listened_at` (viz

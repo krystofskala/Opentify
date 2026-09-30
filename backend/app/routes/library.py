@@ -34,6 +34,7 @@ from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
+from app.utils import utcnow
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import Availability, CamelModel, RecordingOut
 from app.db import engine, get_session
@@ -48,6 +49,7 @@ from app.library.spotify_import import (
 )
 from app.models import (
     Artist,
+    CollectionProgress,
     MediaAsset,
     MediaAssetStatus,
     Playlist,
@@ -860,3 +862,74 @@ async def verify_relabel(recording_id: str, _current: tuple[str, str] = Depends(
         entry["relabeledTo"] = target.id
         _write_verify_report(report)
     return {"recordingId": recording_id, "review": "relabeled", "newRecordingId": target.id}
+
+
+# --- Rozposlouchaná alba/playlisty napříč zařízeními ---------------------
+
+
+def _progress_out(p: CollectionProgress) -> dict:
+    return {
+        "recordingId": p.recording_id,
+        "title": p.title,
+        "index": p.idx,
+        "total": p.total,
+        "positionMs": p.position_ms,
+        "deviceId": p.device_id,
+        "updatedAt": p.updated_at.isoformat(),
+    }
+
+
+@library_router.get("/progress")
+def list_progress(
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    rows = session.exec(select(CollectionProgress).where(CollectionProgress.user_id == current[0])).all()
+    return {"items": {r.route: _progress_out(r) for r in rows}}
+
+
+class ProgressIn(CamelModel):
+    route: str
+    recording_id: str
+    title: str = ""
+    index: int = 0
+    total: int = 0
+    position_ms: int = 0
+
+
+@library_router.put("/progress")
+def put_progress(
+    body: ProgressIn,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    user_id, device_id = current
+    row = session.exec(
+        select(CollectionProgress).where(CollectionProgress.user_id == user_id, CollectionProgress.route == body.route)
+    ).first()
+    if row is None:
+        row = CollectionProgress(user_id=user_id, route=body.route, recording_id=body.recording_id)
+    row.recording_id = body.recording_id
+    row.title = body.title
+    row.idx = body.index
+    row.total = body.total
+    row.position_ms = body.position_ms
+    row.device_id = device_id
+    row.updated_at = utcnow()
+    session.add(row)
+    session.commit()
+    return _progress_out(row)
+
+
+@library_router.delete("/progress")
+def delete_progress(
+    route: str = Query(...),
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    for row in session.exec(
+        select(CollectionProgress).where(CollectionProgress.user_id == current[0], CollectionProgress.route == route)
+    ).all():
+        session.delete(row)
+    session.commit()
+    return {"route": route, "deleted": True}
