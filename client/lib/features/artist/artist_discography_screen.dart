@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -14,6 +16,9 @@ import '../../widgets/state_views.dart';
 import '../../state/artwork_provider.dart';
 import 'artist_screen.dart' show discographyProvider;
 import '../../widgets/collection_actions.dart';
+
+/// Šířka sloupce diskografie na širokém okně (osa uprostřed).
+const _wideMaxWidth = 960.0;
 
 const _typeLabels = {'album': 'Album', 'ep': 'EP', 'single': 'Singl', 'compilation': 'Kompilace'};
 const _filterLabels = {'all': 'Vše', 'album': 'Alba', 'ep': 'EP', 'single': 'Singly', 'compilation': 'Kompilace'};
@@ -83,19 +88,29 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
               final db = b.releaseDate ?? (_oldestFirst ? '9999' : '0000');
               return _oldestFirst ? da.compareTo(db) : db.compareTo(da);
             });
+          // Široké okno: vycentrovaný sloupec jako stránka interpreta (dřív
+          // obsah v úzkém pruhu vlevo a zbytek prázdný) a osa uprostřed se
+          // střídáním vydání vlevo/vpravo.
+          final width = MediaQuery.sizeOf(context).width;
+          final wide = width >= 840;
+          final side = wide ? math.max(AppSpacing.md, (width - _wideMaxWidth) / 2) : 0.0;
           return CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.sm),
+                  padding: EdgeInsets.fromLTRB(
+                      side + AppSpacing.md, AppSpacing.xs, side + AppSpacing.md, wide ? AppSpacing.lg : AppSpacing.sm),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: wide ? CrossAxisAlignment.center : CrossAxisAlignment.start,
                     children: [
                       if (filters.length > 2)
-                        GlassSegmentedControl<String>(
-                          segments: [for (final f in filters) GlassSegment(value: f, label: _filterLabels[f]!)],
-                          selected: type,
-                          onChanged: (value) => setState(() => _type = value),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: wide ? 520 : double.infinity),
+                          child: GlassSegmentedControl<String>(
+                            segments: [for (final f in filters) GlassSegment(value: f, label: _filterLabels[f]!)],
+                            selected: type,
+                            onChanged: (value) => setState(() => _type = value),
+                          ),
                         ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
@@ -106,21 +121,34 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
                   ),
                 ),
               ),
-              SliverList.builder(
-                itemCount: releases.length,
-                itemBuilder: (context, i) {
-                  final release = releases[i];
-                  final year = release.yearLabel;
-                  final firstOfYear = i == 0 || releases[i - 1].yearLabel != year;
-                  final lastOfYear = i == releases.length - 1 || releases[i + 1].yearLabel != year;
-                  return _TimelineRow(
-                    release: release,
-                    year: firstOfYear ? year : null,
-                    isFirst: i == 0,
-                    isLast: i == releases.length - 1,
-                    endsYear: lastOfYear,
-                  );
-                },
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: side),
+                sliver: SliverList.builder(
+                  itemCount: releases.length,
+                  itemBuilder: (context, i) {
+                    final release = releases[i];
+                    final year = release.yearLabel;
+                    final firstOfYear = i == 0 || releases[i - 1].yearLabel != year;
+                    final lastOfYear = i == releases.length - 1 || releases[i + 1].yearLabel != year;
+                    if (wide) {
+                      return _WideTimelineRow(
+                        release: release,
+                        year: firstOfYear ? year : null,
+                        onLeft: i.isOdd,
+                        isFirst: i == 0,
+                        isLast: i == releases.length - 1,
+                        endsYear: lastOfYear,
+                      );
+                    }
+                    return _TimelineRow(
+                      release: release,
+                      year: firstOfYear ? year : null,
+                      isFirst: i == 0,
+                      isLast: i == releases.length - 1,
+                      endsYear: lastOfYear,
+                    );
+                  },
+                ),
               ),
               SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl + MediaQuery.paddingOf(context).bottom)),
             ],
@@ -243,6 +271,155 @@ class _TimelineRow extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Řádek osy na širokém okně: osa uprostřed, vydání střídavě vlevo a
+/// vpravo (větší obal), rok jako štítek přímo na ose u prvního vydání roku.
+class _WideTimelineRow extends ConsumerWidget {
+  const _WideTimelineRow({
+    required this.release,
+    required this.year,
+    required this.onLeft,
+    required this.isFirst,
+    required this.isLast,
+    required this.endsYear,
+  });
+
+  final ReleaseModel release;
+  final String? year;
+  final bool onLeft;
+  final bool isFirst;
+  final bool isLast;
+  final bool endsYear;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final cover = release.coverImageUrl ??
+        ref.watch(recordingArtworkProvider((releaseId: release.id, artistId: release.artistId))).valueOrNull;
+
+    final card = InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      onTap: () => context.push('/releases/${release.id}'),
+      onLongPress: () => showCollectionActions(
+        context,
+        kind: CollectionKind.album,
+        id: release.id,
+        title: release.title,
+        subtitle: release.yearLabel,
+        imageUrl: cover,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xs),
+        child: Row(
+          textDirection: onLeft ? TextDirection.rtl : TextDirection.ltr,
+          children: [
+            ClipPath(
+              clipper: ShapeBorderClipper(shape: AppShapes.md),
+              child: SizedBox(width: 96, height: 96, child: ArtworkImage(url: cover, iconSize: 32)),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: onLeft ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    release.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: onLeft ? TextAlign.right : TextAlign.left,
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_typeLabels[release.releaseType] ?? release.releaseType} · ${_dateLabel(release.releaseDate)}',
+                    textAlign: onLeft ? TextAlign.right : TextAlign.left,
+                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: endsYear ? AppSpacing.md : 0),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: onLeft ? Center(child: card) : const SizedBox.shrink()),
+            SizedBox(
+              width: 88,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _WideAxisPainter(
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
+                        top: !isFirst,
+                        bottom: !isLast,
+                      ),
+                    ),
+                  ),
+                  if (year != null)
+                    DecoratedBox(
+                      decoration: ShapeDecoration(color: scheme.primary, shape: AppShapes.of(AppRadii.pill)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        child: Text(
+                          year!,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: scheme.onPrimary,
+                            fontWeight: FontWeight.w900,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(color: scheme.onSurfaceVariant, shape: BoxShape.circle),
+                    ),
+                ],
+              ),
+            ),
+            Expanded(child: onLeft ? const SizedBox.shrink() : Center(child: card)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WideAxisPainter extends CustomPainter {
+  const _WideAxisPainter({required this.color, required this.top, required this.bottom});
+
+  final Color color;
+  final bool top;
+  final bool bottom;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final x = size.width / 2;
+    final mid = size.height / 2;
+    final line = Paint()
+      ..color = color
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+    if (top) canvas.drawLine(Offset(x, 0), Offset(x, mid), line);
+    if (bottom) canvas.drawLine(Offset(x, mid), Offset(x, size.height), line);
+  }
+
+  @override
+  bool shouldRepaint(covariant _WideAxisPainter old) => old.color != color || old.top != top || old.bottom != bottom;
 }
 
 class _AxisPainter extends CustomPainter {

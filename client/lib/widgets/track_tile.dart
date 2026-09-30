@@ -404,7 +404,8 @@ class _RowTileState extends State<_RowTile> {
                           SizedBox(
                             width: 52,
                             child: Text(
-                              w.recording.durationLabel,
+                              // Neznámá délka = prázdné místo, ne sloupec "--:--".
+                              w.recording.durationMs != null ? w.recording.durationLabel : '',
                               textAlign: TextAlign.right,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontFeatures: const [FontFeature.tabularFigures()],
