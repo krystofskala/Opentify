@@ -64,6 +64,11 @@ class _LiquidScopeState extends State<LiquidScope> {
 /// a sheet fronty si ho odsud bere.
 final LiquidCapture playerLiquidCapture = LiquidCapture();
 
+/// Jen pozadí appky, bez stránky -- pro ovládání v přehrávači (pod ním je
+/// jen pozadí přehrávače = kopie pozadí appky). Kdyby bralo obsah panelu,
+/// zachytávalo by samo sebe.
+final LiquidCapture backgroundLiquidCapture = LiquidCapture();
+
 /// Stránky kořenového navigátoru (shell i album/interpret otevřené nad
 /// ním) -- pro panel přehrávače při vysouvání, ať lomí to, co je opravdu
 /// pod ním, ne Domů schované pod otevřeným albem (živě nahlášeno).

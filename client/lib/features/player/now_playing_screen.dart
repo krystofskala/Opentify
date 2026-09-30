@@ -866,123 +866,130 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   ) {
     final controller = ref.read(audioPlayerControllerProvider.notifier);
     final abBadge = _abBadge(playback, accent);
-    // Stejné sklo jako mini přehrávač a tab bar (tón, rozmazání, lem).
-    return GlassContainer(
-      rim: true,
-      borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Consumer(builder: (context, positionRef, _) {
-            final position = positionRef.watch(audioPlayerControllerProvider.select((s) => s.position));
-            final ms = duration.inMilliseconds;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
+    // Stejné sklo jako mini přehrávač a tab bar (tón, rozmazání, lem)
+    // i s lomem -- láme pozadí přehrávače pod sebou.
+    return LiquidCaptureScope(
+      capture: backgroundLiquidCapture,
+      child: GlassContainer(
+        rim: true,
+        liquid: true,
+        borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Consumer(builder: (context, positionRef, _) {
+              final position = positionRef.watch(audioPlayerControllerProvider.select((s) => s.position));
+              final ms = duration.inMilliseconds;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  WavySeekBar(
+                    progress: ms == 0 ? 0 : position.inMilliseconds.clamp(0, ms) / ms,
+                    isPlaying: playback.isPlaying,
+                    onChangeEnd:
+                        ms == 0 ? null : (value) => controller.seek(Duration(milliseconds: (value * ms).round())),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(_formatDuration(position), style: const TextStyle(color: Colors.white70)),
+                        abBadge,
+                        Text(_formatDuration(duration), style: const TextStyle(color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }),
+            // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
+            // spodní řádek přimáčknutý).
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                WavySeekBar(
-                  progress: ms == 0 ? 0 : position.inMilliseconds.clamp(0, ms) / ms,
-                  isPlaying: playback.isPlaying,
-                  onChangeEnd:
-                      ms == 0 ? null : (value) => controller.seek(Duration(milliseconds: (value * ms).round())),
+                IconButton(
+                  icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
+                  // Bez předchozí skladby `previous()` přetočí na začátek.
+                  onPressed: () => _skip(forward: false),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(_formatDuration(position), style: const TextStyle(color: Colors.white70)),
-                      abBadge,
-                      Text(_formatDuration(duration), style: const TextStyle(color: Colors.white70)),
-                    ],
+                // M3 Expressive: play = "cookie" tvar, pauza = squircle --
+                // tvar pružinou morfuje se stavem.
+                GlassPressable(
+                  onPressed: playback.isBuffering ? null : controller.togglePlayPause,
+                  shape: const CircleBorder(),
+                  semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
+                  child: ExpressiveMorph(
+                    size: 76,
+                    color: Colors.white,
+                    shape: playback.isPlaying
+                        ? const ExpressiveShape.squircle()
+                        : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
+                    child: playback.isBuffering
+                        ? (isProvisioning && provisioningPct != null
+                            ? SizedBox.square(
+                                dimension: 40,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 3, color: accent, value: provisioningPct / 100),
+                              )
+                            : ExpressiveLoadingIndicator(size: 40, color: accent))
+                        : Icon(
+                            playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
+                            size: 44,
+                            color: accent,
+                          ),
                   ),
                 ),
+                IconButton(
+                  icon: const Icon(Symbols.skip_next_rounded, color: Colors.white, size: 34),
+                  onPressed: playback.hasNext ? () => _skip(forward: true) : null,
+                ),
               ],
-            );
-          }),
-          // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
-          // spodní řádek přimáčknutý).
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              IconButton(
-                icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
-                // Bez předchozí skladby `previous()` přetočí na začátek.
-                onPressed: () => _skip(forward: false),
-              ),
-              // M3 Expressive: play = "cookie" tvar, pauza = squircle --
-              // tvar pružinou morfuje se stavem.
-              GlassPressable(
-                onPressed: playback.isBuffering ? null : controller.togglePlayPause,
-                shape: const CircleBorder(),
-                semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
-                child: ExpressiveMorph(
-                  size: 76,
-                  color: Colors.white,
-                  shape: playback.isPlaying
-                      ? const ExpressiveShape.squircle()
-                      : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
-                  child: playback.isBuffering
-                      ? (isProvisioning && provisioningPct != null
-                          ? SizedBox.square(
-                              dimension: 40,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 3, color: accent, value: provisioningPct / 100),
-                            )
-                          : ExpressiveLoadingIndicator(size: 40, color: accent))
-                      : Icon(
-                          playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
-                          size: 44,
-                          color: accent,
-                        ),
+            ),
+            const SizedBox(height: 10),
+            // Text a fronta vždy na dosah pod ovládáním (jako Apple Music);
+            // na PC otevírají druhý sloupec, na mobilu sheet.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // Náhodně a opakování dole mezi ikonami (bez popisků se vejdou).
+                IconButton(
+                  tooltip: 'Náhodné přehrávání',
+                  style: IconButton.styleFrom(
+                    foregroundColor: playback.shuffleEnabled ? Colors.white : Colors.white70,
+                    backgroundColor:
+                        playback.shuffleEnabled ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+                    fixedSize: const Size.square(44),
+                  ),
+                  icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
+                  onPressed: controller.toggleShuffle,
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Symbols.skip_next_rounded, color: Colors.white, size: 34),
-                onPressed: playback.hasNext ? () => _skip(forward: true) : null,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // Text a fronta vždy na dosah pod ovládáním (jako Apple Music);
-          // na PC otevírají druhý sloupec, na mobilu sheet.
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              // Náhodně a opakování dole mezi ikonami (bez popisků se vejdou).
-              IconButton(
-                tooltip: 'Náhodné přehrávání',
-                style: IconButton.styleFrom(
-                  foregroundColor: playback.shuffleEnabled ? Colors.white : Colors.white70,
-                  backgroundColor: playback.shuffleEnabled ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
-                  fixedSize: const Size.square(44),
+                _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback),
+                _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback),
+                IconButton(
+                  tooltip: 'Opakování',
+                  style: IconButton.styleFrom(
+                    foregroundColor: playback.repeatMode == RepeatMode.off ? Colors.white70 : Colors.white,
+                    backgroundColor: playback.repeatMode == RepeatMode.off
+                        ? Colors.transparent
+                        : Colors.white.withValues(alpha: 0.16),
+                    fixedSize: const Size.square(44),
+                  ),
+                  icon: Icon(
+                    playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
+                    size: 22,
+                    semanticLabel: 'Opakování',
+                  ),
+                  onPressed: controller.cycleRepeatMode,
                 ),
-                icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
-                onPressed: controller.toggleShuffle,
-              ),
-              _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback),
-              _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback),
-              IconButton(
-                tooltip: 'Opakování',
-                style: IconButton.styleFrom(
-                  foregroundColor: playback.repeatMode == RepeatMode.off ? Colors.white70 : Colors.white,
-                  backgroundColor:
-                      playback.repeatMode == RepeatMode.off ? Colors.transparent : Colors.white.withValues(alpha: 0.16),
-                  fixedSize: const Size.square(44),
-                ),
-                icon: Icon(
-                  playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
-                  size: 22,
-                  semanticLabel: 'Opakování',
-                ),
-                onPressed: controller.cycleRepeatMode,
-              ),
-              // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
-              if (MediaQuery.sizeOf(context).width < 600) _likeButton(playback),
-            ],
-          ),
-        ],
+                // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
+                if (MediaQuery.sizeOf(context).width < 600) _likeButton(playback),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
