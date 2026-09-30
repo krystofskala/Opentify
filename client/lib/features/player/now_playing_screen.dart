@@ -966,15 +966,15 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {
     final wideSide = MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
     final active = wideSide ? _side == panel : (panel == _SidePanel.lyrics && _lyricsMode);
-    return TextButton.icon(
-      style: TextButton.styleFrom(
+    // Jen ikona (jako Apple Music); aktivní = kulatý tónový podklad.
+    return IconButton(
+      tooltip: label,
+      style: IconButton.styleFrom(
         foregroundColor: active ? Colors.white : Colors.white70,
-        backgroundColor: active ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
-        shape: const StadiumBorder(),
-        visualDensity: VisualDensity.compact,
+        backgroundColor: active ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+        fixedSize: const Size.square(44),
       ),
-      icon: Icon(icon, size: 20, fill: active ? 1 : 0),
-      label: Text(label),
+      icon: Icon(icon, size: 22, fill: active ? 1 : 0, semanticLabel: label),
       onPressed: () {
         if (MediaQuery.sizeOf(context).width >= _sideColumnMinWidth) {
           setState(() {
