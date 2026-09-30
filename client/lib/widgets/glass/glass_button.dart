@@ -178,6 +178,8 @@ class GlassButtonGroup extends StatelessWidget {
           GlassButton(
             label: buttons[i].label,
             onPressed: buttons[i].onPressed,
+            // Dřív se tu dlouhý stisk ztrácel (podržení Přehrát nic neudělalo).
+            onLongPress: buttons[i].onLongPress,
             icon: buttons[i].icon,
             style: buttons[i].style,
             destructive: buttons[i].destructive,

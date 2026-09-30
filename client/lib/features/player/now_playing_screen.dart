@@ -610,7 +610,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   ? _carouselView(playback)
                   : GestureDetector(
                       onTap: () => _setLyrics(false),
-                      child: _Artwork(info: nowPlaying),
+                      // Usazený malý obal v textu "žije" s přehráváním.
+                      child: t >= 0.999 && _lyricsMode
+                          ? _LivingCover(info: nowPlaying, playing: playback.isPlaying)
+                          : _Artwork(info: nowPlaying),
                     ),
             ),
             Positioned(
@@ -1081,4 +1084,129 @@ class _Artwork extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Malý obal v režimu textu: když hraje, žije -- pomalu se otáčí a přelévá
+/// mezi expresivními tvary (cookie, květ, čtyřlístek...). Při pauze se
+/// plynule vrátí do obyčejného zaobleného čtverce.
+class _LivingCover extends StatefulWidget {
+  const _LivingCover({required this.info, required this.playing});
+
+  final NowPlayingInfo info;
+  final bool playing;
+
+  @override
+  State<_LivingCover> createState() => _LivingCoverState();
+}
+
+class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixin {
+  static const _shapes = [
+    ExpressiveShape.cookie(lobes: 9, depth: 0.09),
+    ExpressiveShape.cookie(lobes: 5, depth: 0.2),
+    ExpressiveShape.cookie(lobes: 4, depth: 0.2),
+    ExpressiveShape.cookie(lobes: 7, depth: 0.14),
+    ExpressiveShape.cookie(lobes: 12, depth: 0.06),
+  ];
+  static const _morphSeconds = 3.2;
+
+  // Čas běží jen při přehrávání; `_live` = síla tvaru (0 = čtverec).
+  late final AnimationController _clock =
+      AnimationController(vsync: this, duration: Duration(milliseconds: (_morphSeconds * 1000 * _shapes.length).round()));
+  late final AnimationController _live =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 600), value: widget.playing ? 1 : 0);
+
+  bool get _reduce => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.playing) _clock.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_LivingCover old) {
+    super.didUpdateWidget(old);
+    if (old.playing == widget.playing) return;
+    if (widget.playing) {
+      _live.animateTo(1, curve: Curves.easeOutBack);
+      if (!_reduce) _clock.repeat();
+    } else {
+      _live.animateTo(0, curve: Curves.easeOutCubic).whenComplete(() {
+        if (mounted && !widget.playing) _clock.stop();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _clock.dispose();
+    _live.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = widget.info.artworkUrl != null
+        ? NetImage(url: widget.info.artworkUrl!)
+        : Container(
+            color: Colors.white.withValues(alpha: 0.15),
+            child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 32),
+          );
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_clock, _live]),
+        builder: (context, child) {
+          final pos = _clock.value * _shapes.length;
+          final i = pos.floor() % _shapes.length;
+          // Každý tvar chvíli drží, pak se přelije do dalšího.
+          final t = Curves.easeInOutCubic.transform(((pos - pos.floor() - 0.55) / 0.45).clamp(0.0, 1.0));
+          return ClipPath(
+            clipper: _LivingClipper(
+              a: _shapes[i],
+              b: _shapes[(i + 1) % _shapes.length],
+              t: t,
+              spin: _clock.value * 2 * math.pi,
+              live: _live.value,
+            ),
+            child: child,
+          );
+        },
+        child: image,
+      ),
+    );
+  }
+}
+
+class _LivingClipper extends CustomClipper<Path> {
+  const _LivingClipper({required this.a, required this.b, required this.t, required this.spin, required this.live});
+
+  final ExpressiveShape a;
+  final ExpressiveShape b;
+  final double t;
+  final double spin;
+  final double live;
+
+  @override
+  Path getClip(Size size) {
+    const steps = 160;
+    final c = size.center(Offset.zero);
+    final radius = size.shortestSide / 2;
+    final path = Path();
+    for (var k = 0; k <= steps; k++) {
+      final theta = 2 * math.pi * k / steps;
+      // Klid: zaoblený čtverec (superelipsa), stejný dojem jako obal jinde.
+      final cs = math.cos(theta).abs(), sn = math.sin(theta).abs();
+      final rest = 1 / math.pow(math.pow(cs, 3.2) + math.pow(sn, 3.2), 1 / 3.2);
+      final local = theta - spin * live;
+      final shape = a.radiusAt(local) * (1 - t) + b.radiusAt(local) * t;
+      final r = radius * (rest + (shape - rest) * live);
+      final p = c + Offset(math.cos(theta), math.sin(theta)) * r;
+      k == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    return path..close();
+  }
+
+  @override
+  bool shouldReclip(_LivingClipper old) =>
+      old.t != t || old.spin != spin || old.live != live || old.a != a || old.b != b;
 }

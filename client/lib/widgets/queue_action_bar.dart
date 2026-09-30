@@ -26,10 +26,8 @@ class QueueActionBar extends ConsumerWidget {
   final String? albumArtUrl;
   final String? artistName;
 
-  /// Stáhnout rovnou celý seznam na pozadí (`prefetchWholeQueue`) -- jen
-  /// album a vlastní playlist. Jinde (oblíbené, knihovna, hledání, žebříčky)
-  /// se předstahuje jen další skladba, jinak by přehrání jedné skladby
-  /// stáhlo desítky dalších.
+  /// Nepoužívá se: Přehrát stahuje jen na vyžádání (hrající a další
+  /// skladbu), ne celé album najednou -- uživatel to tak chce.
   final bool downloadWholeList;
 
   List<NowPlayingInfo> _infosFor(List<RecordingModel> ordered) => ordered
@@ -40,13 +38,13 @@ class QueueActionBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     void playAll() {
       if (tracks.isEmpty) return;
-      ref.read(audioPlayerControllerProvider.notifier).playQueue(_infosFor(tracks), 0, sourceLabel: sourceLabel, prefetchWholeQueue: downloadWholeList);
+      ref.read(audioPlayerControllerProvider.notifier).playQueue(_infosFor(tracks), 0, sourceLabel: sourceLabel);
     }
 
     void shuffle() {
       if (tracks.isEmpty) return;
       final shuffled = [...tracks]..shuffle();
-      ref.read(audioPlayerControllerProvider.notifier).playQueue(_infosFor(shuffled), 0, sourceLabel: sourceLabel, prefetchWholeQueue: downloadWholeList);
+      ref.read(audioPlayerControllerProvider.notifier).playQueue(_infosFor(shuffled), 0, sourceLabel: sourceLabel);
     }
 
     // Jedna prominentní akce na obrazovku (HIG Buttons), vedlejší tónová;
