@@ -2,9 +2,9 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Jezdec 0..1 uložený v preferencích (výchozí 0.5 = dnešní vzhled).
+/// Jezdec 0..1 uložený v preferencích.
 class GlassSliderController extends StateNotifier<double> {
-  GlassSliderController(this._prefKey) : super(0.5) {
+  GlassSliderController(this._prefKey, [double initial = 0.5]) : super(initial) {
     _load();
   }
 
@@ -30,20 +30,20 @@ class GlassSliderController extends StateNotifier<double> {
 }
 
 /// Profil › Vzhled › "Mléčnost skla": síla rozmazání obsahu pod sklem
-/// (0 = čiré, 0.5 = výchozí, 1 = dvojnásobné).
+/// (0 = čiré, 1 = dvojnásobné proti původnímu; výchozí 0.1 -- schváleno).
 final glassFrostProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_frost'));
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_frost', 0.1));
 
-/// Profil › Vzhled › "Tón skla": síla výplně skla (0 = bez tónu, 0.5 =
-/// výchozí, 1 = dvojnásobná).
+/// Profil › Vzhled › "Síla tónu": síla výplně skla (0 = bez tónu, 1 =
+/// dvojnásobná proti původnímu; výchozí 0.7 -- schváleno).
 final glassTintProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_tint'));
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_tint', 0.7));
 
 /// Profil › Vzhled › "Tón v barvě skladby": sklo tónované barvou hrající
 /// skladby (tmavý odstín v tmavém režimu, světlý ve světlém) místo neutrální
 /// šedé/bílé -- lišty jsou na pozadí lépe vidět.
 class GlassAccentTintController extends StateNotifier<bool> {
-  GlassAccentTintController() : super(false) {
+  GlassAccentTintController() : super(true) {
     _load();
   }
 
@@ -71,7 +71,7 @@ class GlassAccentTintController extends StateNotifier<bool> {
 enum GlassToneMode { auto, light, dark }
 
 class GlassToneController extends StateNotifier<GlassToneMode> {
-  GlassToneController() : super(GlassToneMode.auto) {
+  GlassToneController() : super(GlassToneMode.dark) {
     _load();
   }
 

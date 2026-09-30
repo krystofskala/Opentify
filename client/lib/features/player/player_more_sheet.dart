@@ -16,6 +16,7 @@ import '../../widgets/now_playing_sheet.dart';
 import 'queue_panel.dart';
 import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProvider;
 import '../../theme/app_theme.dart';
 import '../../widgets/radio_station.dart';
 
@@ -108,6 +109,13 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Posun časování textu -- jen když je text vidět.
+                          if (playback.nowPlaying != null)
+                            Consumer(
+                              builder: (context, ref, _) => ref.watch(lyricsVisibleProvider) > 0
+                                  ? LyricsTimingRow(recordingId: playback.nowPlaying!.recordingId)
+                                  : const SizedBox.shrink(),
+                            ),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Symbols.queue_music_rounded),

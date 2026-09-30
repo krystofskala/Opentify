@@ -82,6 +82,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
   /// Co sloupec ukazuje i během zavírací animace.
   _SidePanel _lastSide = _SidePanel.lyrics;
 
+  /// Telefon: režim textu jako v Apple Music (malý obal nahoře, text
+  /// přes střed, ovládání dole) místo sheetu s textem.
+  bool _lyricsMode = false;
+
   /// Změřená výška skupiny obal + název + ovládání (výška druhého sloupce).
   double? _playerHeight;
   // Tear-off metody je `==` sama se sebou -- `detach` tak pozná svou trasu.
@@ -357,7 +361,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                                     ],
                                   ),
                                 );
-                                if (!sideColumnFits) return Center(child: player);
+                                if (!sideColumnFits) {
+                                  return AnimatedSwitcher(
+                                    duration: Motion.state.duration,
+                                    switchInCurve: Motion.state,
+                                    child: _lyricsMode
+                                        ? _lyricsLayout(context, playback, accent, duration, positionMs,
+                                            isProvisioning, provisioningPct)
+                                        : Center(key: const ValueKey('cover'), child: player),
+                                  );
+                                }
                                 // PC: text/fronta jako druhý sloupec vedle
                                 // obalu a ovládání (stejné světlejší sklo),
                                 // jen když ho uživatel otevře.
@@ -398,6 +411,69 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
           ),
         ],
       ),
+    );
+  }
+
+  /// Režim textu (telefon): řádek s malým obalem, názvem, interpretem
+  /// a srdíčkem, pod ním text přes celou výšku, dole stejné ovládání.
+  Widget _lyricsLayout(
+    BuildContext context,
+    AudioPlayerState playback,
+    Color accent,
+    Duration duration,
+    int positionMs,
+    bool isProvisioning,
+    int? provisioningPct,
+  ) {
+    final nowPlaying = playback.nowPlaying!;
+    return Column(
+      key: const ValueKey('lyrics'),
+      children: [
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            GestureDetector(
+              onTap: () => setState(() => _lyricsMode = false),
+              child: SizedBox.square(dimension: 60, child: _Artwork(info: nowPlaying)),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    nowPlaying.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    nowPlaying.artistName ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 15),
+                  ),
+                ],
+              ),
+            ),
+            _likeButton(playback),
+          ],
+        ),
+        Expanded(
+          child: ShaderMask(
+            // Text se nahoře a dole rozplyne (jako v Apple Music).
+            blendMode: BlendMode.dstIn,
+            shaderCallback: (rect) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0x00000000), Color(0xFF000000), Color(0xFF000000), Color(0x00000000)],
+              stops: [0, 0.06, 0.86, 1],
+            ).createShader(rect),
+            child: LyricsView(recordingId: nowPlaying.recordingId, immersive: true, color: Colors.white),
+          ),
+        ),
+        _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
+      ],
     );
   }
 
@@ -742,7 +818,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
   }
 
   Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {
-    final active = _side == panel && MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
+    final wideSide = MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
+    final active = wideSide ? _side == panel : (panel == _SidePanel.lyrics && _lyricsMode);
     return TextButton.icon(
       style: TextButton.styleFrom(
         foregroundColor: active ? Colors.white : Colors.white70,
@@ -763,7 +840,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
             }
           });
         } else if (panel == _SidePanel.lyrics) {
-          showLyricsPanel(context, recordingId: playback.nowPlaying!.recordingId, accentColor: accent);
+          setState(() => _lyricsMode = !_lyricsMode);
         } else {
           showQueuePanel(context, accentColor: accent);
         }
