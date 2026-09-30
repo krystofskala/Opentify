@@ -24,7 +24,10 @@ from app.models import Artist, Listen, ListenLater, Playlist, PlaylistItem, Play
 
 # Stejné sloupce jako vlastní CSV export TuneMyMusic (ten určitě přijme);
 # "Spotify - id" = přesná skladba bez hledání podle názvu.
-TMM_HEADER = ["Track name", "Artist name", "Album", "Playlist name", "Type", "ISRC", "Spotify - id"]
+TMM_HEADER = [
+    "Track name", "Artist name", "Album", "Playlist name", "Type", "ISRC",
+    "Spotify - id", "Deezer - id", "Apple Music - id",
+]
 TOP_TRACKS = 500
 
 
@@ -88,6 +91,9 @@ class _Lookup:
             "album": self.album(rec.release_id),
             "isrc": rec.isrc or "",
             "spotifyId": (rec.external_refs or {}).get("spotifyId") or "",
+            "deezerId": rec.deezer_id or "",
+            "appleId": (rec.external_refs or {}).get("appleMusicId") or "",
+            "mbid": rec.mbid or "",
             "recordingId": rec.id,
         }
 
@@ -97,7 +103,10 @@ def _chunks(items: list[str], size: int = 900) -> list[list[str]]:
 
 
 def _tmm_rows(tracks: list[dict], playlist: str) -> list[list[str]]:
-    return [[t["title"], t["artist"], t["album"], playlist, "Playlist", t["isrc"], t["spotifyId"]] for t in tracks]
+    return [
+        [t["title"], t["artist"], t["album"], playlist, "Playlist", t["isrc"], t["spotifyId"], t["deezerId"], t["appleId"]]
+        for t in tracks
+    ]
 
 
 def _csv(rows: list[list[str]], header: list[str]) -> bytes:
