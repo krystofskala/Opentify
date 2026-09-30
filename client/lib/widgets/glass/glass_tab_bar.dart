@@ -67,8 +67,8 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     super.dispose();
   }
 
-  void _springPos(double target, SpringDescription spring) {
-    _pos.animateWith(SpringSimulation(spring, _pos.value, target, _pos.velocity));
+  void _springPos(double target, SpringDescription spring, [double? velocity]) {
+    _pos.animateWith(SpringSimulation(spring, _pos.value, target, velocity ?? _pos.velocity));
   }
 
   void _springLift(double target) {
@@ -95,7 +95,19 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     _springPos(_slotAt(d.localPosition.dx), _follow);
   }
 
-  void _onDragUpdate(DragUpdateDetails d) => _springPos(_slotAt(d.localPosition.dx), _follow);
+  // Při tažení kapka sedí přesně pod prstem (dřív ji každý pohyb honil novou
+  // pružinou -- zaostávala a cukala, živě nahlášeno); pružina až po puštění.
+  void _onDragUpdate(DragUpdateDetails d) {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final target = _slotAt(d.localPosition.dx);
+    final dt = (now - _lastDragAt) / 1e6;
+    if (dt > 0 && dt < 0.1) _dragVelocity = (target - _pos.value) / dt;
+    _lastDragAt = now;
+    _pos.value = target;
+  }
+
+  int _lastDragAt = 0;
+  double _dragVelocity = 0;
 
   void _onDragEnd(DragEndDetails d) {
     _dragging = false;
@@ -103,7 +115,10 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     final fling = (d.primaryVelocity ?? 0) / _itemWidth * 0.12;
     final index = (_pos.value + fling).round().clamp(0, widget.items.length - 1);
     _springLift(0);
-    _select(index);
+    // Doskok navazuje na rychlost prstu.
+    _springPos(index.toDouble(), _settle, _dragVelocity);
+    if (index != widget.selectedIndex) widget.onSelected(index);
+    _dragVelocity = 0;
   }
 
   @override
@@ -219,7 +234,8 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     const pad = 5.0;
     final lift = _lift.value;
     // Natažení ve směru pohybu podle rychlosti (jako kapka).
-    final speed = (_pos.velocity.abs() * 0.05).clamp(0.0, 0.28);
+    final v = _dragging ? _dragVelocity : _pos.velocity;
+    final speed = (v.abs() * 0.05).clamp(0.0, 0.28);
     final baseW = _itemWidth - 2 * pad, baseH = h - 2 * pad;
     final w = baseW * (1 + 0.28 * lift) * (1 + speed);
     final hh = baseH * (1 + 0.42 * lift) * (1 - speed * 0.45);
