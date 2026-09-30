@@ -74,12 +74,14 @@ class GlassTokens {
   /// Rozmazání "regular" varianty (chrome). HIG Materials: regular varianta
   /// "blurs and adjusts the luminosity of background content to maintain
   /// legibility".
-  /// Sjednocení (audit): 28 → 32 -- přes zrnité pozadí má chrome působit
-  /// hladce matně, ne zrnitě.
-  static const double blur = 32;
+  /// Podle Apple Music (iOS 26, živé screenshoty): sklo je hodně průhledné
+  /// -- obsah pod lištou je vidět, jen lehce rozmazaný a ztmavený, barvy
+  /// zůstávají živé; hranici skla ukazuje lom na hraně. Dřív 32 (hladce
+  /// matné kvůli zrnu), uživatel chce vzhled Apple.
+  static const double blur = 8;
 
-  /// Silnější rozmazání pro celoobrazovkový přehrávač (obal za sklem).
-  static const double blurPlayer = 56;
+  /// Sheety a panely přes celou obrazovku (obal za sklem).
+  static const double blurPlayer = 14;
 
   /// Vibrance -- zvýšená sytost toho, co je za sklem. Klíč k Apple vzhledu:
   /// obsah za sklem zůstává živý, ne vybledle šedý. (Materials: "use vibrant
@@ -117,11 +119,12 @@ class GlassTokens {
   /// Vlasová hrana s přechodem (vlevo nahoře → vpravo dole) -- to z panelu
   /// dělá skutečné sklo. Žádné tlusté okraje ani záře.
   static const double edgeWidth = 0.8;
-  static const double edgeAlphaStart = 0.45;
-  static const double edgeAlphaEnd = 0.05;
 
-  /// 1px vnitřní linka lesku u horní hrany.
-  static const double topHighlightAlpha = 0.5;
+  /// Přirozený odlesk (`GlassEdgePainter`): jas hrany natočené ke světlu
+  /// a slabý odraz na protější straně.
+  /// Jen jemně -- hlavní lem dělá zjasněný obsah pod sklem (`GlassRefraction`).
+  static const double edgeAlphaStart = 0.3;
+  static const double edgeAlphaEnd = 0.1;
 
   // --- Hloubka ------------------------------------------------------------
 

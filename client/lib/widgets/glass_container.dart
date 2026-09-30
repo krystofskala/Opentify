@@ -1,13 +1,13 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:figma_squircle/figma_squircle.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../state/glass_settings.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
-import 'app_background.dart' show AppBackgroundLens;
+import 'glass/glass_refraction.dart';
 
 /// Liquid Glass materiál (viz pravidla v `theme/glass_tokens.dart`):
 /// rozmazání + vibrance (sytost/jas obsahu ZA sklem), NEUTRÁLNÍ výplň,
@@ -36,7 +36,6 @@ class GlassContainer extends StatelessWidget {
     this.baseFill = true,
     this.fit = StackFit.loose,
     this.lens = false,
-    this.lensVisibility,
   });
 
   /// Hustě namrzlé sklo přehrávače: silné rozmazání + vibrance, jemné
@@ -52,7 +51,6 @@ class GlassContainer extends StatelessWidget {
     this.showEdgeHighlight = true,
     this.fit = StackFit.loose,
     this.lens = false,
-    this.lensVisibility,
   })  : saturation = GlassTokens.vibrancy,
         tintOpacity = GlassTokens.playerTint,
         blur = true,
@@ -87,12 +85,9 @@ class GlassContainer extends StatelessWidget {
   final bool baseFill;
   final StackFit fit;
 
-  /// Lom živého pozadí v pruhu u hrany (`AppBackgroundLens`) -- plovoucí
-  /// prvky nad pozadím (tab bar, mini přehrávač, panely přehrávače).
+  /// Lom obsahu pod sklem v pruhu u hrany (`GlassRefraction`) -- plovoucí
+  /// prvky (tab bar, mini přehrávač, ovládání přehrávače, skleněná tlačítka).
   final bool lens;
-
-  /// Síla lomu 0..1 za běhu (viz `AppBackgroundLens.visibility`).
-  final ValueListenable<double>? lensVisibility;
 
   @override
   Widget build(BuildContext context) {
@@ -113,40 +108,40 @@ class GlassContainer extends StatelessWidget {
     ];
     final fill = _flatten(fills);
     final content = padding == null ? child : Padding(padding: padding!, child: child);
-    Widget surface = DecoratedBox(
+    final Widget surface = DecoratedBox(
       decoration: ShapeDecoration(shape: shape, color: fill),
-      // Lom živého pozadí na hraně -- nad výplní, pod obsahem.
-      child: lens
-          ? Stack(
-              fit: fit,
-              children: [
-                Positioned.fill(
-                  child: RepaintBoundary(
-                    child: AppBackgroundLens(borderRadius: borderRadius, fill: fill, visibility: lensVisibility),
-                  ),
-                ),
-                content,
-              ],
-            )
-          : content,
+      child: content,
     );
-    final sigma = blurSigma * (1 - 0.75 * clarity);
+    final sigma = blur ? blurSigma * (1 - 0.75 * clarity) : 0.0;
+    // Vibrance (`outer`) se aplikuje na výsledek rozmazání (`inner`) --
+    // stejné pořadí jako CSS `backdrop-filter: blur() saturate()`.
+    ImageFilter frosted() => ImageFilter.compose(
+          outer: vibrancyColorFilter(saturation: saturation),
+          inner: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+        );
 
     final glass = ClipPath(
       clipper: ShapeBorderClipper(shape: shape),
       child: Stack(
         fit: fit,
         children: [
-          if (blur)
-            BackdropFilter(
-              // Vibrance (`outer`) se aplikuje na výsledek rozmazání (`inner`)
-              // -- stejné pořadí jako CSS `backdrop-filter: blur() saturate()`.
-              filter: ImageFilter.compose(
-                outer: vibrancyColorFilter(saturation: saturation),
-                inner: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          if (lens) ...[
+            // Pruh u hrany: skutečný obsah pod sklem zalomený (zvětšený ke
+            // středu), směrem k hraně čím dál čistší. Vnitřek je rozmazaný
+            // zvlášť, oříznutý na `innerInset`, ať nerozmaže i lom.
+            Positioned.fill(
+              child: GlassRefraction(borderRadius: borderRadius, blurSigma: sigma, saturation: saturation),
+            ),
+            if (blur)
+              Positioned.fill(
+                child: ClipRRect(
+                  clipper: _InnerClipper(borderRadius, GlassRefraction.innerInset),
+                  child: BackdropFilter(filter: frosted(), child: const SizedBox.expand()),
+                ),
               ),
-              child: surface,
-            )
+            surface,
+          ] else if (blur)
+            BackdropFilter(filter: frosted(), child: surface)
           else
             surface,
           if (showEdgeHighlight)
@@ -173,6 +168,30 @@ class GlassContainer extends StatelessWidget {
   }
 }
 
+/// Vnitřek skla bez pruhu s lomem (zaoblený obdélník zmenšený o `inset`).
+class _InnerClipper extends CustomClipper<RRect> {
+  const _InnerClipper(this.radius, this.inset);
+
+  final BorderRadius radius;
+  final double inset;
+
+  @override
+  RRect getClip(Size size) {
+    final i = math.min(inset, size.shortestSide / 2);
+    Radius r(Radius c) => Radius.circular(math.max(0.0, c.x - i));
+    return RRect.fromRectAndCorners(
+      (Offset.zero & size).deflate(i),
+      topLeft: r(radius.topLeft),
+      topRight: r(radius.topRight),
+      bottomLeft: r(radius.bottomLeft),
+      bottomRight: r(radius.bottomRight),
+    );
+  }
+
+  @override
+  bool shouldReclip(_InnerClipper old) => old.radius != radius || old.inset != inset;
+}
+
 /// Jediný měkký stín plovoucích prvků (`GlassTokens.shadow*`).
 const List<BoxShadow> glassShadow = [
   BoxShadow(
@@ -196,101 +215,45 @@ SmoothRectangleBorder glassShape(BorderRadius radius) {
   );
 }
 
-/// Vlasová přechodová hrana (vlevo nahoře světlejší → vpravo dole skoro
-/// nic) + 1px vnitřní lesk podél horní hrany. Tohle z plochy dělá sklo.
+/// Přirozený odlesk skla: JEDNA tenká linka po obvodu, jejíž jas závisí na
+/// tom, kam hrana míří vůči světlu (shora zleva) -- zaoblené konce a rohy
+/// natočené ke světlu svítí, rovné hrany skoro vůbec, protější strana jen
+/// slabý odraz. Dřív obvodová vlasová linka + druhá linka lesku nahoře
+/// působily jako falešná dvojitá čára (živě nahlášeno, mobil i PC).
 class GlassEdgePainter extends CustomPainter {
   const GlassEdgePainter({required this.shape});
 
   final ShapeBorder shape;
 
+  // Směr ke světlu (shora zleva), jednotkový.
+  static const double _lx = -0.6, _ly = -0.8;
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final outer = shape.getOuterPath(rect.deflate(GlassTokens.edgeWidth / 2));
-    canvas.drawPath(
-      outer,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = GlassTokens.edgeWidth
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: GlassTokens.edgeAlphaStart),
-            Colors.white.withValues(alpha: GlassTokens.edgeAlphaEnd),
-          ],
-        ).createShader(rect),
-    );
-    // Lesk jen v horní části -- klip na horních ~35 % výšky.
-    canvas.save();
-    canvas.clipRect(Rect.fromLTWH(0, 0, size.width, size.height * 0.35));
-    canvas.drawPath(
-      shape.getOuterPath(rect.deflate(1.5)),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.white.withValues(alpha: GlassTokens.topHighlightAlpha),
-            Colors.white.withValues(alpha: 0),
-          ],
-        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height * 0.35)),
-    );
-    canvas.restore();
+    final path = shape.getOuterPath(rect.deflate(0.5));
+    final paint = Paint()
+      ..strokeWidth = 1
+      ..strokeCap = StrokeCap.round
+      ..isAntiAlias = true;
+    for (final metric in path.computeMetrics()) {
+      const step = 2.0;
+      for (var d = 0.0; d < metric.length; d += step) {
+        final a = metric.getTangentForOffset(d);
+        final b = metric.getTangentForOffset(math.min(metric.length, d + step));
+        if (a == null || b == null) continue;
+        // Obrys jde po směru hodinových ručiček -> vnější normála = (ty, -tx).
+        final nx = a.vector.dy, ny = -a.vector.dx;
+        final facing = nx * _lx + ny * _ly;
+        final light = math.pow(math.max(0.0, facing), 6) * GlassTokens.edgeAlphaStart +
+            math.pow(math.max(0.0, -facing), 6) * GlassTokens.edgeAlphaEnd;
+        if (light < 0.01) continue;
+        paint.color = Colors.white.withValues(alpha: light.toDouble());
+        canvas.drawLine(a.position, b.position, paint);
+      }
+    }
   }
 
   @override
   bool shouldRepaint(covariant GlassEdgePainter oldDelegate) => oldDelegate.shape != shape;
-}
-
-/// Pozadí `AppBar`u, které se ze skla objeví, až když pod ním obsah
-/// odscrolluje (stejná logika jako `AppBar.scrolledUnder`) -- v klidu je
-/// lišta průhledná. HIG Materials: horní lišta je součást plovoucí vrstvy.
-class GlassScrolledUnderBackground extends StatefulWidget {
-  const GlassScrolledUnderBackground({super.key});
-
-  @override
-  State<GlassScrolledUnderBackground> createState() => _GlassScrolledUnderBackgroundState();
-}
-
-class _GlassScrolledUnderBackgroundState extends State<GlassScrolledUnderBackground> {
-  ScrollNotificationObserverState? _observer;
-  bool _scrolledUnder = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _observer?.removeListener(_handle);
-    _observer = ScrollNotificationObserver.maybeOf(context);
-    _observer?.addListener(_handle);
-  }
-
-  @override
-  void dispose() {
-    _observer?.removeListener(_handle);
-    super.dispose();
-  }
-
-  void _handle(ScrollNotification notification) {
-    if (notification is! ScrollUpdateNotification || !defaultScrollNotificationPredicate(notification)) return;
-    final metrics = notification.metrics;
-    if (metrics.axis != Axis.vertical) return;
-    final scrolled = metrics.extentBefore > 0;
-    if (scrolled != _scrolledUnder) setState(() => _scrolledUnder = scrolled);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedOpacity(
-      opacity: _scrolledUnder ? 1 : 0,
-      duration: const Duration(milliseconds: 220),
-      child: const GlassContainer(
-        borderRadius: BorderRadius.zero,
-        showEdgeHighlight: false,
-        child: SizedBox.expand(),
-      ),
-    );
-  }
 }

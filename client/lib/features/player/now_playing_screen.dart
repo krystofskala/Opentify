@@ -17,7 +17,7 @@ import '../../theme/glass_tokens.dart';
 import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
 import '../../state/glass_settings.dart';
-import '../../widgets/app_background.dart' show AppBackgroundLens, AppBackgroundMirror;
+import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart';
@@ -321,15 +321,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
           // (světlý režim víc -- pastelový gradient), vnitřní horní lesk a
           // vlasová zrcadlová hrana nahoře.
           IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: sheetFill))),
-          // Lom pozadí na horní zaoblené hraně panelu.
-          Positioned.fill(
-            child: RepaintBoundary(
-              child: AppBackgroundLens(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(Expressive.cornerExtraLarge)),
-                fill: sheetFill,
-              ),
-            ),
-          ),
           const IgnorePointer(
             child: DecoratedBox(
               decoration: BoxDecoration(

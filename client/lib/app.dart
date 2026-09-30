@@ -12,6 +12,7 @@ import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
 import 'widgets/now_playing_sheet.dart';
+import 'widgets/top_fade_scroll_behavior.dart';
 
 const _defaultSeed = Colors.deepPurple;
 
@@ -37,6 +38,7 @@ class OpentifyApp extends ConsumerWidget {
       // `themeAnimation*` jako změna barvy.
       themeMode: ref.watch(themeModeProvider),
       routerConfig: router,
+      scrollBehavior: const TopFadeScrollBehavior(),
       // Změna seedu (jiné album/interpret/skladba) přebarví celé téma
       // plynule, stejnou křivkou jako přehrávač a pozadí -- ne skokem.
       themeAnimationDuration: accentTransitionDuration,

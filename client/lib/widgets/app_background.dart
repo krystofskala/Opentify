@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../core/reduced_motion.dart';
@@ -668,21 +667,27 @@ class _FlowMesh {
     final ax = size.width / short * density;
     final ay = size.height / short * density;
     final vx = _cols + 1;
-    // Parametry snímku pro `sampleArgb` (lom na hranách skla, `AppBackgroundLens`).
-    _lastPalette = p;
-    _lastFlow = flow;
-    _lastWarp = warp;
-    _lastLift = lift;
-    _lastLightness = lightness;
-    _lastDeepWeight = deepWeight;
-    _lastAx = ax;
-    _lastAy = ay;
 
     for (var j = 0; j <= _rows; j++) {
       final py = j / _rows * ay;
       for (var i = 0; i <= _cols; i++) {
         final px = i / _cols * ax;
-        _colors[j * vx + i] = _colorAt(px, py, p, flow, warp, deepWeight).toArgb(lift, lightness);
+        // Dvojitě pokřivená doména (Quilez) -> mramorované, stáčející se
+        // proudy. Čas jen s celočíselnými koeficienty => bezešvá perioda 256.
+        final qx = _fbm(px + flow, py + flow);
+        final qy = _fbm(px + 5.2 - flow, py + 1.3 + flow);
+        final rx = _fbm(px + warp * qx + 1.7, py + warp * qy + 9.2 - flow);
+        final ry = _fbm(px + warp * qx + 8.3 + flow, py + warp * qy + 2.8);
+        final f = _fbm(px + warp * rx, py + warp * ry);
+
+        // Barvy se do sebe vmíchávají (vážené přechody přes celou plochu),
+        // nikde "díra" do černa: i nejtmavší slot palety je barevný.
+        var c = _Lab.lerp(p[1], p[2], _smooth(f * 2.2 - 0.6));
+        c = _Lab.lerp(c, p[3], _smooth(qx * 2.4 - 1.0));
+        c = _Lab.lerp(c, p[5], _smooth(ry * 2.6 - 1.4));
+        c = _Lab.lerp(c, p[0], _smooth(1.05 - (rx + qy) * 1.1) * deepWeight);
+        c = _Lab.lerp(c, p[4], _smooth(f * rx * 4.2 - 1.9) * 0.85);
+        _colors[j * vx + i] = c.toArgb(lift, lightness);
       }
     }
 
@@ -692,345 +697,6 @@ class _FlowMesh {
       colors: _colors,
       indices: _indices,
     );
-  }
-
-  List<_Lab>? _lastPalette;
-  double _lastFlow = 0, _lastWarp = 3.2, _lastLift = 0, _lastLightness = 1, _lastDeepWeight = 0.6;
-  double _lastAx = 1, _lastAy = 1;
-
-  /// Barva pozadí (ARGB) v bodě obrazovky -- přesně jako poslední snímek sítě,
-  /// jen bez interpolace mezi vrcholy. `null`, dokud se nic nevykreslilo.
-  int? sampleArgb(double x, double y) {
-    final p = _lastPalette;
-    final size = _size;
-    if (p == null || size == null || size.isEmpty) return null;
-    final px = x / size.width * _lastAx;
-    final py = y / size.height * _lastAy;
-    return _colorAt(px, py, p, _lastFlow, _lastWarp, _lastDeepWeight).toArgb(_lastLift, _lastLightness);
-  }
-
-  static _Lab _colorAt(double px, double py, List<_Lab> p, double flow, double warp, double deepWeight) {
-    // Dvojitě pokřivená doména (Quilez) -> mramorované, stáčející se
-    // proudy. Čas jen s celočíselnými koeficienty => bezešvá perioda 256.
-    final qx = _fbm(px + flow, py + flow);
-    final qy = _fbm(px + 5.2 - flow, py + 1.3 + flow);
-    final rx = _fbm(px + warp * qx + 1.7, py + warp * qy + 9.2 - flow);
-    final ry = _fbm(px + warp * qx + 8.3 + flow, py + warp * qy + 2.8);
-    final f = _fbm(px + warp * rx, py + warp * ry);
-
-    // Barvy se do sebe vmíchávají (vážené přechody přes celou plochu),
-    // nikde "díra" do černa: i nejtmavší slot palety je barevný.
-    var c = _Lab.lerp(p[1], p[2], _smooth(f * 2.2 - 0.6));
-    c = _Lab.lerp(c, p[3], _smooth(qx * 2.4 - 1.0));
-    c = _Lab.lerp(c, p[5], _smooth(ry * 2.6 - 1.4));
-    c = _Lab.lerp(c, p[0], _smooth(1.05 - (rx + qy) * 1.1) * deepWeight);
-    c = _Lab.lerp(c, p[4], _smooth(f * rx * 4.2 - 1.9) * 0.85);
-    return c;
-  }
-}
-
-/// Lom světla na zaobleném okraji skla (Liquid Glass, schváleno podle
-/// náhledu "Lom skla"): střed skla se nemění, v pruhu u hrany (22 px) se
-/// živé pozadí láme -- obraz se bere zevnitř podle Snellova zákona na
-/// zaoblení profilu "squircle" (n = 1.5, paprsek jde celou tloušťkou skla,
-/// takže nejsilněji přímo u hrany: natahuje se a zrcadlí podél obvodu).
-/// Na samé hraně tenký odlesk, jasný tam, kde je pozadí hned za hranou
-/// světlé -- světlo tak "přichází" z pozadí a s tokem barev se posouvá.
-///
-/// Kreslí se jen úzký prstenec (pár set vrcholů), přes výplň skla a pod
-/// obsah. Výplň skla (`fill`) se do pruhu promítne, ať má stejný tón jako
-/// zbytek skla. Jen s CPU pozadím (shaderová cesta je vypnutá).
-class AppBackgroundLens extends StatelessWidget {
-  const AppBackgroundLens({super.key, required this.borderRadius, this.fill, this.visibility});
-
-  final BorderRadius borderRadius;
-  final Color? fill;
-
-  /// 0..1 -- jak moc je pod sklem vidět živé pozadí (tlačítka nad fotkou
-  /// interpreta: lom sílí, jak fotka mizí). `null` = vždy naplno.
-  final ValueListenable<double>? visibility;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.dependOnInheritedWidgetOfExactType<_BackgroundScope>()?.state;
-    if (state == null || state._programReady != null) return const SizedBox.shrink();
-    return IgnorePointer(
-      child: _LensLeaf(state: state, borderRadius: borderRadius, fill: fill, visibility: visibility),
-    );
-  }
-}
-
-class _LensLeaf extends LeafRenderObjectWidget {
-  const _LensLeaf({required this.state, required this.borderRadius, this.fill, this.visibility});
-
-  final _AppBackgroundState state;
-  final BorderRadius borderRadius;
-  final Color? fill;
-  final ValueListenable<double>? visibility;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderLens(state: state, borderRadius: borderRadius, fill: fill, visibility: visibility);
-
-  @override
-  void updateRenderObject(BuildContext context, _RenderLens renderObject) {
-    renderObject
-      ..state = state
-      ..borderRadius = borderRadius
-      ..fill = fill
-      ..visibility = visibility;
-  }
-}
-
-class _RenderLens extends RenderBox {
-  _RenderLens({
-    required _AppBackgroundState state,
-    required BorderRadius borderRadius,
-    Color? fill,
-    ValueListenable<double>? visibility,
-  })  : _state = state,
-        _borderRadius = borderRadius,
-        _fill = fill,
-        _visibility = visibility;
-
-  ValueListenable<double>? _visibility;
-  set visibility(ValueListenable<double>? value) {
-    if (value == _visibility) return;
-    if (attached) _visibility?.removeListener(markNeedsPaint);
-    _visibility = value;
-    if (attached) _visibility?.addListener(markNeedsPaint);
-    markNeedsPaint();
-  }
-
-  // Schválené hodnoty z náhledu.
-  static const double _bezel = 22;
-  static const double _strength = 25;
-  static const double _spec = 0.3;
-  // Prstence od hrany dovnitř (px) -- hustší u hrany, kde se děje nejvíc.
-  static const List<double> _insets = [0, 1.5, 3.5, 6, 10, 15, 22];
-  static final List<double> _shift = _snellShifts();
-
-  /// Posun obrazu pro každý prstenec: Δ = (tloušťka + y(x)) · tan(θ1 − θ2),
-  /// θ1 = sklon profilu, sin θ2 = sin θ1 / 1.5; normováno na max 1.
-  static List<double> _snellShifts() {
-    double f(double x) => math.pow(math.max(0.0, 1 - math.pow(1 - x, 4)), 0.25).toDouble();
-    double shift(double x) {
-      const e = 0.002;
-      final slope = (f(math.min(1.0, x + e)) - f(math.max(0.0, x - e))) / (2 * e);
-      final t1 = math.atan(slope);
-      final t2 = math.asin(math.sin(t1) / 1.5);
-      return (0.8 + f(x)) * math.tan(t1 - t2);
-    }
-
-    var max = 0.0;
-    for (var i = 1; i <= 256; i++) {
-      max = math.max(max, shift(i / 256));
-    }
-    return [for (final d in _insets) shift(math.max(0.002, d / _bezel)) / max];
-  }
-
-  _AppBackgroundState _state;
-  set state(_AppBackgroundState value) {
-    if (value == _state) return;
-    if (attached) _state._frame.removeListener(markNeedsPaint);
-    _state = value;
-    if (attached) _state._frame.addListener(markNeedsPaint);
-    markNeedsPaint();
-  }
-
-  BorderRadius _borderRadius;
-  set borderRadius(BorderRadius value) {
-    if (value == _borderRadius) return;
-    _borderRadius = value;
-    _geometryFor = null;
-    markNeedsPaint();
-  }
-
-  Color? _fill;
-  set fill(Color? value) {
-    if (value == _fill) return;
-    _fill = value;
-    markNeedsPaint();
-  }
-
-  // Obrys se počítá jen při změně velikosti/poloměru.
-  Size? _geometryFor;
-  Float32List _outer = Float32List(0); // x, y na hraně (lokálně)
-  Float32List _normals = Float32List(0); // vnější normála
-  Float32List _corner = Float32List(0); // střed rohu + směr rohu (pro vnitřní prstence)
-  Float32List _radius = Float32List(0);
-  Float32List _positions = Float32List(0);
-  Int32List _colors = Int32List(0);
-  Uint16List _indices = Uint16List(0);
-  final List<ui.Vertices> _retired = [];
-
-  @override
-  void attach(PipelineOwner owner) {
-    super.attach(owner);
-    _state._frame.addListener(markNeedsPaint);
-    _visibility?.addListener(markNeedsPaint);
-  }
-
-  @override
-  void detach() {
-    _state._frame.removeListener(markNeedsPaint);
-    _visibility?.removeListener(markNeedsPaint);
-    super.detach();
-  }
-
-  @override
-  void dispose() {
-    for (final v in _retired) {
-      v.dispose();
-    }
-    _retired.clear();
-    super.dispose();
-  }
-
-  @override
-  bool get sizedByParent => true;
-
-  @override
-  Size computeDryLayout(BoxConstraints constraints) => constraints.biggest;
-
-  void _buildGeometry(Size size) {
-    _geometryFor = size;
-    final w = size.width, h = size.height;
-    final maxR = math.min(w, h) / 2;
-    double r(Radius c) => math.min(c.x, maxR);
-    final tl = r(_borderRadius.topLeft), tr = r(_borderRadius.topRight);
-    final br = r(_borderRadius.bottomRight), bl = r(_borderRadius.bottomLeft);
-    final pts = <double>[], nrm = <double>[], cor = <double>[], rad = <double>[];
-    const step = 6.0;
-    // Rovná hrana: body po `step`, normála osová, bez rohu.
-    void edge(double x0, double y0, double x1, double y1, double nx, double ny) {
-      final len = math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-      final n = math.max(1, (len / step).ceil());
-      for (var i = 0; i < n; i++) {
-        final t = i / n;
-        pts.addAll([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
-        nrm.addAll([nx, ny]);
-        cor.addAll([double.nan, 0, 0, 0]);
-        rad.add(0);
-      }
-    }
-
-    // Roh: oblouk kolem středu (cx, cy) s poloměrem rr, směr rohu (sx, sy).
-    void arc(double cx, double cy, double rr, double a0, double sx, double sy) {
-      final n = math.max(3, (rr * math.pi / 2 / step).ceil());
-      for (var i = 0; i < n; i++) {
-        final a = a0 + (math.pi / 2) * i / n;
-        final nx = math.cos(a), ny = math.sin(a);
-        pts.addAll([cx + nx * rr, cy + ny * rr]);
-        nrm.addAll([nx, ny]);
-        cor.addAll([cx, cy, sx, sy]);
-        rad.add(rr);
-      }
-    }
-
-    edge(tl, 0, w - tr, 0, 0, -1);
-    arc(w - tr, tr, tr, -math.pi / 2, 1, -1);
-    edge(w, tr, w, h - br, 1, 0);
-    arc(w - br, h - br, br, 0, 1, 1);
-    edge(w - br, h, bl, h, 0, 1);
-    arc(bl, h - bl, bl, math.pi / 2, -1, 1);
-    edge(0, h - bl, 0, tl, -1, 0);
-    arc(tl, tl, tl, math.pi, -1, -1);
-
-    _outer = Float32List.fromList(pts);
-    _normals = Float32List.fromList(nrm);
-    _corner = Float32List.fromList(cor);
-    _radius = Float32List.fromList(rad);
-    final n = rad.length, rings = _insets.length;
-    _positions = Float32List(n * rings * 2);
-    _colors = Int32List(n * rings);
-    final idx = <int>[];
-    for (var k = 0; k < rings - 1; k++) {
-      for (var i = 0; i < n; i++) {
-        final i2 = (i + 1) % n;
-        final a = k * n + i, b = k * n + i2, c = (k + 1) * n + i, d = (k + 1) * n + i2;
-        idx.addAll([a, b, c, b, d, c]);
-      }
-    }
-    _indices = Uint16List.fromList(idx);
-    // Pozice prstenců (lokálně) -- vnitřní obrys zaobleného obdélníku.
-    for (var k = 0; k < rings; k++) {
-      final d = _insets[k];
-      for (var i = 0; i < n; i++) {
-        final o = (k * n + i) * 2;
-        final ix = _inner(i, d);
-        _positions[o] = ix.dx;
-        _positions[o + 1] = ix.dy;
-      }
-    }
-  }
-
-  /// Bod obrysu `i` posunutý o `d` dovnitř. U rohu s menším poloměrem než
-  /// `d` se vnitřní obrys "zaostří" do jednoho bodu (ne přehyb přes střed).
-  Offset _inner(int i, double d) {
-    final x = _outer[i * 2], y = _outer[i * 2 + 1];
-    final nx = _normals[i * 2], ny = _normals[i * 2 + 1];
-    final cx = _corner[i * 4];
-    if (cx.isNaN) return Offset(x - nx * d, y - ny * d);
-    final cy = _corner[i * 4 + 1], sx = _corner[i * 4 + 2], sy = _corner[i * 4 + 3];
-    final rr = _radius[i];
-    if (d <= rr) return Offset(cx + nx * (rr - d), cy + ny * (rr - d));
-    return Offset(cx - sx * (d - rr), cy - sy * (d - rr));
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    if (size.isEmpty) return;
-    final mesh = _FallbackPainter._mesh;
-    if (mesh._lastPalette == null) return;
-    final visible = (_visibility?.value ?? 1).clamp(0.0, 1.0);
-    if (visible <= 0.01) return;
-    if (_geometryFor != size) _buildGeometry(size);
-    // Poloha na obrazovce -- pozadí je přes celé okno od počátku.
-    final origin = localToGlobal(Offset.zero);
-    final n = _radius.length, rings = _insets.length;
-    final fill = _fill;
-    for (var k = 0; k < rings; k++) {
-      final d = _insets[k];
-      final x = d / _bezel;
-      final shift = _shift[k] * _strength;
-      // Pruh je u hrany čirý (lom je vidět ostře), dovnitř se rozplyne do skla.
-      final alpha = (1 - x * x * (3 - 2 * x)) * visible;
-      final rim = math.pow(1 - x, 6).toDouble();
-      for (var i = 0; i < n; i++) {
-        final o = (k * n + i) * 2;
-        final nx = _normals[i * 2], ny = _normals[i * 2 + 1];
-        final gx = origin.dx + _positions[o], gy = origin.dy + _positions[o + 1];
-        var argb = mesh.sampleArgb(gx - nx * shift, gy - ny * shift) ?? 0xFF000000;
-        var color = Color(argb);
-        if (fill != null) color = Color.alphaBlend(fill, color);
-        if (rim > 0.02) {
-          // Světlo z pozadí hned za hranou (18 px ven).
-          final out = Color(mesh.sampleArgb(gx + nx * 18, gy + ny * 18) ?? 0xFF000000);
-          final lum = 0.3 * out.r + 0.59 * out.g + 0.11 * out.b;
-          final s = (rim * (0.12 + 1.8 * lum * lum) * _spec).clamp(0.0, 1.0);
-          color = Color.lerp(color, Colors.white, s)!;
-        }
-        _colors[k * n + i] = color.withValues(alpha: alpha * color.a).toARGB32().toSigned(32);
-      }
-    }
-    // Pozice jsou lokální; posun `offset` do vrstvy.
-    final positions = offset == Offset.zero ? _positions : _shifted(offset);
-    final vertices = ui.Vertices.raw(ui.VertexMode.triangles, positions, colors: _colors, indices: _indices);
-    context.canvas.drawVertices(vertices, BlendMode.dst, Paint());
-    _retired.add(vertices);
-    while (_retired.length > 3) {
-      _retired.removeAt(0).dispose();
-    }
-  }
-
-  Float32List _shifted(Offset offset) {
-    final out = Float32List(_positions.length);
-    for (var i = 0; i < out.length; i += 2) {
-      out[i] = _positions[i] + offset.dx;
-      out[i + 1] = _positions[i + 1] + offset.dy;
-    }
-    return out;
   }
 }
 
