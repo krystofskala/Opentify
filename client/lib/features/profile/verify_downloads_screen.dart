@@ -68,7 +68,7 @@ class _VerifyDownloadsScreenState extends ConsumerState<VerifyDownloadsScreen> {
       await ref.read(apiClientProvider).postJson('/library/verify-report/${item.recordingId}/$action');
       setState(() {
         _state[item.recordingId] = action;
-        if (action == 'ok') _done.add(item.recordingId);
+        if (action == 'ok' || action == 'relabel') _done.add(item.recordingId);
       });
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
@@ -136,7 +136,11 @@ class _VerifyDownloadsScreenState extends ConsumerState<VerifyDownloadsScreen> {
                 state: _state[item.recordingId] ?? item.review,
                 onPlay: () => _play(item),
                 onOk: () => _act(item, 'ok'),
-                onRedownload: item.ownFile ? null : () => _act(item, 'redownload'),
+                // Vlastní hudba: soubor je dobrý, jen špatně přiřazený -> přeřadit
+                // ke skladbě, kterou slyší Shazam. Stažená: stáhnout znovu.
+                onRedownload: item.ownFile
+                    ? (item.gotTitle == null ? null : () => _act(item, 'relabel'))
+                    : () => _act(item, 'redownload'),
               );
             },
           );
@@ -226,11 +230,11 @@ class _VerifyRow extends ConsumerWidget {
                           compact: true,
                           onPressed: onRedownload,
                         )
-                      else
+                      if (item.ownFile)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            'Tvoje vlastní hudba – soubor appka nemění',
+                            'Vlastní hudba – soubor zůstane, jen se přeřadí',
                             style: theme.textTheme.bodySmall?.copyWith(color: muted),
                           ),
                         ),

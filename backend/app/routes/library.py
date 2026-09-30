@@ -753,7 +753,7 @@ def verify_report(
     report = _read_verify_report()
     items = []
     for rid, e in report.items():
-        if e.get("verdict") not in ("mismatch", "broken") or e.get("review") == "ok":
+        if e.get("verdict") not in ("mismatch", "broken") or e.get("review") in ("ok", "relabeled"):
             continue
         rec = session.get(Recording, rid)
         path = e.get("path")
@@ -825,3 +825,38 @@ async def verify_redownload(
         entry["review"] = "redownload"
         _write_verify_report(report)
     return {"recordingId": recording_id, "review": "redownload"}
+
+
+@library_router.post("/verify-report/{recording_id}/relabel")
+async def verify_relabel(recording_id: str, _current: tuple[str, str] = Depends(get_current_user)):
+    """"Shazam má pravdu" u VLASTNÍ hudby: soubor je v pořádku, jen ho sken
+    přiřadil ke špatné skladbě (živě: Marsyas vedený jako Aleš Procházka).
+    Soubor se nemění -- přeřadí se k interpretovi a skladbě, kterou slyší
+    Shazam. Chráněná alba (Kontrast) se nemění."""
+    from app.library.matching import find_or_create_artist, find_or_create_recording
+    from app.library.scanner import _reassign_media_asset
+
+    async with _VERIFY_LOCK:
+        report = _read_verify_report()
+        entry = report.get(recording_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="skladba v kontrole není")
+        if entry.get("verdict") == "protected":
+            raise HTTPException(status_code=400, detail="chráněná skladba se nemění")
+        got_title, got_artist = entry.get("gotTitle"), entry.get("gotArtist")
+        if not got_title or not got_artist:
+            raise HTTPException(status_code=400, detail="Shazam skladbu nepoznal -- není k čemu přeřadit.")
+        with Session(engine) as session:
+            asset = session.get(MediaAsset, recording_id)
+            if asset is None or not asset.storage_path:
+                raise HTTPException(status_code=404, detail="soubor nenalezen")
+            artist = find_or_create_artist(session, got_artist)
+            target = find_or_create_recording(session, artist, got_title)
+            if target.id != recording_id:
+                _reassign_media_asset(
+                    session, asset, target.id, Path(asset.storage_path), asset.source_provider or "local"
+                )
+        entry["review"] = "relabeled"
+        entry["relabeledTo"] = target.id
+        _write_verify_report(report)
+    return {"recordingId": recording_id, "review": "relabeled", "newRecordingId": target.id}
