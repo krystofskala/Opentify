@@ -634,7 +634,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             ],
                           ),
                         ),
-                        _likeButton(playback),
+                        // Srdíčko je dole v ovládání -- tady přepínač
+                        // sledování textu (u téhle skladby).
+                        LyricsFollowButton(recordingId: nowPlaying.recordingId),
                       ],
                     ),
                   ),
@@ -1127,7 +1129,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                           Expanded(child: QueueView()),
                         ],
                       )
-                    : LyricsView(key: const ValueKey('lyrics'), recordingId: recordingId),
+                    : Stack(
+                      key: const ValueKey('lyrics'),
+                      children: [
+                        Positioned.fill(child: LyricsView(recordingId: recordingId)),
+                        Positioned(top: 0, right: 8, child: LyricsFollowButton(recordingId: recordingId)),
+                      ],
+                    ),
               ),
             ),
           ),

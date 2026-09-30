@@ -146,7 +146,8 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
               if (lyrics.instrumental) {
                 return Center(child: Text('Instrumentální skladba.', style: muted));
               }
-              if (lyrics.hasSynced) {
+              final follow = !ref.watch(lyricsFollowOffProvider).contains(recordingId);
+              if (lyrics.hasSynced && follow) {
                 return _SyncedLyricsList(
                   lines: lyrics.syncedLines!,
                   position: position + _lead + offset,
@@ -155,11 +156,13 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                   color: fg,
                 );
               }
+              // Sledování vypnuté (nebo text bez časů): jen ke čtení.
+              final plain = lyrics.plain ?? lyrics.syncedLines?.map((l) => l.text).join(String.fromCharCode(10)) ?? '';
               return SingleChildScrollView(
                 controller: scrollController,
                 padding: EdgeInsets.symmetric(horizontal: immersive ? 4 : 24, vertical: 16),
                 child: Text(
-                  lyrics.plain ?? '',
+                  plain,
                   style: immersive
                       ? TextStyle(color: fg, fontSize: 24, fontWeight: FontWeight.w800, height: 1.35)
                       : TextStyle(color: fg, fontSize: 16, height: 1.6),
@@ -213,6 +216,68 @@ final lyricsModeProvider = StateNotifierProvider<LyricsModeController, bool>((re
 
 /// Posun časování textu (menu "⋯" přehrávače, jen když je text vidět):
 /// "Text později" / hodnota / "Text dřív".
+/// Skladby, u kterých uživatel vypnul sledování textu (špatně načasovaný
+/// text) -- text je pak jen ke čtení, bez posouvání a zvýrazňování.
+/// Pamatuje se natrvalo pro každou skladbu zvlášť.
+class LyricsFollowOffController extends StateNotifier<Set<String>> {
+  LyricsFollowOffController() : super(const {}) {
+    _load();
+  }
+
+  static const _prefKey = 'lyrics.follow_off';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList(_prefKey);
+      if (saved != null && mounted) state = saved.toSet();
+    } catch (_) {}
+  }
+
+  Future<void> setFollow(String recordingId, bool follow) async {
+    state = follow ? ({...state}..remove(recordingId)) : {...state, recordingId};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_prefKey, state.toList());
+    } catch (_) {}
+  }
+}
+
+final lyricsFollowOffProvider =
+    StateNotifierProvider<LyricsFollowOffController, Set<String>>((ref) => LyricsFollowOffController());
+
+/// Ikona "sledovat text" přímo v přehrávači (mobil: místo srdíčka v řádku
+/// nad textem, PC: roh sloupce s textem). Jen u textu s časy.
+class LyricsFollowButton extends ConsumerWidget {
+  const LyricsFollowButton({super.key, required this.recordingId, this.color = Colors.white});
+
+  final String recordingId;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final synced = ref.watch(_lyricsProvider(recordingId)).valueOrNull?.hasSynced ?? false;
+    if (!synced) return const SizedBox.shrink();
+    final follow = !ref.watch(lyricsFollowOffProvider).contains(recordingId);
+    return IconButton(
+      tooltip: follow ? 'Vypnout sledování textu' : 'Zapnout sledování textu',
+      style: IconButton.styleFrom(
+        foregroundColor: follow ? color : color.withValues(alpha: 0.6),
+        backgroundColor: follow ? color.withValues(alpha: 0.16) : Colors.transparent,
+        fixedSize: const Size.square(44),
+      ),
+      icon: Icon(
+        follow ? Symbols.sync_rounded : Symbols.sync_disabled_rounded,
+        size: 22,
+        semanticLabel: follow ? 'Sledování textu zapnuté' : 'Sledování textu vypnuté',
+      ),
+      onPressed: () => ref.read(lyricsFollowOffProvider.notifier).setFollow(recordingId, !follow),
+    );
+  }
+}
+
+/// Menu "⋯" přehrávače (jen když je text vidět): přepínač "Sledovat text"
+/// pro tuhle skladbu -- místo dřívějšího posouvání časování.
 class LyricsTimingRow extends ConsumerWidget {
   const LyricsTimingRow({super.key, required this.recordingId});
 
@@ -223,25 +288,27 @@ class LyricsTimingRow extends ConsumerWidget {
     final synced = ref.watch(_lyricsProvider(recordingId)).valueOrNull?.hasSynced ?? false;
     if (!synced) return const SizedBox.shrink();
     final theme = Theme.of(context);
-    final offset = ref.watch(lyricsOffsetProvider(recordingId));
-    final seconds = (offset.inMilliseconds.abs() / 1000).toStringAsFixed(1).replaceAll('.', ',');
-    final label = offset == Duration.zero ? 'Časování textu' : 'Posun ${offset.isNegative ? '−' : '+'}$seconds s';
-    void shift(int direction) =>
-        ref.read(lyricsOffsetProvider(recordingId).notifier).update((d) => d + Duration(milliseconds: 500 * direction));
+    final follow = !ref.watch(lyricsFollowOffProvider).contains(recordingId);
     return Row(
       children: [
         Icon(Symbols.lyrics_rounded, color: theme.colorScheme.onSurfaceVariant),
         const SizedBox(width: 16),
-        Expanded(child: Text(label, style: theme.textTheme.bodyLarge)),
-        IconButton(
-          tooltip: 'Text později (−0,5 s)',
-          icon: const Icon(Symbols.fast_rewind_rounded),
-          onPressed: () => shift(-1),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sledovat text', style: theme.textTheme.bodyLarge),
+              Text(
+                'U téhle skladby text sám posouvat a zvýrazňovat',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
         ),
-        IconButton(
-          tooltip: 'Text dřív (+0,5 s)',
-          icon: const Icon(Symbols.fast_forward_rounded),
-          onPressed: () => shift(1),
+        GlassSwitch(
+          value: follow,
+          semanticLabel: 'Sledovat text',
+          onChanged: (v) => ref.read(lyricsFollowOffProvider.notifier).setFollow(recordingId, v),
         ),
       ],
     );
