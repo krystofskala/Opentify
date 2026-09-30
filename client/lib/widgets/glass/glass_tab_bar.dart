@@ -138,6 +138,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                       borderRadius: const BorderRadius.all(Radius.circular(h / 2)),
                       shadow: true,
                       rim: true,
+                      liquid: true,
                       child: SizedBox(
                         height: h,
                         width: width,
@@ -145,9 +146,21 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                       ),
                     ),
                     // Kapka výběru nad lištou (smí přesahovat při zvednutí).
-                    AnimatedBuilder(
-                      animation: Listenable.merge([_pos, _lift]),
-                      builder: (context, _) => _drop(theme, accent, isDark, width),
+                    // Vlastní `RepaintBoundary`: bez ní se při tažení každý
+                    // snímek překreslovala celá obrazovka (stránka se zrnem
+                    // a obaly) -- tažení se sekalo (živě nahlášeno).
+                    Positioned.fill(
+                      child: RepaintBoundary(
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            AnimatedBuilder(
+                              animation: Listenable.merge([_pos, _lift]),
+                              builder: (context, _) => _drop(theme, accent, isDark, width),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),

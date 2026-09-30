@@ -324,7 +324,7 @@ class _AppearanceCard extends ConsumerWidget {
                   children: [
                     Text('Lom skla (test)', style: theme.textTheme.titleSmall),
                     Text(
-                      'Mini přehrávač láme obsah pod sebou jako Liquid Glass. Vypni, kdyby trhal nebo zčernaly obaly.',
+                      'Mini přehrávač a lišta lámou obsah pod sebou jako Liquid Glass. Vypni, kdyby trhaly nebo zčernaly obaly.',
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
