@@ -23,7 +23,14 @@ class SectionAppBar extends StatelessWidget implements PreferredSizeWidget {
     final canPop = ModalRoute.of(context)?.canPop ?? false;
     return AppBar(
       automaticallyImplyLeading: false,
-      leading: canPop ? const Center(child: GlassBackButton()) : null,
+      // Zpět zarovnané s obsahem (16 pt od kraje), ne vycentrované ve slotu.
+      leadingWidth: 16 + GlassBackButton.size,
+      leading: canPop
+          ? const Padding(
+              padding: EdgeInsets.only(left: 16),
+              child: Align(alignment: Alignment.centerLeft, child: GlassBackButton()),
+            )
+          : null,
       title: Text(title),
       actions: actions,
       bottom: bottom,

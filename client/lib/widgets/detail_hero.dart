@@ -215,11 +215,14 @@ class DetailHeroAppBar extends StatelessWidget {
       forceMaterialTransparency: true,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
-      leadingWidth: kToolbarHeight + side,
+      // Zpět na stejné svislici jako obsah a tlačítka vpravo (16 pt od
+      // okraje) -- dřív sedělo vycentrované v 56pt slotu, ~6 pt od kraje.
+      leadingWidth: side + AppSpacing.md + 44,
       leading: canPop
           ? Padding(
-              padding: EdgeInsets.only(left: side),
-              child: Center(
+              padding: EdgeInsets.only(left: side + AppSpacing.md),
+              child: Align(
+                alignment: Alignment.centerLeft,
                 child: _HeroCircleButton(
                   icon: Symbols.arrow_back_rounded,
                   tooltip: 'Zpět',

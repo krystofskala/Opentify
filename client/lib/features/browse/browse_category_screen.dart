@@ -97,9 +97,13 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
           expandedHeight: 170 + top,
           backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
-          leading: Center(child: GlassBackButton(onPressed: () => context.pop())),
+          leadingWidth: 16 + GlassBackButton.size,
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Align(alignment: Alignment.centerLeft, child: GlassBackButton(onPressed: () => context.pop())),
+          ),
           flexibleSpace: FlexibleSpaceBar(
-            titlePadding: const EdgeInsetsDirectional.only(start: 56, bottom: 14),
+            titlePadding: const EdgeInsetsDirectional.only(start: 72, bottom: 14),
             title: Text(c.title, style: const TextStyle(fontWeight: FontWeight.w800)),
             background: DecoratedBox(
               decoration: BoxDecoration(

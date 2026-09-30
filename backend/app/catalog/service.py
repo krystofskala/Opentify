@@ -717,6 +717,7 @@ class CatalogService:
             return None
         await self._enrich_release_images(release)
         await self._enrich_release_genres(release)
+        await self._enrich_release_date(release)
         return self._to_release_out(release)
 
     async def get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
@@ -906,6 +907,20 @@ class CatalogService:
         if country:
             artist.country = country
             self._session.add(artist)
+            self._session.commit()
+
+    async def _enrich_release_date(self, release: Release) -> None:
+        """Rok vydání u alb z Deezeru: výsledky hledání a skladby nesou jen
+        zkrácené album bez `release_date`, takže většina alb rok neměla
+        (živě: detail alba bez roku). Doplní se při otevření detailu."""
+        if release.release_date or not release.deezer_id:
+            return
+        album = await self._dz.album(release.deezer_id)
+        date = (album or {}).get("release_date")
+        # Deezer u neznámého data vrací "0000-00-00".
+        if date and not date.startswith("0000"):
+            release.release_date = date
+            self._session.add(release)
             self._session.commit()
 
     async def _enrich_release_genres(self, release: Release) -> None:
