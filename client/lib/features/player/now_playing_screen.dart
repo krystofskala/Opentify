@@ -19,6 +19,7 @@ import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
+import '../../widgets/glass/expressive_skip_button.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart';
 import '../../widgets/net_image.dart';
@@ -236,16 +237,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   Future<void> _skip({required bool forward}) async {
     final playback = ref.read(audioPlayerControllerProvider);
     final controller = ref.read(audioPlayerControllerProvider.notifier);
-    final slides = forward
-        ? playback.hasNext
-        : playback.previousIndex != null && playback.position <= const Duration(seconds: 3);
+    final slides =
+        forward ? playback.hasNext : playback.previousIndex != null && playback.position <= const Duration(seconds: 3);
     final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     if (!slides || reduce || _carousel.isAnimating) {
       forward ? await controller.next() : await controller.previous();
       return;
     }
     const spring = SpringDescription(mass: 1, stiffness: 420, damping: 38);
-    await _carousel.animateWith(SpringSimulation(spring, _carousel.value, forward ? -_carouselWidth : _carouselWidth, 0));
+    await _carousel
+        .animateWith(SpringSimulation(spring, _carousel.value, forward ? -_carouselWidth : _carouselWidth, 0));
     if (!mounted) return;
     forward ? await controller.next() : await controller.previous();
     if (mounted) _carousel.value = 0;
@@ -769,9 +770,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           if (nowPlaying.artistName != null || nowPlaying.artistId != null) ...[
             const SizedBox(height: 8),
             GestureDetector(
-              onTap: nowPlaying.artistId == null
-                  ? null
-                  : () => _openAfterClose('/artists/${nowPlaying.artistId}'),
+              onTap: nowPlaying.artistId == null ? null : () => _openAfterClose('/artists/${nowPlaying.artistId}'),
               child: Text(
                 nowPlaying.artistName ?? 'Zobrazit interpreta',
                 textAlign: TextAlign.center,
@@ -844,60 +843,62 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
           // spodní řádek přimáčknutý).
           const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              IconButton(
-                icon: Icon(Symbols.shuffle_rounded, color: playback.shuffleEnabled ? accent : Colors.white54, size: 22),
-                tooltip: 'Náhodné přehrávání',
-                onPressed: controller.toggleShuffle,
+          // Úzké iPhony (mini/SE): řada se raději zmenší, než aby přetekla.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: 340,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    icon: Icon(Symbols.shuffle_rounded,
+                        color: playback.shuffleEnabled ? accent : Colors.white54, size: 22),
+                    tooltip: 'Náhodné přehrávání',
+                    onPressed: controller.toggleShuffle,
+                  ),
+                  // Bez předchozí skladby `previous()` přetočí na začátek.
+                  ExpressiveSkipButton(forward: false, onPressed: () => _skip(forward: false)),
+                  // M3 Expressive: play = "cookie" tvar, pauza = squircle --
+                  // tvar pružinou morfuje se stavem.
+                  GlassPressable(
+                    onPressed: playback.isBuffering ? null : controller.togglePlayPause,
+                    shape: const CircleBorder(),
+                    semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
+                    child: ExpressiveMorph(
+                      size: 76,
+                      color: Colors.white,
+                      shape: playback.isPlaying
+                          ? const ExpressiveShape.squircle()
+                          : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
+                      child: playback.isBuffering
+                          ? (isProvisioning && provisioningPct != null
+                              ? SizedBox.square(
+                                  dimension: 40,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 3, color: accent, value: provisioningPct / 100),
+                                )
+                              : ExpressiveLoadingIndicator(size: 40, color: accent))
+                          : Icon(
+                              playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
+                              size: 44,
+                              color: accent,
+                            ),
+                    ),
+                  ),
+                  ExpressiveSkipButton(forward: true, onPressed: playback.hasNext ? () => _skip(forward: true) : null),
+                  IconButton(
+                    icon: Icon(
+                      playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
+                      color: playback.repeatMode == RepeatMode.off ? Colors.white54 : accent,
+                      size: 22,
+                    ),
+                    tooltip: 'Opakování',
+                    onPressed: controller.cycleRepeatMode,
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
-                // Bez předchozí skladby `previous()` přetočí na začátek.
-                onPressed: () => _skip(forward: false),
-              ),
-              // M3 Expressive: play = "cookie" tvar, pauza = squircle --
-              // tvar pružinou morfuje se stavem.
-              GlassPressable(
-                onPressed: playback.isBuffering ? null : controller.togglePlayPause,
-                shape: const CircleBorder(),
-                semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
-                child: ExpressiveMorph(
-                  size: 76,
-                  color: Colors.white,
-                  shape: playback.isPlaying
-                      ? const ExpressiveShape.squircle()
-                      : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
-                  child: playback.isBuffering
-                      ? (isProvisioning && provisioningPct != null
-                          ? SizedBox.square(
-                              dimension: 40,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 3, color: accent, value: provisioningPct / 100),
-                            )
-                          : ExpressiveLoadingIndicator(size: 40, color: accent))
-                      : Icon(
-                          playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
-                          size: 44,
-                          color: accent,
-                        ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Symbols.skip_next_rounded, color: Colors.white, size: 34),
-                onPressed: playback.hasNext ? () => _skip(forward: true) : null,
-              ),
-              IconButton(
-                icon: Icon(
-                  playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
-                  color: playback.repeatMode == RepeatMode.off ? Colors.white54 : accent,
-                  size: 22,
-                ),
-                tooltip: 'Opakování',
-                onPressed: controller.cycleRepeatMode,
-              ),
-            ],
+            ),
           ),
           const SizedBox(height: 10),
           // Text a fronta vždy na dosah pod ovládáním (jako Apple Music);
