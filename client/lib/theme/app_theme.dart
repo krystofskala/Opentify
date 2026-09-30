@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 import '../widgets/app_background.dart' show AppBackgroundMirror;
+import '../widgets/glass/liquid_glass.dart';
 import 'accent_color.dart' show isAchromatic;
 import 'design_tokens.dart';
 import 'shapes.dart';
@@ -173,7 +174,13 @@ class _OpaqueWhileMoving extends PageTransitionsBuilder {
     Widget child,
   ) {
     // První stránka (bez předchozí) se nezakrývá -- pod ní nic není.
-    final backed = route.isFirst ? child : _BackdropWhileAnimating(animation: animation, child: child);
+    var backed = route.isFirst ? child : _BackdropWhileAnimating(animation: animation, child: child);
+    // Stránky kořenového navigátoru jdou zachytit pro sklo přehrávače
+    // (viz `routeLiquidCapture`); vnořené stránky tabů pokrývá shell.
+    final root = Navigator.maybeOf(context, rootNavigator: true);
+    if (root != null && route.navigator == root) {
+      backed = LiquidCaptureScope(capture: routeLiquidCapture, child: LiquidSource.page(child: backed));
+    }
     return inner.buildTransitions(route, context, animation, secondaryAnimation, backed);
   }
 }

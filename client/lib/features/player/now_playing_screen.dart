@@ -314,8 +314,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // rozmazává a těsně před horní hranou se rozplyne do pozadí
           // přehrávače (`veil`). Úplně nahoře už jen neprůhledné pozadí.
           final veil = Curves.easeInCubic.transform(((v - 0.55) / 0.45).clamp(0.0, 1.0));
-          final shellCapture = LiquidScope.shell;
-          final glassy = v < 0.999 && shellCapture != null;
+          final glassy = v < 0.999;
           return Stack(
             children: [
               Positioned.fill(
@@ -354,7 +353,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             if (glassy)
                               Positioned.fill(
                                 child: LiquidCaptureScope(
-                                  capture: shellCapture,
+                                  capture: routeLiquidCapture,
                                   child: GlassContainer(
                                     liquid: true,
                                     rim: true,

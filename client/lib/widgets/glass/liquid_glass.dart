@@ -64,6 +64,11 @@ class _LiquidScopeState extends State<LiquidScope> {
 /// a sheet fronty si ho odsud bere.
 final LiquidCapture playerLiquidCapture = LiquidCapture();
 
+/// Stránky kořenového navigátoru (shell i album/interpret otevřené nad
+/// ním) -- pro panel přehrávače při vysouvání, ať lomí to, co je opravdu
+/// pod ním, ne Domů schované pod otevřeným albem (živě nahlášeno).
+final LiquidCapture routeLiquidCapture = LiquidCapture();
+
 /// Dá podstromu konkrétní (sdílené) zachytávání, viz [playerLiquidCapture].
 class LiquidCaptureScope extends StatelessWidget {
   const LiquidCaptureScope({super.key, required this.capture, required this.child});
@@ -88,7 +93,9 @@ class _LiquidScopeData extends InheritedWidget {
 class LiquidCapture {
   static RenderLiquidSource? _background;
 
-  RenderLiquidSource? _page;
+  // Víc zdrojů (stránky nad sebou) -- bere se naposledy připojený, který
+  // se zrovna kreslí (zakrytá/offstage stránka obrázek nevrátí).
+  final List<RenderLiquidSource> _pages = [];
   final Set<RenderLiquidGlass> _glasses = {};
   ui.Image? _sharp;
   ui.Image? _blurred;
@@ -151,7 +158,11 @@ class LiquidCapture {
     final rect = union.inflate(_margin).intersect(screen);
     if (rect.isEmpty) return;
     final bg = bgSource.capture(rect, dpr);
-    final pg = _page?.capture(rect, dpr);
+    ui.Image? pg;
+    for (final source in _pages.reversed) {
+      pg = source.capture(rect, dpr);
+      if (pg != null) break;
+    }
     if (bg == null) {
       pg?.dispose();
       return;
@@ -249,7 +260,9 @@ class RenderLiquidSource extends RenderRepaintBoundary {
     if (scope == null) {
       LiquidCapture._background = this;
     } else {
-      scope._page = this;
+      scope._pages
+        ..remove(this)
+        ..add(this);
     }
   }
 
@@ -257,8 +270,8 @@ class RenderLiquidSource extends RenderRepaintBoundary {
     final scope = _scope;
     if (scope == null) {
       if (LiquidCapture._background == this) LiquidCapture._background = null;
-    } else if (scope._page == this) {
-      scope._page = null;
+    } else {
+      scope._pages.remove(this);
     }
   }
 
