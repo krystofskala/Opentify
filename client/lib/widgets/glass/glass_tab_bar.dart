@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/physics.dart';
 
 import '../../theme/glass_tokens.dart';
@@ -231,6 +234,10 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
             child: Stack(
               clipBehavior: Clip.none,
               children: [
+                // Zvednutá kapka zvětšuje, co je skutečně pod ní (lišta
+                // i obsah) -- ikony pod ní pak sedí přesně pod barevnou
+                // kopií (dřív prosvítaly nezvětšené a byly dvakrát).
+                if (magnify > 1.001) Positioned.fill(child: _MagnifyBackdrop(scale: magnify)),
                 // Sklo kapky: v klidu jemné (jako dřív), zvednuté čiré.
                 Positioned.fill(
                   child: ColoredBox(
@@ -273,5 +280,59 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
         ),
       ),
     );
+  }
+}
+
+
+/// Zvětšení toho, co je pod kapkou, kolem jejího středu (`BackdropFilter`
+/// s maticí -- na webu jde, shader ne).
+class _MagnifyBackdrop extends LeafRenderObjectWidget {
+  const _MagnifyBackdrop({required this.scale});
+
+  final double scale;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderMagnify(scale);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMagnify renderObject) => renderObject.scale = scale;
+}
+
+class _RenderMagnify extends RenderBox {
+  _RenderMagnify(this._scale);
+
+  double _scale;
+  set scale(double v) {
+    if (v == _scale) return;
+    _scale = v;
+    markNeedsPaint();
+  }
+
+  final LayerHandle<BackdropFilterLayer> _layer = LayerHandle<BackdropFilterLayer>();
+
+  @override
+  bool get sizedByParent => true;
+
+  @override
+  bool get alwaysNeedsCompositing => true;
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) => constraints.biggest;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final c = (offset & size).center;
+    final m = Matrix4.identity()
+      ..translateByDouble(c.dx, c.dy, 0, 1)
+      ..scaleByDouble(_scale, _scale, 1, 1)
+      ..translateByDouble(-c.dx, -c.dy, 0, 1);
+    final layer = (_layer.layer ??= BackdropFilterLayer())..filter = ImageFilter.matrix(m.storage);
+    context.pushLayer(layer, (_, __) {}, Offset.zero);
+  }
+
+  @override
+  void dispose() {
+    _layer.layer = null;
+    super.dispose();
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
@@ -73,7 +74,7 @@ class _RenderMeasureSize extends RenderProxyBox {
   }
 }
 
-class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with SingleTickerProviderStateMixin {
+class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with TickerProviderStateMixin {
   NowPlayingSheetController? _sheet;
 
   /// Otevřený druhý sloupec (PC); `null` = zavřený (výchozí).
@@ -85,6 +86,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
   /// Telefon: režim textu jako v Apple Music (malý obal nahoře, text
   /// přes střed, ovládání dole) místo sheetu s textem.
   bool _lyricsMode = false;
+
+  /// Přechod obal ↔ text (0 = obal, 1 = text): obal se plynule zmenší do
+  /// řádku nahoře, ovládání sjede dolů, text se vynoří -- vše jednou pružinou.
+  late final AnimationController _lyricsAnim = AnimationController(vsync: this, duration: Motion.enter.duration);
+  late final CurvedAnimation _lyricsCurve =
+      CurvedAnimation(parent: _lyricsAnim, curve: Motion.enter, reverseCurve: Motion.enter.flipped);
+  double? _titleH;
+  double? _controlsH;
+
+  void _setLyrics(bool on) {
+    if (on == _lyricsMode) return;
+    setState(() => _lyricsMode = on);
+    on ? _lyricsAnim.forward() : _lyricsAnim.reverse();
+  }
 
   /// Změřená výška skupiny obal + název + ovládání (výška druhého sloupce).
   double? _playerHeight;
@@ -362,14 +377,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
                                   ),
                                 );
                                 if (!sideColumnFits) {
-                                  return AnimatedSwitcher(
-                                    duration: Motion.state.duration,
-                                    switchInCurve: Motion.state,
-                                    child: _lyricsMode
-                                        ? _lyricsLayout(context, playback, accent, duration, positionMs,
-                                            isProvisioning, provisioningPct)
-                                        : Center(key: const ValueKey('cover'), child: player),
-                                  );
+                                  return _phoneStage(constraints, playback, accent, duration, positionMs,
+                                      isProvisioning, provisioningState, provisioningPct);
                                 }
                                 // PC: text/fronta jako druhý sloupec vedle
                                 // obalu a ovládání (stejné světlejší sklo),
@@ -414,66 +423,156 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
     );
   }
 
-  /// Režim textu (telefon): řádek s malým obalem, názvem, interpretem
-  /// a srdíčkem, pod ním text přes celou výšku, dole stejné ovládání.
-  Widget _lyricsLayout(
-    BuildContext context,
+  /// Telefon: obal/název/ovládání a režim textu jako JEDNA scéna s polohami
+  /// spočítanými z rozměrů -- při přepnutí se obal plynule zmenší do rohu
+  /// (nebo zpět), ovládání sjede ke spodní hraně, velký název odpluje
+  /// a malý se vynoří, text vyjede zespodu (jako v Apple Music). Dřív se
+  /// dvě rozložení jen prolnula.
+  Widget _phoneStage(
+    BoxConstraints constraints,
     AudioPlayerState playback,
     Color accent,
     Duration duration,
     int positionMs,
     bool isProvisioning,
+    TrackProvisioningState? provisioningState,
     int? provisioningPct,
   ) {
     final nowPlaying = playback.nowPlaying!;
-    return Column(
-      key: const ValueKey('lyrics'),
-      children: [
-        const SizedBox(height: 8),
-        Row(
+    final fullW = constraints.maxWidth, h = constraints.maxHeight;
+    final w = math.min(fullW, 480.0);
+    final x0 = (fullW - w) / 2;
+    double interval(double t, double a, double b) => ((t - a) / (b - a)).clamp(0.0, 1.0);
+    return AnimatedBuilder(
+      animation: _lyricsCurve,
+      builder: (context, _) {
+        final t = _lyricsCurve.value;
+        final tc = t.clamp(0.0, 1.0);
+        final titleH = _titleH ?? 84;
+        final ctrlH = _controlsH ?? 230;
+        // Obalový režim: obal + název + ovládání jako jedna skupina uprostřed.
+        final coverS = math.max(0.0, math.min(w, h - (28 + titleH + 24 + ctrlH)));
+        final groupH = coverS + 28 + titleH + 24 + ctrlH;
+        final top0 = math.max(0.0, (h - groupH) / 2);
+        final big = Rect.fromLTWH(x0 + (w - coverS) / 2, top0, coverS, coverS);
+        final small = Rect.fromLTWH(x0, 8, 60, 60);
+        final cover = Rect.lerp(big, small, t)!;
+        final titleTop = top0 + coverS + 28;
+        final ctrlTop = lerpDouble(titleTop + titleH + 24, h - ctrlH, t)!;
+        final lyricsIn = interval(tc, 0.3, 1);
+        final smallIn = interval(tc, 0.45, 1);
+        final bigOut = interval(tc, 0, 0.35);
+        return Stack(
+          clipBehavior: Clip.none,
           children: [
-            GestureDetector(
-              onTap: () => setState(() => _lyricsMode = false),
-              child: SizedBox.square(dimension: 60, child: _Artwork(info: nowPlaying)),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    nowPlaying.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+            if (tc > 0.01)
+              Positioned(
+                left: x0,
+                width: w,
+                top: 80 + (1 - lyricsIn) * 48,
+                bottom: ctrlH + 4,
+                child: IgnorePointer(
+                  ignoring: !_lyricsMode,
+                  child: Opacity(
+                    opacity: lyricsIn,
+                    child: ShaderMask(
+                      // Text se nahoře a dole rozplyne (jako v Apple Music).
+                      blendMode: BlendMode.dstIn,
+                      shaderCallback: (rect) => const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x00000000), Color(0xFF000000), Color(0xFF000000), Color(0x00000000)],
+                        stops: [0, 0.06, 0.86, 1],
+                      ).createShader(rect),
+                      child: LyricsView(recordingId: nowPlaying.recordingId, immersive: true, color: Colors.white),
+                    ),
                   ),
-                  Text(
-                    nowPlaying.artistName ?? '',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 15),
+                ),
+              ),
+            // Velký název -- odpluje nahoru spolu s obalem a zmizí.
+            Positioned(
+              left: x0,
+              width: w,
+              top: lerpDouble(titleTop, titleTop - 60, tc),
+              child: IgnorePointer(
+                ignoring: _lyricsMode,
+                child: Opacity(
+                  opacity: 1 - bigOut,
+                  child: _MeasureSize(
+                    onChange: (size) {
+                      if (_titleH != size.height) setState(() => _titleH = size.height);
+                    },
+                    child: _titleBlock(context, playback, isProvisioning, provisioningState),
                   ),
-                ],
+                ),
               ),
             ),
-            _likeButton(playback),
+            // Malý řádek vedle zmenšeného obalu.
+            Positioned(
+              left: x0 + 74,
+              width: w - 74,
+              top: 8,
+              height: 60,
+              child: IgnorePointer(
+                ignoring: !_lyricsMode,
+                child: Opacity(
+                  opacity: smallIn,
+                  child: Transform.translate(
+                    offset: Offset(0, (1 - smallIn) * 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                nowPlaying.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                              ),
+                              Text(
+                                nowPlaying.artistName ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 15),
+                              ),
+                            ],
+                          ),
+                        ),
+                        _likeButton(playback),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Obal: v klidu karusel (tažení na další/předchozí), při přechodu
+            // a v textu jen obrázek (klepnutí vrátí obal).
+            Positioned.fromRect(
+              rect: cover,
+              child: t <= 0.0001 && !_lyricsMode
+                  ? _carouselView(playback)
+                  : GestureDetector(
+                      onTap: () => _setLyrics(false),
+                      child: _Artwork(info: nowPlaying),
+                    ),
+            ),
+            Positioned(
+              left: x0,
+              width: w,
+              top: ctrlTop,
+              child: _MeasureSize(
+                onChange: (size) {
+                  if (_controlsH != size.height) setState(() => _controlsH = size.height);
+                },
+                child: _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
+              ),
+            ),
           ],
-        ),
-        Expanded(
-          child: ShaderMask(
-            // Text se nahoře a dole rozplyne (jako v Apple Music).
-            blendMode: BlendMode.dstIn,
-            shaderCallback: (rect) => const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0x00000000), Color(0xFF000000), Color(0xFF000000), Color(0x00000000)],
-              stops: [0, 0.06, 0.86, 1],
-            ).createShader(rect),
-            child: LyricsView(recordingId: nowPlaying.recordingId, immersive: true, color: Colors.white),
-          ),
-        ),
-        _controls(playback, accent, duration, positionMs, isProvisioning, provisioningPct),
-      ],
+        );
+      },
     );
   }
 
@@ -859,7 +958,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
             }
           });
         } else if (panel == _SidePanel.lyrics) {
-          setState(() => _lyricsMode = !_lyricsMode);
+          _setLyrics(!_lyricsMode);
         } else {
           showQueuePanel(context, accentColor: accent);
         }

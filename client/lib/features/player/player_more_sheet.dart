@@ -31,6 +31,8 @@ Future<void> showPlayerMoreSheet(BuildContext context) {
     useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
+    // Plynulé vysunutí pružinou (výchozí materiálová animace byla useknutá).
+    sheetAnimationStyle: Motion.sheet,
     builder: (context) => const _PlayerMoreSheet(),
   );
 }

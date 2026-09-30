@@ -263,6 +263,16 @@ class Motion {
   /// Změna stavu: barva, průhlednost, výplň (bez překmitu).
   static SpringCurve get state => Expressive.effectsDefault;
 
+  /// Vysunutí sheetu (fronta, menu "⋯"): měkká pružina bez překmitu
+  /// (sheet nesmí přestřelit přes horní hranu), zasunutí rychlé.
+  static final SpringCurve sheetIn = SpringCurve(dampingRatio: 1.0, stiffness: 260);
+  static AnimationStyle get sheet => AnimationStyle(
+        duration: sheetIn.duration,
+        curve: sheetIn,
+        reverseDuration: const Duration(milliseconds: 260),
+        reverseCurve: Curves.easeInCubic,
+      );
+
   /// Odezva na dotek (zmáčknutí rohů, posun palce přepínače) -- rychlá
   /// pružina s mírným překmitem.
   static SpringCurve get press => Expressive.spatialFast;

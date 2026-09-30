@@ -21,6 +21,8 @@ Future<void> showQueuePanel(BuildContext context, {required Color accentColor}) 
     useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
+    // Plynulé vysunutí pružinou (výchozí materiálová animace byla useknutá).
+    sheetAnimationStyle: Motion.sheet,
     builder: (context) => _QueuePanel(accentColor: accentColor),
   );
 }
