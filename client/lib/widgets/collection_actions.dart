@@ -13,6 +13,7 @@ import 'media_card.dart' show ArtworkImage;
 import 'radio_station.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
 import '../core/cz_plural.dart';
+import 'remove_from_library.dart' show libraryRevisionProvider;
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -170,6 +171,22 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   toast('Do fronty: ${songs(infos.length)} z „$title“');
                 }),
               ),
+              if (kind == CollectionKind.album)
+                _Row(
+                  icon: Symbols.library_add_rounded,
+                  label: 'Přidat do knihovny',
+                  // `run` nejdřív načte tracklist (skladby se tím zapíšou do
+                  // katalogu), pak se album přidá a stáhne.
+                  onTap: () => run((infos) async {
+                    try {
+                      await container.read(apiClientProvider).postJson('/library/albums/$id');
+                      container.read(libraryRevisionProvider.notifier).state++;
+                      toast('„$title“ je v knihovně (${songs(infos.length)})');
+                    } catch (_) {
+                      toast('Album se nepodařilo přidat');
+                    }
+                  }),
+                ),
               _Row(
                 icon: Symbols.radio_rounded,
                 label: 'Přejít na rádio',

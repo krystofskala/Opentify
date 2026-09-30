@@ -101,6 +101,10 @@ app.include_router(recognize_router, prefix="/api/v1")
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
+    # Klasická knihovna: adminovi nic nezmizí (jednorázově, viz entries).
+    from app.library.entries import seed_admin_library
+
+    seed_admin_library()
     asyncio.create_task(redis_listener())
     asyncio.create_task(backfill_loop())
     asyncio.create_task(artwork_backfill_loop())

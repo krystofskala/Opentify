@@ -27,6 +27,8 @@ import '../../widgets/view_mode_toggle.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../widgets/collection_actions.dart';
 import '../../core/cz_plural.dart';
+import '../../state/auth_controller.dart';
+import '../../state/library_scope.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -104,6 +106,8 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
       child: Scaffold(
         appBar: SectionAppBar(
           'Knihovna',
+          // Admin: celá sdílená knihovna na serveru, nebo jen ta jeho.
+          actions: const [_LibraryScopeToggle()],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(64 + 48),
             child: Column(
@@ -727,6 +731,29 @@ class _LibraryTabSegments extends StatelessWidget {
         segments: [for (var i = 0; i < _labels.length; i++) GlassSegment(value: i, label: _labels[i])],
         selected: controller.index,
         onChanged: controller.animateTo,
+      ),
+    );
+  }
+}
+
+
+/// Admin: "Moje" (klasická knihovna) / "Vše na serveru" (všechno stažené).
+/// Ostatní profily ho nevidí.
+class _LibraryScopeToggle extends ConsumerWidget {
+  const _LibraryScopeToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(authProvider).valueOrNull?.user?.role != 'admin') return const SizedBox.shrink();
+    final all = ref.watch(libraryScopeAllProvider);
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      child: GlassButton(
+        label: all ? 'Vše na serveru' : 'Moje',
+        icon: all ? Symbols.dns_rounded : Symbols.person_rounded,
+        style: GlassButtonStyle.tonal,
+        compact: true,
+        onPressed: () => ref.read(libraryScopeAllProvider.notifier).set(!all),
       ),
     );
   }

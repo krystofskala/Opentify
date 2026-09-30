@@ -73,11 +73,6 @@ async def provision_track(
 ):
     user_id, device_id = current
     interactive = body is not None and body.priority == "interactive"
-    # Přehrání/stažení = skladba v knihovně profilu (viz app/library/entries.py).
-    if interactive:
-        from app.library.entries import add_to_library
-
-        add_to_library(session, user_id, recording_id)
     try:
         asset, job, created = get_or_create_job(session, recording_id, user_id, device_id)
     except LookupError:

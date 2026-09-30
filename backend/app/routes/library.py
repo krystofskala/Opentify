@@ -25,10 +25,11 @@ import os
 import re
 import unicodedata
 import zipfile
+from contextvars import ContextVar
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
@@ -64,7 +65,17 @@ from app.models import (
     Release,
 )
 
-library_router = APIRouter(prefix="/library", tags=["library"])
+# Admin: přepínač v Knihovně "Vše na serveru" (hlavička X-Library-Scope: all)
+# -- celá sdílená knihovna místo klasické. Async závislost, ať hodnota
+# doputuje i do synchronních endpointů (threadpool kopíruje kontext).
+_scope_all: ContextVar[bool] = ContextVar("library_scope_all", default=False)
+
+
+async def _library_scope(request: Request) -> None:
+    _scope_all.set(request.headers.get("x-library-scope") == "all")
+
+
+library_router = APIRouter(prefix="/library", tags=["library"], dependencies=[Depends(_library_scope)])
 
 # Kontejnerová cesta je pevná (bind mount cíl v docker-compose.yml) -- co se
 # mění mezi Windows vývojem a Linux serverem, je jen `MUSIC_DIR` (hostitelská
@@ -84,33 +95,27 @@ _IN_LIBRARY = and_(
 
 
 def _in_library(user_id: str):
-    """Knihovna profilu: admin = všechno stažené (soubory jsou jeho
-    kurátorství), ostatní profily = jen skladby, které si sami pustili,
-    stáhli nebo lajkli (`LibraryEntry`). Soubory jsou sdílené."""
-    if user_id == ADMIN_ID:
-        # Všechno stažené KROMĚ skladeb, které stáhl jen jiný profil -- ty
-        # adminovi v knihovně nepatří, dokud si je sám nepustí/nelajkne.
-        foreign_only = (
-            select(ProvisioningJob.recording_id)
-            .where(ProvisioningJob.requested_by_user_id != ADMIN_ID)
-            .where(
-                ProvisioningJob.recording_id.not_in(  # type: ignore[attr-defined]
-                    select(ProvisioningJob.recording_id).where(ProvisioningJob.requested_by_user_id == ADMIN_ID)
-                )
-            )
-            .where(
-                ProvisioningJob.recording_id.not_in(  # type: ignore[attr-defined]
-                    select(LibraryEntry.recording_id).where(LibraryEntry.user_id == ADMIN_ID)
-                )
-            )
-        )
-        return and_(_IN_LIBRARY, MediaAsset.recording_id.not_in(foreign_only))  # type: ignore[attr-defined]
-    return and_(
-        _IN_LIBRARY,
-        MediaAsset.recording_id.in_(  # type: ignore[attr-defined]
-            select(LibraryEntry.recording_id).where(LibraryEntry.user_id == user_id)
-        ),
+    """Klasická knihovna (jako Spotify/Apple Music): jen co si profil sám
+    přidal -- tlačítkem "Přidat do knihovny" (`LibraryEntry`), lajkem
+    (Oblíbené), a u admina navíc jeho vlastní hudba z PC. Poslech ani
+    stažení skladbu do knihovny nepřidá. Soubory jsou sdílené mezi profily
+    (co má stažené jeden, hraje druhému hned), knihovna ne."""
+    liked = (
+        select(PlaylistItem.recording_id)
+        .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+        .where(Playlist.owner_user_id == user_id, Playlist.source == LIKED_SONGS_SOURCE)
     )
+    entries = select(LibraryEntry.recording_id).where(LibraryEntry.user_id == user_id)
+    mine = or_(
+        MediaAsset.recording_id.in_(entries),  # type: ignore[attr-defined]
+        MediaAsset.recording_id.in_(liked),  # type: ignore[attr-defined]
+    )
+    if user_id == ADMIN_ID and _scope_all.get():
+        return _IN_LIBRARY
+    if user_id == ADMIN_ID:
+        own_music = MediaAsset.source_provider.in_(("local", "musicbrainz-local"))  # type: ignore[union-attr]
+        mine = or_(mine, own_music)
+    return and_(_IN_LIBRARY, mine)
 
 
 def _progress_dict(p: ScanProgress) -> dict:
@@ -490,6 +495,76 @@ def _remove_from_library(session: Session, recording_id: str, dry_run: bool = Fa
     return {"recordingId": recording_id, "result": "deleted", "freedBytes": freed}
 
 
+def _remove_for(session: Session, user_id: str, recording_id: str, dry_run: bool = False) -> dict:
+    """Odebrat z knihovny profilu. Soubor se smaže (uvolní místo) jen
+    u admina a jen když ho v knihovně nemá nikdo jiný; jinak zůstává
+    sdílený pro rychlé přehrání."""
+    if not dry_run:
+        remove_entry(session, user_id, recording_id)
+    others = session.exec(
+        select(LibraryEntry).where(LibraryEntry.recording_id == recording_id, LibraryEntry.user_id != user_id)
+    ).first()
+    if user_id == ADMIN_ID and others is None:
+        return _remove_from_library(session, recording_id, dry_run)
+    return {"recordingId": recording_id, "result": "hidden", "freedBytes": 0}
+
+
+@library_router.get("/entries")
+def library_entries(
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Id skladeb v knihovně profilu (pro "Přidat/Odebrat z knihovny")."""
+    ids = session.exec(
+        select(MediaAsset.recording_id).where(_in_library(current[0]))
+    ).all()
+    return {"recordingIds": sorted(set(ids))}
+
+
+async def _add_and_fetch(user_id: str, device_id: str, recording_ids: list[str]) -> int:
+    """Přidat do knihovny + stáhnout, co ještě staženo není (knihovna =
+    přehratelné hned)."""
+    from app.provisioning_service import enqueue, get_or_create_job
+
+    added = 0
+    with Session(engine) as session:
+        for rid in recording_ids:
+            if session.get(Recording, rid) is None:
+                continue
+            add_to_library(session, user_id, rid)
+            added += 1
+            try:
+                _asset, job, created = get_or_create_job(session, rid, user_id, device_id)
+            except LookupError:
+                continue
+            if job is not None and created:
+                await enqueue(job)
+    return added
+
+
+@library_router.post("/tracks/{recording_id}")
+async def add_track(recording_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    """"Přidat do knihovny" -- skladba."""
+    added = await _add_and_fetch(current[0], current[1], [recording_id])
+    if not added:
+        raise HTTPException(status_code=404, detail="skladba nenalezena")
+    return {"recordingId": recording_id, "inLibrary": True}
+
+
+@library_router.post("/albums/{release_id}")
+async def add_album(
+    release_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """"Přidat do knihovny" -- celé album (skladby, které katalog zná)."""
+    ids = list(session.exec(select(Recording.id).where(Recording.release_id == release_id)).all())
+    if not ids:
+        raise HTTPException(status_code=404, detail="album nemá skladby v katalogu")
+    added = await _add_and_fetch(current[0], current[1], ids)
+    return {"releaseId": release_id, "added": added}
+
+
 @library_router.delete("/tracks/{recording_id}")
 def remove_track(
     recording_id: str,
@@ -499,10 +574,7 @@ def remove_track(
     """"Odebrat z knihovny" -- neodebírá z Oblíbených ani z playlistů (to
     jsou samostatné akce), jen z "Moje knihovna". Jiný profil než admin
     maže jen svou položku, sdílený soubor zůstává."""
-    if current[0] != ADMIN_ID:
-        removed = remove_entry(session, current[0], recording_id)
-        return {"recordingId": recording_id, "result": "hidden" if removed else "not_in_library", "freedBytes": 0}
-    return _remove_from_library(session, recording_id)
+    return _remove_for(session, current[0], recording_id)
 
 
 @library_router.post("/tracks/remove")
@@ -514,14 +586,7 @@ def remove_tracks(
 ):
     """`?dryRun=true` -- jen spočítá, co by se stalo (kolik MB se uvolní, co
     se jen skryje), pro potvrzovací sheet v klientovi. Nic nemění."""
-    if current[0] != ADMIN_ID:
-        # Jiný profil: jen z jeho knihovny, soubory (sdílené) zůstávají.
-        results = []
-        for rid in body.recording_ids[:500]:
-            removed = True if dry_run else remove_entry(session, current[0], rid)
-            results.append({"recordingId": rid, "result": "hidden" if removed else "not_in_library", "freedBytes": 0})
-        return {"removed": len(results), "freedBytes": 0, "results": results}
-    results = [_remove_from_library(session, rid, dry_run) for rid in body.recording_ids[:500]]
+    results = [_remove_for(session, current[0], rid, dry_run) for rid in body.recording_ids[:500]]
     return {
         "removed": sum(1 for r in results if r["result"] != "not_in_library"),
         "freedBytes": sum(r["freedBytes"] for r in results),
@@ -721,7 +786,6 @@ async def like_song(
         session.commit()
         if user_id == ADMIN_ID:
             send_feedback_later(recording_id, 0)
-    add_to_library(session, user_id, recording_id)
     return {"recordingId": recording_id, "liked": True}
 
 

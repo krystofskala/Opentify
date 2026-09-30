@@ -48,10 +48,14 @@ class ApiClient {
   final String deviceId;
   final http.Client _http;
 
+  /// Hlavičky navíc pro všechny požadavky (admin: "Vše na serveru" v Knihovně).
+  final Map<String, String> extraHeaders = {};
+
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         'X-User-Id': userId,
         'X-Device-Id': deviceId,
+        ...extraHeaders,
       };
 
   Uri _uri(String path, Map<String, String>? query) {

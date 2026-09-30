@@ -8,9 +8,7 @@ import '../data/listen_later_repository.dart' show LaterKind;
 import '../state/listen_later_controller.dart';
 import '../models/recording_model.dart';
 import '../state/audio_player_controller.dart';
-import '../models/availability.dart';
 import '../state/liked_songs_controller.dart';
-import '../state/provisioning_controller.dart';
 import '../theme/design_tokens.dart';
 import '../theme/shapes.dart';
 import 'add_to_playlist_sheet.dart';
@@ -18,6 +16,7 @@ import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'remove_from_library.dart';
 import 'radio_station.dart';
+import '../state/library_scope.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -111,10 +110,8 @@ class _TrackActionsSheet extends ConsumerWidget {
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
     final isLater =
         ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, recording.id) != null));
-    final provisioningStatus = ref.watch(provisioningControllerProvider.select((s) => s[recording.id]?.status));
-    // Jen co je opravdu v knihovně (stažené / z vlastní složky).
-    final inLibrary = provisioningStatus == 'AVAILABLE' ||
-        (provisioningStatus == null && recording.availability == Availability.available);
+    // Klasická knihovna profilu: co si sám přidal (ne co jen poslouchal).
+    final inLibrary = ref.watch(libraryIdsProvider).valueOrNull?.contains(recording.id) ?? false;
 
     void run(VoidCallback action) {
       Navigator.of(context).pop();
@@ -228,6 +225,19 @@ class _TrackActionsSheet extends ConsumerWidget {
                     icon: Symbols.person_rounded,
                     label: 'Přejít na interpreta',
                     onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
+                  ),
+                if (!inLibrary)
+                  _Item(
+                    icon: Symbols.library_add_rounded,
+                    label: 'Přidat do knihovny',
+                    onTap: () => run(() async {
+                      try {
+                        await addTrackToLibrary(ref, recording.id);
+                        toast('Přidáno do knihovny');
+                      } catch (_) {
+                        toast('Nepodařilo se přidat do knihovny');
+                      }
+                    }),
                   ),
                 if (inLibrary)
                   _Item(
