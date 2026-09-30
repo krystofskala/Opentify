@@ -427,7 +427,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // Výjimka: světlý režim -- přehrávač má bílé popředí a na světlém
           // pastelovém pozadí by bez ztmavení nebylo čitelné.
           if (Theme.of(context).brightness == Brightness.light)
-            const IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: Color(0x4D000000)))),
+            // Přes celou plochu (dřív bez Positioned.fill -> nulová velikost,
+            // ztmavení se vůbec nekreslilo a bílý text zanikal).
+            const Positioned.fill(
+              child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: Color(0x59000000)))),
+            ),
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(
