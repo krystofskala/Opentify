@@ -57,10 +57,14 @@ class GlassButton extends StatelessWidget {
     this.compact = false,
     this.expand = false,
     this.groupPosition,
+    this.onLongPress,
   }) : assert(!(destructive && style == GlassButtonStyle.prominent), 'Destruktivní akce nesmí být prominent (HIG).');
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// Dlouhý stisk (např. "Přehrát" -> přehrát jako další / do fronty).
+  final VoidCallback? onLongPress;
   final IconData? icon;
   final GlassButtonStyle style;
   final bool destructive;
@@ -97,6 +101,7 @@ class GlassButton extends StatelessWidget {
 
     return GlassPressable(
       onPressed: onPressed,
+      onLongPress: onPressed == null ? null : onLongPress,
       shape: glassShape(_radius(height, false, groupPosition)),
       semanticLabel: label,
       builder: (context, pressed) {

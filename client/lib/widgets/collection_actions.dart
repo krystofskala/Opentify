@@ -216,3 +216,76 @@ class _Row extends StatelessWidget {
     );
   }
 }
+
+/// Dlouhý stisk na "Přehrát" nad seznamem skladeb: skladby už jsou načtené,
+/// jen nabídnout, KAM je dát (jako další / na konec fronty).
+Future<void> showPlayOptions(BuildContext context, {required String title, required List<NowPlayingInfo> infos}) {
+  if (infos.isEmpty) return Future.value();
+  HapticFeedback.selectionClick();
+  final container = ProviderScope.containerOf(context, listen: false);
+  final controller = container.read(audioPlayerControllerProvider.notifier);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  String songs(int n) => n == 1 ? '1 skladba' : (n >= 2 && n <= 4 ? '$n skladby' : '$n skladeb');
+  void toast(String text) =>
+      messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+  return showGlassSheet<void>(
+    context,
+    builder: (sheetContext) {
+      final theme = Theme.of(sheetContext);
+      void run(Future<void> Function() action) {
+        Navigator.of(sheetContext).pop();
+        action();
+      }
+
+      return SafeArea(
+        child: GlassSheet(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: Text('$title · ${songs(infos.length)}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                const Divider(height: 1),
+                _Row(
+                  icon: Symbols.play_arrow_rounded,
+                  label: 'Přehrát',
+                  onTap: () => run(() => controller.playQueue(infos, 0, sourceLabel: title)),
+                ),
+                _Row(
+                  icon: Symbols.playlist_play_rounded,
+                  label: 'Přehrát jako další',
+                  onTap: () => run(() async {
+                    await controller.playNextAll(infos, sourceLabel: title);
+                    toast('Jako další: ${songs(infos.length)} z „$title“');
+                  }),
+                ),
+                _Row(
+                  icon: Symbols.queue_music_rounded,
+                  label: 'Přidat do fronty',
+                  onTap: () => run(() async {
+                    await controller.addAllToQueue(infos, sourceLabel: title);
+                    toast('Do fronty: ${songs(infos.length)} z „$title“');
+                  }),
+                ),
+                _Row(
+                  icon: Symbols.shuffle_rounded,
+                  label: 'Zamíchat a přidat do fronty',
+                  onTap: () => run(() async {
+                    await controller.addAllToQueue([...infos]..shuffle(), sourceLabel: title);
+                    toast('Do fronty zamíchaně: ${songs(infos.length)}');
+                  }),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}

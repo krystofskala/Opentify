@@ -169,7 +169,9 @@ class DetailHeroAppBar extends StatelessWidget {
   static double expandedHeightFor(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     if (isWide(context)) return _wideCoverSize(width) + 2 * _wideBoxPadding + kToolbarHeight + AppSpacing.lg;
-    return (width * 0.9).clamp(330.0, 460.0);
+    // O ~15 % nižší než dřív -- živé pozadí je vidět dřív (schválený plán
+    // hlavičky; fotka zůstává, ambientně se rozplývá, viz `_AmbientFade`).
+    return (width * 0.77).clamp(290.0, 400.0);
   }
 
   /// Široké okno (desktop/tablet na šířku): místo fotky přes celou šířku
@@ -569,6 +571,7 @@ class _WideHeroBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cover = DetailHeroAppBar._wideCoverSize(MediaQuery.sizeOf(context).width);
+    final sticker = cover * 0.3;
     return Padding(
       padding: const EdgeInsets.all(DetailHeroAppBar._wideBoxPadding),
       child: Row(
@@ -579,21 +582,22 @@ class _WideHeroBox extends StatelessWidget {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                // Tvary vyčnívají za obal nahoru/doleva a doprava dolů --
-                // místo je v odsazení (`_wideBoxPadding` + lišta nad).
+                _WideCover(hero: hero, size: cover),
+                // Jedna malá "samolepka" přes horní pravý okraj (schválená
+                // varianta C) -- dřív velké tvary za obalem kopírovaly jeho
+                // tvar a působily strojově.
                 Positioned(
-                  left: -cover * 0.13,
-                  top: -cover * 0.13,
-                  width: cover * 1.3,
-                  height: cover * 1.3,
+                  left: cover * 0.79,
+                  top: -cover * 0.03,
+                  width: sticker,
+                  height: sticker,
                   child: RepaintBoundary(
                     child: AnimatedAccent(
                       color: hero.accent ?? Theme.of(context).colorScheme.primary,
-                      builder: (context, c) => CustomPaint(painter: _StagePainter(c)),
+                      builder: (context, c) => CustomPaint(painter: _StickerPainter(c)),
                     ),
                   ),
                 ),
-                _WideCover(hero: hero, size: cover),
               ],
             ),
           ),
@@ -605,15 +609,13 @@ class _WideHeroBox extends StatelessWidget {
   }
 }
 
-/// Pozadí obalu na širokém okně: velký "cookie" za obalem a malý
-/// čtyřlístek u jeho pravého dolního rohu (stejná řeč tvarů jako karta
-/// Wrapped). Barvy z akcentu stránky; u černobílé stránky zůstanou šedé.
-class _StagePainter extends CustomPainter {
-  const _StagePainter(this.accent);
+/// Malý čtyřlístek se zrnitým gradientem v barvě stránky (u černobílé
+/// stránky zůstane šedý).
+class _StickerPainter extends CustomPainter {
+  const _StickerPainter(this.accent);
 
   final Color accent;
 
-  static const _cookie = ExpressiveShape.cookie(lobes: 9, depth: 0.08);
   static const _clover = ExpressiveShape.cookie(lobes: 4, depth: 0.22);
 
   Color _tone(double hueShift, double lightness) {
@@ -627,31 +629,31 @@ class _StagePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final main = Rect.fromLTWH(0, 0, w * 0.86, w * 0.86);
-    paintGrainShape(canvas, expressivePath(main, _cookie, null, 0, 0.35), main, 0,
-        from: _tone(0, 0.68), to: _tone(35, 0.42));
-    final clover = Rect.fromLTWH(w * 0.7, w * 0.7, w * 0.3, w * 0.3);
-    paintGrainShape(canvas, expressivePath(clover, _clover, null, 0, 0.4), clover, 0,
-        from: _tone(-40, 0.76), to: _tone(-10, 0.52));
+    final rect = Offset.zero & size;
+    final path = expressivePath(rect, _clover, null, 0, 0.3);
+    canvas.drawShadow(path, Colors.black, 6, false);
+    paintGrainShape(canvas, path, rect, 0, from: _tone(-40, 0.76), to: _tone(-10, 0.52));
   }
 
   @override
-  bool shouldRepaint(covariant _StagePainter old) => old.accent != accent;
+  bool shouldRepaint(covariant _StickerPainter old) => old.accent != accent;
 }
 
+/// Obal/fotka na širokém okně. Interpret: fotka vystřižená do M3 Expressive
+/// "cookie" (výrazný avatar); album/playlist: zaoblený čtverec -- cookie by
+/// ořízl rohy obalu (text, logo).
 class _WideCover extends StatelessWidget {
   const _WideCover({required this.hero, required this.size});
 
   final DetailHeroAppBar hero;
   final double size;
 
+  static const _cookie = ExpressiveShape.cookie(lobes: 12, depth: 0.06);
+
   @override
   Widget build(BuildContext context) {
     final mosaic = hero.mosaicUrls.toSet().toList();
     final url = hero.thumbnailUrl ?? hero.imageUrl ?? (mosaic.isNotEmpty ? mosaic.first : null);
-    final circle = hero.thumbnailCircle;
-    final radius = BorderRadius.circular(circle ? size / 2 : Expressive.cornerExtraLarge);
     final Widget child;
     if (hero.artwork != null) {
       child = hero.artwork!;
@@ -662,6 +664,17 @@ class _WideCover extends StatelessWidget {
     } else {
       child = _GradientArt(icon: hero.placeholderIcon, accent: hero.accent);
     }
+    if (hero.thumbnailCircle) {
+      final path = expressivePath(Offset.zero & Size.square(size), _cookie);
+      return SizedBox.square(
+        dimension: size,
+        child: CustomPaint(
+          painter: _PathShadowPainter(path),
+          child: ClipPath(clipper: _PathClipper(path), child: SizedBox.expand(child: child)),
+        ),
+      );
+    }
+    final radius = BorderRadius.circular(Expressive.cornerExtraLarge);
     return Container(
       width: size,
       height: size,
@@ -674,6 +687,28 @@ class _WideCover extends StatelessWidget {
       child: ClipRRect(borderRadius: radius, child: child),
     );
   }
+}
+
+class _PathClipper extends CustomClipper<Path> {
+  const _PathClipper(this.path);
+  final Path path;
+
+  @override
+  Path getClip(Size size) => path;
+
+  @override
+  bool shouldReclip(covariant _PathClipper old) => old.path != path;
+}
+
+class _PathShadowPainter extends CustomPainter {
+  const _PathShadowPainter(this.path);
+  final Path path;
+
+  @override
+  void paint(Canvas canvas, Size size) => canvas.drawShadow(path.shift(const Offset(0, 6)), Colors.black, 14, false);
+
+  @override
+  bool shouldRepaint(covariant _PathShadowPainter old) => old.path != path;
 }
 
 /// Na telefonu přes celou šířku; na širokém okně (poměr nad ~1.8:1) by

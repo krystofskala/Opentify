@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../models/recording_model.dart';
 import '../state/audio_player_controller.dart';
+import 'collection_actions.dart';
 import 'glass/glass.dart';
 import 'track_actions.dart';
 
@@ -58,6 +59,8 @@ class QueueActionBar extends ConsumerWidget {
           style: GlassButtonStyle.prominent,
           compact: true,
           onPressed: tracks.isEmpty ? null : playAll,
+          // Dlouhý stisk: přehrát jako další / do fronty -- nepřeruší, co hraje.
+          onLongPress: () => showPlayOptions(context, title: sourceLabel ?? 'Seznam', infos: _infosFor(tracks)),
         ),
         GlassButton(
           label: 'Zamíchat',
