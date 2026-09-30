@@ -203,7 +203,11 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   @override
   void initState() {
     super.initState();
-    _progress.forward();
+    // Adresy všech úryvků hned -- přepnutí karty pak nečeká na server.
+    for (final slide in _slides) {
+      final id = slide.trackId;
+      if (id != null) _snippets[id] ??= _repo.snippet(id);
+    }
     _scheduleRender();
     if (ref.read(audioPlayerControllerProvider).isPlaying) {
       _mainWasPlaying = true;
@@ -212,7 +216,20 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     // Na PC projde autoplay (stránka otevřená klepnutím); iOS ho odmítne a
     // zvuk se odemkne prvním klepnutím do příběhu.
     _audioUnlocked = true;
-    _playSlideAudio(0);
+    _startSlide(0);
+  }
+
+  /// Karta se rozběhne (časovač, animace), až úryvek opravdu hraje --
+  /// obraz a hudba synchronně. Bez hudby (ztlumeno, iOS ještě nepovolil
+  /// zvuk, úryvek není) nejvýš po 3 s.
+  Future<void> _startSlide(int index) async {
+    _progress
+      ..stop()
+      ..value = 0;
+    await _playSlideAudio(index).timeout(const Duration(seconds: 3), onTimeout: () {});
+    if (!mounted || _index != index) return;
+    if (index < _slides.length - 1 && !_progress.isAnimating) _progress.forward();
+    _preloadAfter(index);
   }
 
   @override
@@ -274,12 +291,36 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
 
   void _onPage(int index) {
     setState(() => _index = index);
-    _progress
-      ..stop()
-      ..value = 0;
-    if (index < _slides.length - 1) _progress.forward();
     _scheduleRender();
-    _playSlideAudio(index);
+    unawaited(_startSlide(index));
+  }
+
+  String? _trackFor(int index) {
+    for (var i = index; i >= 0; i--) {
+      final id = _slides[i].trackId;
+      if (id != null) return id;
+    }
+    return null;
+  }
+
+  // Úryvek další karty připravený na volném přehrávači (jen s prolnutím --
+  // iOS má jediný přehrávač).
+  String? _preloadedTrack;
+  AudioPlayer? _preloadedPlayer;
+
+  Future<void> _preloadAfter(int index) async {
+    if (!_canFade || index + 1 >= _slides.length) return;
+    final trackId = _trackFor(index + 1);
+    if (trackId == null || trackId == _currentTrack || trackId == _preloadedTrack) return;
+    final snippet = await (_snippets[trackId] ??= _repo.snippet(trackId));
+    if (!mounted || snippet == null || trackId == _currentTrack) return;
+    final idle = _players[1 - _activePlayer];
+    try {
+      await idle.setVolume(0);
+      await idle.setUrl(snippet.url, initialPosition: snippet.start);
+      _preloadedTrack = trackId;
+      _preloadedPlayer = idle;
+    } catch (_) {}
   }
 
   /// Plynulá změna hlasitosti jednoho přehrávače (ease-in-out, ~30 kroků/s).
@@ -327,10 +368,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   }
 
   Future<void> _playSlideAudio(int index) async {
-    String? trackId;
-    for (var i = index; i >= 0 && trackId == null; i--) {
-      trackId = _slides[i].trackId;
-    }
+    final trackId = _trackFor(index);
     if (trackId == null || trackId == _currentTrack) return;
     _currentTrack = trackId;
     final token = ++_audioToken;
@@ -342,11 +380,16 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     // krátce dotlumit (hlasitost stejně nejde, tak aspoň pauza) a přepnout.
     final next = _canFade ? _players[1 - _activePlayer] : previous;
     if (!_canFade && previous.playing) await previous.pause();
-    try {
-      await next.setVolume(0);
-      await next.setUrl(snippet.url, initialPosition: snippet.start);
-    } catch (_) {
-      return;
+    final ready = _preloadedTrack == trackId && _preloadedPlayer == next;
+    _preloadedTrack = null;
+    _preloadedPlayer = null;
+    if (!ready) {
+      try {
+        await next.setVolume(0);
+        await next.setUrl(snippet.url, initialPosition: snippet.start);
+      } catch (_) {
+        return;
+      }
     }
     if (!mounted || token != _audioToken) return;
     _activePlayer = _players.indexOf(next);
@@ -363,6 +406,12 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     }));
     if (_canFade) unawaited(_fadeTo(next, 1, _crossfade));
     _watchTail(next, snippet.start);
+    // Hotovo, až zvuk opravdu běží (pozice se hýbe) -- pak se pustí obraz.
+    try {
+      await next.positionStream
+          .firstWhere((p) => next.playing && p > snippet.start + const Duration(milliseconds: 80))
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   void _scheduleRender() {
