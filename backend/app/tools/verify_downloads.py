@@ -6,7 +6,7 @@ Pro každý soubor (stažené z YouTube/Soulseeku i vlastní knihovna) vezme
 15 s ze středu, nechá je rozpoznat stejně anonymně jako Open Shazam (jen
 otisk, přes Mullvad VPN) a porovná interpreta a název s tím, co má skladba
 v katalogu. Nic nemaže ani nemění -- jen zapíše zprávu
-`/data/verify_downloads.json` (průběžně, jde přerušit a pustit znovu --
+`/data/db/verify_downloads.json` (průběžně, jde přerušit a pustit znovu --
 hotové přeskočí).
 
 Spuštění (v kontejneru api):  python -m app.tools.verify_downloads
@@ -27,12 +27,13 @@ from app.db import engine
 from app.models import Artist, MediaAsset, MediaAssetStatus, Recording, Release
 from app.recognize import RecognizeError, recognize
 
-REPORT = Path("/data/verify_downloads.json")
+REPORT = Path("/data/db/verify_downloads.json")  # svazek db preziva prestavbu kontejneru
 PROVIDERS = ("youtube", "slskd", "musicbrainz-local", "local")
 # Vlastní nahrávky, které Shazam znát nemůže (malá česká kapela uživatelova
 # táty, nikde online) -- nekontrolují se, ať je "rozpoznání" cizí skladby
 # nikdy neoznačí k výměně. Porovnává se normalizovaný název alba.
 PROTECTED_RELEASES = {"kde zustal raj"}
+PROTECTED_ARTISTS = {"kontrast"}  # tátova kapela
 PAUSE_SECONDS = 4.0
 
 
@@ -93,7 +94,7 @@ async def main() -> None:
             "provider": asset.source_provider,
             "path": asset.storage_path,
         }
-        if release and _norm(release.title) in PROTECTED_RELEASES:
+        if (release and _norm(release.title) in PROTECTED_RELEASES) or _norm(expected_artist) in PROTECTED_ARTISTS:
             entry["verdict"] = "protected"
             report[rec.id] = entry
             continue
