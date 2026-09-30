@@ -18,6 +18,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_import_report.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import 'profiles_section.dart';
+import '../../core/share_image.dart' show shareFile;
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -57,6 +58,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     } else {
       _pollTimer?.cancel();
       _pollTimer = null;
+    }
+  }
+
+  Future<void> _export(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(const SnackBar(content: Text('Připravuju export…')));
+    try {
+      final bytes = await ref.read(apiClientProvider).getBytes('/library/export');
+      final stamp = DateTime.now().toIso8601String().substring(0, 10);
+      messenger?.hideCurrentSnackBar();
+      await shareFile(bytes, fileName: 'opentify-export-$stamp.zip', mimeType: 'application/zip');
+    } catch (_) {
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(const SnackBar(content: Text('Export se nepodařil.')));
     }
   }
 
@@ -117,6 +132,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   'sama. Zvuk z mikrofonu zůstává v zařízení, nic se neodesílá.',
               buttonLabel: 'Ladit',
               onPressed: () => context.push('/tuner'),
+            ),
+            const SizedBox(height: 12),
+            _ActionCard(
+              icon: Symbols.ios_share_rounded,
+              title: 'Exportovat moje data',
+              description: 'Oblíbené, playlisty, historie poslechů a Poslechnout později v jednom ZIPu. '
+                  'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',
+              buttonLabel: 'Exportovat',
+              onPressed: () => _export(context),
             ),
             const SizedBox(height: 12),
             // Profily (jen admin; ostatní sekci nevidí).

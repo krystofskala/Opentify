@@ -7,3 +7,8 @@ import 'share_image_stub.dart' if (dart.library.js_interop) 'share_image_web.dar
 /// Volat hned z obsluhy klepnutí -- Safari sdílení jinak odmítne.
 Future<void> shareImage(Uint8List png, {required String fileName, String? text}) =>
     impl.shareImage(png, fileName: fileName, text: text);
+
+/// Libovolný soubor (export ZIP): iPhone systémové sdílení (Uložit do
+/// Souborů, AirDrop...), PC stažení.
+Future<void> shareFile(Uint8List bytes, {required String fileName, required String mimeType}) =>
+    impl.shareFile(bytes, fileName: fileName, mimeType: mimeType);

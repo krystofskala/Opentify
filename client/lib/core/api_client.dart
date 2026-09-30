@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -63,6 +64,15 @@ class ApiClient {
   Future<Map<String, dynamic>> getJson(String path, {Map<String, String>? query}) async {
     final response = await _http.get(_uri(path, query), headers: _headers).timeout(_defaultTimeout);
     return _decode(response) as Map<String, dynamic>;
+  }
+
+  /// Binární odpověď (export ZIP).
+  Future<Uint8List> getBytes(String path, {Duration timeout = const Duration(minutes: 2)}) async {
+    final response = await _http.get(_uri(path, null), headers: _headers).timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(statusCode: response.statusCode, body: response.body);
+    }
+    return response.bodyBytes;
   }
 
   Future<List<dynamic>> getJsonList(String path, {Map<String, String>? query}) async {

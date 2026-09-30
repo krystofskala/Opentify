@@ -936,3 +936,25 @@ def delete_progress(
         session.delete(row)
     session.commit()
     return {"route": route, "deleted": True}
+
+
+@library_router.get("/export")
+def export_library(current: tuple[str, str] = Depends(get_current_user)):
+    """ZIP s oblíbenými, playlisty, historií a "Poslechnout později" --
+    CSV pro TuneMyMusic (převod do Spotify apod.) + úplný JSON."""
+    from fastapi.responses import Response as RawResponse
+
+    from app.library.export import build_export
+    from app.models import AppUser
+
+    user_id, _ = current
+    with Session(engine) as session:
+        user = session.get(AppUser, user_id)
+        name = user.name if user else "profil"
+        data = build_export(session, user_id, name)
+    stamp = utcnow().strftime("%Y-%m-%d")
+    return RawResponse(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="opentify-export-{stamp}.zip"'},
+    )

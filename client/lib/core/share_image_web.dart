@@ -17,11 +17,14 @@ extension type _ShareData._(JSObject _) implements JSObject {
   external factory _ShareData({JSArray<web.File> files, String text});
 }
 
-Future<void> shareImage(Uint8List png, {required String fileName, String? text}) async {
+Future<void> shareImage(Uint8List png, {required String fileName, String? text}) =>
+    shareFile(png, fileName: fileName, mimeType: 'image/png', text: text);
+
+Future<void> shareFile(Uint8List bytes, {required String fileName, required String mimeType, String? text}) async {
   final file = web.File(
-    [png.toJS].toJS,
+    [bytes.toJS].toJS,
     fileName,
-    web.FilePropertyBag()..type = 'image/png', // `type` je v téhle verzi jen setter z BlobPropertyBag
+    web.FilePropertyBag()..type = mimeType, // `type` je v téhle verzi jen setter z BlobPropertyBag
   );
   final data = text == null ? _ShareData(files: [file].toJS) : _ShareData(files: [file].toJS, text: text);
   final coarse = web.window.matchMedia('(pointer: coarse)').matches;
