@@ -241,6 +241,8 @@ class QuickPickTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final shape = AppShapes.of(Expressive.cornerMedium);
+    final mix = mixArtOf(card);
+    if (mix != null) return _wide(context, shape, mix);
     return GlassPressable(
       onPressed: onTap,
       onLongPress: onLongPress,
@@ -281,6 +283,121 @@ class QuickPickTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Vlastní mix: generativní obal přes celou dlaždici (dřív 56px čtverec,
+  /// ze kterého kresba přetékala jako flek a u nálad byl prázdný -- živě
+  /// nahlášeno; roztažená deska "Návratu do minulosti" se líbila). Název
+  /// vlevo přes jemné ztmavení, vpravo něco konkrétního: číslo denního mixu,
+  /// rok, nebo vějíř obalů z mixu.
+  Widget _wide(BuildContext context, OutlinedBorder shape, MixArtSpec mix) {
+    const shadow = [Shadow(blurRadius: 8, color: Colors.black45)];
+    final covers = card.coverUrls.take(3).toList();
+    final Widget accent = switch (mix.style) {
+      MixArtStyle.daily || MixArtStyle.year => Text(
+          mix.style == MixArtStyle.year && mix.headline.length > 2
+              ? '’${mix.headline.substring(mix.headline.length - 2)}'
+              : mix.headline,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 34,
+            fontWeight: FontWeight.w900,
+            height: 1,
+            shadows: shadow,
+          ),
+        ),
+      _ => covers.isEmpty ? const SizedBox.shrink() : _CoverFan(urls: covers),
+    };
+    return GlassPressable(
+      onPressed: onTap,
+      onLongPress: onLongPress,
+      shape: shape,
+      minSize: Size.zero,
+      child: ClipPath(
+        clipper: ShapeBorderClipper(shape: shape),
+        child: SizedBox(
+          height: 56,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              MixArtwork(spec: mix, compact: true, labels: false),
+              // Ztmavení zleva -- čitelný název na jakékoliv kresbě.
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0x8C000000), Color(0x33000000), Color(0x00000000)],
+                    stops: [0, 0.55, 1],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: AppSpacing.sm, right: AppSpacing.xs),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        card.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              shadows: shadow,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    accent,
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Vějíř 2-3 obalů z mixu (vpravo na široké dlaždici).
+class _CoverFan extends StatelessWidget {
+  const _CoverFan({required this.urls});
+
+  final List<String> urls;
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 36.0;
+    const step = 16.0;
+    return SizedBox(
+      width: size + step * (urls.length - 1) + 6,
+      height: 56,
+      child: Stack(
+        alignment: Alignment.centerRight,
+        children: [
+          for (var i = urls.length - 1; i >= 0; i--)
+            Positioned(
+              right: i * step,
+              child: Transform.rotate(
+                angle: (i - (urls.length - 1) / 2) * -0.14,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2))],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox.square(
+                      dimension: size,
+                      child: ArtworkImage(url: urls[i], icon: Symbols.music_note_rounded, iconSize: 16),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
