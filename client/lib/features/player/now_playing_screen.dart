@@ -688,8 +688,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final sourceLabel = ref.watch(audioPlayerControllerProvider.select((s) => s.queueSourceLabel));
     // Obě strany stejně široké, jinak titulek "Přehrává se" není opticky
     // uprostřed (živě nahlášeno). Mobil: 1 + 1 tlačítko, PC: 1 + 2.
-    final narrow = MediaQuery.sizeOf(context).width < 600;
-    final sideWidth = (narrow ? 1 : 2) * kMinInteractiveDimension;
+    // Srdíčko je všude dole v ovládání -- nahoře jen ⋯ (1 + 1 tlačítko).
+    const sideWidth = kMinInteractiveDimension;
     return Row(
       children: [
         SizedBox(
@@ -750,7 +750,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             children: [
               // Mobil: srdíčko je v řádku pod ovládáním -- lišta by jinak
               // titulek "Přehrává se" zmáčkla do dvou řádků (živě nahlášeno).
-              if (!narrow) LikeHeart(recordingId: nowPlaying.recordingId, color: Colors.white),
               IconButton(
                 icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
                 tooltip: 'Další možnosti',
@@ -1004,7 +1003,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   onPressed: controller.cycleRepeatMode,
                 ),
                 // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
-                if (MediaQuery.sizeOf(context).width < 600) _likeButton(playback),
+                _likeButton(playback),
               ],
             ),
           ],
