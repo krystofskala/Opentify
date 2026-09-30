@@ -1,8 +1,10 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../../theme/glass_tokens.dart';
 
 /// Předchozí · Přehrát · Další jako spojená skupina tlačítek M3 Expressive
 /// (jako PixelPlay, https://m3.material.io/blog/building-with-m3-expressive):
@@ -38,19 +40,29 @@ class ExpressivePlayerGroup extends StatefulWidget {
 }
 
 class _ExpressivePlayerGroupState extends State<ExpressivePlayerGroup> with TickerProviderStateMixin {
-  int? _pressed;
   late final AnimationController _flyPrev = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
   late final AnimationController _flyNext = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
 
+  // "Puls" každého tlačítka (0 = klid, 1 = roztažené). Neomezený, ať
+  // pružina při návratu může lehce přestřelit (typický Expressive dojezd).
+  late final List<AnimationController> _pulse = [
+    for (var i = 0; i < 3; i++) AnimationController.unbounded(vsync: this),
+  ];
+  final List<bool> _holding = [false, false, false];
+
   static const double _gap = 6;
-  // Poměr šířek: Přehrát je širší; stisknuté se roztáhne o 35 %.
+  // Přehrát je širší; stisknuté se roztáhne o 65 % a sousedi uhnou.
   static const _weights = [1.0, 1.35, 1.0];
-  static const double _grow = 1.35;
+  static const double _grow = 0.65;
+  static const _back = SpringDescription(mass: 1, stiffness: 320, damping: 16);
 
   @override
   void dispose() {
     _flyPrev.dispose();
     _flyNext.dispose();
+    for (final c in _pulse) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -61,6 +73,27 @@ class _ExpressivePlayerGroupState extends State<ExpressivePlayerGroup> with Tick
         1 => widget.onPlayPause,
         _ => widget.onNext,
       };
+
+  void _down(int i) {
+    if (_reduce) return;
+    _holding[i] = true;
+    _pulse[i].animateTo(1, duration: const Duration(milliseconds: 140), curve: Curves.easeOutCubic);
+  }
+
+  /// Po puštění (nebo rychlém klepnutí) tlačítko nejdřív dorazí do plného
+  /// roztažení -- i krátké ťuknutí je tak vidět -- a pak pružinou zpět.
+  Future<void> _release(int i) async {
+    _holding[i] = false;
+    if (_reduce) return;
+    final c = _pulse[i];
+    if (c.value < 0.98) {
+      await c.animateTo(1, duration: Duration(milliseconds: (140 * (1 - c.value)).round() + 40), curve: Curves.easeOutCubic);
+    }
+    if (!mounted || _holding[i]) return;
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    if (!mounted || _holding[i]) return;
+    c.animateWith(SpringSimulation(_back, c.value, 0, 0));
+  }
 
   void _tap(int i) {
     final cb = _callback(i);
@@ -77,20 +110,25 @@ class _ExpressivePlayerGroupState extends State<ExpressivePlayerGroup> with Tick
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final total = constraints.maxWidth - 2 * _gap;
-      final weights = [
-        for (var i = 0; i < 3; i++) _weights[i] * (_pressed == i ? _grow : 1),
-      ];
-      final sum = weights.fold<double>(0, (a, b) => a + b);
       return SizedBox(
         height: widget.height,
-        child: Row(
-          children: [
-            _item(0, total * weights[0] / sum),
-            const SizedBox(width: _gap),
-            _item(1, total * weights[1] / sum),
-            const SizedBox(width: _gap),
-            _item(2, total * weights[2] / sum),
-          ],
+        child: AnimatedBuilder(
+          animation: Listenable.merge(_pulse),
+          builder: (context, _) {
+            final weights = [
+              for (var i = 0; i < 3; i++) _weights[i] * (1 + _grow * _pulse[i].value),
+            ];
+            final sum = weights.fold<double>(0, (a, b) => a + b);
+            return Row(
+              children: [
+                _item(0, total * weights[0] / sum),
+                const SizedBox(width: _gap),
+                _item(1, total * weights[1] / sum),
+                const SizedBox(width: _gap),
+                _item(2, total * weights[2] / sum),
+              ],
+            );
+          },
         ),
       );
     });
@@ -98,19 +136,17 @@ class _ExpressivePlayerGroupState extends State<ExpressivePlayerGroup> with Tick
 
   Widget _item(int i, double width) {
     final enabled = _callback(i) != null;
-    final pressed = _pressed == i;
+    final p = _pulse[i].value;
+    final pc = p.clamp(0.0, 1.0);
     final isPlay = i == 1;
     final h = widget.height;
-    // Kapsle v klidu; stisk = hranatější. Přehrát: hraje = zaoblený
+    // Kapsle v klidu, roztažené = hranatější. Přehrát: hraje = zaoblený
     // čtverec, pauza = kapsle (tvar ukazuje stav jako v PixelPlay).
-    final radius = pressed
-        ? h * 0.26
-        : isPlay
-            ? (widget.isPlaying ? h * 0.32 : h / 2)
-            : h / 2;
-    final color = isPlay
-        ? widget.playColor
-        : Colors.white.withValues(alpha: pressed ? 0.24 : 0.14);
+    final rest = isPlay ? (widget.isPlaying ? h * 0.32 : h / 2) : h / 2;
+    final radius = lerpDouble(rest, h * 0.24, pc)!;
+    final color = isPlay ? widget.playColor : Colors.white.withValues(alpha: 0.14 + 0.12 * pc);
+    // Šipky se vyboulí směrem přeskočení (Předchozí doleva, Další doprava).
+    final dir = i == 0 ? -1.0 : (i == 2 ? 1.0 : 0.0);
     final Widget icon;
     if (isPlay) {
       icon = widget.playChild ??
@@ -128,7 +164,7 @@ class _ExpressivePlayerGroupState extends State<ExpressivePlayerGroup> with Tick
     } else {
       icon = _Fly(
         animation: i == 0 ? _flyPrev : _flyNext,
-        direction: i == 0 ? -1 : 1,
+        direction: dir,
         child: Icon(
           i == 0 ? Symbols.skip_previous_rounded : Symbols.skip_next_rounded,
           size: 32,
@@ -147,20 +183,24 @@ class _ExpressivePlayerGroupState extends State<ExpressivePlayerGroup> with Tick
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapDown: enabled ? (_) => setState(() => _pressed = i) : null,
-        onTapUp: enabled ? (_) => setState(() => _pressed = null) : null,
-        onTapCancel: () => setState(() => _pressed = null),
+        onTapDown: enabled ? (_) => _down(i) : null,
+        onTapUp: enabled ? (_) => _release(i) : null,
+        onTapCancel: () => _release(i),
         onTap: () => _tap(i),
-        child: AnimatedContainer(
-          duration: Motion.enter.duration,
-          curve: Motion.enter,
-          width: width,
-          height: h,
-          decoration: ShapeDecoration(
-            color: color,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
+        child: Transform.translate(
+          offset: Offset(dir * 7 * p, 0),
+          child: Transform.scale(
+            scaleY: 1 + 0.07 * p,
+            child: Container(
+              width: width,
+              height: h,
+              decoration: ShapeDecoration(
+                color: color,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
+              ),
+              child: ClipRect(child: Center(child: icon)),
+            ),
           ),
-          child: ClipRect(child: Center(child: icon)),
         ),
       ),
     );
