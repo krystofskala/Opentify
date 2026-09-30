@@ -125,6 +125,18 @@ async def get_artist_bio(
     return bio.model_dump(by_alias=True)
 
 
+@catalog_router.get("/artists/{artist_id}/support")
+async def get_artist_support(
+    artist_id: str,
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    data = await service.get_artist_support(artist_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="interpret nenalezen")
+    return data
+
+
 @catalog_router.get("/releases/{release_id}")
 async def get_release(
     release_id: str,

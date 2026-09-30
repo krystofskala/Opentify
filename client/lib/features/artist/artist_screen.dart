@@ -25,6 +25,7 @@ import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
 import '../../widgets/radio_station.dart';
 import '../../widgets/collection_actions.dart';
+import 'artist_support.dart';
 
 final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getDiscography(artistId);
@@ -277,6 +278,7 @@ class _ArtistBody extends ConsumerWidget {
               // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru
               // slučuje do kanonického interpreta s MBID.
               SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id)),
+              SliverToBoxAdapter(child: ArtistSupportSection(artistId: artist.id, artistName: artist.name)),
               const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
             ]),
           ],

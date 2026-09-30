@@ -328,6 +328,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         children: [
           // Panel bez tónování (živě: "pozadí velkého přehrávače nemá být
           // tónované vůbec") -- čisté živé pozadí, vrstvu ukazuje jen hrana.
+          // Výjimka: světlý režim -- přehrávač má bílé popředí a na světlém
+          // pastelovém pozadí by bez ztmavení nebylo čitelné.
+          if (Theme.of(context).brightness == Brightness.light)
+            const IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: Color(0x4D000000)))),
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(

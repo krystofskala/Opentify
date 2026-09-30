@@ -18,6 +18,8 @@ vyvolaný explicitním otevřením obrazovky, ne psaním do vyhledávacího pole
 
 from __future__ import annotations
 
+from urllib.parse import quote_plus
+
 import asyncio
 import re
 import unicodedata
@@ -609,6 +611,48 @@ class CatalogService:
 
         related = self._upsert_related_artists(relations)
         return ArtistBioOut(bio=bio, related_artists=[self._to_artist_out(a) for a in related])
+
+    async def get_artist_support(self, artist_id: str) -> dict[str, Any] | None:
+        """Jak interpreta podpořit (sekce "Podpořit" na jeho stránce): odkazy
+        z MusicBrainz `url-rels` (web, Bandcamp, obchod, Discogs, koncerty).
+        Co MusicBrainz nemá, doplní odkaz na vyhledávání (Discogs, Songkick,
+        Bandcamp) -- ať sekce není prázdná. Jen odkazy; nic se nestahuje,
+        otevírá je až uživatel klepnutím."""
+        artist = self._get_artist_row(artist_id)
+        if artist is None:
+            return None
+        relations: list[dict[str, Any]] = []
+        if artist.mbid:
+            try:
+                relations = (await self._mb.get_artist(artist.mbid)).get("relations") or []
+            except MusicBrainzError:
+                relations = []
+        by_type: dict[str, list[str]] = {}
+        for rel in relations:
+            url = (rel.get("url") or {}).get("resource")
+            if url and not rel.get("ended"):
+                by_type.setdefault(str(rel.get("type") or ""), []).append(url)
+
+        def first(*types: str) -> str | None:
+            for t in types:
+                for url in by_type.get(t, []):
+                    return url
+            return None
+
+        name = quote_plus(artist.name)
+        concerts = first("bandsintown", "songkick")
+        shop = first("merchandise", "online merchandise", "purchase for mail-order")
+        return {
+            "web": first("official homepage"),
+            "bandcamp": first("bandcamp") or None,
+            "bandcampSearch": f"https://bandcamp.com/search?q={name}&item_type=b",
+            "shop": shop,
+            "records": first("discogs") or f"https://www.discogs.com/search/?q={name}&type=artist",
+            "concerts": concerts or f"https://www.songkick.com/search?query={name}",
+            "concertsSource": (
+                "Bandsintown" if concerts and "bandsintown" in concerts else "Songkick"
+            ),
+        }
 
     def _extract_wikidata_qid(self, relations: list[dict[str, Any]]) -> str | None:
         for rel in relations:

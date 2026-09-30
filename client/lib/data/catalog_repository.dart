@@ -38,6 +38,10 @@ class CatalogRepository {
     return ArtistBioModel.fromJson(json);
   }
 
+  /// Odkazy "Podpořit umělce" (web, Bandcamp, obchod, Discogs, koncerty).
+  Future<Map<String, dynamic>> getArtistSupport(String artistId) =>
+      _api.getJson('/catalog/artists/$artistId/support');
+
   Future<DiscographyModel> getDiscography(String artistId, {String? releaseType}) async {
     final json = await _api.getJson(
       '/catalog/artists/$artistId/discography',
