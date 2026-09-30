@@ -42,24 +42,28 @@ class GlassContainer extends StatelessWidget {
     this.liquid = false,
   });
 
-  /// Hustě namrzlé sklo přehrávače: silné rozmazání + vibrance, jemné
-  /// tónování barvou skladby a mléčný závoj. Za ním je živé pozadí appky.
+  /// Dřív vlastní "přehrávačové" sklo (barva skladby navíc, silnější
+  /// rozmazání, mléčný závoj) -- fronta, menu a text tak vypadaly jinak než
+  /// zbytek appky (živě nahlášeno). Teď stejné sklo jako všude (řídí ho
+  /// Profil › Vzhled) s lemem; `tint` se ignoruje.
   const GlassContainer.frosted({
     super.key,
     required this.child,
-    required Color this.tint,
+    // ignore: avoid_unused_constructor_parameters
+    Color? tint,
     this.borderRadius = const BorderRadius.all(Radius.circular(AppRadii.lg)),
-    this.blurSigma = GlassTokens.blurPlayer,
     this.padding,
     this.shadow = false,
     this.showEdgeHighlight = true,
     this.fit = StackFit.loose,
-    this.rim = false,
+    this.rim = true,
     this.liquid = false,
-  })  : saturation = GlassTokens.vibrancy,
+  })  : tint = null,
+        blurSigma = GlassTokens.blur,
+        saturation = GlassTokens.vibrancy,
         tintOpacity = GlassTokens.playerTint,
         blur = true,
-        frost = 0.06,
+        frost = 0,
         emphasis = 0,
         baseFill = true;
 

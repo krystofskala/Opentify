@@ -1415,7 +1415,6 @@ class _HeroCircleButton extends StatelessWidget {
           onTap: onPressed,
           child: GlassContainer(
             borderRadius: BorderRadius.circular(22),
-            blurSigma: 12,
             rim: true,
             child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),
           ),

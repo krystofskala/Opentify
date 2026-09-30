@@ -69,8 +69,7 @@ class GlassSheet extends StatelessWidget {
       ],
     );
     const radius = BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius));
-    return tint != null
-        ? GlassContainer.frosted(tint: tint!, borderRadius: radius, fit: expand ? StackFit.expand : StackFit.loose, child: body)
-        : GlassContainer(borderRadius: radius, fit: expand ? StackFit.expand : StackFit.loose, child: body);
+    // Všechny sheety stejné sklo jako lišty (i s lemem); `tint` už nic nemění.
+    return GlassContainer(rim: true, borderRadius: radius, fit: expand ? StackFit.expand : StackFit.loose, child: body);
   }
 }
