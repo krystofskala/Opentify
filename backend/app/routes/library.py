@@ -52,6 +52,7 @@ from app.library.spotify_import import (
 )
 from app.models import (
     Artist,
+    AppUser,
     CollectionProgress,
     LibraryEntry,
     ProvisioningJob,
@@ -84,7 +85,12 @@ def _downloaded_by(user_id: str):
     if user_id == ADMIN_ID:
         foreign_only = (
             select(ProvisioningJob.recording_id)
-            .where(ProvisioningJob.requested_by_user_id != ADMIN_ID)
+            # Jen skutečné profily -- staré testovací úlohy ("bench...") jsou adminovy.
+            .where(
+                ProvisioningJob.requested_by_user_id.in_(  # type: ignore[attr-defined]
+                    select(AppUser.id).where(AppUser.id != ADMIN_ID)
+                )
+            )
             .where(
                 ProvisioningJob.recording_id.not_in(  # type: ignore[attr-defined]
                     select(ProvisioningJob.recording_id).where(ProvisioningJob.requested_by_user_id == ADMIN_ID)
