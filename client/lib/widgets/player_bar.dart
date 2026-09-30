@@ -221,7 +221,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
               // Stejně kulatá jako tab bar pod ní -- dřív 26 vs. 31 (design audit #11).
               borderRadius: BorderRadius.circular(GlassTokens.tabBarHeight / 2),
               shadow: widget.shadow,
-              lens: true,
+              rim: true,
               child: MediaQuery.removePadding(
                 context: context,
                 removeBottom: true,

@@ -625,7 +625,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       blur: false,
       baseFill: false,
       emphasis: GlassTokens.emphasis,
-      lens: true,
+      rim: true,
       borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       child: Column(

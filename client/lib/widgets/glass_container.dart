@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../state/glass_settings.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
-import 'glass/glass_refraction.dart';
+import 'glass/glass_rim.dart';
 
 /// Liquid Glass materiál (viz pravidla v `theme/glass_tokens.dart`):
 /// rozmazání + vibrance (sytost/jas obsahu ZA sklem), NEUTRÁLNÍ výplň,
@@ -35,7 +35,7 @@ class GlassContainer extends StatelessWidget {
     this.emphasis = 0,
     this.baseFill = true,
     this.fit = StackFit.loose,
-    this.lens = false,
+    this.rim = false,
   });
 
   /// Hustě namrzlé sklo přehrávače: silné rozmazání + vibrance, jemné
@@ -50,7 +50,7 @@ class GlassContainer extends StatelessWidget {
     this.shadow = false,
     this.showEdgeHighlight = true,
     this.fit = StackFit.loose,
-    this.lens = false,
+    this.rim = false,
   })  : saturation = GlassTokens.vibrancy,
         tintOpacity = GlassTokens.playerTint,
         blur = true,
@@ -85,9 +85,9 @@ class GlassContainer extends StatelessWidget {
   final bool baseFill;
   final StackFit fit;
 
-  /// Lom obsahu pod sklem v pruhu u hrany (`GlassRefraction`) -- plovoucí
-  /// prvky (tab bar, mini přehrávač, ovládání přehrávače, skleněná tlačítka).
-  final bool lens;
+  /// Lem v barvě obsahu pod sklem (`GlassRim`) -- plovoucí prvky (tab bar,
+  /// mini přehrávač, ovládání přehrávače, skleněná tlačítka).
+  final bool rim;
 
   @override
   Widget build(BuildContext context) {
@@ -125,17 +125,13 @@ class GlassContainer extends StatelessWidget {
       child: Stack(
         fit: fit,
         children: [
-          if (lens) ...[
-            // Pruh u hrany: skutečný obsah pod sklem zalomený (zvětšený ke
-            // středu), směrem k hraně čím dál čistší. Vnitřek je rozmazaný
-            // zvlášť, oříznutý na `innerInset`, ať nerozmaže i lom.
-            Positioned.fill(
-              child: GlassRefraction(borderRadius: borderRadius, blurSigma: sigma, saturation: saturation),
-            ),
+          if (rim) ...[
+            // Lem čte ostrý obsah pod hranou; rozmazání je až za ním.
+            Positioned.fill(child: GlassRim(borderRadius: borderRadius)),
             if (blur)
               Positioned.fill(
                 child: ClipRRect(
-                  clipper: _InnerClipper(borderRadius, GlassRefraction.innerInset),
+                  clipper: _InnerClipper(borderRadius, GlassRim.width),
                   child: BackdropFilter(filter: frosted(), child: const SizedBox.expand()),
                 ),
               ),

@@ -45,7 +45,7 @@ class GlassTabBar extends StatelessWidget {
         child: GlassContainer(
           borderRadius: const BorderRadius.all(Radius.circular(GlassTokens.tabBarHeight / 2)),
           shadow: true,
-          lens: true,
+          rim: true,
           child: SizedBox(
             height: GlassTokens.tabBarHeight,
             child: Stack(
