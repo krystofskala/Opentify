@@ -108,7 +108,7 @@ class _AppBackgroundState extends State<AppBackground> {
   // objeví, chvíli zůstanou a zmizí; mezi nimi je záblesk palety. Celé
   // kolo ~80 s, host s větší plochou na obalu zůstane déle. Pozadí jinak
   // beze změny -- během písničky se nikdy celé nepřebarví.
-  static const _guestCycleSeconds = 80.0;
+  static const _guestCycleSeconds = 60.0;
   List<({_Lab slot, double w})> _guests = const [];
   double _guestClock = 0;
   // Host, který byl vidět při změně skladby -- dozní s přechodem palety.
@@ -218,8 +218,9 @@ class _AppBackgroundState extends State<AppBackground> {
       k++;
     }
     final local = x / _guests[k].w;
-    // 30 % úseku klid (jen záblesk palety), pak náběh, drží, odchod.
-    final v = math.max(0.0, (local - 0.3) / 0.7);
+    // 10 % úseku klid (jen záblesk palety), pak náběh, drží, odchod -- dřív
+    // 30 %, takže první host přišel až dlouho po začátku skladby.
+    final v = math.max(0.0, (local - 0.1) / 0.9);
     return (_guests[k].slot, _FlowMesh._smooth(v / 0.35) * _FlowMesh._smooth((1 - v) / 0.35));
   }
 
@@ -821,7 +822,16 @@ List<Color> _paletteFor(
     // Kontrastní akcent obalu (žlutá kresba na modré) = jedno světlo místo
     // "nejsvětlejšího" tónu; u tmavého režimu tlumené, ať nekřičí.
     final accentTone = character?.accent;
-    final glowDark = accentTone != null ? from(accentTone, 0.55) : from(lightest, 0.72);
+    // Akcent je to jediné, co pozadí z kontrastní barvy obalu ukáže -- musí
+    // být čitelný (cihlová kšiltovka na modrém obalu vycházela v tmavém
+    // režimu jako olivově hnědá a ztratila se, živě nahlášeno): víc světla
+    // a aspoň střední sytost.
+    Color vivid(Color c, double l) {
+      final base = HSLColor.fromColor(from(c, l));
+      return _keepOkHue(base.withSaturation(math.max(base.saturation, 0.6)).toColor(), c);
+    }
+
+    final glowDark = accentTone != null ? vivid(accentTone, 0.66) : from(lightest, 0.72);
     final glowLight = accentTone != null ? from(accentTone, 0.88) : from(t1, 0.93);
     return dark
         ? [from(darkest, 0.13), from(t0, 0.24), from(t0, 0.42), from(t1, 0.55), glowDark, from(t2, 0.32)]
