@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_admin
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient, get_deezer_client
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError, get_musicbrainz_client
@@ -18,7 +18,7 @@ from app.catalog.service import CatalogService
 from app.catalog.schemas import RecordingOut
 from app.catalog.cache import cached_json_swr
 from app.db import engine, get_session
-from app.models import Recording
+from app.models import Artist, Recording, Release
 
 catalog_router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -111,6 +111,61 @@ async def get_discography(
     if data is None:
         raise HTTPException(status_code=404, detail="interpret nenalezen")
     return data
+
+
+@catalog_router.post("/artists/{artist_id}/releases/{release_id}/not-artist")
+async def mark_release_not_artist(
+    artist_id: str,
+    release_id: str,
+    session: Session = Depends(get_session),
+    _current=Depends(require_admin),
+):
+    """"Nepatří k interpretovi": Deezer (i MB) občas přimíchá alba
+    stejnojmenné cizí kapely. Album se z diskografie interpreta natrvalo
+    vyřadí a přesune ke zvláštnímu stejnojmennému interpretovi, ať jeho
+    skladby nevisí pod špatnou kapelou."""
+    from sqlmodel import select
+
+    from app.redis_bus import get_redis
+
+    artist = session.get(Artist, artist_id)
+    release = session.get(Release, release_id)
+    if artist is None or release is None:
+        raise HTTPException(status_code=404, detail="interpret nebo album nenalezeno")
+    refs = dict(artist.external_refs or {})
+    not_mine = list(refs.get("notMine") or [])
+    for key in (release.id, release.deezer_id):
+        if key and key not in not_mine:
+            not_mine.append(key)
+    refs["notMine"] = not_mine
+    artist.external_refs = refs
+    session.add(artist)
+    if release.artist_id == artist.id:
+        homonym = next(
+            (
+                a
+                for a in session.exec(select(Artist).where(Artist.name == artist.name)).all()
+                if (a.external_refs or {}).get("homonymOf") == artist.id
+            ),
+            None,
+        )
+        if homonym is None:
+            homonym = Artist(name=artist.name, external_refs={"homonymOf": artist.id})
+            session.add(homonym)
+            session.flush()
+        release.artist_id = homonym.id
+        session.add(release)
+        for rec in session.exec(
+            select(Recording).where(Recording.release_id == release.id, Recording.artist_id == artist.id)
+        ).all():
+            rec.artist_id = homonym.id
+            session.add(rec)
+    session.commit()
+    r = get_redis()
+    keys = [k async for k in r.scan_iter(match=f"vault:catalog:cache:*{artist_id}*")]
+    if keys:
+        await r.delete(*keys)
+    return {"artistId": artist_id, "releaseId": release_id, "notMine": not_mine}
 
 
 @catalog_router.get("/artists/{artist_id}/bio")

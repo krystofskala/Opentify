@@ -70,6 +70,7 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
         if artist is None:
             return []
         mbid, name, deezer_id = artist.mbid, artist.name, artist.deezer_id
+        not_mine = set((artist.external_refs or {}).get("notMine") or [])
 
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -104,6 +105,8 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
             deezer_id = str(match["id"]) if match else None
         tracks = await dz.artist_top(deezer_id, LIMIT) if deezer_id else None
         for track in tracks or []:
+            if str((track.get("album") or {}).get("id")) in not_mine:
+                continue  # album stejnojmenného cizího interpreta
             with Session(engine) as session:
                 rec = ingest_track_with_context(session, track)
                 session.commit()

@@ -15,6 +15,7 @@ import 'track_actions.dart' show nowPlayingInfoFor;
 import '../core/cz_plural.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
 import '../state/offline_controller.dart';
+import '../state/auth_controller.dart';
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -33,6 +34,8 @@ Future<void> showCollectionActions(
   String? subtitle,
   String? imageUrl,
   Widget? artwork,
+  String? fromArtistId,
+  VoidCallback? onNotArtist,
 }) {
   HapticFeedback.selectionClick();
   return showGlassSheet<void>(
@@ -45,6 +48,8 @@ Future<void> showCollectionActions(
       subtitle: subtitle,
       imageUrl: imageUrl,
       artwork: artwork,
+      fromArtistId: fromArtistId,
+      onNotArtist: onNotArtist,
     ),
   );
 }
@@ -58,6 +63,8 @@ class _CollectionActionsSheet extends ConsumerWidget {
     this.subtitle,
     this.imageUrl,
     this.artwork,
+    this.fromArtistId,
+    this.onNotArtist,
   });
 
   final BuildContext hostContext;
@@ -67,6 +74,10 @@ class _CollectionActionsSheet extends ConsumerWidget {
   final String? subtitle;
   final String? imageUrl;
   final Widget? artwork;
+  /// Album otevřené ze stránky interpreta: admin ho může vyřadit jako
+  /// album stejnojmenné cizí kapely (Deezer je občas slučuje).
+  final String? fromArtistId;
+  final VoidCallback? onNotArtist;
 
   // Přes kontejner appky -- načítá se až po zavření sheetu, jeho `ref` už
   // v tu chvíli neplatí.
@@ -210,6 +221,25 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   goToRadio(hostContext, kind == CollectionKind.album ? RadioSeed.album : RadioSeed.playlist, seedId);
                 },
               ),
+              if (kind == CollectionKind.album &&
+                  fromArtistId != null &&
+                  ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
+                _Row(
+                  icon: Symbols.person_off_rounded,
+                  label: 'Nepatří k tomuto interpretovi',
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    try {
+                      await container
+                          .read(apiClientProvider)
+                          .postJson('/catalog/artists/$fromArtistId/releases/$id/not-artist');
+                      onNotArtist?.call();
+                      toast('„$title“ vyřazeno z interpreta');
+                    } catch (_) {
+                      toast('Nepodařilo se vyřadit');
+                    }
+                  },
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
                 child: Text(

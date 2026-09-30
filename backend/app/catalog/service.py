@@ -466,7 +466,11 @@ class CatalogService:
     async def _deezer_discography(self, artist: Artist) -> list[Release]:
         await self._resolve_deezer_id_lazily(artist)
         albums = await self._dz.artist_albums(artist.deezer_id) if artist.deezer_id else None
-        releases = [r for r in (ingest_album(self._session, a, artist) for a in albums or []) if r is not None]
+        # Deezer občas slučuje stejnojmenné interprety do jednoho (živě: česká
+        # Marsyas + francouzské duo) -- alba označená "nepatří sem" vynechat.
+        not_mine = set((artist.external_refs or {}).get("notMine") or [])
+        albums = [a for a in albums or [] if str(a.get("id")) not in not_mine]
+        releases = [r for r in (ingest_album(self._session, a, artist) for a in albums) if r is not None]
         self._session.commit()
         return releases
 
@@ -526,6 +530,8 @@ class CatalogService:
             known_titles.add(norm(extra.title))
             releases.append(extra)
 
+        not_mine = set((artist.external_refs or {}).get("notMine") or [])
+        releases = [r for r in releases if r.id not in not_mine and (r.deezer_id or "") not in not_mine]
         releases.sort(key=lambda r: r.release_date or "9999")
         return DiscographyOut(
             artist=self._to_artist_out(artist),

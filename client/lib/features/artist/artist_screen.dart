@@ -431,12 +431,12 @@ class _RelatedArtistsSection extends StatelessWidget {
   }
 }
 
-class _ReleaseRail extends StatelessWidget {
+class _ReleaseRail extends ConsumerWidget {
   const _ReleaseRail({required this.releases});
   final List<ReleaseModel> releases;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return SizedBox(
       height: 190,
       child: ListView.builder(
@@ -462,6 +462,8 @@ class _ReleaseRail extends StatelessWidget {
                   title: release.title,
                   subtitle: release.yearLabel,
                   imageUrl: release.coverImageUrl,
+                  fromArtistId: release.artistId,
+                  onNotArtist: () => ref.invalidate(discographyProvider),
                 ),
               ),
             ),

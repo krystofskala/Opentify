@@ -206,6 +206,8 @@ class _TimelineRow extends ConsumerWidget {
         title: release.title,
         subtitle: release.yearLabel,
         imageUrl: cover,
+        fromArtistId: release.artistId,
+        onNotArtist: () => ref.invalidate(discographyProvider),
       ),
       child: IntrinsicHeight(
         child: Row(
@@ -309,6 +311,8 @@ class _WideTimelineRow extends ConsumerWidget {
         title: release.title,
         subtitle: release.yearLabel,
         imageUrl: cover,
+        fromArtistId: release.artistId,
+        onNotArtist: () => ref.invalidate(discographyProvider),
       ),
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xs),
