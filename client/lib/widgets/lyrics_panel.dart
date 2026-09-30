@@ -263,8 +263,8 @@ class LyricsFollowButton extends ConsumerWidget {
       tooltip: follow ? 'Vypnout sledování textu' : 'Zapnout sledování textu',
       // Stejně jako přepínače v ovládání přehrávače (Text, Náhodně...).
       style: IconButton.styleFrom(
-        foregroundColor: follow ? color : color.withValues(alpha: 0.7),
-        backgroundColor: follow ? color.withValues(alpha: 0.16) : Colors.transparent,
+        foregroundColor: follow ? color : color.withValues(alpha: 0.55),
+        backgroundColor: follow ? color.withValues(alpha: 0.08) : Colors.transparent,
         fixedSize: const Size.square(44),
       ),
       icon: Icon(

@@ -808,10 +808,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   clipBehavior: Clip.none,
                   fit: StackFit.expand,
                   children: [
-                    if (prev != null)
-                      Opacity(opacity: dx > 0 ? reveal : 0, child: page(prev, dx - w, neighbor: true)),
-                    if (next != null)
-                      Opacity(opacity: dx < 0 ? reveal : 0, child: page(next, dx + w, neighbor: true)),
+                    if (prev != null) Opacity(opacity: dx > 0 ? reveal : 0, child: page(prev, dx - w, neighbor: true)),
+                    if (next != null) Opacity(opacity: dx < 0 ? reveal : 0, child: page(next, dx + w, neighbor: true)),
                     page(playback.nowPlaying!, dx),
                   ],
                 );
@@ -983,9 +981,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 IconButton(
                   tooltip: 'Náhodné přehrávání',
                   style: IconButton.styleFrom(
-                    foregroundColor: playback.shuffleEnabled ? Colors.white : Colors.white70,
+                    foregroundColor: playback.shuffleEnabled ? Colors.white : Colors.white.withValues(alpha: 0.55),
                     backgroundColor:
-                        playback.shuffleEnabled ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+                        playback.shuffleEnabled ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
                     fixedSize: const Size.square(44),
                   ),
                   icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
@@ -996,10 +994,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 IconButton(
                   tooltip: 'Opakování',
                   style: IconButton.styleFrom(
-                    foregroundColor: playback.repeatMode == RepeatMode.off ? Colors.white70 : Colors.white,
+                    foregroundColor:
+                        playback.repeatMode == RepeatMode.off ? Colors.white.withValues(alpha: 0.55) : Colors.white,
                     backgroundColor: playback.repeatMode == RepeatMode.off
                         ? Colors.transparent
-                        : Colors.white.withValues(alpha: 0.16),
+                        : Colors.white.withValues(alpha: 0.08),
                     fixedSize: const Size.square(44),
                   ),
                   icon: Icon(
@@ -1040,7 +1039,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             const SizedBox(width: 4),
             Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
             const SizedBox(width: 4),
-            const Icon(Symbols.close_rounded, size: 14, color: Colors.white70),
+            const Icon(Symbols.close_rounded, size: 14, color: Colors.white.withValues(alpha: 0.55)),
           ],
         ),
       ),
@@ -1049,7 +1048,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   Widget _likeButton(AudioPlayerState playback) {
     final id = playback.nowPlaying!.recordingId;
-    return LikeHeart(recordingId: id, size: 22, color: Colors.white70);
+    return LikeHeart(recordingId: id, size: 22, color: Colors.white.withValues(alpha: 0.55));
   }
 
   Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {
@@ -1059,8 +1058,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     return IconButton(
       tooltip: label,
       style: IconButton.styleFrom(
-        foregroundColor: active ? Colors.white : Colors.white70,
-        backgroundColor: active ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+        foregroundColor: active ? Colors.white : Colors.white.withValues(alpha: 0.55),
+        backgroundColor: active ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
         fixedSize: const Size.square(44),
       ),
       icon: Icon(icon, size: 22, fill: active ? 1 : 0, semanticLabel: label),
@@ -1136,12 +1135,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         ],
                       )
                     : Stack(
-                      key: const ValueKey('lyrics'),
-                      children: [
-                        Positioned.fill(child: LyricsView(recordingId: recordingId)),
-                        Positioned(top: 0, right: 8, child: LyricsFollowButton(recordingId: recordingId)),
-                      ],
-                    ),
+                        key: const ValueKey('lyrics'),
+                        children: [
+                          Positioned.fill(child: LyricsView(recordingId: recordingId)),
+                          Positioned(top: 0, right: 8, child: LyricsFollowButton(recordingId: recordingId)),
+                        ],
+                      ),
               ),
             ),
           ),
@@ -1329,7 +1328,6 @@ class _LivingClipper extends CustomClipper<Path> {
   bool shouldReclip(_LivingClipper old) =>
       old.t != t || old.spin != spin || old.live != live || old.a != a || old.b != b;
 }
-
 
 /// Album nahrávky, když ho položka fronty nenese (`GET /catalog/recordings`).
 final _releaseOfRecording = FutureProvider.family<String?, String>((ref, recordingId) async {
