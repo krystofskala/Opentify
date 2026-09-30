@@ -596,12 +596,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
     int? provisioningPct,
   ) {
     final controller = ref.read(audioPlayerControllerProvider.notifier);
-    // Ovládání na světlejším skleněném panelu -- bez vlastního rozmazání
-    // (leží na už namrzlém skle).
+    // Stejné sklo jako mini přehrávač a tab bar (tón, rozmazání, lem).
     return GlassContainer(
-      blur: false,
-      baseFill: false,
-      emphasis: GlassTokens.emphasis,
       rim: true,
       borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -802,9 +798,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
           width: 460,
           height: height,
           child: GlassContainer(
-            blur: false,
-            baseFill: false,
-            emphasis: GlassTokens.emphasis,
+            rim: true,
             borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
             padding: const EdgeInsets.only(top: 8),
             fit: StackFit.expand,
