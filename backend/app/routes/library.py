@@ -27,7 +27,9 @@ import unicodedata
 import zipfile
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
@@ -36,6 +38,7 @@ from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
+from app.library.spotify_link import SpotifyLinkError, import_spotify_link
 from app.library.spotify_import import (
     LIKED_SONGS_SOURCE,
     LIKED_SONGS_TITLE,
@@ -497,6 +500,40 @@ async def import_spotify(
             }
             for p in result.playlists
         ],
+    }
+
+
+class SpotifyLinkIn(BaseModel):
+    url: str
+
+
+@library_router.post("/import/spotify-link")
+async def import_spotify_link_route(
+    body: SpotifyLinkIn,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Odkaz na Spotify playlist/album/skladbu -> playlist v knihovně (viz
+    `app/library/spotify_link.py`). Volá ho vyhledávání v appce i zkratka
+    iOS "Do Opentify" ze sdílení (bez hlaviček -> výchozí uživatel)."""
+    user_id, _device_id = current
+    try:
+        result = await import_spotify_link(session, user_id, body.url)
+    except SpotifyLinkError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Spotify se nepodařilo načíst, zkus to za chvíli.") from exc
+    r = result.report
+    return {
+        "id": r.playlist_id,
+        "title": r.title,
+        "kind": result.kind,
+        "owner": result.owner,
+        "total": r.total,
+        "matched": r.matched,
+        "skipped": r.skipped,
+        "inLibrary": r.in_library,
+        "truncated": result.truncated,
     }
 
 

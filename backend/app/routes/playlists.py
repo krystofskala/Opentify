@@ -73,7 +73,11 @@ def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) ->
     různých obalů + nejčastější interpreti. Vlastní playlisty se mění, tak
     mozaika z aktuálních položek; uložená (kopie z Domů) jen jako záloha."""
     ids = [item.recording_id for item in items]
-    covers = _covers_for(ids[:40]) or list(playlist.cover_urls or [])
+    # Sdílené ze Spotify: jejich vlastní obal (uložený u nás), ne mozaika.
+    if (playlist.source or "").startswith("spotify-link:") and playlist.cover_urls:
+        covers = list(playlist.cover_urls)
+    else:
+        covers = _covers_for(ids[:40]) or list(playlist.cover_urls or [])
     counts: Counter[str] = Counter()
     for recording_id in ids:
         recording = session.get(Recording, recording_id)
@@ -144,7 +148,7 @@ def list_playlists(
             generated_at=p.generated_at,
             item_count=len(items),
         ).model_dump(by_alias=True)
-        results.append({**out, "coverUrls": covers, "artistNames": artist_names})
+        results.append({**out, "coverUrls": covers, "artistNames": artist_names, "description": p.description})
     return results
 
 

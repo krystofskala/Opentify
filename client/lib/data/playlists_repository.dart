@@ -14,7 +14,14 @@ class PlaylistSummaryModel {
     required this.itemCount,
     this.coverUrls = const [],
     this.artistNames = const [],
+    this.description,
   });
+
+  /// U sdílených ze Spotify "Ze Spotify · autor".
+  final String? description;
+
+  /// Naimportované z odkazu na Spotify (záložka Sdílené v Knihovně).
+  bool get isShared => source?.startsWith('spotify-link:') ?? false;
 
   final String id;
   final String title;
@@ -36,6 +43,7 @@ class PlaylistSummaryModel {
         itemCount: json['itemCount'] as int,
         coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
         artistNames: (json['artistNames'] as List<dynamic>? ?? const []).cast<String>(),
+        description: json['description'] as String?,
       );
 }
 
@@ -56,6 +64,20 @@ class PlaylistsRepository {
   Future<PlaylistDetailModel> create(String title) async {
     final json = await _api.postJson('/playlists', body: {'title': title});
     return PlaylistDetailModel.fromJson(json);
+  }
+
+  /// Odkaz na Spotify playlist/album/skladbu -> playlist v knihovně
+  /// (backend stáhne obsah přes VPN, viz `app/library/spotify_link.py`).
+  Future<SpotifyLinkImport> importSpotifyLink(String url) async {
+    final json = await _api.postJson('/library/import/spotify-link', body: {'url': url});
+    return SpotifyLinkImport(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      owner: json['owner'] as String?,
+      total: json['total'] as int,
+      matched: json['matched'] as int,
+      truncated: json['truncated'] as bool? ?? false,
+    );
   }
 
   Future<PlaylistDetailModel> get(String playlistId) async {
@@ -93,3 +115,28 @@ class PlaylistsRepository {
     return PlaylistDetailModel.fromJson(json);
   }
 }
+
+/// Výsledek importu z odkazu na Spotify.
+class SpotifyLinkImport {
+  const SpotifyLinkImport({
+    required this.id,
+    required this.title,
+    this.owner,
+    required this.total,
+    required this.matched,
+    required this.truncated,
+  });
+
+  final String id;
+  final String title;
+  final String? owner;
+  final int total;
+  final int matched;
+
+  /// Spotify dává veřejně jen prvních 100 skladeb playlistu.
+  final bool truncated;
+}
+
+/// Je v textu odkaz na Spotify (playlist, album, skladba, krátký odkaz)?
+bool looksLikeSpotifyLink(String text) =>
+    RegExp(r'open\.spotify\.com/|spotify:(playlist|album|track):|spotify\.link/').hasMatch(text);

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../data/playlists_repository.dart' show looksLikeSpotifyLink;
+import '../../widgets/spotify_link_import.dart';
 import '../../core/api_client.dart';
 import '../browse/browse_category_screen.dart' show DeezerPlaylistTile;
 import '../browse/browse_grid.dart';
@@ -96,7 +98,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     super.dispose();
   }
 
+  /// Vložený odkaz na Spotify se nehledá, ale rovnou naimportuje (playlist
+  /// se objeví v Knihovně › Sdílené a otevře se).
+  bool _maybeSpotifyLink(String value) {
+    if (!looksLikeSpotifyLink(value)) return false;
+    _debounce?.cancel();
+    _controller.clear();
+    _focusNode.unfocus();
+    setState(() {});
+    importSpotifyLink(context, ref, value);
+    return true;
+  }
+
   void _onChanged(String value) {
+    if (_maybeSpotifyLink(value)) return;
     setState(() {});
     _debounce?.cancel();
     _debounce = Timer(_debounceDuration, () {
@@ -115,6 +130,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _runSearch(String value) {
+    if (_maybeSpotifyLink(value)) return;
     _debounce?.cancel();
     _controller.text = value;
     _controller.selection = TextSelection.collapsed(offset: value.length);
