@@ -2,7 +2,7 @@
 skladba, za kterou se vydává? (Nalezeno živě: část stažených souborů byla
 jiná skladba nebo poškozená.)
 
-Pro každý stažený soubor (YouTube, Soulseek -- vlastní knihovna ne) vezme
+Pro každý soubor (stažené z YouTube/Soulseeku i vlastní knihovna) vezme
 15 s ze středu, nechá je rozpoznat stejně anonymně jako Open Shazam (jen
 otisk, přes Mullvad VPN) a porovná interpreta a název s tím, co má skladba
 v katalogu. Nic nemaže ani nemění -- jen zapíše zprávu
@@ -24,11 +24,15 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Artist, MediaAsset, MediaAssetStatus, Recording
+from app.models import Artist, MediaAsset, MediaAssetStatus, Recording, Release
 from app.recognize import RecognizeError, recognize
 
 REPORT = Path("/data/verify_downloads.json")
-PROVIDERS = ("youtube", "slskd")
+PROVIDERS = ("youtube", "slskd", "musicbrainz-local", "local")
+# Vlastní nahrávky, které Shazam znát nemůže (malá česká kapela uživatelova
+# táty, nikde online) -- nekontrolují se, ať je "rozpoznání" cizí skladby
+# nikdy neoznačí k výměně. Porovnává se normalizovaný název alba.
+PROTECTED_RELEASES = {"kde zustal raj"}
 PAUSE_SECONDS = 4.0
 
 
@@ -69,22 +73,30 @@ async def main() -> None:
     report: dict[str, dict] = json.loads(REPORT.read_text()) if REPORT.exists() else {}
     with Session(engine) as session:
         rows = session.exec(
-            select(MediaAsset, Recording, Artist)
+            select(MediaAsset, Recording, Artist, Release)
             .join(Recording, Recording.id == MediaAsset.recording_id)
             .join(Artist, Artist.id == Recording.artist_id, isouter=True)
+            .join(Release, Release.id == Recording.release_id, isouter=True)
             .where(MediaAsset.status == MediaAssetStatus.AVAILABLE)
             .where(MediaAsset.source_provider.in_(PROVIDERS))  # type: ignore[union-attr]
         ).all()
-    todo = [(a, r, ar) for a, r, ar in rows if r.id not in report and a.storage_path]
+    # Stažené napřed (tam jsou známé chyby), vlastní knihovna potom.
+    rows = sorted(rows, key=lambda row: row[0].source_provider in ("musicbrainz-local", "local"))
+    todo = [(a, r, ar, rel) for a, r, ar, rel in rows if r.id not in report and a.storage_path]
     print(f"celkem {len(rows)}, zbývá {len(todo)}", flush=True)
-    for i, (asset, rec, artist) in enumerate(todo, 1):
+    for i, (asset, rec, artist, release) in enumerate(todo, 1):
         expected_artist = artist.name if artist else ""
         entry: dict = {
             "title": rec.title,
             "artist": expected_artist,
+            "album": release.title if release else None,
             "provider": asset.source_provider,
             "path": asset.storage_path,
         }
+        if release and _norm(release.title) in PROTECTED_RELEASES:
+            entry["verdict"] = "protected"
+            report[rec.id] = entry
+            continue
         try:
             clip = await _snippet(asset.storage_path)
             match = await recognize(clip) if clip else None

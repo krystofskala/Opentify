@@ -462,7 +462,12 @@ class _HeroFlexible extends StatelessWidget {
                     children: [
                       if (hero._barThumb != null) ...[
                         _Thumb(
-                            url: hero._barThumb!, size: 30, circle: hero.thumbnailCircle, icon: hero.placeholderIcon),
+                          url: hero._barThumb!,
+                          size: 30,
+                          circle: hero.thumbnailCircle,
+                          icon: hero.placeholderIcon,
+                          seed: hero.title,
+                        ),
                         const SizedBox(width: AppSpacing.sm),
                       ],
                       Expanded(
@@ -1052,6 +1057,7 @@ class _HeroTitleBlock extends StatelessWidget {
                     circle: hero.thumbnailCircle,
                     icon: hero.placeholderIcon,
                     elevated: true,
+                    seed: hero.title,
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(child: titleColumn),
@@ -1170,18 +1176,43 @@ class _AutoShrinkTitle extends StatelessWidget {
 
 /// Náhled (obal/avatar) vedle názvu a ve sbalené liště.
 class _Thumb extends StatelessWidget {
-  const _Thumb(
-      {required this.url, required this.size, required this.circle, required this.icon, this.elevated = false});
+  const _Thumb({
+    required this.url,
+    required this.size,
+    required this.circle,
+    required this.icon,
+    this.elevated = false,
+    this.seed,
+  });
 
   final String url;
   final double size;
+
+  /// Interpret: místo kruhu jeho "fun shape" (stejný jako na PC, podle
+  /// jména -- `seed`), bez rámečku.
   final bool circle;
   final IconData icon;
   final bool elevated;
+  final String? seed;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    if (circle) {
+      final look = _ArtistLook.of(seed ?? url);
+      final path = expressivePath(Offset.zero & Size.square(size), look.photo, null, 0, look.photoSpin);
+      final image = ClipPath(
+        clipper: _PathClipper(path),
+        child: ColoredBox(
+          color: scheme.surfaceContainerHigh,
+          child: NetImage(url: url, placeholder: Icon(icon, size: size * 0.45, color: scheme.onSurfaceVariant)),
+        ),
+      );
+      return SizedBox.square(
+        dimension: size,
+        child: elevated ? CustomPaint(painter: _PathShadowPainter(path), child: image) : image,
+      );
+    }
     final radius =
         circle ? BorderRadius.circular(size / 2) : BorderRadius.circular(size >= 64 ? AppRadii.md : AppRadii.xs);
     return Container(
@@ -1431,7 +1462,8 @@ class HeroLink extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (avatarUrl != null) ...[
-          _Thumb(url: avatarUrl!, size: 24, circle: true, icon: icon ?? Symbols.person_rounded),
+          // Malý avatar interpreta v jeho tvaru, bez rámečku (nenásilně).
+          _Thumb(url: avatarUrl!, size: 26, circle: true, icon: icon ?? Symbols.person_rounded, seed: text),
           const SizedBox(width: AppSpacing.xs),
         ] else if (icon != null) ...[
           Icon(icon, size: 16, color: base.withValues(alpha: 0.7)),
