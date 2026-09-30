@@ -73,7 +73,9 @@ void main() {
     vec3 outside = texture(uSharp, uvOf(p + n * 14.0)).rgb;
     float l = dot(outside, vec3(0.3, 0.59, 0.11));
     float facing = max(0.0, dot(n, normalize(vec2(-0.6, -0.8))));
-    float k = rim * clamp(0.06 + 1.5 * l * l, 0.0, 1.0) * (0.55 + 0.45 * facing);
+    // Základ 0.22 -- hrana je vidět i nad tmavým (dřív nad tmavým zrnem
+    // úplně zmizela, živě nahlášeno); světlo zpoza hrany přidává víc.
+    float k = rim * clamp(0.22 + 1.4 * l * l, 0.0, 1.0) * (0.6 + 0.4 * facing);
     col = mix(col, min(vec3(1.0), outside * 0.6 + 0.55), k);
   }
   col = clamp(col, 0.0, 1.0);

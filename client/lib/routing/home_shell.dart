@@ -43,11 +43,12 @@ class HomeShell extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Jeden stín na skupinu (má ho tab bar) -- žádné vrstvené stíny.
+              // Vlastní měkký stín i u mini přehrávače -- průhledné sklo se
+              // jinak na tmavé stránce slévalo s okolím (živě nahlášeno).
               MediaQuery.removePadding(
                 context: context,
                 removeBottom: true,
-                child: const PlayerBar(shadow: false),
+                child: const PlayerBar(),
               ),
               GlassTabBar(
                 items: _tabs,
