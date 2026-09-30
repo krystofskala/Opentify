@@ -19,6 +19,7 @@ import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
+import '../../state/artwork_provider.dart';
 import '../../state/providers.dart' show catalogRepositoryProvider;
 import '../../widgets/glass/glass.dart';
 import '../../widgets/glass/liquid_glass.dart';
@@ -255,6 +256,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       _carousel.value = 0;
     } else {
       await _carousel.animateWith(SpringSimulation(spring, dx, 0, v));
+      // Pružina končí pár pixelů od nuly -- dorovnat přesně.
+      if (mounted && !_carousel.isAnimating) _carousel.value = 0;
     }
   }
 
@@ -778,20 +781,29 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               builder: (context, _) {
                 final dx = _carousel.value;
                 final w = _carouselWidth;
-                Widget page(NowPlayingInfo info, double offset) {
+                Widget page(NowPlayingInfo info, double offset, {bool neighbor = false}) {
                   final distance = (offset.abs() / w).clamp(0.0, 1.0);
+                  final art = neighbor ? _NeighborArtwork(info: info) : _Artwork(info: info);
                   return Transform.translate(
                     offset: Offset(offset, 0),
-                    child: Transform.scale(scale: 1 - 0.08 * distance, child: _Artwork(info: info)),
+                    child: Transform.scale(scale: 1 - 0.08 * distance, child: art),
                   );
                 }
 
+                // Sousední obal jen během tažení: roste s vytažením a po
+                // nedokončeném tahu (pružina zpět) zase zmizí -- dřív na
+                // širokém okně zůstal stát vedle (pružina se zastaví pár
+                // pixelů od nuly). Ve stromu je pořád (průhledný), ať se
+                // obrázek načte dopředu.
+                final reveal = ((dx.abs() - 2) / (w * 0.12)).clamp(0.0, 1.0);
                 return Stack(
                   clipBehavior: Clip.none,
                   fit: StackFit.expand,
                   children: [
-                    if (prev != null && dx > 0) page(prev, dx - w),
-                    if (next != null && dx < 0) page(next, dx + w),
+                    if (prev != null)
+                      Opacity(opacity: dx > 0 ? reveal : 0, child: page(prev, dx - w, neighbor: true)),
+                    if (next != null)
+                      Opacity(opacity: dx < 0 ? reveal : 0, child: page(next, dx + w, neighbor: true)),
                     page(playback.nowPlaying!, dx),
                   ],
                 );
@@ -1135,10 +1147,29 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   }
 }
 
-class _Artwork extends StatelessWidget {
-  const _Artwork({required this.info});
+/// Obal sousední skladby v karuselu -- položka fronty ho často nenese
+/// (playlist, rádio), dohledá se přes album / interpreta.
+class _NeighborArtwork extends ConsumerWidget {
+  const _NeighborArtwork({required this.info});
 
   final NowPlayingInfo info;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    var url = info.artworkUrl;
+    if (url == null) {
+      final releaseId = info.releaseId ?? ref.watch(_releaseOfRecording(info.recordingId)).valueOrNull;
+      url = ref.watch(recordingArtworkProvider((releaseId: releaseId, artistId: info.artistId))).valueOrNull;
+    }
+    return _Artwork(info: info, url: url);
+  }
+}
+
+class _Artwork extends StatelessWidget {
+  const _Artwork({required this.info, this.url});
+
+  final NowPlayingInfo info;
+  final String? url;
 
   @override
   Widget build(BuildContext context) {
@@ -1149,8 +1180,8 @@ class _Artwork extends StatelessWidget {
       ),
       child: ClipPath(
         clipper: ShapeBorderClipper(shape: AppShapes.of(24)),
-        child: info.artworkUrl != null
-            ? NetImage(url: info.artworkUrl!)
+        child: (url ?? info.artworkUrl) != null
+            ? NetImage(url: (url ?? info.artworkUrl)!)
             : Container(
                 color: Colors.white.withValues(alpha: 0.15),
                 child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 96),
