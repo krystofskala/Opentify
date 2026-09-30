@@ -261,13 +261,16 @@ class LyricsFollowButton extends ConsumerWidget {
     final follow = !ref.watch(lyricsFollowOffProvider).contains(recordingId);
     return IconButton(
       tooltip: follow ? 'Vypnout sledování textu' : 'Zapnout sledování textu',
+      // Stejně jako přepínače v ovládání přehrávače (Text, Náhodně...).
       style: IconButton.styleFrom(
-        foregroundColor: follow ? color.withValues(alpha: 0.9) : color.withValues(alpha: 0.5),
+        foregroundColor: follow ? color : color.withValues(alpha: 0.7),
+        backgroundColor: follow ? color.withValues(alpha: 0.16) : Colors.transparent,
         fixedSize: const Size.square(44),
       ),
       icon: Icon(
         follow ? Symbols.subtitles_rounded : Symbols.subtitles_off_rounded,
         size: 22,
+        fill: follow ? 1 : 0,
         semanticLabel: follow ? 'Sledování textu zapnuté' : 'Sledování textu vypnuté',
       ),
       onPressed: () => ref.read(lyricsFollowOffProvider.notifier).setFollow(recordingId, !follow),
