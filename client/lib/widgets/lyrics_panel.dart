@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/lyrics_repository.dart';
 import '../state/audio_player_controller.dart';
@@ -178,6 +179,36 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
 /// Kolik zobrazení textu je právě na obrazovce (režim textu v přehrávači,
 /// sheet, sloupec na PC) -- menu "⋯" podle toho ukáže posun časování.
 final lyricsVisibleProvider = StateProvider<int>((ref) => 0);
+
+/// Režim textu v přehrávači (telefon) jako přepínač: zůstává zapnutý přes
+/// další skladby, zavření přehrávače i nové spuštění appky -- dřív se
+/// s každým otevřením přehrávače vrátil na obal.
+class LyricsModeController extends StateNotifier<bool> {
+  LyricsModeController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'player.lyrics_mode';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    if (value == state) return;
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final lyricsModeProvider = StateNotifierProvider<LyricsModeController, bool>((ref) => LyricsModeController());
 
 /// Posun časování textu (menu "⋯" přehrávače, jen když je text vidět):
 /// "Text později" / hodnota / "Text dřív".

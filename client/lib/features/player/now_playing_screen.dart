@@ -96,10 +96,35 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   double? _titleH;
   double? _controlsH;
 
-  void _setLyrics(bool on) {
+  void _setLyrics(bool on, {bool animate = true, bool save = true}) {
     if (on == _lyricsMode) return;
     setState(() => _lyricsMode = on);
-    on ? _lyricsAnim.forward() : _lyricsAnim.reverse();
+    if (animate) {
+      on ? _lyricsAnim.forward() : _lyricsAnim.reverse();
+    } else {
+      _lyricsAnim.value = on ? 1 : 0;
+    }
+    if (save) ref.read(lyricsModeProvider.notifier).set(on);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Uložený přepínač: přehrávač se otevře rovnou v režimu, ve kterém byl
+    // naposled (bez animace). Při prvním spuštění se hodnota načítá
+    // asynchronně -- proto posluchač, ne jednorázové čtení.
+    var initializing = true;
+    ref.listenManual<bool>(lyricsModeProvider, (_, on) {
+      if (!mounted || on == _lyricsMode) return;
+      if (initializing) {
+        // setState v initState nejde -- první hodnota rovnou do polí.
+        _lyricsMode = on;
+        _lyricsAnim.value = on ? 1 : 0;
+      } else {
+        _setLyrics(on, animate: false, save: false);
+      }
+    }, fireImmediately: true);
+    initializing = false;
   }
 
   /// Změřená výška skupiny obal + název + ovládání (výška druhého sloupce).
