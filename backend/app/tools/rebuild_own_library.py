@@ -53,6 +53,11 @@ PROTECTED = {"kontrast", "kde zustal raj"}
 _STRONG = set("øìùòØÌÙÒ\x8a\x8d\x8e\x9a\x9d\x9e")
 _WEAK = set("èÈïÏ")
 _PREFIX = re.compile(r"^\s*\d{1,3}\s*[-._)]*\s*")
+# Ocásky z YouTube v názvech: "(Official Music Video) HD", "[Lyrics]", "- Lyrics".
+_VIDEO_JUNK = re.compile(
+    r"\s*([(\[][^)\]]*(official|video|lyrics?|audio|hd|hq)[^)\]]*[)\]]|\s-\s*(official\s+)?(music\s+)?(video|audio|lyrics?)\s*$|\bHD\b|\bHQ\b)\s*",
+    re.IGNORECASE,
+)
 # Zástupné hodnoty ve štítcích = žádná hodnota.
 _PLACEHOLDERS = {"unknown", "unknown artist", "various", "various artists", "va", "neznamy", "neznamy interpret"}
 
@@ -149,6 +154,10 @@ def plan() -> list[dict]:
         tags = _read_tags(p)
         title = fix_text(tags.title, path) or nfc(_PREFIX.sub("", p.stem).replace("_", " ").strip())
         artist = fix_text(tags.artist, path)
+        if not _real(artist) and " - " in title:
+            # Stažené z YouTube bez štítků: "Interpret - Název (Official Video) HD".
+            artist, title = (x.strip() for x in title.split(" - ", 1))
+        title = _VIDEO_JUNK.sub("", title).strip() or title
         folders[str(p.parent)].append({
             "old": rid,
             "path": path,
@@ -172,6 +181,15 @@ def plan() -> list[dict]:
         for f in files:
             by_release[f["release"]].append(f)
         for release, group in by_release.items():
+            # Pole interpreta jako seznam autorů ("Alex Eichenberger/…/Lucy
+            # Rose/…"): jméno společné všem skladbám je skutečný interpret.
+            credits = [set(p.strip() for p in f["artist"].split("/")) for f in group if f["artist"] and "/" in f["artist"]]
+            if len(credits) >= 2 and len(credits) == len(group):
+                common = set.intersection(*credits)
+                named = [c for c in common if all(_norm(c) in _norm(Path(f["path"]).stem + " " + folder) for f in group)]
+                if len(named) == 1:
+                    for f in group:
+                        f["artist"] = named[0]
             aa = Counter(f["albumartist"] for f in group if f["albumartist"])
             artists = Counter(f["artist"] for f in group if f["artist"])
             if aa:
