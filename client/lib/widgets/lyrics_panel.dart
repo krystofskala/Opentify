@@ -249,10 +249,13 @@ final lyricsFollowOffProvider =
 /// Ikona "sledovat text" přímo v přehrávači (mobil: místo srdíčka v řádku
 /// nad textem, PC: roh sloupce s textem). Jen u textu s časy.
 class LyricsFollowButton extends ConsumerWidget {
-  const LyricsFollowButton({super.key, required this.recordingId, this.color = Colors.white});
+  const LyricsFollowButton({super.key, required this.recordingId, this.color = Colors.white, this.activeColor});
 
   final String recordingId;
   final Color color;
+
+  /// Barva zapnutého stavu (barva skladby), jinak `color`.
+  final Color? activeColor;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -263,8 +266,7 @@ class LyricsFollowButton extends ConsumerWidget {
       tooltip: follow ? 'Vypnout sledování textu' : 'Zapnout sledování textu',
       // Stejně jako přepínače v ovládání přehrávače (Text, Náhodně...).
       style: IconButton.styleFrom(
-        foregroundColor: follow ? color : color.withValues(alpha: 0.55),
-        backgroundColor: follow ? color.withValues(alpha: 0.08) : Colors.transparent,
+        foregroundColor: follow ? (activeColor ?? color) : color.withValues(alpha: 0.55),
         fixedSize: const Size.square(44),
       ),
       icon: Icon(

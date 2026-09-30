@@ -643,7 +643,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         ),
                         // Srdíčko je dole v ovládání -- tady přepínač
                         // sledování textu (u téhle skladby).
-                        LyricsFollowButton(recordingId: nowPlaying.recordingId),
+                        LyricsFollowButton(recordingId: nowPlaying.recordingId, activeColor: accent),
                       ],
                     ),
                   ),
@@ -981,9 +981,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 IconButton(
                   tooltip: 'Náhodné přehrávání',
                   style: IconButton.styleFrom(
-                    foregroundColor: playback.shuffleEnabled ? Colors.white : Colors.white.withValues(alpha: 0.55),
-                    backgroundColor:
-                        playback.shuffleEnabled ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
+                    foregroundColor: playback.shuffleEnabled ? accent : Colors.white.withValues(alpha: 0.55),
                     fixedSize: const Size.square(44),
                   ),
                   icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
@@ -995,10 +993,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   tooltip: 'Opakování',
                   style: IconButton.styleFrom(
                     foregroundColor:
-                        playback.repeatMode == RepeatMode.off ? Colors.white.withValues(alpha: 0.55) : Colors.white,
-                    backgroundColor: playback.repeatMode == RepeatMode.off
-                        ? Colors.transparent
-                        : Colors.white.withValues(alpha: 0.08),
+                        playback.repeatMode == RepeatMode.off ? Colors.white.withValues(alpha: 0.55) : accent,
                     fixedSize: const Size.square(44),
                   ),
                   icon: Icon(
@@ -1039,7 +1034,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             const SizedBox(width: 4),
             Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
             const SizedBox(width: 4),
-            const Icon(Symbols.close_rounded, size: 14, color: Colors.white.withValues(alpha: 0.55)),
+            const Icon(Symbols.close_rounded, size: 14, color: Colors.white70),
           ],
         ),
       ),
@@ -1054,12 +1049,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {
     final wideSide = MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
     final active = wideSide ? _side == panel : (panel == _SidePanel.lyrics && _lyricsMode);
-    // Jen ikona (jako Apple Music); aktivní = kulatý tónový podklad.
+    // Jen ikona (jako Apple Music); zapnuté = barva skladby, bez podkladu.
     return IconButton(
       tooltip: label,
       style: IconButton.styleFrom(
-        foregroundColor: active ? Colors.white : Colors.white.withValues(alpha: 0.55),
-        backgroundColor: active ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
+        foregroundColor: active ? accent : Colors.white.withValues(alpha: 0.55),
         fixedSize: const Size.square(44),
       ),
       icon: Icon(icon, size: 22, fill: active ? 1 : 0, semanticLabel: label),
@@ -1138,7 +1132,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         key: const ValueKey('lyrics'),
                         children: [
                           Positioned.fill(child: LyricsView(recordingId: recordingId)),
-                          Positioned(top: 0, right: 8, child: LyricsFollowButton(recordingId: recordingId)),
+                          Positioned(
+                              top: 0,
+                              right: 8,
+                              child: LyricsFollowButton(
+                                recordingId: recordingId,
+                                activeColor: ref.read(audioPlayerControllerProvider).accentColor,
+                              )),
                         ],
                       ),
               ),
