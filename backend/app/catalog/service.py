@@ -763,11 +763,15 @@ class CatalogService:
                 if not title:
                     continue
                 isrcs = rec_json.get("isrcs") or []
+                # Interpret skladby, ne alba: u soundtracků/kompilací MB alba
+                # připíše celé jednomu jménu (živě: Pelíšky -> všech 31 skladeb
+                # "Boleslav Polívka", pak se stahovalo "Polívka – Lékořice").
+                track_artist = self._ingest_artist_credit(track.get("artist-credit") or rec_json.get("artist-credit"))
                 recording = upsert_recording(
                     self._session,
                     mbid=rec_json.get("id") or track.get("id"),
                     release_id=release.id,
-                    artist_id=release.artist_id,
+                    artist_id=track_artist.id if track_artist else release.artist_id,
                     title=title,
                     duration_ms=rec_json.get("length") or track.get("length"),
                     isrc=isrcs[0] if isrcs else None,
