@@ -32,13 +32,16 @@ Future<Color?> extractAccentColor(String imageUrl) {
 final Map<String, Future<Color?>> _accentFutures = {};
 
 /// Jedna analýza obalu pro všechny tři pohledy (akcent, podpůrné tóny,
-/// charakter) -- dřív si ho každý dekódoval a procházel v plném rozlišení
-/// zvlášť. Zmenšený na 96 px už při dekódování, na barvy to stačí.
+/// charakter) -- dřív si ho každý procházel zvlášť.
 Future<PaletteGenerator> _paletteFor(String imageUrl) {
   final future = _paletteFutures.putIfAbsent(
     imageUrl,
+    // Stejné vstupy jako dřív (celý obal, oblast 120 px): zmenšený obrázek
+    // dával jiné poměry barev a u některých obalů divné pozadí (živě
+    // nahlášeno). Sdílí se jen výsledek mezi akcentem, tóny a charakterem.
     () => PaletteGenerator.fromImageProvider(
-      ResizeImage(CachedNetworkImageProvider(imageUrl), width: 96, height: 96, policy: ResizeImagePolicy.fit),
+      CachedNetworkImageProvider(imageUrl),
+      size: const Size(120, 120),
       maximumColorCount: 16,
     ),
   );

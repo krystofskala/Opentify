@@ -13,6 +13,7 @@ import '../state/glass_settings.dart';
 import '../state/user_idle.dart';
 import '../theme/selected_accent.dart';
 import 'glass/expressive_shapes.dart';
+import 'glass/liquid_glass.dart';
 import 'glass_container.dart';
 import 'net_image.dart';
 import '../core/cz_plural.dart';
@@ -418,11 +419,16 @@ class _HeroFlexible extends StatelessWidget {
               height: height,
               child: Opacity(
                 opacity: barT,
-                child: const GlassContainer(
-                  borderRadius: BorderRadius.zero,
-                  showEdgeHighlight: false,
-                  fit: StackFit.expand,
-                  child: SizedBox.expand(),
+                // Lišta láme obsah stránky, který pod ní odjíždí.
+                child: LiquidCaptureScope(
+                  capture: routeLiquidCapture,
+                  child: const GlassContainer(
+                    borderRadius: BorderRadius.zero,
+                    showEdgeHighlight: false,
+                    liquid: true,
+                    fit: StackFit.expand,
+                    child: SizedBox.expand(),
+                  ),
                 ),
               ),
             ),

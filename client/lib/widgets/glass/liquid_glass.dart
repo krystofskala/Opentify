@@ -162,11 +162,24 @@ class LiquidCapture {
     final screen = Offset.zero & (view.physicalSize / viewDpr);
     final rect = union.inflate(_margin).intersect(screen);
     if (rect.isEmpty) return;
-    final bg = bgSource.capture(rect, dpr);
+    // Skla tohohle zachytávání se na dobu snímku skryjí -- sklo ležící
+    // přímo ve stránce (horní lišta alba) tak láme stránku pod sebou, ne
+    // samo sebe (jinak by se obraz rozmazával do nekonečna).
+    for (final g in _glasses) {
+      g._hiddenForCapture(true);
+    }
+    final ui.Image? bg;
     ui.Image? pg;
-    for (final source in _pages.reversed) {
-      pg = source.capture(rect, dpr);
-      if (pg != null) break;
+    try {
+      bg = bgSource.capture(rect, dpr);
+      for (final source in _pages.reversed) {
+        pg = source.capture(rect, dpr);
+        if (pg != null) break;
+      }
+    } finally {
+      for (final g in _glasses) {
+        g._hiddenForCapture(false);
+      }
     }
     if (bg == null) {
       pg?.dispose();
@@ -428,12 +441,29 @@ class RenderLiquidGlass extends RenderBox {
   @override
   bool get sizedByParent => true;
 
+  // Vlastní vrstva (průhlednost), aby šlo sklo při zachytávání na okamžik
+  // skrýt, viz `LiquidCapture._capture`.
+  @override
+  bool get alwaysNeedsCompositing => true;
+
+  void _hiddenForCapture(bool hidden) {
+    final l = layer;
+    if (l is OpacityLayer) l.alpha = hidden ? 0 : 255;
+  }
+
   @override
   Size computeDryLayout(BoxConstraints constraints) => constraints.biggest;
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    if (size.isEmpty) return;
+    if (size.isEmpty) {
+      layer = null;
+      return;
+    }
+    layer = context.pushOpacity(offset, 255, _paintGlass, oldLayer: layer as OpacityLayer?);
+  }
+
+  void _paintGlass(PaintingContext context, Offset offset) {
     globalRect = localToGlobal(Offset.zero) & size;
     _capture._schedule();
     final canvas = context.canvas;

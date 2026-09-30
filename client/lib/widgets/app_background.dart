@@ -713,6 +713,16 @@ class _FlowMesh {
   }
 }
 
+/// Hlavní barva pozadí (slot "základ" palety) -- pro tón skla v "hlavní
+/// barvě" (Profil › Vzhled), ať sklo ladí s tím, co je na pozadí vidět.
+Color? backgroundMainColor(
+  Color? accent,
+  Brightness brightness,
+  List<Color> supportTones,
+  CoverCharacter? character,
+) =>
+    accent == null ? null : _paletteFor(accent, brightness, supportTones, character).first;
+
 /// Paleta 6 slotů: [základ, stín, jádro, střed, highlight, doplněk].
 List<Color> _paletteFor(
   Color? accent,

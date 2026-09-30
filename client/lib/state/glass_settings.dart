@@ -50,6 +50,36 @@ final glassDarknessProvider =
 final glassColorfulnessProvider = StateNotifierProvider<GlassSliderController, double>(
     (ref) => GlassSliderController('appearance.glass_colorfulness', 0.7));
 
+/// Profil › Vzhled › "Barva tónu": hlavní = převládající barva pozadí
+/// (sklo ladí s pozadím), kontrastní = výrazná barva obalu (akcent). Dřív
+/// vždy akcent -- u obalů, kde se liší od pozadí, pak sklo působilo cize.
+class GlassTintMainController extends StateNotifier<bool> {
+  GlassTintMainController() : super(true) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.glass_tint_main';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+/// `true` = hlavní barva pozadí, `false` = kontrastní (akcent).
+final glassTintMainProvider = StateNotifierProvider<GlassTintMainController, bool>((ref) => GlassTintMainController());
+
 /// Profil › Vzhled › "Tón v barvě skladby": sklo tónované barvou hrající
 /// skladby (tmavý odstín v tmavém režimu, světlý ve světlém) místo neutrální
 /// šedé/bílé -- lišty jsou na pozadí lépe vidět.

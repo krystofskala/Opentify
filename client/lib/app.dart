@@ -66,7 +66,12 @@ class OpentifyApp extends ConsumerWidget {
             // Tón skla v barvě skladby se přebarvuje spolu s pozadím
             // (`AnimatedAccent` = stejná délka a křivka).
             child: AnimatedAccent(
-              color: seed,
+              // Tón skla: hlavní barva pozadí, nebo kontrastní akcent.
+              color: (ref.watch(glassTintMainProvider)
+                      ? backgroundMainColor(accent, Theme.of(context).brightness,
+                          ref.watch(effectiveSupportTonesProvider), ref.watch(effectiveCoverCharacterProvider))
+                      : null) ??
+                  seed,
               builder: (context, tone) => GlassSettings(
                 frost: ref.watch(glassFrostProvider),
                 tint: ref.watch(glassTintProvider),

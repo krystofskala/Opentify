@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../widgets/app_background.dart' show AppBackgroundMirror;
 import '../widgets/glass/liquid_glass.dart';
+import '../widgets/now_playing_sheet.dart' show HiddenUnderPlayer;
 import 'accent_color.dart' show isAchromatic;
 import 'design_tokens.dart';
 import 'shapes.dart';
@@ -179,7 +180,10 @@ class _OpaqueWhileMoving extends PageTransitionsBuilder {
     // (viz `routeLiquidCapture`); vnořené stránky tabů pokrývá shell.
     final root = Navigator.maybeOf(context, rootNavigator: true);
     if (root != null && route.navigator == root) {
-      backed = LiquidCaptureScope(capture: routeLiquidCapture, child: LiquidSource.page(child: backed));
+      // Pod úplně otevřeným přehrávačem se stránka nekreslí (baterie).
+      backed = HiddenUnderPlayer(
+        child: LiquidCaptureScope(capture: routeLiquidCapture, child: LiquidSource.page(child: backed)),
+      );
     }
     return inner.buildTransitions(route, context, animation, secondaryAnimation, backed);
   }

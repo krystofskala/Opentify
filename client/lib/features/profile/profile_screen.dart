@@ -425,6 +425,26 @@ class _AppearanceCard extends ConsumerWidget {
               ),
             ],
           ),
+          if (ref.watch(glassAccentTintProvider)) ...[
+            const SizedBox(height: 12),
+            Text('Barva tónu', style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              'Hlavní ladí s pozadím, kontrastní je výrazná barva z obalu.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 8),
+            GlassSegmentedControl<bool>(
+              segments: const [
+                GlassSegment(value: true, label: 'Hlavní'),
+                GlassSegment(value: false, label: 'Kontrastní'),
+              ],
+              selected: ref.watch(glassTintMainProvider),
+              onChanged: ref.read(glassTintMainProvider.notifier).set,
+            ),
+          ],
         ],
       ),
     );
