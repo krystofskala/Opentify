@@ -95,13 +95,12 @@ class GlassTokens {
 
   /// Neutrální výplň skla -- žádné akcentové tónování na chrome.
   /// Světlý režim: bílá ~12 %, tmavý: černá ~26 % + náznak bílé.
-  static const double fillLight = 0.12;
-  static const double fillDark = 0.30;
-  static const double fillDarkWhiteHint = 0.04;
-
-  /// Tlumení zrna v tmavém režimu: tenký bílý závoj navíc (jen tmavý
-  /// režim, jen s neutrální výplní), aby se šum pozadí neprokreslil do skla.
-  static const double frostDark = 0.03;
+  /// Výrazný tón skla, ať se od okolí jasně odliší (s průhledným sklem se
+  /// lišty slévaly s pozadím -- živě nahlášeno): světlý režim bílá, tmavý
+  /// tmavě šedá (ne čistá černá).
+  static const double fillLight = 0.42;
+  static const double fillDark = 0.5;
+  static const Color fillDarkColor = Color(0xFF1E1E22);
 
   /// Tónování barvou skladby -- JEN plochy přehrávače, jemně.
   static const double playerTint = 0.14;

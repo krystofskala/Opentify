@@ -58,9 +58,9 @@ void main() {
   vec2 n = normalize(vec2(sdf(p + vec2(0.5, 0.0)) - sdf(p - vec2(0.5, 0.0)),
                           sdf(p + vec2(0.0, 0.5)) - sdf(p - vec2(0.0, 0.5))) + 1e-6);
   if (t < uBezel) q = p - n * snell(max(0.002, x)) * uStrength;
-  // Rozmazání: u hrany slabší (lom zůstane ostrý), ve středu plné.
-  float frost = uBlur < 0.5 ? 0.0 : 0.25 + 0.75 * smoothstep(0.0, 1.0, x);
-  vec3 col = mix(texture(uSharp, uvOf(q)).rgb, texture(uBlurred, uvOf(q)).rgb, frost);
+  // Rozmazání stejné přes celé sklo, lom láme už rozmazaný obraz -- dřív
+  // byla hrana čistší než střed a přechod byl vidět jako prstenec.
+  vec3 col = uBlur < 0.5 ? texture(uSharp, uvOf(q)).rgb : texture(uBlurred, uvOf(q)).rgb;
   // Vibrance (sytost kolem jasu) jako CSS saturate().
   float lum = dot(col, vec3(0.213, 0.715, 0.072));
   col = mix(vec3(lum), col, uSat);

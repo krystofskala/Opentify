@@ -16,7 +16,6 @@ import '../../theme/accent_color.dart';
 import '../../theme/glass_tokens.dart';
 import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
-import '../../state/glass_settings.dart';
 import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
 import '../../widgets/glass/glass.dart';
@@ -303,35 +302,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
     final isProvisioning = provisioningState?.isInFlight ?? false;
     final provisioningPct = provisioningState?.pct;
 
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    // Skoro čiré sklo (schváleno): animace pozadí má být vidět čistě, vrstvu
-    // nad ní ukazuje hlavně lom na hraně. Průhlednost skla v Profilu ubírá dál.
-    final veil = 1 - 0.7 * GlassSettings.clarityOf(context);
-    final sheetFill = Color.alphaBlend(
-      accent.withValues(alpha: 0.08 * veil),
-      Colors.black.withValues(alpha: (dark ? 0.12 : 0.30) * veil),
-    );
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Sklo panelu nad živým gradientem (ne mléčný závoj): jemné
-          // tónování barvou skladby + ztmavení kvůli čitelnosti bílého obsahu
-          // (světlý režim víc -- pastelový gradient), vnitřní horní lesk a
-          // vlasová zrcadlová hrana nahoře.
-          IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: sheetFill))),
-          const IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment(0, -0.55),
-                  colors: [Color(0x1FFFFFFF), Color(0x00FFFFFF)],
-                ),
-              ),
-            ),
-          ),
+          // Panel bez tónování (živě: "pozadí velkého přehrávače nemá být
+          // tónované vůbec") -- čisté živé pozadí, vrstvu ukazuje jen hrana.
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(
