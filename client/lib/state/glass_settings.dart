@@ -2,14 +2,13 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Profil › Vzhled › "Průhlednost skla": 0 = dnešní mléčné sklo, 1 = skoro
-/// čiré (méně rozmazání i výplně). Platí pro všechny skleněné prvky.
-class GlassClarityController extends StateNotifier<double> {
-  GlassClarityController() : super(0) {
+/// Jezdec 0..1 uložený v preferencích (výchozí 0.5 = dnešní vzhled).
+class GlassSliderController extends StateNotifier<double> {
+  GlassSliderController(this._prefKey) : super(0.5) {
     _load();
   }
 
-  static const _prefKey = 'appearance.glass_clarity';
+  final String _prefKey;
 
   Future<void> _load() async {
     try {
@@ -30,8 +29,45 @@ class GlassClarityController extends StateNotifier<double> {
   }
 }
 
-final glassClarityProvider =
-    StateNotifierProvider<GlassClarityController, double>((ref) => GlassClarityController());
+/// Profil › Vzhled › "Mléčnost skla": síla rozmazání obsahu pod sklem
+/// (0 = čiré, 0.5 = výchozí, 1 = dvojnásobné).
+final glassFrostProvider =
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_frost'));
+
+/// Profil › Vzhled › "Tón skla": síla výplně skla (0 = bez tónu, 0.5 =
+/// výchozí, 1 = dvojnásobná).
+final glassTintProvider =
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_tint'));
+
+/// Profil › Vzhled › "Tón v barvě skladby": sklo tónované barvou hrající
+/// skladby (tmavý odstín v tmavém režimu, světlý ve světlém) místo neutrální
+/// šedé/bílé -- lišty jsou na pozadí lépe vidět.
+class GlassAccentTintController extends StateNotifier<bool> {
+  GlassAccentTintController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.glass_accent_tint';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final glassAccentTintProvider =
+    StateNotifierProvider<GlassAccentTintController, bool>((ref) => GlassAccentTintController());
 
 /// Profil › Vzhled › "Skleněná tlačítka": šipka zpět a tlačítka v hlavičce
 /// jako skleněné kapky s lomem místo dnešních tmavých kroužků.
@@ -94,21 +130,31 @@ final liquidGlassProvider = StateNotifierProvider<LiquidGlassController, bool>((
 class GlassSettings extends InheritedWidget {
   const GlassSettings({
     super.key,
-    required this.clarity,
+    this.frost = 0.5,
+    this.tint = 0.5,
+    this.tintColor,
     required this.glassButtons,
     this.liquid = false,
     required super.child,
   });
 
-  final double clarity;
+  /// Jezdce 0..1, výchozí 0.5 (násobitel 2× hodnota).
+  final double frost;
+  final double tint;
+
+  /// Barva tónu místo neutrální (barva skladby), nebo `null`.
+  final Color? tintColor;
   final bool glassButtons;
   final bool liquid;
 
   static GlassSettings? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<GlassSettings>();
 
-  static double clarityOf(BuildContext context) => maybeOf(context)?.clarity ?? 0;
 
   @override
   bool updateShouldNotify(GlassSettings old) =>
-      old.clarity != clarity || old.glassButtons != glassButtons || old.liquid != liquid;
+      old.frost != frost ||
+      old.tint != tint ||
+      old.tintColor != tintColor ||
+      old.glassButtons != glassButtons ||
+      old.liquid != liquid;
 }

@@ -100,15 +100,20 @@ class GlassContainer extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final shape = glassShape(borderRadius);
-    // Profil › Vzhled › "Průhlednost skla": méně výplně i rozmazání.
-    final clarity = GlassSettings.clarityOf(context);
-    final veil = 1 - 0.7 * clarity;
+    // Profil › Vzhled: "Mléčnost skla" (rozmazání), "Tón skla" (výplň)
+    // a "Tón v barvě skladby" (barva výplně místo šedé/bílé).
+    final settings = GlassSettings.maybeOf(context);
+    final veil = 2 * (settings?.tint ?? 0.5);
+    double a(double alpha) => (alpha * veil).clamp(0.0, 0.95);
+    final base = switch (settings?.tintColor) {
+      final c? => _accentTone(c, isDark),
+      null => isDark ? GlassTokens.fillDarkColor : Colors.white,
+    };
 
     final fills = <Color>[
-      if (baseFill && isDark) GlassTokens.fillDarkColor.withValues(alpha: GlassTokens.fillDark * veil),
-      if (baseFill && !isDark) Colors.white.withValues(alpha: GlassTokens.fillLight * veil),
-      if (tint != null) tint!.withValues(alpha: tintOpacity * veil),
-      if (frost > 0) Colors.white.withValues(alpha: frost * veil),
+      if (baseFill) base.withValues(alpha: a(isDark ? GlassTokens.fillDark : GlassTokens.fillLight)),
+      if (tint != null) tint!.withValues(alpha: a(tintOpacity)),
+      if (frost > 0) Colors.white.withValues(alpha: a(frost)),
       if (emphasis > 0) Colors.white.withValues(alpha: emphasis),
     ];
     final fill = _flatten(fills);
@@ -118,7 +123,7 @@ class GlassContainer extends StatelessWidget {
       decoration: ShapeDecoration(shape: shape, color: fill),
       child: content,
     );
-    final sigma = blur ? blurSigma * (1 - 0.75 * clarity) : 0.0;
+    final sigma = blur ? blurSigma * 2 * (settings?.frost ?? 0.5) : 0.0;
     // Vibrance (`outer`) se aplikuje na výsledek rozmazání (`inner`) --
     // stejné pořadí jako CSS `backdrop-filter: blur() saturate()`.
     ImageFilter frosted() => ImageFilter.compose(
@@ -137,7 +142,7 @@ class GlassContainer extends StatelessWidget {
               child: LiquidGlass(
                 capture: liquidCapture,
                 radius: borderRadius.topLeft.x,
-                blurSigma: blur ? blurSigma * (1 - 0.75 * clarity) : 0,
+                blurSigma: sigma,
                 fill: fill ?? const Color(0x00000000),
                 saturation: saturation,
               ),
@@ -175,6 +180,16 @@ class GlassContainer extends StatelessWidget {
             )
           : glass,
     );
+  }
+
+  /// Tón skla v barvě skladby: tmavý odstín v tmavém režimu, světlý ve
+  /// světlém (čitelnost textu jako u neutrální výplně).
+  static Color _accentTone(Color c, bool isDark) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withSaturation((hsl.saturation * (isDark ? 0.7 : 0.55)).clamp(0.0, 1.0))
+        .withLightness(isDark ? 0.17 : 0.9)
+        .toColor();
   }
 
   static Color? _flatten(List<Color> layers) {

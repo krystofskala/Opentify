@@ -338,27 +338,88 @@ class _AppearanceCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Text('Průhlednost skla', style: theme.textTheme.titleSmall),
-          Text(
-            'Lišta, mini přehrávač, přehrávač a panely: od mléčného po čiré sklo.',
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          _GlassSlider(
+            title: 'Mléčnost skla',
+            subtitle: 'Jak moc sklo rozmazává obsah pod sebou.',
+            left: 'Čiré',
+            right: 'Mléčné',
+            provider: glassFrostProvider,
           ),
+          const SizedBox(height: 8),
+          _GlassSlider(
+            title: 'Tón skla',
+            subtitle: 'Jak moc je sklo zabarvené -- silnější tón líp odliší lišty od pozadí.',
+            left: 'Slabý',
+            right: 'Silný',
+            provider: glassTintProvider,
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
-              Text('Mléčné', style: theme.textTheme.labelSmall),
               Expanded(
-                child: Slider(
-                  value: ref.watch(glassClarityProvider),
-                  semanticFormatterCallback: (v) => '${(v * 100).round()} % průhlednosti',
-                  onChanged: ref.read(glassClarityProvider.notifier).preview,
-                  onChangeEnd: (_) => ref.read(glassClarityProvider.notifier).save(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Tón v barvě skladby', style: theme.textTheme.titleSmall),
+                    Text(
+                      'Sklo se zabarví barvou hrající skladby místo šedé (bílé ve světlém režimu).',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
               ),
-              Text('Čiré', style: theme.textTheme.labelSmall),
+              GlassSwitch(
+                value: ref.watch(glassAccentTintProvider),
+                semanticLabel: 'Tón v barvě skladby',
+                onChanged: ref.read(glassAccentTintProvider.notifier).set,
+              ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Jezdec nastavení skla (Profil › Vzhled).
+class _GlassSlider extends ConsumerWidget {
+  const _GlassSlider({
+    required this.title,
+    required this.subtitle,
+    required this.left,
+    required this.right,
+    required this.provider,
+  });
+
+  final String title;
+  final String subtitle;
+  final String left;
+  final String right;
+  final StateNotifierProvider<GlassSliderController, double> provider;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: theme.textTheme.titleSmall),
+        Text(subtitle, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        Row(
+          children: [
+            Text(left, style: theme.textTheme.labelSmall),
+            Expanded(
+              child: Slider(
+                value: ref.watch(provider),
+                semanticFormatterCallback: (v) => '$title ${(v * 100).round()} %',
+                onChanged: ref.read(provider.notifier).preview,
+                onChangeEnd: (_) => ref.read(provider.notifier).save(),
+              ),
+            ),
+            Text(right, style: theme.textTheme.labelSmall),
+          ],
+        ),
+      ],
     );
   }
 }

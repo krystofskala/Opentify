@@ -7,7 +7,7 @@ import 'state/glass_settings.dart';
 import 'state/grain_controller.dart';
 import 'state/theme_mode_controller.dart';
 import 'state/user_idle.dart';
-import 'theme/accent_color.dart' show accentTransitionCurve, accentTransitionDuration;
+import 'theme/accent_color.dart' show AnimatedAccent, accentTransitionCurve, accentTransitionDuration;
 import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
@@ -59,11 +59,23 @@ class OpentifyApp extends ConsumerWidget {
             fineGrain: ref.watch(fineGrainProvider),
             // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
             // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
-            child: GlassSettings(
-              clarity: ref.watch(glassClarityProvider),
-              glassButtons: ref.watch(glassButtonsProvider),
-              liquid: ref.watch(liquidGlassProvider),
-              child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
+            // Tón skla v barvě skladby se přebarvuje spolu s pozadím
+            // (`AnimatedAccent` = stejná délka a křivka).
+            child: AnimatedAccent(
+              color: seed,
+              builder: (context, tone) => GlassSettings(
+                frost: ref.watch(glassFrostProvider),
+                tint: ref.watch(glassTintProvider),
+                tintColor: ref.watch(glassAccentTintProvider) ? tone : null,
+                glassButtons: ref.watch(glassButtonsProvider),
+                liquid: ref.watch(liquidGlassProvider),
+                // Popisky při najetí myší rušily (živě nahlášeno) -- vypnuté
+                // všude; čtečka obrazovky je dostane dál.
+                child: TooltipVisibility(
+                  visible: false,
+                  child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
+                ),
+              ),
             ),
           ))),
     );
