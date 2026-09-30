@@ -71,6 +71,39 @@ class WikimediaClient:
 
         return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
 
+    async def _get_wikipedia_intro(self, lang: str, title: str) -> str | None:
+        """Celý úvodní oddíl článku (víc odstavců) -- REST summary vrací jen
+        první 2-3 věty a "Zobrazit vše" pak nemělo co ukázat (živě nahlášeno)."""
+        cache_key = f"wikipedia:intro:{lang}:{title}"
+
+        async def fetch() -> dict[str, Any] | None:
+            resp = await self._client.get(
+                f"https://{lang}.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "prop": "extracts",
+                    "exintro": "1",
+                    "explaintext": "1",
+                    "redirects": "1",
+                    "format": "json",
+                    "titles": title,
+                },
+            )
+            resp.raise_for_status()
+            pages = (resp.json().get("query") or {}).get("pages") or {}
+            page = next(iter(pages.values()), {})
+            return {"extract": page.get("extract")}
+
+        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        text = ((data or {}).get("extract") or "").strip()
+        if not text:
+            return None
+        # Rozumný strop -- úvod bývá pár odstavců, výjimečně stránka textu.
+        if len(text) > 2400:
+            cut = text[:2400].rsplit(". ", 1)[0]
+            text = cut + "."
+        return text
+
     async def get_bio_from_wikidata(self, wikidata_qid: str) -> str | None:
         """`wikidata_qid` je jen `Q...` část URL (viz
         `CatalogService._extract_wikidata_qid`). Zkusí čeština -> angličtina,
@@ -90,6 +123,12 @@ class WikimediaClient:
             if not sitelink or not sitelink.get("title"):
                 continue
             lang = _WIKI_TO_LANG[wiki_key]
+            try:
+                intro = await self._get_wikipedia_intro(lang, sitelink["title"])
+            except httpx.HTTPError:
+                intro = None
+            if intro:
+                return intro
             try:
                 summary = await self._get_wikipedia_summary(lang, sitelink["title"])
             except httpx.HTTPError:

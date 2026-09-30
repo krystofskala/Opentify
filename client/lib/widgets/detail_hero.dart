@@ -563,13 +563,51 @@ class _FadedMedia extends StatelessWidget {
 /// Široké okno: M3 Expressive kompozice přímo na živém pozadí (bez
 /// skleněného boxu) -- velký obal/fotka (kruh u interpreta) na hravých
 /// tvarech se zrnitým gradientem v barvě stránky, informační blok vpravo.
-class _WideHeroBox extends StatelessWidget {
+class _WideHeroBox extends StatefulWidget {
   const _WideHeroBox({required this.hero});
 
   final DetailHeroAppBar hero;
 
   @override
+  State<_WideHeroBox> createState() => _WideHeroBoxState();
+}
+
+/// Příchod interpreta: fotka se z kruhu přelije do svého tvaru a samolepky
+/// postupně "vyskočí" (M3 Expressive pružiny). Při "omezit pohyb" hned hotovo.
+class _WideHeroBoxState extends State<_WideHeroBox> with SingleTickerProviderStateMixin {
+  late final AnimationController _intro =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1400));
+  static final Set<String> _played = {};
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_intro.isAnimating || _intro.value > 0) return;
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    // Jen při prvním příchodu na interpreta -- hlavička se při scrollu
+    // odebírá a znovu přidává, animace by se jinak opakovala.
+    if (!widget.hero.thumbnailCircle || reduceMotion || !_played.add(widget.hero.title)) {
+      _intro.value = 1;
+    } else {
+      _intro.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _intro.dispose();
+    super.dispose();
+  }
+
+  /// Úsek celkové animace [from, to] přemapovaný na 0..1 a prohnaný pružinou.
+  double _phase(double from, double to, Curve curve) {
+    final v = ((_intro.value - from) / (to - from)).clamp(0.0, 1.0);
+    return curve.transform(v);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final hero = widget.hero;
     final cover = DetailHeroAppBar._wideCoverSize(MediaQuery.sizeOf(context).width);
     // Samolepky jen u interpreta (fotka ve tvaru je naše kompozice). Obal
     // alba je sám o sobě dílo -- tvar přes něj by ho jen zakryl.
@@ -585,21 +623,40 @@ class _WideHeroBox extends StatelessWidget {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                _WideCover(hero: hero, size: cover, look: look),
+                AnimatedBuilder(
+                  animation: _intro,
+                  builder: (context, _) {
+                    final morph = _phase(0, 0.6, Motion.enter);
+                    return Transform.scale(
+                      scale: 0.9 + 0.1 * morph,
+                      child: _WideCover(hero: hero, size: cover, look: look, morph: morph),
+                    );
+                  },
+                ),
                 // Malé "samolepky" kolem fotky (schválená varianta C) -- každý
                 // interpret jiný tvar, místo a velikost, u jednoho vždy stejné.
                 if (look != null)
-                  for (final s in look.stickers)
+                  for (final (i, s) in look.stickers.indexed)
                     Positioned(
                       left: cover * s.x,
                       top: cover * s.y,
                       width: cover * s.size,
                       height: cover * s.size,
-                      child: RepaintBoundary(
-                        child: AnimatedAccent(
-                          color: accent,
-                          builder: (context, c) =>
-                              CustomPaint(painter: _StickerPainter(c, s.shape, s.hueShift, s.spin)),
+                      child: AnimatedBuilder(
+                        animation: _intro,
+                        builder: (context, child) {
+                          final pop = _phase(0.35 + i * 0.15, 0.85 + i * 0.15, Motion.press);
+                          return Transform.rotate(
+                            angle: (1 - pop) * -0.9,
+                            child: Transform.scale(scale: pop.clamp(0.0, 1.3), child: child),
+                          );
+                        },
+                        child: RepaintBoundary(
+                          child: AnimatedAccent(
+                            color: accent,
+                            builder: (context, c) =>
+                                CustomPaint(painter: _StickerPainter(c, s.shape, s.hueShift, s.spin)),
+                          ),
                         ),
                       ),
                     ),
@@ -720,11 +777,14 @@ class _ArtistLook {
 /// "cookie" (výrazný avatar); album/playlist: zaoblený čtverec -- cookie by
 /// ořízl rohy obalu (text, logo).
 class _WideCover extends StatelessWidget {
-  const _WideCover({required this.hero, required this.size, this.look});
+  const _WideCover({required this.hero, required this.size, this.look, this.morph = 1});
 
   final DetailHeroAppBar hero;
   final double size;
   final _ArtistLook? look;
+
+  /// 0 = kruh, 1 = tvar interpreta (příchodová animace).
+  final double morph;
 
   @override
   Widget build(BuildContext context) {
@@ -742,7 +802,13 @@ class _WideCover extends StatelessWidget {
     }
     if (hero.thumbnailCircle) {
       final l = look ?? _ArtistLook.of(hero.title);
-      final path = expressivePath(Offset.zero & Size.square(size), l.photo, null, 0, l.photoSpin);
+      final path = expressivePath(
+        Offset.zero & Size.square(size),
+        const ExpressiveShape.circle(),
+        l.photo,
+        morph,
+        l.photoSpin,
+      );
       return SizedBox.square(
         dimension: size,
         child: CustomPaint(
@@ -1220,35 +1286,52 @@ class _HeroTeaserState extends State<HeroTeaser> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final style = theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant, height: 1.4);
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: AnimatedSize(
-            duration: Motion.enter.duration,
-            curve: Motion.enter,
-            alignment: Alignment.topCenter,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.text,
-                  maxLines: _expanded ? null : 2,
-                  overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant, height: 1.4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // "Zobrazit vše" jen když text opravdu přesahuje 2 řádky -- dřív byl
+          // odkaz i pod krátkým textem a nedělal nic (živě nahlášeno).
+          final painter = TextPainter(
+            text: TextSpan(text: widget.text, style: style),
+            maxLines: 2,
+            textDirection: Directionality.of(context),
+            textScaler: MediaQuery.textScalerOf(context),
+          )..layout(maxWidth: constraints.maxWidth);
+          final overflows = painter.didExceedMaxLines;
+          painter.dispose();
+          final text = Text(
+            widget.text,
+            maxLines: _expanded || !overflows ? null : 2,
+            overflow: _expanded || !overflows ? TextOverflow.visible : TextOverflow.ellipsis,
+            style: style,
+          );
+          if (!overflows) return text;
+          return MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: AnimatedSize(
+                duration: Motion.enter.duration,
+                curve: Motion.enter,
+                alignment: Alignment.topCenter,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    text,
+                    const SizedBox(height: 2),
+                    Text(
+                      _expanded ? 'Zobrazit méně' : 'Zobrazit vše',
+                      style: theme.textTheme.labelLarge?.copyWith(color: scheme.primary, fontWeight: FontWeight.w800),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  _expanded ? 'Zobrazit méně' : 'Zobrazit vše',
-                  style: theme.textTheme.labelLarge?.copyWith(color: scheme.primary, fontWeight: FontWeight.w800),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
