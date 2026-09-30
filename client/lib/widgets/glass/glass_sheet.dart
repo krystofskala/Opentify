@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../theme/glass_tokens.dart';
 import '../glass_container.dart';
+import '../now_playing_sheet.dart' show NowPlayingSheetController;
+import 'liquid_glass.dart';
 
 /// Otevře sheet na kořenovém navigátoru (nad plovoucí navigací) --
 /// jednotný vstup pro všechny sheety/menu v appce.
 Future<T?> showGlassSheet<T>(BuildContext context, {required WidgetBuilder builder}) {
+  // Lom skla: nad přehrávačem láme přehrávač, jinak stránku pod sebou.
+  final capture =
+      (NowPlayingSheetController.maybeOf(context)?.isOpen ?? false) ? playerLiquidCapture : routeLiquidCapture;
   return showModalBottomSheet<T>(
     context: context,
     useRootNavigator: true,
@@ -14,7 +19,7 @@ Future<T?> showGlassSheet<T>(BuildContext context, {required WidgetBuilder build
     elevation: 0,
     // Jedna animace pro všechny sheety (pružné vysunutí, rychlé zasunutí).
     sheetAnimationStyle: Motion.sheet,
-    builder: builder,
+    builder: (context) => LiquidCaptureScope(capture: capture, child: builder(context)),
   );
 }
 
@@ -70,6 +75,7 @@ class GlassSheet extends StatelessWidget {
     );
     const radius = BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius));
     // Všechny sheety stejné sklo jako lišty (i s lemem); `tint` už nic nemění.
-    return GlassContainer(rim: true, borderRadius: radius, fit: expand ? StackFit.expand : StackFit.loose, child: body);
+    return GlassContainer(
+        rim: true, liquid: true, borderRadius: radius, fit: expand ? StackFit.expand : StackFit.loose, child: body);
   }
 }

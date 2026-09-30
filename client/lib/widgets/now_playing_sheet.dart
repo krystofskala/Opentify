@@ -55,6 +55,9 @@ class NowPlayingSheetController {
   /// 0 = zasunuto, 1 = rozbaleno.
   Animation<double> get position => _anim;
 
+  static NowPlayingSheetController? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<_NowPlayingSheetScope>()?.controller;
+
   static NowPlayingSheetController of(BuildContext context) {
     final scope = context.getInheritedWidgetOfExactType<_NowPlayingSheetScope>();
     assert(scope != null, 'NowPlayingSheetHost chybí nad Navigatorem');

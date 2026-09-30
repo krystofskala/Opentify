@@ -1087,29 +1087,34 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         child: SizedBox(
           width: 460,
           height: height,
-          child: GlassContainer(
-            rim: true,
-            borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
-            padding: const EdgeInsets.only(top: 8),
-            fit: StackFit.expand,
-            child: AnimatedSwitcher(
-              duration: Motion.state.duration,
-              switchInCurve: Motion.state,
-              child: _lastSide == _SidePanel.queue
-                  ? const Column(
-                      key: ValueKey('queue'),
-                      children: [
-                        SizedBox(
-                          height: 40,
-                          child: Center(
-                            child:
-                                Text('FRONTA', style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2)),
+          // PC: sloupec s textem/frontou láme pozadí přehrávače.
+          child: LiquidCaptureScope(
+            capture: backgroundLiquidCapture,
+            child: GlassContainer(
+              rim: true,
+              liquid: true,
+              borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
+              padding: const EdgeInsets.only(top: 8),
+              fit: StackFit.expand,
+              child: AnimatedSwitcher(
+                duration: Motion.state.duration,
+                switchInCurve: Motion.state,
+                child: _lastSide == _SidePanel.queue
+                    ? const Column(
+                        key: ValueKey('queue'),
+                        children: [
+                          SizedBox(
+                            height: 40,
+                            child: Center(
+                              child: Text('FRONTA',
+                                  style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2)),
+                            ),
                           ),
-                        ),
-                        Expanded(child: QueueView()),
-                      ],
-                    )
-                  : LyricsView(key: const ValueKey('lyrics'), recordingId: recordingId),
+                          Expanded(child: QueueView()),
+                        ],
+                      )
+                    : LyricsView(key: const ValueKey('lyrics'), recordingId: recordingId),
+              ),
             ),
           ),
         ),

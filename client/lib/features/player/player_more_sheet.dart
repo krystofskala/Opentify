@@ -74,6 +74,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
       child: GlassContainer.frosted(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
         tint: accent,
+        liquid: true,
         shadow: false,
         // Obsah vždy světlý na barevném skle (jako přehrávač), nezávisle na
         // světlém/tmavém režimu systému.

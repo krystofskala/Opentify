@@ -22,6 +22,8 @@ Future<void> showSpotifyImportReport(BuildContext context, SpotifyImportResult r
       maxChildSize: 0.92,
       builder: (context, scrollController) => GlassContainer(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+        rim: true,
+        liquid: true,
         shadow: false,
         fit: StackFit.expand,
         padding: const EdgeInsets.only(top: AppSpacing.md),

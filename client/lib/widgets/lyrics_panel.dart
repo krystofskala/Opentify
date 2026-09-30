@@ -51,6 +51,7 @@ class _LyricsPanel extends ConsumerWidget {
           // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač pod ním.
           borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
           tint: accentColor,
+          liquid: true,
           fit: StackFit.expand,
           child: Column(
             children: [
