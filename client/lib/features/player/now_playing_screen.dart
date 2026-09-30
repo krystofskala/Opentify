@@ -19,7 +19,6 @@ import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
-import '../../widgets/glass/expressive_skip_button.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart';
 import '../../widgets/net_image.dart';
@@ -871,29 +870,44 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // Rovnoměrné rozestupy (živě nahlášeno: nahoře zbytečná mezera,
           // spodní řádek přimáčknutý).
           const SizedBox(height: 6),
-          // Spojená skupina Předchozí · Přehrát · Další (M3 Expressive, jako
-          // PixelPlay) přes celou šířku.
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              Expanded(
-                child: ExpressivePlayerGroup(
-                  isPlaying: playback.isPlaying,
-                  // Bez předchozí skladby `previous()` přetočí na začátek.
-                  onPrevious: () => _skip(forward: false),
-                  onPlayPause: playback.isBuffering ? null : controller.togglePlayPause,
-                  onNext: playback.hasNext ? () => _skip(forward: true) : null,
-                  playColor: Colors.white,
-                  playIconColor: accent,
-                  playChild: playback.isBuffering
+              IconButton(
+                icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
+                // Bez předchozí skladby `previous()` přetočí na začátek.
+                onPressed: () => _skip(forward: false),
+              ),
+              // M3 Expressive: play = "cookie" tvar, pauza = squircle --
+              // tvar pružinou morfuje se stavem.
+              GlassPressable(
+                onPressed: playback.isBuffering ? null : controller.togglePlayPause,
+                shape: const CircleBorder(),
+                semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
+                child: ExpressiveMorph(
+                  size: 76,
+                  color: Colors.white,
+                  shape: playback.isPlaying
+                      ? const ExpressiveShape.squircle()
+                      : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
+                  child: playback.isBuffering
                       ? (isProvisioning && provisioningPct != null
                           ? SizedBox.square(
-                              dimension: 34,
+                              dimension: 40,
                               child: CircularProgressIndicator(
                                   strokeWidth: 3, color: accent, value: provisioningPct / 100),
                             )
-                          : ExpressiveLoadingIndicator(size: 36, color: accent))
-                      : null,
+                          : ExpressiveLoadingIndicator(size: 40, color: accent))
+                      : Icon(
+                          playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
+                          size: 44,
+                          color: accent,
+                        ),
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Symbols.skip_next_rounded, color: Colors.white, size: 34),
+                onPressed: playback.hasNext ? () => _skip(forward: true) : null,
               ),
             ],
           ),
