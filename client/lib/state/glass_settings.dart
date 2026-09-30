@@ -61,17 +61,54 @@ class GlassButtonsController extends StateNotifier<bool> {
 
 final glassButtonsProvider = StateNotifierProvider<GlassButtonsController, bool>((ref) => GlassButtonsController());
 
+/// Profil › Vzhled › "Lom skla (test)": sklo mini přehrávače láme obsah pod
+/// sebou shaderem nad zachyceným snímkem (`LiquidGlass`). Výchozí zapnuto,
+/// dokud se testuje -- vypnout, kdyby se rozbily obaly nebo trhalo.
+class LiquidGlassController extends StateNotifier<bool> {
+  LiquidGlassController() : super(true) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.liquid_glass_test';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final liquidGlassProvider = StateNotifierProvider<LiquidGlassController, bool>((ref) => LiquidGlassController());
+
 /// Nastavení skla pro celý strom (`GlassContainer` je bez Riverpodu).
 class GlassSettings extends InheritedWidget {
-  const GlassSettings({super.key, required this.clarity, required this.glassButtons, required super.child});
+  const GlassSettings({
+    super.key,
+    required this.clarity,
+    required this.glassButtons,
+    this.liquid = false,
+    required super.child,
+  });
 
   final double clarity;
   final bool glassButtons;
+  final bool liquid;
 
   static GlassSettings? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<GlassSettings>();
 
   static double clarityOf(BuildContext context) => maybeOf(context)?.clarity ?? 0;
 
   @override
-  bool updateShouldNotify(GlassSettings old) => old.clarity != clarity || old.glassButtons != glassButtons;
+  bool updateShouldNotify(GlassSettings old) =>
+      old.clarity != clarity || old.glassButtons != glassButtons || old.liquid != liquid;
 }

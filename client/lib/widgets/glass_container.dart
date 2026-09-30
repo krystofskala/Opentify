@@ -8,6 +8,7 @@ import '../state/glass_settings.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
 import 'glass/glass_rim.dart';
+import 'glass/liquid_glass.dart';
 
 /// Liquid Glass materiál (viz pravidla v `theme/glass_tokens.dart`):
 /// rozmazání + vibrance (sytost/jas obsahu ZA sklem), NEUTRÁLNÍ výplň,
@@ -36,6 +37,7 @@ class GlassContainer extends StatelessWidget {
     this.baseFill = true,
     this.fit = StackFit.loose,
     this.rim = false,
+    this.liquid = false,
   });
 
   /// Hustě namrzlé sklo přehrávače: silné rozmazání + vibrance, jemné
@@ -51,6 +53,7 @@ class GlassContainer extends StatelessWidget {
     this.showEdgeHighlight = true,
     this.fit = StackFit.loose,
     this.rim = false,
+    this.liquid = false,
   })  : saturation = GlassTokens.vibrancy,
         tintOpacity = GlassTokens.playerTint,
         blur = true,
@@ -89,6 +92,10 @@ class GlassContainer extends StatelessWidget {
   /// mini přehrávač, ovládání přehrávače, skleněná tlačítka).
   final bool rim;
 
+  /// Sklo se skutečným lomem obsahu pod sebou (`LiquidGlass`, test) --
+  /// jen uvnitř `LiquidScope` a se zapnutým "Lom skla (test)".
+  final bool liquid;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -108,6 +115,7 @@ class GlassContainer extends StatelessWidget {
     ];
     final fill = _flatten(fills);
     final content = padding == null ? child : Padding(padding: padding!, child: child);
+    final liquidCapture = liquid && (GlassSettings.maybeOf(context)?.liquid ?? false) ? LiquidScope.maybeOf(context) : null;
     final Widget surface = DecoratedBox(
       decoration: ShapeDecoration(shape: shape, color: fill),
       child: content,
@@ -125,7 +133,19 @@ class GlassContainer extends StatelessWidget {
       child: Stack(
         fit: fit,
         children: [
-          if (rim) ...[
+          if (liquidCapture != null) ...[
+            // Lom, rozmazání, výplň i lem kreslí shader nad zachyceným obsahem.
+            Positioned.fill(
+              child: LiquidGlass(
+                capture: liquidCapture,
+                radius: borderRadius.topLeft.x,
+                blurSigma: blur ? blurSigma * (1 - 0.75 * clarity) : 0,
+                fill: fill ?? const Color(0x00000000),
+                saturation: saturation,
+              ),
+            ),
+            content,
+          ] else if (rim) ...[
             // Lem čte ostrý obsah pod hranou; rozmazání je až za ním.
             Positioned.fill(child: GlassRim(borderRadius: borderRadius)),
             if (blur)

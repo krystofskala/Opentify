@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../core/reduced_motion.dart';
 import '../theme/accent_color.dart' show CoverCharacter, isAchromatic;
+import 'glass/liquid_glass.dart' show LiquidSource;
 
 /// Globální pozadí appky -- tekuté zrnité gradienty (reference: "50 Grainy
 /// Gradients", generativní Figma gradienty) v jednom fragment shaderu
@@ -304,7 +305,8 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
           children: [
             // Každá vrstva přímé dítě `Stack`u -- `Positioned` uvnitř
             // `RepaintBoundary` dřív shazoval release build.
-            RepaintBoundary(child: IgnorePointer(child: CustomPaint(painter: painter))),
+            // Hranice vrstvy + zdroj snímku pro sklo s lomem (`LiquidGlass`).
+            LiquidSource.background(child: IgnorePointer(child: CustomPaint(painter: painter))),
             widget.child,
           ],
         ),

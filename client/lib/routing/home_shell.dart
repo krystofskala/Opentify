@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../widgets/glass/glass.dart';
+import '../widgets/glass/liquid_glass.dart';
 import '../widgets/player_bar.dart';
 
 /// Bottom-nav shell pro čtyři hlavní destinace (Domů/Hledat/Knihovna/Profil) --
@@ -26,9 +27,12 @@ class HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // `LiquidScope` + `LiquidSource.page`: obsah stránky pod lištami jde
+    // zachytit pro sklo s lomem (Profil › Vzhled › "Lom skla (test)").
+    return LiquidScope(
+        child: Scaffold(
       extendBody: true,
-      body: navigationShell,
+      body: LiquidSource.page(child: navigationShell),
       // Na širokém okně plovoucí skupina (přehrávač + tab bar) uprostřed s
       // omezenou šířkou -- ne pruh přes celých 2000 px.
       bottomNavigationBar: Align(
@@ -54,7 +58,7 @@ class HomeShell extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

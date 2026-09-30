@@ -222,6 +222,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
               borderRadius: BorderRadius.circular(GlassTokens.tabBarHeight / 2),
               shadow: widget.shadow,
               rim: true,
+              liquid: true,
               child: MediaQuery.removePadding(
                 context: context,
                 removeBottom: true,

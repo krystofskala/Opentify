@@ -58,6 +58,7 @@ flutter:
   # Animované zrnité pozadí (lib/widgets/app_background.dart).
   shaders:
     - shaders/chroma_grain.frag
+    - shaders/liquid_glass.frag
 
   # PixelPlay-inspired jednotný zaoblený typeface napříč appkou (viz
   # lib/theme/app_theme.dart) -- bundlovaný OFL soubor, ne `google_fonts`

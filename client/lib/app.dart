@@ -62,6 +62,7 @@ class OpentifyApp extends ConsumerWidget {
             child: GlassSettings(
               clarity: ref.watch(glassClarityProvider),
               glassButtons: ref.watch(glassButtonsProvider),
+              liquid: ref.watch(liquidGlassProvider),
               child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
             ),
           ))),

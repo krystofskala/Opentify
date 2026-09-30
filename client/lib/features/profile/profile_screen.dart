@@ -316,6 +316,28 @@ class _AppearanceCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Lom skla (test)', style: theme.textTheme.titleSmall),
+                    Text(
+                      'Mini přehrávač láme obsah pod sebou jako Liquid Glass. Vypni, kdyby trhal nebo zčernaly obaly.',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              GlassSwitch(
+                value: ref.watch(liquidGlassProvider),
+                semanticLabel: 'Lom skla (test)',
+                onChanged: ref.read(liquidGlassProvider.notifier).set,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Text('Průhlednost skla', style: theme.textTheme.titleSmall),
           Text(
             'Lišta, mini přehrávač, přehrávač a panely: od mléčného po čiré sklo.',
