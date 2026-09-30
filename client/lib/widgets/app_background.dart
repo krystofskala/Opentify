@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../core/reduced_motion.dart';
-import '../theme/accent_color.dart' show CoverCharacter, isAchromatic;
+import '../theme/accent_color.dart' show CoverCharacter, accentTransitionDuration, isAchromatic;
 import 'glass/liquid_glass.dart' show LiquidSource;
 
 /// Globální pozadí appky -- tekuté zrnité gradienty (reference: "50 Grainy
@@ -97,7 +97,8 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
 
   // Delší přechod -- zrno se přebarvuje zrnko po zrnku (shader), má to být
   // pozvolné, ne blik.
-  static const _tweenSeconds = 2.8;
+  // Stejně jako přebarvení UI (`accentTransitionDuration`) -- vše najednou.
+  static final double _tweenSeconds = accentTransitionDuration.inMilliseconds / 1000;
   static const _staggerSeconds = 0.06;
 
   // Hosté (další barvy obalu) ve světlém záblesku (slot p4): po jednom se

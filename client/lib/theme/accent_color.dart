@@ -269,7 +269,10 @@ Color normalizeAccent(Color color) {
 
 /// Jednotná délka/křivka všech barevných přechodů (téma, přehrávač,
 /// hlavičky, pozadí) -- ať se všechno přebarví najednou a stejně rychle.
-const accentTransitionDuration = Duration(milliseconds: 700);
+/// Stejně dlouho jako přebarvení pozadí zrnko po zrnku (`AppBackground`
+/// ji používá taky) -- dřív UI 0,7 s a pozadí 2,8 s, takže tlačítka
+/// a lišty měly novou barvu dávno před pozadím (živě nahlášeno).
+const accentTransitionDuration = Duration(milliseconds: 2800);
 const accentTransitionCurve = Curves.easeInOutCubic;
 
 /// Plynule animovaná barva nálady -- pro místa, co barvu čtou přímo
