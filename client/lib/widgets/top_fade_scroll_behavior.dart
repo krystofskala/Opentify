@@ -8,6 +8,11 @@ import 'package:flutter/rendering.dart';
 class TopFadeScrollBehavior extends MaterialScrollBehavior {
   const TopFadeScrollBehavior();
 
+  /// Žádné posuvníky (na PC je Material ukazuje u každého seznamu a
+  /// rozbíjely dojem skla -- živě nahlášeno). Scroll kolečkem/tažením dál jde.
+  @override
+  Widget buildScrollbar(BuildContext context, Widget child, ScrollableDetails details) => child;
+
   @override
   Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
     final base = super.buildOverscrollIndicator(context, child, details);

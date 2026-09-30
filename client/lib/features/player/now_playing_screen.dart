@@ -19,6 +19,7 @@ import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
+import '../../state/providers.dart' show catalogRepositoryProvider;
 import '../../widgets/glass/glass.dart';
 import '../../widgets/glass/liquid_glass.dart';
 import '../../widgets/lyrics_panel.dart';
@@ -809,6 +810,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     TrackProvisioningState? provisioningState,
   ) {
     final nowPlaying = playback.nowPlaying!;
+    // Fronta z playlistu/rádia často album nenese -- dohledat ho, ať název
+    // vždy vede na album (živě: odkaz zmizel).
+    final releaseId = nowPlaying.releaseId ?? ref.watch(_releaseOfRecording(nowPlaying.recordingId)).valueOrNull;
     return AnimatedBuilder(
       animation: _carousel,
       builder: (context, child) => Opacity(
@@ -819,9 +823,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         mainAxisSize: MainAxisSize.min,
         children: [
           GestureDetector(
-            onTap: nowPlaying.releaseId == null
+            onTap: releaseId == null
                 ? null
-                : () => _openAfterClose('/releases/${nowPlaying.releaseId}?track=${nowPlaying.recordingId}'),
+                : () => _openAfterClose('/releases/$releaseId?track=${nowPlaying.recordingId}'),
             child: Text(
               nowPlaying.title,
               textAlign: TextAlign.center,
@@ -840,8 +844,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.78),
                   fontSize: 16,
-                  decoration: nowPlaying.artistId != null ? TextDecoration.underline : null,
-                  decorationColor: Colors.white.withValues(alpha: 0.4),
                 ),
               ),
             ),
@@ -1282,3 +1284,13 @@ class _LivingClipper extends CustomClipper<Path> {
   bool shouldReclip(_LivingClipper old) =>
       old.t != t || old.spin != spin || old.live != live || old.a != a || old.b != b;
 }
+
+
+/// Album nahrávky, když ho položka fronty nenese (`GET /catalog/recordings`).
+final _releaseOfRecording = FutureProvider.family<String?, String>((ref, recordingId) async {
+  try {
+    return (await ref.read(catalogRepositoryProvider).getRecording(recordingId)).releaseId;
+  } catch (_) {
+    return null;
+  }
+});
