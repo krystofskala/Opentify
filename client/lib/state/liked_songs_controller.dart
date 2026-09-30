@@ -54,3 +54,45 @@ final likedSongsControllerProvider =
     StateNotifierProvider<LikedSongsController, AsyncValue<Set<String>>>((ref) {
   return LikedSongsController(ref.watch(libraryRepositoryProvider));
 });
+
+/// Zlomená srdce (dlouhé podržení srdíčka): skladby, které uživatel nechce
+/// slyšet -- server je vyřadí z Oblíbených i z výběrů (mixy, rádia).
+class DislikedController extends StateNotifier<Set<String>> {
+  DislikedController(this._ref, this._repo) : super(const {}) {
+    _load();
+  }
+
+  final Ref _ref;
+  final LibraryRepository _repo;
+
+  Future<void> _load() async {
+    try {
+      final ids = await _repo.dislikedIds();
+      if (mounted) state = ids;
+    } catch (_) {}
+  }
+
+  bool isDisliked(String recordingId) => state.contains(recordingId);
+
+  /// Zlomí srdce (a odebere z Oblíbených), nebo ho zase spraví.
+  Future<void> toggle(String recordingId) async {
+    final was = state.contains(recordingId);
+    state = was ? ({...state}..remove(recordingId)) : {...state, recordingId};
+    try {
+      if (was) {
+        await _repo.undislikeSong(recordingId);
+      } else {
+        if (_ref.read(likedSongsControllerProvider.notifier).isLiked(recordingId)) {
+          await _ref.read(likedSongsControllerProvider.notifier).toggle(recordingId);
+        }
+        await _repo.dislikeSong(recordingId);
+      }
+    } catch (_) {
+      state = was ? {...state, recordingId} : ({...state}..remove(recordingId));
+    }
+  }
+}
+
+final dislikedProvider = StateNotifierProvider<DislikedController, Set<String>>((ref) {
+  return DislikedController(ref, ref.watch(libraryRepositoryProvider));
+});

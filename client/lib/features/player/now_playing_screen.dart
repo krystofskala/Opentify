@@ -10,8 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../widgets/like_heart.dart';
 import '../../state/audio_player_controller.dart';
-import '../../state/liked_songs_controller.dart';
 import '../../state/provisioning_controller.dart';
 import '../../theme/accent_color.dart';
 import '../../theme/glass_tokens.dart';
@@ -591,9 +591,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       );
 
   Widget _header(BuildContext context, NowPlayingInfo nowPlaying, Color accent) {
-    final isLiked = ref.watch(
-      likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(nowPlaying.recordingId) ?? false),
-    );
     final sourceLabel = ref.watch(audioPlayerControllerProvider.select((s) => s.queueSourceLabel));
     // Obě strany stejně široké, jinak titulek "Přehrává se" není opticky
     // uprostřed (živě nahlášeno). Mobil: 1 + 1 tlačítko, PC: 1 + 2.
@@ -659,16 +656,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             children: [
               // Mobil: srdíčko je v řádku pod ovládáním -- lišta by jinak
               // titulek "Přehrává se" zmáčkla do dvou řádků (živě nahlášeno).
-              if (!narrow)
-                IconButton(
-                  icon: Icon(
-                    isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-                    color: isLiked ? Colors.redAccent : Colors.white,
-                    size: 24,
-                  ),
-                  tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                  onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
-                ),
+              if (!narrow) LikeHeart(recordingId: nowPlaying.recordingId, color: Colors.white),
               IconButton(
                 icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
                 tooltip: 'Další možnosti',
@@ -925,18 +913,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   Widget _likeButton(AudioPlayerState playback) {
     final id = playback.nowPlaying!.recordingId;
-    final isLiked = ref.watch(likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(id) ?? false));
-    return IconButton(
-      visualDensity: VisualDensity.compact,
-      icon: Icon(
-        isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-        fill: isLiked ? 1 : 0,
-        color: isLiked ? Colors.redAccent : Colors.white70,
-        size: 22,
-      ),
-      tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-      onPressed: () => ref.read(likedSongsControllerProvider.notifier).toggle(id),
-    );
+    return LikeHeart(recordingId: id, size: 22, color: Colors.white70);
   }
 
   Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {

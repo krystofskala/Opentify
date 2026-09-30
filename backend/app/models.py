@@ -198,6 +198,16 @@ class Listen(SQLModel, table=True):
     lb_error: str | None = None
 
 
+class RecordingDislike(SQLModel, table=True):
+    """Zlomené srdce -- skladba, kterou uživatel nechce slyšet (viz
+    app/library/dislikes.py)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    recording_id: str = Field(foreign_key="recording.id", index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class ListenLater(SQLModel, table=True):
     """"Poslechnout později" -- skladba, album nebo interpret, na které teď
     není nálada. Po poslechnutí se samo označí `listened_at` (viz

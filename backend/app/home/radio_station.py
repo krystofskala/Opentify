@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from app.library.dislikes import without_disliked
 from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.db import engine
@@ -144,7 +145,7 @@ def _save(user_id: str, kind: str, target_id: str, name: str, recording_ids: lis
             session.flush()
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
-        for position, recording_id in enumerate(recording_ids):
+        for position, recording_id in enumerate(without_disliked(user_id, recording_ids)):
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         now = utcnow()
         what = {"track": "skladby", "album": "alba", "playlist": "playlistu", "artist": "interpreta"}[kind]

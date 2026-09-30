@@ -1,3 +1,4 @@
+import 'like_heart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -412,15 +413,8 @@ class _RowTileState extends State<_RowTile> {
                               ),
                             ),
                           ),
-                        IconButton(
-                          icon: Icon(
-                            w.isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-                            fill: w.isLiked ? 1 : 0,
-                            color: w.isLiked ? Colors.redAccent : null,
-                          ),
-                          tooltip: w.isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                          onPressed: w.onToggleLike,
-                        ),
+                        // Stahování vlevo od srdíčka, srdíčko u pravé hrany --
+                        // stažené skladby ikonu nemají a srdíčka pořád lícují.
                         _Trailing(
                           isAvailable: w.isAvailable,
                           isInFlight: w.isInFlight,
@@ -429,6 +423,7 @@ class _RowTileState extends State<_RowTile> {
                           onTap: w.onTap,
                           onRetry: w.onRetry,
                         ),
+                        LikeHeart(recordingId: w.recording.id),
                         if (wide)
                           IconButton(
                             icon: const Icon(Symbols.more_horiz_rounded),
@@ -628,8 +623,7 @@ class _Trailing extends StatelessWidget {
         ),
       );
     }
-    // Dostupná skladba: bez ikony (klepnutí na řádek přehraje), jen místo,
-    // ať srdíčka ve všech řádcích lícují.
+    // Dostupná skladba: bez ikony (klepnutí na řádek přehraje), jen místo.
     if (isAvailable) return const SizedBox(width: 48, height: 48);
     return IconButton(
       icon: Icon(isFailed ? Symbols.refresh_rounded : Symbols.download_rounded),

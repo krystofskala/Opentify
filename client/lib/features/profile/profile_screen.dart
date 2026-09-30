@@ -338,6 +338,28 @@ class _AppearanceCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Zrno na skle', style: theme.textTheme.titleSmall),
+                    Text(
+                      'Jemná textura na lištách a panelech, stejná jako na pozadí.',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              GlassSwitch(
+                value: ref.watch(glassGrainProvider),
+                semanticLabel: 'Zrno na skle',
+                onChanged: ref.read(glassGrainProvider.notifier).set,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Text('Tón skla', style: theme.textTheme.titleSmall),
           const SizedBox(height: 6),
           GlassSegmentedControl<GlassToneMode>(

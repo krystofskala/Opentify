@@ -38,6 +38,7 @@ from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
+from app.library.dislikes import disliked_ids, send_feedback_later
 from app.library.spotify_link import SpotifyLinkError, import_spotify_link
 from app.library.spotify_import import (
     LIKED_SONGS_SOURCE,
@@ -45,7 +46,17 @@ from app.library.spotify_import import (
     get_or_create_liked_songs_playlist,
     import_spotify_library,
 )
-from app.models import Artist, MediaAsset, MediaAssetStatus, Playlist, PlaylistItem, PlaylistKind, Recording, Release
+from app.models import (
+    Artist,
+    MediaAsset,
+    MediaAssetStatus,
+    Playlist,
+    PlaylistItem,
+    PlaylistKind,
+    Recording,
+    RecordingDislike,
+    Release,
+)
 
 library_router = APIRouter(prefix="/library", tags=["library"])
 
@@ -621,6 +632,49 @@ def like_song(
         session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         session.commit()
     return {"recordingId": recording_id, "liked": True}
+
+
+@library_router.get("/disliked")
+def disliked_songs(
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Id skladeb se zlomeným srdcem (viz app/library/dislikes.py)."""
+    return {"recordingIds": sorted(disliked_ids(session, current[0]))}
+
+
+@library_router.post("/disliked/{recording_id}")
+async def dislike_song(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Zlomené srdce: vyřadí z Oblíbených i ze všech výběrů, LB "hate"."""
+    user_id, _device_id = current
+    if session.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
+    if recording_id not in disliked_ids(session, user_id):
+        session.add(RecordingDislike(user_id=user_id, recording_id=recording_id))
+        session.commit()
+    unlike_song(recording_id, session=session, current=current)
+    send_feedback_later(recording_id, -1)
+    return {"recordingId": recording_id, "disliked": True}
+
+
+@library_router.delete("/disliked/{recording_id}")
+async def undislike_song(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    user_id, _device_id = current
+    for row in session.exec(
+        select(RecordingDislike).where(RecordingDislike.user_id == user_id, RecordingDislike.recording_id == recording_id)
+    ).all():
+        session.delete(row)
+    session.commit()
+    send_feedback_later(recording_id, 0)
+    return {"recordingId": recording_id, "disliked": False}
 
 
 @library_router.delete("/liked-songs/{recording_id}")

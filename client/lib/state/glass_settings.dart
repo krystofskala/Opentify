@@ -126,6 +126,34 @@ class GlassButtonsController extends StateNotifier<bool> {
   }
 }
 
+/// Profil › Vzhled › "Zrno na skle": jemná textura (stejné zrno jako
+/// pozadí) na skleněných prvcích -- test, výchozí vypnuto.
+class GlassGrainController extends StateNotifier<bool> {
+  GlassGrainController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.glass_grain';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final glassGrainProvider = StateNotifierProvider<GlassGrainController, bool>((ref) => GlassGrainController());
+
 final glassButtonsProvider = StateNotifierProvider<GlassButtonsController, bool>((ref) => GlassButtonsController());
 
 /// Profil › Vzhled › "Lom skla (test)": sklo mini přehrávače láme obsah pod
@@ -165,6 +193,8 @@ class GlassSettings extends InheritedWidget {
     this.tint = 0.5,
     this.tintColor,
     this.tone = GlassToneMode.auto,
+    this.grain = false,
+    this.fineGrain = false,
     required this.glassButtons,
     this.liquid = false,
     required super.child,
@@ -177,6 +207,10 @@ class GlassSettings extends InheritedWidget {
   /// Barva tónu místo neutrální (barva skladby), nebo `null`.
   final Color? tintColor;
   final GlassToneMode tone;
+  final bool grain;
+
+  /// "Jemnější zrno" -- zrno na skle pak taky slabší.
+  final bool fineGrain;
   final bool glassButtons;
   final bool liquid;
 
@@ -189,6 +223,8 @@ class GlassSettings extends InheritedWidget {
       old.tint != tint ||
       old.tintColor != tintColor ||
       old.tone != tone ||
+      old.grain != grain ||
+      old.fineGrain != fineGrain ||
       old.glassButtons != glassButtons ||
       old.liquid != liquid;
 }

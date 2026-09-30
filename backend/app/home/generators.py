@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 from sqlmodel import Session, select
 
+from app.library.dislikes import without_disliked
 from app.catalog.deezer import get_deezer_client
 from app.catalog.deezer_ingest import ingest_track_with_context
 from app.catalog.upsert import upsert_artist, upsert_release
@@ -144,7 +145,8 @@ def _save_playlist(
             session.flush()
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
-        for position, recording_id in enumerate(recording_ids):
+        # Zlomená srdce do žádného výběru.
+        for position, recording_id in enumerate(without_disliked(owner, recording_ids)):
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         now = utcnow()
         playlist.title = title

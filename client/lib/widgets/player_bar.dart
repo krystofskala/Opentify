@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import 'like_heart.dart';
 import '../state/audio_player_controller.dart';
-import '../state/liked_songs_controller.dart';
 import '../state/provisioning_controller.dart';
 import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
@@ -184,9 +184,6 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
     final positionMs =
         playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
     final hasError = playback.error != null;
-    final isLiked = ref.watch(
-      likedSongsControllerProvider.select((s) => s.valueOrNull?.contains(nowPlaying.recordingId) ?? false),
-    );
     final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
     final isProvisioning = provisioningState?.isInFlight ?? false;
     final provisioningPct = provisioningState?.pct;
@@ -270,16 +267,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                       child: Row(
                         children: [
                           Expanded(child: _swipeArea(playback, fg, hasError, isProvisioning, provisioningState)),
-                          IconButton(
-                            icon: Icon(
-                              isLiked ? Symbols.favorite_rounded : Symbols.favorite_border_rounded,
-                              color: isLiked ? Colors.redAccent : fg,
-                              size: 22,
-                            ),
-                            tooltip: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                            onPressed: () =>
-                                ref.read(likedSongsControllerProvider.notifier).toggle(nowPlaying.recordingId),
-                          ),
+                          LikeHeart(recordingId: nowPlaying.recordingId, size: 22, color: fg),
                           IconButton(
                             icon: playback.isBuffering
                                 ? SizedBox(

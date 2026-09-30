@@ -271,6 +271,20 @@ class LibraryRepository {
     await _api.deleteJson('/library/liked-songs/$recordingId');
   }
 
+  /// Zlomené srdce (backend app/library/dislikes.py).
+  Future<Set<String>> dislikedIds() async {
+    final json = await _api.getJson('/library/disliked');
+    return (json['recordingIds'] as List<dynamic>).cast<String>().toSet();
+  }
+
+  Future<void> dislikeSong(String recordingId) async {
+    await _api.postJson('/library/disliked/$recordingId');
+  }
+
+  Future<void> undislikeSong(String recordingId) async {
+    await _api.deleteJson('/library/disliked/$recordingId');
+  }
+
   /// Naskenované lokální soubory (`POST /library/scan`) -- vždy `available`,
   /// takže je jde v klientu rovnou přehrát bez obstarávání.
   Future<LocalTracksPage> localTracks({int limit = 100, int offset = 0}) async {

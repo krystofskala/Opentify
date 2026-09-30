@@ -10,6 +10,7 @@ import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
 import 'glass/glass_rim.dart';
 import 'glass/liquid_glass.dart';
+import 'mix_artwork.dart' show GrainPainter;
 
 /// Liquid Glass materiál (viz pravidla v `theme/glass_tokens.dart`):
 /// rozmazání + vibrance (sytost/jas obsahu ZA sklem), NEUTRÁLNÍ výplň,
@@ -139,6 +140,23 @@ class GlassContainer extends StatelessWidget {
       );
     }
     final liquidCapture = liquid && (GlassSettings.maybeOf(context)?.liquid ?? false) ? LiquidScope.maybeOf(context) : null;
+    // Profil › Vzhled › "Zrno na skle": jemná textura nad výplní, pod obsahem.
+    if (settings?.grain ?? false) {
+      content = Stack(
+        fit: fit,
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: (settings?.fineGrain ?? false) ? 0.3 : 0.55,
+                child: const RepaintBoundary(child: CustomPaint(painter: GrainPainter())),
+              ),
+            ),
+          ),
+          content,
+        ],
+      );
+    }
     final Widget surface = DecoratedBox(
       decoration: ShapeDecoration(shape: shape, color: fill),
       child: content,
