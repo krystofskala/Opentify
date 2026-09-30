@@ -179,7 +179,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   // Dva přehrávače střídavě -- nový úryvek se pomalu zesiluje, zatímco starý
   // doznívá (prolnutí). iOS hlasitost webu měnit nedovolí a každý <audio>
   // musí zvlášť odemknout klepnutím -- tam jen jeden přehrávač a střih.
-  static const _crossfade = Duration(milliseconds: 1600);
+  static const _crossfade = Duration(milliseconds: 2500);
   static const _tailFade = Duration(milliseconds: 2500);
   static const _snippetLength = Duration(seconds: 30);
   late final bool _canFade = !shouldUseRadioStream();
@@ -226,7 +226,10 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     _progress
       ..stop()
       ..value = 0;
-    await _playSlideAudio(index).timeout(const Duration(seconds: 3), onTimeout: () {});
+    // Počkat na skutečný zvuk (první úryvek se ještě načítá -- dřív 3 s a
+    // hudba pak naskočila až ve třetině první karty); zablokované
+    // přehrávání (iOS před klepnutím) se nečeká.
+    await _playSlideAudio(index).timeout(const Duration(seconds: 10), onTimeout: () {});
     if (!mounted || _index != index) return;
     if (index < _slides.length - 1 && !_progress.isAnimating) _progress.forward();
     _preloadAfter(index);
@@ -332,7 +335,10 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     final done = Completer<void>();
     _fades[player] = Timer.periodic(duration ~/ steps, (timer) {
       step++;
-      final t = Curves.easeInOut.transform(step / steps);
+      // Prolnutí se stejnou výkonovou křivkou (sin/cos): součet hlasitostí
+      // obou úryvků neklesne ani nenaskočí -- lineární přechod zněl tvrdě.
+      final x = step / steps;
+      final t = target > start ? math.sin(x * math.pi / 2) : 1 - math.cos(x * math.pi / 2);
       unawaited(player.setVolume(start + (target - start) * t));
       if (step >= steps) {
         timer.cancel();
@@ -407,10 +413,14 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     if (_canFade) unawaited(_fadeTo(next, 1, _crossfade));
     _watchTail(next, snippet.start);
     // Hotovo, až zvuk opravdu běží (pozice se hýbe) -- pak se pustí obraz.
+    // Odmítnuté přehrávání (`_audioUnlocked` zpět na false) nečekat.
+    final started = next.positionStream
+        .firstWhere((p) => next.playing && p > snippet.start + const Duration(milliseconds: 80))
+        .then((_) {});
+    final blocked = Stream<void>.periodic(const Duration(milliseconds: 150))
+        .firstWhere((_) => !_audioUnlocked || !mounted || token != _audioToken);
     try {
-      await next.positionStream
-          .firstWhere((p) => next.playing && p > snippet.start + const Duration(milliseconds: 80))
-          .timeout(const Duration(seconds: 3));
+      await Future.any([started, blocked]).timeout(const Duration(seconds: 10));
     } catch (_) {}
   }
 
