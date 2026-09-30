@@ -571,7 +571,10 @@ class _WideHeroBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cover = DetailHeroAppBar._wideCoverSize(MediaQuery.sizeOf(context).width);
-    final sticker = cover * 0.3;
+    // Samolepky jen u interpreta (fotka ve tvaru je naše kompozice). Obal
+    // alba je sám o sobě dílo -- tvar přes něj by ho jen zakryl.
+    final look = hero.thumbnailCircle ? _ArtistLook.of(hero.title) : null;
+    final accent = hero.accent ?? Theme.of(context).colorScheme.primary;
     return Padding(
       padding: const EdgeInsets.all(DetailHeroAppBar._wideBoxPadding),
       child: Row(
@@ -582,22 +585,24 @@ class _WideHeroBox extends StatelessWidget {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                _WideCover(hero: hero, size: cover),
-                // Jedna malá "samolepka" přes horní pravý okraj (schválená
-                // varianta C) -- dřív velké tvary za obalem kopírovaly jeho
-                // tvar a působily strojově.
-                Positioned(
-                  left: cover * 0.79,
-                  top: -cover * 0.03,
-                  width: sticker,
-                  height: sticker,
-                  child: RepaintBoundary(
-                    child: AnimatedAccent(
-                      color: hero.accent ?? Theme.of(context).colorScheme.primary,
-                      builder: (context, c) => CustomPaint(painter: _StickerPainter(c)),
+                _WideCover(hero: hero, size: cover, look: look),
+                // Malé "samolepky" kolem fotky (schválená varianta C) -- každý
+                // interpret jiný tvar, místo a velikost, u jednoho vždy stejné.
+                if (look != null)
+                  for (final s in look.stickers)
+                    Positioned(
+                      left: cover * s.x,
+                      top: cover * s.y,
+                      width: cover * s.size,
+                      height: cover * s.size,
+                      child: RepaintBoundary(
+                        child: AnimatedAccent(
+                          color: accent,
+                          builder: (context, c) =>
+                              CustomPaint(painter: _StickerPainter(c, s.shape, s.hueShift, s.spin)),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -612,11 +617,12 @@ class _WideHeroBox extends StatelessWidget {
 /// Malý čtyřlístek se zrnitým gradientem v barvě stránky (u černobílé
 /// stránky zůstane šedý).
 class _StickerPainter extends CustomPainter {
-  const _StickerPainter(this.accent);
+  const _StickerPainter(this.accent, this.shape, this.hueShift, this.spin);
 
   final Color accent;
-
-  static const _clover = ExpressiveShape.cookie(lobes: 4, depth: 0.22);
+  final ExpressiveShape shape;
+  final double hueShift;
+  final double spin;
 
   Color _tone(double hueShift, double lightness) {
     final hsl = HSLColor.fromColor(accent);
@@ -630,25 +636,95 @@ class _StickerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final path = expressivePath(rect, _clover, null, 0, 0.3);
+    final path = expressivePath(rect, shape, null, 0, spin);
     canvas.drawShadow(path, Colors.black, 6, false);
-    paintGrainShape(canvas, path, rect, 0, from: _tone(-40, 0.76), to: _tone(-10, 0.52));
+    paintGrainShape(canvas, path, rect, 0, from: _tone(hueShift, 0.76), to: _tone(hueShift + 30, 0.52));
   }
 
   @override
-  bool shouldRepaint(covariant _StickerPainter old) => old.accent != accent;
+  bool shouldRepaint(covariant _StickerPainter old) =>
+      old.accent != accent || old.shape != shape || old.hueShift != hueShift || old.spin != spin;
+}
+
+class _Sticker {
+  const _Sticker(this.x, this.y, this.size, this.shape, this.hueShift, this.spin);
+
+  /// Levý horní roh a velikost v násobcích velikosti fotky.
+  final double x;
+  final double y;
+  final double size;
+  final ExpressiveShape shape;
+  final double hueShift;
+  final double spin;
+}
+
+/// Vzhled hlavičky interpreta odvozený z jeho jména: tvar fotky a rozmístění
+/// samolepek. Stálý pro interpreta, různý mezi interprety.
+class _ArtistLook {
+  const _ArtistLook(this.photo, this.photoSpin, this.stickers);
+
+  final ExpressiveShape photo;
+  final double photoSpin;
+  final List<_Sticker> stickers;
+
+  /// Tvary, které snesou obličej (bez hlubokých zářezů).
+  static const _photoShapes = [
+    ExpressiveShape.cookie(lobes: 12, depth: 0.06),
+    ExpressiveShape.cookie(lobes: 9, depth: 0.08),
+    ExpressiveShape.cookie(lobes: 7, depth: 0.09),
+    ExpressiveShape.cookie(lobes: 6, depth: 0.1),
+    ExpressiveShape.cookie(lobes: 4, depth: 0.12),
+    ExpressiveShape.squircle(squareness: 0.85),
+  ];
+
+  static const _stickerShapes = [
+    ExpressiveShape.cookie(lobes: 4, depth: 0.22),
+    ExpressiveShape.cookie(lobes: 9, depth: 0.1),
+    ExpressiveShape.cookie(lobes: 5, depth: 0.26),
+    ExpressiveShape.circle(),
+  ];
+
+  /// Místa (x, y) samolepky kolem fotky -- vždy přes okraj, nikdy přes střed.
+  static const _spots = [
+    (0.79, -0.03), // vpravo nahoře
+    (-0.08, 0.70), // vlevo dole
+    (0.80, 0.68), // vpravo dole
+    (-0.06, 0.02), // vlevo nahoře
+    (0.62, 0.84), // dole vpravo od středu
+  ];
+
+  static _ArtistLook of(String seedText) {
+    final rnd = math.Random(seedText.codeUnits.fold<int>(17, (h, c) => (h * 31 + c) & 0x7fffffff));
+    final photo = _photoShapes[rnd.nextInt(_photoShapes.length)];
+    final spots = [..._spots]..shuffle(rnd);
+    final main = _Sticker(
+      spots[0].$1,
+      spots[0].$2,
+      0.22 + rnd.nextDouble() * 0.1,
+      _stickerShapes[rnd.nextInt(_stickerShapes.length)],
+      -40 + rnd.nextDouble() * 80,
+      rnd.nextDouble() * math.pi,
+    );
+    // Někdy ještě malá tečka jinde -- ne u všech, ať to není šablona.
+    final extra = rnd.nextDouble() < 0.45
+        ? [
+            _Sticker(spots[1].$1 + 0.04, spots[1].$2 + 0.04, 0.09, const ExpressiveShape.circle(),
+                120 + rnd.nextDouble() * 60, 0),
+          ]
+        : const <_Sticker>[];
+    return _ArtistLook(photo, rnd.nextDouble() * math.pi, [main, ...extra]);
+  }
 }
 
 /// Obal/fotka na širokém okně. Interpret: fotka vystřižená do M3 Expressive
 /// "cookie" (výrazný avatar); album/playlist: zaoblený čtverec -- cookie by
 /// ořízl rohy obalu (text, logo).
 class _WideCover extends StatelessWidget {
-  const _WideCover({required this.hero, required this.size});
+  const _WideCover({required this.hero, required this.size, this.look});
 
   final DetailHeroAppBar hero;
   final double size;
-
-  static const _cookie = ExpressiveShape.cookie(lobes: 12, depth: 0.06);
+  final _ArtistLook? look;
 
   @override
   Widget build(BuildContext context) {
@@ -665,7 +741,8 @@ class _WideCover extends StatelessWidget {
       child = _GradientArt(icon: hero.placeholderIcon, accent: hero.accent);
     }
     if (hero.thumbnailCircle) {
-      final path = expressivePath(Offset.zero & Size.square(size), _cookie);
+      final l = look ?? _ArtistLook.of(hero.title);
+      final path = expressivePath(Offset.zero & Size.square(size), l.photo, null, 0, l.photoSpin);
       return SizedBox.square(
         dimension: size,
         child: CustomPaint(
@@ -1031,7 +1108,8 @@ class _Thumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final radius = circle ? BorderRadius.circular(size / 2) : BorderRadius.circular(size >= 64 ? AppRadii.md : AppRadii.xs);
+    final radius =
+        circle ? BorderRadius.circular(size / 2) : BorderRadius.circular(size >= 64 ? AppRadii.md : AppRadii.xs);
     return Container(
       width: size,
       height: size,
