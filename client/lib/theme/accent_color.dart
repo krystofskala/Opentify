@@ -44,6 +44,11 @@ Future<PaletteGenerator> _paletteFor(String imageUrl) {
       CachedNetworkImageProvider(imageUrl),
       size: const Size(120, 120),
       maximumColorCount: 16,
+      // Výchozí filtr knihovny zahazuje i celé pásmo "pleťových" tónů
+      // (odstín ~10–37°) -- cihlová, oranžová a hnědá z obalu se tak do
+      // palety nikdy nedostaly (živě: oranžová kšiltovka chyběla celou
+      // skladbu). Vynechat jen skoro černou a skoro bílou.
+      filters: const [_avoidBlackWhite],
     ),
   );
   // Neúspěch neukládat (obal se může doplnit později); hotové palety drží
@@ -53,6 +58,8 @@ Future<PaletteGenerator> _paletteFor(String imageUrl) {
 }
 
 final Map<String, Future<PaletteGenerator>> _paletteFutures = {};
+
+bool _avoidBlackWhite(HSLColor color) => color.lightness > 0.05 && color.lightness < 0.95;
 final Map<String, Color> _accentCache = {};
 
 /// Už spočítaná barva pro URL (synchronně), nebo `null`, pokud ještě ne.
