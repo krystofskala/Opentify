@@ -66,6 +66,37 @@ class GlassAccentTintController extends StateNotifier<bool> {
   }
 }
 
+/// Profil › Vzhled › "Tón skla": světlé nebo tmavé sklo nezávisle na
+/// motivu appky (`auto` = podle motivu).
+enum GlassToneMode { auto, light, dark }
+
+class GlassToneController extends StateNotifier<GlassToneMode> {
+  GlassToneController() : super(GlassToneMode.auto) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.glass_tone';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_prefKey);
+      final mode = GlassToneMode.values.where((m) => m.name == saved).firstOrNull;
+      if (mode != null && mounted) state = mode;
+    } catch (_) {}
+  }
+
+  Future<void> set(GlassToneMode value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefKey, value.name);
+    } catch (_) {}
+  }
+}
+
+final glassToneProvider = StateNotifierProvider<GlassToneController, GlassToneMode>((ref) => GlassToneController());
+
 final glassAccentTintProvider =
     StateNotifierProvider<GlassAccentTintController, bool>((ref) => GlassAccentTintController());
 
@@ -133,6 +164,7 @@ class GlassSettings extends InheritedWidget {
     this.frost = 0.5,
     this.tint = 0.5,
     this.tintColor,
+    this.tone = GlassToneMode.auto,
     required this.glassButtons,
     this.liquid = false,
     required super.child,
@@ -144,6 +176,7 @@ class GlassSettings extends InheritedWidget {
 
   /// Barva tónu místo neutrální (barva skladby), nebo `null`.
   final Color? tintColor;
+  final GlassToneMode tone;
   final bool glassButtons;
   final bool liquid;
 
@@ -155,6 +188,7 @@ class GlassSettings extends InheritedWidget {
       old.frost != frost ||
       old.tint != tint ||
       old.tintColor != tintColor ||
+      old.tone != tone ||
       old.glassButtons != glassButtons ||
       old.liquid != liquid;
 }

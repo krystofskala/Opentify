@@ -338,6 +338,18 @@ class _AppearanceCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 12),
+          Text('Tón skla', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 6),
+          GlassSegmentedControl<GlassToneMode>(
+            selected: ref.watch(glassToneProvider),
+            onChanged: ref.read(glassToneProvider.notifier).set,
+            segments: const [
+              GlassSegment(value: GlassToneMode.auto, label: 'Podle motivu', icon: Symbols.brightness_auto_rounded),
+              GlassSegment(value: GlassToneMode.light, label: 'Světlé', icon: Symbols.light_mode_rounded),
+              GlassSegment(value: GlassToneMode.dark, label: 'Tmavé', icon: Symbols.dark_mode_rounded),
+            ],
+          ),
+          const SizedBox(height: 12),
           _GlassSlider(
             title: 'Mléčnost skla',
             subtitle: 'Jak moc sklo rozmazává obsah pod sebou.',
@@ -347,7 +359,7 @@ class _AppearanceCard extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           _GlassSlider(
-            title: 'Tón skla',
+            title: 'Síla tónu',
             subtitle: 'Jak moc je sklo zabarvené -- silnější tón líp odliší lišty od pozadí.',
             left: 'Slabý',
             right: 'Silný',

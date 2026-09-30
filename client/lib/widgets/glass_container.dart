@@ -5,6 +5,7 @@ import 'package:figma_squircle/figma_squircle.dart';
 import 'package:flutter/material.dart';
 
 import '../state/glass_settings.dart';
+import '../theme/app_theme.dart' show buildAppTheme;
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
 import 'glass/glass_rim.dart';
@@ -98,11 +99,18 @@ class GlassContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final themeDark = theme.brightness == Brightness.dark;
     final shape = glassShape(borderRadius);
     // Profil › Vzhled: "Mléčnost skla" (rozmazání), "Tón skla" (výplň)
     // a "Tón v barvě skladby" (barva výplně místo šedé/bílé).
     final settings = GlassSettings.maybeOf(context);
+    // Světlé/tmavé sklo nezávisle na motivu appky (Profil › Vzhled › Tón skla).
+    final isDark = switch (settings?.tone ?? GlassToneMode.auto) {
+      GlassToneMode.auto => themeDark,
+      GlassToneMode.light => false,
+      GlassToneMode.dark => true,
+    };
     final veil = 2 * (settings?.tint ?? 0.5);
     double a(double alpha) => (alpha * veil).clamp(0.0, 0.95);
     final base = switch (settings?.tintColor) {
@@ -117,7 +125,19 @@ class GlassContainer extends StatelessWidget {
       if (emphasis > 0) Colors.white.withValues(alpha: emphasis),
     ];
     final fill = _flatten(fills);
-    final content = padding == null ? child : Padding(padding: padding!, child: child);
+    Widget content = padding == null ? child : Padding(padding: padding!, child: child);
+    // Sklo opačné než motiv: obsah na něm dostane motiv jeho jasu, ať text
+    // a ikony zůstanou čitelné (bílá na světlém skle by zmizela).
+    if (baseFill && isDark != themeDark) {
+      final flipped = _themeFor(theme.colorScheme.primary, isDark ? Brightness.dark : Brightness.light);
+      content = Theme(
+        data: flipped,
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: flipped.colorScheme.onSurface),
+          child: IconTheme.merge(data: IconThemeData(color: flipped.colorScheme.onSurface), child: content),
+        ),
+      );
+    }
     final liquidCapture = liquid && (GlassSettings.maybeOf(context)?.liquid ?? false) ? LiquidScope.maybeOf(context) : null;
     final Widget surface = DecoratedBox(
       decoration: ShapeDecoration(shape: shape, color: fill),
@@ -180,6 +200,13 @@ class GlassContainer extends StatelessWidget {
             )
           : glass,
     );
+  }
+
+  static final Map<(Color, Brightness), ThemeData> _flippedThemes = {};
+
+  static ThemeData _themeFor(Color seed, Brightness brightness) {
+    if (_flippedThemes.length > 24) _flippedThemes.clear();
+    return _flippedThemes.putIfAbsent((seed, brightness), () => buildAppTheme(seed: seed, brightness: brightness));
   }
 
   /// Tón skla v barvě skladby: tmavý odstín v tmavém režimu, světlý ve

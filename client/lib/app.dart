@@ -67,6 +67,7 @@ class OpentifyApp extends ConsumerWidget {
                 frost: ref.watch(glassFrostProvider),
                 tint: ref.watch(glassTintProvider),
                 tintColor: ref.watch(glassAccentTintProvider) ? tone : null,
+                tone: ref.watch(glassToneProvider),
                 glassButtons: ref.watch(glassButtonsProvider),
                 liquid: ref.watch(liquidGlassProvider),
                 // Popisky při najetí myší rušily (živě nahlášeno) -- vypnuté
