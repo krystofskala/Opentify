@@ -30,6 +30,7 @@ import '../../core/cz_plural.dart';
 import '../../state/auth_controller.dart';
 import '../../state/library_scope.dart';
 import 'offline_tab.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -641,6 +642,7 @@ class _PlaylistsTab extends ConsumerWidget {
         ],
       ),
     );
+    final grid = ref.watch(_playlistGridProvider);
     Widget card(PlaylistSummaryModel playlist) {
       final artists = playlist.artistNames;
       final who = artists.isEmpty
@@ -649,7 +651,7 @@ class _PlaylistsTab extends ConsumerWidget {
               ? artists.join(', ')
               : '${artists.take(2).join(', ')} a další';
       return MediaCard(
-        layout: MediaCardLayout.row,
+        layout: grid ? MediaCardLayout.card : MediaCardLayout.row,
         placeholderIcon: Symbols.queue_music_rounded,
         artwork: PlaylistArtwork(
           title: playlist.title,
@@ -704,8 +706,50 @@ class _PlaylistsTab extends ConsumerWidget {
               padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
               children: [
                 liked,
+                // Moje playlisty: seznam, nebo galerie (mřížka obalů).
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.xs, 0),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text('Moje playlisty', style: Theme.of(context).textTheme.titleMedium)),
+                      IconButton(
+                        tooltip: grid ? 'Zobrazit jako seznam' : 'Zobrazit jako mřížku',
+                        icon: Icon(grid ? Symbols.view_list_rounded : Symbols.grid_view_rounded),
+                        onPressed: () => ref.read(_playlistGridProvider.notifier).set(!grid),
+                      ),
+                    ],
+                  ),
+                ),
                 create,
-                for (final p in own) card(p),
+                if (!grid)
+                  for (final p in own) card(p)
+                else
+                  LayoutBuilder(builder: (context, constraints) {
+                    final columns = (constraints.maxWidth / 180).floor().clamp(2, 8);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                      child: Column(
+                        children: [
+                          for (var i = 0; i < own.length; i += columns)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  for (var j = i; j < i + columns; j++)
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                                        child: j < own.length ? card(own[j]) : const SizedBox.shrink(),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  }),
               ],
             ),
           );
@@ -793,3 +837,31 @@ class _LibraryScopeToggle extends ConsumerWidget {
     );
   }
 }
+
+
+/// Knihovna › Playlisty: seznam, nebo galerie (pamatuje se).
+class _PlaylistGridController extends StateNotifier<bool> {
+  _PlaylistGridController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'library.playlists_grid';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool grid) async {
+    state = grid;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, grid);
+    } catch (_) {}
+  }
+}
+
+final _playlistGridProvider = StateNotifierProvider<_PlaylistGridController, bool>((ref) => _PlaylistGridController());

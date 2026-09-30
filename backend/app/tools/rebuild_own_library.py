@@ -317,7 +317,9 @@ def compilations_to_playlists() -> list[str]:
                 continue
             if not _is_compilation(release.title, artist_name, len({r.artist_id for r, _ in tracks})):
                 continue
-            title = "Volné skladby" if _norm(release.title) in {"local-music", "mp"} else release.title
+            # Výběr o jedné skladbě nestojí za vlastní playlist.
+            loose = _norm(release.title) in {"local-music", "mp"} or len(tracks) == 1
+            title = "Volné skladby" if loose else release.title
             playlist = session.exec(
                 select(Playlist).where(
                     Playlist.owner_user_id == ADMIN_ID, Playlist.kind == PlaylistKind.USER, Playlist.title == title
