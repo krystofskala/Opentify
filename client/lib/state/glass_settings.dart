@@ -39,6 +39,17 @@ final glassFrostProvider =
 final glassTintProvider =
     StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_tint', 0.7));
 
+/// Profil › Vzhled › "Tmavost tónu": jak tmavá je výplň skla (výchozí 0.5 =
+/// dosavadní vzhled). Odděleně od barevnosti -- tmavé sklo nemusí být sytě
+/// barevné (živě: hodně barevné tmavé sklo vypadalo divně).
+final glassDarknessProvider =
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_darkness', 0.5));
+
+/// Profil › Vzhled › "Barevnost tónu": kolik barvy skladby sklo nese
+/// (0 = neutrální šedá, výchozí 0.7 = dosavadní vzhled).
+final glassColorfulnessProvider = StateNotifierProvider<GlassSliderController, double>(
+    (ref) => GlassSliderController('appearance.glass_colorfulness', 0.7));
+
 /// Profil › Vzhled › "Tón v barvě skladby": sklo tónované barvou hrající
 /// skladby (tmavý odstín v tmavém režimu, světlý ve světlém) místo neutrální
 /// šedé/bílé -- lišty jsou na pozadí lépe vidět.
@@ -192,6 +203,8 @@ class GlassSettings extends InheritedWidget {
     this.frost = 0.5,
     this.tint = 0.5,
     this.tintColor,
+    this.darkness = 0.5,
+    this.colorfulness = 0.7,
     this.tone = GlassToneMode.auto,
     this.grain = false,
     this.fineGrain = false,
@@ -206,6 +219,10 @@ class GlassSettings extends InheritedWidget {
 
   /// Barva tónu místo neutrální (barva skladby), nebo `null`.
   final Color? tintColor;
+
+  /// Jezdce 0..1: tmavost výplně a kolik barvy skladby nese.
+  final double darkness;
+  final double colorfulness;
   final GlassToneMode tone;
   final bool grain;
 
@@ -222,6 +239,8 @@ class GlassSettings extends InheritedWidget {
       old.frost != frost ||
       old.tint != tint ||
       old.tintColor != tintColor ||
+      old.darkness != darkness ||
+      old.colorfulness != colorfulness ||
       old.tone != tone ||
       old.grain != grain ||
       old.fineGrain != fineGrain ||

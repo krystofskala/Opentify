@@ -71,6 +71,8 @@ class OpentifyApp extends ConsumerWidget {
                 frost: ref.watch(glassFrostProvider),
                 tint: ref.watch(glassTintProvider),
                 tintColor: ref.watch(glassAccentTintProvider) ? tone : null,
+                darkness: ref.watch(glassDarknessProvider),
+                colorfulness: ref.watch(glassColorfulnessProvider),
                 tone: ref.watch(glassToneProvider),
                 grain: ref.watch(glassGrainProvider),
                 fineGrain: ref.watch(fineGrainProvider),

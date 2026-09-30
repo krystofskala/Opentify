@@ -45,6 +45,24 @@ class _LiquidScopeState extends State<LiquidScope> {
   Widget build(BuildContext context) => _LiquidScopeData(capture: _capture, child: widget.child);
 }
 
+/// Zachytávání pro skla MIMO `HomeShell` -- sheet fronty nad přehrávačem
+/// je samostatná trasa, `LiquidScope` shellu nad ním není, a sklo tak
+/// spadlo na obyčejné rozmazání bez lomu (živě nahlášeno). Přehrávač svůj
+/// obsah registruje sem (`LiquidCaptureScope` + `LiquidSource.page`)
+/// a sheet fronty si ho odsud bere.
+final LiquidCapture playerLiquidCapture = LiquidCapture();
+
+/// Dá podstromu konkrétní (sdílené) zachytávání, viz [playerLiquidCapture].
+class LiquidCaptureScope extends StatelessWidget {
+  const LiquidCaptureScope({super.key, required this.capture, required this.child});
+
+  final LiquidCapture capture;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => _LiquidScopeData(capture: capture, child: child);
+}
+
 class _LiquidScopeData extends InheritedWidget {
   const _LiquidScopeData({required this.capture, required super.child});
 

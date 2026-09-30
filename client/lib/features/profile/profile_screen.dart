@@ -388,6 +388,22 @@ class _AppearanceCard extends ConsumerWidget {
             provider: glassTintProvider,
           ),
           const SizedBox(height: 8),
+          _GlassSlider(
+            title: 'Tmavost tónu',
+            subtitle: 'Jak tmavé je sklo.',
+            left: 'Světlejší',
+            right: 'Tmavší',
+            provider: glassDarknessProvider,
+          ),
+          const SizedBox(height: 8),
+          _GlassSlider(
+            title: 'Barevnost tónu',
+            subtitle: 'Kolik barvy skladby sklo nese – vlevo skoro šedé, vpravo barevné.',
+            left: 'Šedé',
+            right: 'Barevné',
+            provider: glassColorfulnessProvider,
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(

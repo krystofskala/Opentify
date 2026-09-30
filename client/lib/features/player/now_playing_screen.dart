@@ -20,6 +20,7 @@ import '../../theme/shapes.dart';
 import '../../widgets/app_background.dart' show AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/glass/liquid_glass.dart';
 import '../../widgets/lyrics_panel.dart';
 import '../../widgets/net_image.dart';
 import '../../widgets/now_playing_sheet.dart';
@@ -328,21 +329,28 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   ),
                   child: ClipRRect(
                     borderRadius: radius,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Živý gradient appky (už v barvě skladby) přesně na
-                        // svém místě na obrazovce -- obsah stránky pod panelem
-                        // je tím úplně zakrytý, barvy a pohyb prosvítají.
-                        Positioned(
-                          top: -panelTop,
-                          left: 0,
-                          width: size.width,
-                          height: size.height,
-                          child: const AppBackgroundMirror(),
+                    // Obsah přehrávače jde zachytit pro sklo s lomem nad ním
+                    // (sheet fronty, viz `playerLiquidCapture`).
+                    child: LiquidCaptureScope(
+                      capture: playerLiquidCapture,
+                      child: LiquidSource.page(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // Živý gradient appky (už v barvě skladby) přesně na
+                            // svém místě na obrazovce -- obsah stránky pod panelem
+                            // je tím úplně zakrytý, barvy a pohyb prosvítají.
+                            Positioned(
+                              top: -panelTop,
+                              left: 0,
+                              width: size.width,
+                              height: size.height,
+                              child: const AppBackgroundMirror(),
+                            ),
+                            MediaQuery.removePadding(context: context, removeTop: true, child: child!),
+                          ],
                         ),
-                        MediaQuery.removePadding(context: context, removeTop: true, child: child!),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -1134,8 +1142,8 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
   static const _morphSeconds = 3.2;
 
   // Čas běží jen při přehrávání; `_live` = síla tvaru (0 = čtverec).
-  late final AnimationController _clock =
-      AnimationController(vsync: this, duration: Duration(milliseconds: (_morphSeconds * 1000 * _shapes.length).round()));
+  late final AnimationController _clock = AnimationController(
+      vsync: this, duration: Duration(milliseconds: (_morphSeconds * 1000 * _shapes.length).round()));
   late final AnimationController _live =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 600), value: widget.playing ? 1 : 0);
 

@@ -114,9 +114,10 @@ class GlassContainer extends StatelessWidget {
     };
     final veil = 2 * (settings?.tint ?? 0.5);
     double a(double alpha) => (alpha * veil).clamp(0.0, 0.95);
+    final darkness = settings?.darkness ?? 0.5;
     final base = switch (settings?.tintColor) {
-      final c? => _accentTone(c, isDark),
-      null => isDark ? GlassTokens.fillDarkColor : Colors.white,
+      final c? => _accentTone(c, isDark, darkness, settings?.colorfulness ?? 0.7),
+      null => _neutralTone(isDark, darkness),
     };
 
     final fills = <Color>[
@@ -235,12 +236,20 @@ class GlassContainer extends StatelessWidget {
 
   /// Tón skla v barvě skladby: tmavý odstín v tmavém režimu, světlý ve
   /// světlém (čitelnost textu jako u neutrální výplně).
-  static Color _accentTone(Color c, bool isDark) {
+  /// `darkness`/`colorfulness` z Profil › Vzhled (0.5 / 0.7 = původní
+  /// vzhled: světlost 0.17 v tmavém, 0.9 ve světlém; sytost ×0.7 / ×0.55).
+  static Color _accentTone(Color c, bool isDark, double darkness, double colorfulness) {
     final hsl = HSLColor.fromColor(c);
-    return hsl
-        .withSaturation((hsl.saturation * (isDark ? 0.7 : 0.55)).clamp(0.0, 1.0))
-        .withLightness(isDark ? 0.17 : 0.9)
-        .toColor();
+    final lightness = isDark ? 0.30 - 0.26 * darkness : 0.98 - 0.16 * darkness;
+    final saturation = hsl.saturation * colorfulness * (isDark ? 1.0 : 0.8);
+    return hsl.withSaturation(saturation.clamp(0.0, 1.0)).withLightness(lightness.clamp(0.0, 1.0)).toColor();
+  }
+
+  /// Neutrální tón (bez barvy skladby) se stejnou tmavostí.
+  static Color _neutralTone(bool isDark, double darkness) {
+    if (!isDark) return HSLColor.fromAHSL(1, 240, 0.08, (1.04 - 0.16 * darkness).clamp(0.0, 1.0)).toColor();
+    final hsl = HSLColor.fromColor(GlassTokens.fillDarkColor);
+    return hsl.withLightness((0.22 - 0.19 * darkness).clamp(0.0, 1.0)).toColor();
   }
 
   static Color? _flatten(List<Color> layers) {

@@ -9,6 +9,7 @@ import '../../theme/glass_tokens.dart';
 import '../../widgets/net_image.dart';
 import '../../core/cz_plural.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/glass/liquid_glass.dart';
 
 /// Fronta přehrávání jako bottom sheet -- stejný `DraggableScrollableSheet`
 /// vzor jako `showLyricsPanel` (dvě různé navigační stylizace pro dvě
@@ -40,38 +41,43 @@ class _QueuePanel extends ConsumerWidget {
       expand: false,
       builder: (context, scrollController) => ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
-        child: GlassContainer.frosted(
-          // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač pod ním.
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
-          tint: accentColor,
-          fit: StackFit.expand,
-          child: Column(
-            children: [
-              const SizedBox(height: 10),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                playback.queueSourceLabel != null
-                    ? 'PŘEHRÁVÁNO Z ${playback.queueSourceLabel!.toUpperCase()}'
-                    : 'FRONTA',
-                style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.5),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: playback.queue.isEmpty
-                    ? const Center(child: Text('Fronta je prázdná.', style: TextStyle(color: Colors.white70)))
-                    : _QueueList(
-                        scrollController: scrollController,
-                        queue: playback.queue,
-                        currentIndex: playback.queueIndex,
-                      ),
-              ),
-            ],
+        // Sklo s lomem nad obsahem přehrávače (Profil › Vzhled › Lom skla).
+        child: LiquidCaptureScope(
+          capture: playerLiquidCapture,
+          child: GlassContainer.frosted(
+            // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač pod ním.
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(GlassTokens.sheetRadius)),
+            tint: accentColor,
+            liquid: true,
+            fit: StackFit.expand,
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  playback.queueSourceLabel != null
+                      ? 'PŘEHRÁVÁNO Z ${playback.queueSourceLabel!.toUpperCase()}'
+                      : 'FRONTA',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: playback.queue.isEmpty
+                      ? const Center(child: Text('Fronta je prázdná.', style: TextStyle(color: Colors.white70)))
+                      : _QueueList(
+                          scrollController: scrollController,
+                          queue: playback.queue,
+                          currentIndex: playback.queueIndex,
+                        ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -218,7 +224,9 @@ class _QueueListState extends ConsumerState<_QueueList> {
               final to = currentIndex + 1 + newIndex;
               final group = queue[from].groupId;
               // Sbalený blok táhne celou skupinu, ne jen první skladbu.
-              if (group != null && !_expanded.contains(group) && (from == currentIndex + 1 || queue[from - 1].groupId != group)) {
+              if (group != null &&
+                  !_expanded.contains(group) &&
+                  (from == currentIndex + 1 || queue[from - 1].groupId != group)) {
                 var count = 0;
                 while (from + count < queue.length && queue[from + count].groupId == group) {
                   count++;
