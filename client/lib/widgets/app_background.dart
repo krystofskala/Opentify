@@ -531,14 +531,18 @@ class _FallbackPainter extends CustomPainter {
   /// jasu, jednou za velikost okna -- každý snímek pak jen jedno vykreslení
   /// textury. Tmavý režim silnější (±14 %), světlý jemnější (±9 %).
   static ui.Image _buildGrain(Size size, double dpr, bool dark, bool fine) {
-    const cell = 1.6;
+    // Monitory s nízkou hustotou (1×, starší/levnější): buňka 1,6 fyzického px
+    // je tam skoro 2 pixely -- zrno působilo jako hrubý šum (živě nahlášeno).
+    // Tam jemnější body a zhruba poloviční síla; retina beze změny.
+    final lowRes = dpr < 1.5;
+    final cell = lowRes ? 1.0 : 1.6;
     final cols = (size.width * dpr / cell).ceil();
     final rows = (size.height * dpr / cell).ceil();
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final random = math.Random(7);
     // "Jemnější zrno" (Profil): ~0.08 místo 0.14 (návrh z design auditu).
-    final strength = fine ? (dark ? 0.08 : 0.05) : (dark ? 0.14 : 0.09);
+    final strength = (fine ? (dark ? 0.08 : 0.05) : (dark ? 0.14 : 0.09)) * (lowRes ? 0.55 : 1.0);
     final buckets = List.generate(6, (_) => <double>[]);
     for (var y = 0; y < rows; y++) {
       for (var x = 0; x < cols; x++) {
