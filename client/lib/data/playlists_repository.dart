@@ -24,6 +24,10 @@ class PlaylistSummaryModel {
   /// Naimportované z odkazu na Spotify (záložka Sdílené v Knihovně).
   bool get isShared => source?.startsWith('spotify-link:') ?? false;
 
+  /// Playlist z tvé staré vlastní hudby (výběry, soundtracky) -- značka
+  /// "před 2016" na náhledu.
+  bool get isLegacy => source == 'own-music:legacy';
+
   final String id;
   final String title;
   final String kind;

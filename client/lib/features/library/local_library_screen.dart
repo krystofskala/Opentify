@@ -651,7 +651,12 @@ class _PlaylistsTab extends ConsumerWidget {
       return MediaCard(
         layout: MediaCardLayout.row,
         placeholderIcon: Symbols.queue_music_rounded,
-        artwork: PlaylistArtwork(title: playlist.title, coverUrls: playlist.coverUrls, showTitle: false),
+        artwork: PlaylistArtwork(
+          title: playlist.title,
+          coverUrls: playlist.coverUrls,
+          showTitle: false,
+          badge: playlist.isLegacy ? 'před 2016' : null,
+        ),
         title: playlist.title,
         // Sdílené: autor ze Spotify ("Ze Spotify · jméno").
         subtitle: playlist.isShared && playlist.description != null

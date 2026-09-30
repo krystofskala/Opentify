@@ -23,6 +23,7 @@ class PlaylistArtwork extends StatelessWidget {
     this.showTitle = true,
     this.dailyMixNumber,
     this.mix,
+    this.badge,
   });
 
   final String title;
@@ -38,8 +39,39 @@ class PlaylistArtwork extends StatelessWidget {
   /// Generativní obal vlastního mixu (viz `mixArtOf`).
   final MixArtSpec? mix;
 
+  /// Malá průhledná značka v rohu náhledu (např. "před 2016").
+  final String? badge;
+
   @override
   Widget build(BuildContext context) {
+    final art = _art();
+    if (badge == null) return art;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        art,
+        Positioned(
+          left: 4,
+          bottom: 4,
+          child: DecoratedBox(
+            decoration: ShapeDecoration(
+              shape: const StadiumBorder(),
+              color: Colors.black.withValues(alpha: 0.42),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Text(
+                badge!,
+                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800, height: 1.2),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _art() {
     final spec = mix ??
         (dailyMixNumber == null
             ? null

@@ -320,7 +320,9 @@ def compilations_to_playlists() -> list[str]:
                 )
             ).first()
             if playlist is None:
-                playlist = Playlist(owner_user_id=ADMIN_ID, title=title, kind=PlaylistKind.USER, description="Z tvé hudby")
+                playlist = Playlist(
+                    owner_user_id=ADMIN_ID, title=title, kind=PlaylistKind.USER, description="Z tvé hudby", source="own-music:legacy"
+                )
                 session.add(playlist)
                 session.commit()
                 session.refresh(playlist)
