@@ -251,6 +251,10 @@ def apply(items: list[dict]) -> Counter:
             if _protected(f):
                 stats["protected"] += 1
                 continue
+            old_rec = session.get(Recording, f["old"]) if f["old"] else None
+            if old_rec is not None and (old_rec.external_refs or {}).get("manual"):
+                stats["manual"] += 1  # ručně opravené (třeba Once) -- nepřepisovat
+                continue
             release_artist = find_or_create_artist(session, f["release_artist"])
             release = find_or_create_release(session, release_artist, f["release"])
             artist = find_or_create_artist(session, f["artist"])
@@ -277,7 +281,7 @@ _COMPILATION = re.compile(
     r"best of|greatest|very best|collection|hits|anthology|výběr|to nejlepší|\b(19|20)\d{2}\s*-\s*(19|20)\d{2}\b",
     re.IGNORECASE,
 )
-_GENERIC = {"folk", "once", "dope mix", "local-music", "unknown album", "mp"}
+_GENERIC = {"folk", "dope mix", "local-music", "unknown album", "mp"}
 
 
 def _is_compilation(release_title: str, release_artist: str, track_artists: int) -> bool:
