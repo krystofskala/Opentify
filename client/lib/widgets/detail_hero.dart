@@ -1087,58 +1087,67 @@ class _HeroTitleBlock extends StatelessWidget {
 /// Typový štítek (ALBUM, INTERPRET, DENNÍ MIX...) -- sjednocená "vybraná"
 /// pilulka z glass_tokens: `primaryContainer` + vnitřní horní lesk, text a
 /// ikona `onPrimaryContainer`.
+/// Typ stránky (Album, Žebříček, Mix...) v jazyce M3 Expressive: plný
+/// "cookie" tvar v barvě skladby s ikonou a tučný popisek bez pilulky.
+/// Dřív malá pilulka s VERZÁLKAMI a lesklým přechodem -- působila lacině
+/// a k tvarům zbytku appky nepasovala (živě nahlášeno).
 class _TypeChip extends StatelessWidget {
   const _TypeChip({required this.label, this.icon});
 
   final String label;
   final IconData? icon;
 
+  static const _shape = ExpressiveShape.cookie(lobes: 8, depth: 0.12);
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fg = scheme.onPrimaryContainer;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.center,
-          colors: [
-            Color.alphaBlend(
-              Colors.white.withValues(alpha: Expressive.selectedPillHighlightAlpha),
-              scheme.primaryContainer,
+    final text = label.isEmpty ? label : label[0].toUpperCase() + label.substring(1).toLowerCase();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          SizedBox.square(
+            dimension: 32,
+            child: CustomPaint(
+              painter: _ShapeFill(_shape, scheme.primary),
+              child: Center(child: Icon(icon, size: 17, fill: 1, weight: 500, color: scheme.onPrimary)),
             ),
-            scheme.primaryContainer,
-          ],
+          ),
+          const SizedBox(width: 10),
+        ],
+        Text(
+          text,
+          style: TextStyle(
+            fontFamily: 'Nunito',
+            color: scheme.onSurface.withValues(alpha: 0.92),
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.2,
+            height: 1.1,
+            shadows: [Shadow(color: scheme.surface.withValues(alpha: 0.6), blurRadius: 16)],
+          ),
         ),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 10, offset: const Offset(0, 2))],
-      ),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(icon != null ? 8 : 10, 4, 10, 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 14, fill: 1, color: fg),
-              const SizedBox(width: 4),
-            ],
-            Text(
-              label.toUpperCase(),
-              style: TextStyle(
-                color: fg,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
-                height: 1.2,
-                shadows: const [],
-              ),
-            ),
-          ],
-        ),
-      ),
+      ],
     );
   }
+}
+
+class _ShapeFill extends CustomPainter {
+  const _ShapeFill(this.shape, this.color);
+
+  final ExpressiveShape shape;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = expressivePath(Offset.zero & size, shape);
+    canvas.drawShadow(path, Colors.black, 3, false);
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_ShapeFill old) => old.color != color;
 }
 
 /// Velký název: max 2 řádky; když se nevejde, postupně se zmenšuje
