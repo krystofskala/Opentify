@@ -34,7 +34,7 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
         : '${result.matched} z ${result.total} skladeb';
     messenger?.showSnackBar(SnackBar(
       content: Text(
-        '„${result.title}“ je v Knihovně › Playlisty › Sdílené ($count).'
+        '„${result.title}“ je v Knihovně › Sdílené ($count).'
         '${result.truncated ? ' Spotify veřejně ukazuje jen prvních 100.' : ''}',
       ),
     ));

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import 'shared_playlists_screen.dart';
 import '../../data/playlists_repository.dart' show PlaylistSummaryModel;
 import '../../models/recording_model.dart';
 import '../../state/providers.dart';
@@ -13,7 +14,6 @@ import '../../widgets/glass/glass.dart';
 import '../../widgets/library_search_results.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/playlist_card.dart' show PlaylistArtwork;
-import '../../widgets/spotify_link_import.dart';
 import 'liked_songs_screen.dart' show LikedSongsCard;
 import 'listen_later_screen.dart' show ListenLaterCard;
 import '../../widgets/remove_from_library.dart';
@@ -614,7 +614,6 @@ class _PlaylistsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlists = ref.watch(myPlaylistsProvider);
-    final theme = Theme.of(context);
     // Připnuté nahoře: Oblíbené + Poslechnout později.
     const liked = Padding(
       padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.xs),
@@ -623,6 +622,8 @@ class _PlaylistsTab extends ConsumerWidget {
           LikedSongsCard(),
           SizedBox(height: AppSpacing.sm),
           ListenLaterCard(),
+          SizedBox(height: AppSpacing.sm),
+          SharedPlaylistsCard(),
         ],
       ),
     );
@@ -662,7 +663,6 @@ class _PlaylistsTab extends ConsumerWidget {
       body: playlists.when(
         data: (all) {
           final own = [for (final p in all) if (!p.isShared) p];
-          final shared = [for (final p in all) if (p.isShared) p];
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(myPlaylistsProvider);
@@ -679,30 +679,6 @@ class _PlaylistsTab extends ConsumerWidget {
                     message: 'Zatím žádné vlastní playlisty -- založ první tlačítkem vpravo dole.',
                   ),
                 for (final p in own) card(p),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.md, AppSpacing.xs, AppSpacing.xs),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text('Sdílené ze Spotify', style: theme.textTheme.titleMedium)),
-                      GlassButton(
-                        label: 'Přidat',
-                        icon: Symbols.link_rounded,
-                        style: GlassButtonStyle.tonal,
-                        compact: true,
-                        onPressed: () => showSpotifyLinkDialog(context, ref),
-                      ),
-                    ],
-                  ),
-                ),
-                if (shared.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                    child: Text(
-                      'Playlisty, které ti někdo pošle: vlož odkaz tlačítkem Přidat, do Hledat, nebo ho sdílej zkratkou "Do Opentify".',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                for (final p in shared) card(p),
               ],
             ),
           );
