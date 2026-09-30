@@ -24,6 +24,7 @@ import httpx
 from sqlmodel import Session
 
 from app.catalog.embedded_art import URL_TEMPLATE, _save_resized, artwork_path
+from app.library.matching import find_or_create_artist, find_or_create_recording
 from app.library.spotify_import import PlaylistReport, TrackRow, _get_or_create_playlist, _import_tracks_into_playlist
 
 EMBED_LIMIT = 100
@@ -40,10 +41,12 @@ class SpotifyLinkError(Exception):
 
 @dataclass
 class SpotifyLinkResult:
-    report: PlaylistReport
+    report: PlaylistReport | None
     kind: str
     truncated: bool
     owner: str | None
+    # Odkaz na jednu skladbu: žádný playlist, jen skladba k přehrání.
+    recording_id: str | None = None
 
 
 def _proxy() -> str:
@@ -120,6 +123,13 @@ async def import_spotify_link(session: Session, user_id: str, text: str) -> Spot
     kind, sid, name, owner, rows, cover = await fetch_spotify_link(text)
     if not rows:
         raise SpotifyLinkError("V odkazu nejsou žádné skladby.")
+    if kind == "track":
+        # Jedna skladba se jen pustí -- do Knihovny › Sdílené nepatří.
+        artist_name, track_name, _album, duration_ms = rows[0]
+        artist = find_or_create_artist(session, artist_name)
+        recording = find_or_create_recording(session, artist, track_name, duration_ms=duration_ms)
+        session.commit()
+        return SpotifyLinkResult(report=None, kind=kind, truncated=False, owner=owner, recording_id=recording.id)
     playlist = _get_or_create_playlist(session, user_id, f"{_SOURCE_PREFIX}{kind}:{sid}", name)
     # Autor ("Ze Spotify · Jméno") a obal pro záložku Sdílené v Knihovně.
     if owner and kind == "playlist":

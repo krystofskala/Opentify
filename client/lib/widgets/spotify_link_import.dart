@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/playlists_repository.dart';
+import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
+import 'track_actions.dart' show nowPlayingInfoFor;
 import 'glass/glass.dart';
 
 /// Import z odkazu na Spotify: průběh, pak otevře nový playlist a řekne,
@@ -17,14 +19,22 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
   );
   try {
     final result = await ref.read(playlistsRepositoryProvider).importSpotifyLink(url.trim());
-    ref.invalidate(myPlaylistsProvider);
     messenger?.hideCurrentSnackBar();
+    if (result.isTrack) {
+      // Jedna skladba: rovnou pustit (stáhne se, když ještě není).
+      final rec = result.recording;
+      if (rec == null) throw Exception('Skladbu se nepodařilo najít.');
+      ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlayingInfoFor(rec), sourceLabel: 'Spotify');
+      messenger?.showSnackBar(SnackBar(content: Text('Hraje: ${rec.title}')));
+      return;
+    }
+    ref.invalidate(myPlaylistsProvider);
     final count = result.matched == result.total
         ? '${result.total} skladeb'
         : '${result.matched} z ${result.total} skladeb';
     messenger?.showSnackBar(SnackBar(
       content: Text(
-        '„${result.title}“ je v Knihovně › Sdílené ($count).'
+        '„${result.title}“ je v Knihovně › Playlisty › Sdílené ($count).'
         '${result.truncated ? ' Spotify veřejně ukazuje jen prvních 100.' : ''}',
       ),
     ));

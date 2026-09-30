@@ -1,6 +1,7 @@
 import '../core/api_client.dart';
 import '../core/media_url.dart';
 import '../models/playlist_model.dart';
+import '../models/recording_model.dart';
 
 /// Souhrn playlistu pro seznamovou obrazovku (`GET /playlists`) -- bez
 /// `items`, na rozdíl od `PlaylistDetailModel` (`GET /playlists/{id}`),
@@ -70,6 +71,10 @@ class PlaylistsRepository {
   /// (backend stáhne obsah přes VPN, viz `app/library/spotify_link.py`).
   Future<SpotifyLinkImport> importSpotifyLink(String url) async {
     final json = await _api.postJson('/library/import/spotify-link', body: {'url': url});
+    if (json['kind'] == 'track') {
+      final rec = json['recording'];
+      return SpotifyLinkImport.track(rec == null ? null : RecordingModel.fromJson(rec as Map<String, dynamic>));
+    }
     return SpotifyLinkImport(
       id: json['id'] as String,
       title: json['title'] as String,
@@ -125,7 +130,19 @@ class SpotifyLinkImport {
     required this.total,
     required this.matched,
     required this.truncated,
-  });
+  }) : recording = null;
+
+  /// Odkaz na jednu skladbu -- nic se neukládá, jen se pustí.
+  const SpotifyLinkImport.track(this.recording)
+      : id = '',
+        title = '',
+        owner = null,
+        total = 1,
+        matched = 1,
+        truncated = false;
+
+  final RecordingModel? recording;
+  bool get isTrack => id.isEmpty;
 
   final String id;
   final String title;

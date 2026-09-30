@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../data/playlists_repository.dart' show PlaylistSummaryModel;
 import '../../models/recording_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
@@ -96,7 +97,7 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
   Widget build(BuildContext context) {
     final searching = _query.isNotEmpty;
     return DefaultTabController(
-      length: 5,
+      length: 4,
       child: Scaffold(
         appBar: SectionAppBar(
           'Knihovna',
@@ -141,7 +142,7 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
             Offstage(
               offstage: searching,
               child: const TabBarView(
-                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab(), _PlaylistsTab(shared: true)],
+                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab()],
               ),
             ),
             if (searching)
@@ -575,12 +576,11 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
   }
 }
 
-/// Vlastní playlisty (`GET /playlists`), nebo (`shared`) ty přidané
-/// z odkazu na Spotify -- s autorem ("Ze Spotify · jméno") a jejich obalem.
+/// Vlastní playlisty (`GET /playlists`) a pod nimi sekce "Sdílené ze
+/// Spotify" (přidané z odkazu -- s autorem a jejich obalem). Dřív samostatný
+/// tab, to bylo moc (živě nahlášeno).
 class _PlaylistsTab extends ConsumerWidget {
-  const _PlaylistsTab({this.shared = false});
-
-  final bool shared;
+  const _PlaylistsTab();
 
   Future<void> _createPlaylist(BuildContext context, WidgetRef ref) async {
     final controller = TextEditingController();
@@ -613,9 +613,8 @@ class _PlaylistsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final playlists = ref.watch(myPlaylistsProvider).whenData(
-          (all) => [for (final p in all) if (p.isShared == shared) p],
-        );
+    final playlists = ref.watch(myPlaylistsProvider);
+    final theme = Theme.of(context);
     // Připnuté nahoře: Oblíbené + Poslechnout později.
     const liked = Padding(
       padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.xs),
@@ -627,70 +626,87 @@ class _PlaylistsTab extends ConsumerWidget {
         ],
       ),
     );
+    Widget card(PlaylistSummaryModel playlist) {
+      final artists = playlist.artistNames;
+      final who = artists.isEmpty
+          ? 'Playlist'
+          : artists.length < 3
+              ? artists.join(', ')
+              : '${artists.take(2).join(', ')} a další';
+      return MediaCard(
+        layout: MediaCardLayout.row,
+        placeholderIcon: Symbols.queue_music_rounded,
+        artwork: PlaylistArtwork(title: playlist.title, coverUrls: playlist.coverUrls, showTitle: false),
+        title: playlist.title,
+        // Sdílené: autor ze Spotify ("Ze Spotify · jméno").
+        subtitle: playlist.isShared && playlist.description != null
+            ? '${playlist.description} · ${playlist.itemCount} skladeb'
+            : '$who · ${playlist.itemCount} skladeb',
+        onTap: () => context.push('/playlists/${playlist.id}'),
+        onLongPress: () => showCollectionActions(
+          context,
+          kind: CollectionKind.playlist,
+          id: playlist.id,
+          title: playlist.title,
+          imageUrl: playlist.coverUrls.firstOrNull,
+        ),
+      );
+    }
+
     return Scaffold(
-      floatingActionButton: shared
-          ? FloatingActionButton.extended(
-              onPressed: () => showSpotifyLinkDialog(context, ref),
-              icon: const Icon(Symbols.link_rounded),
-              label: const Text('Přidat ze Spotify'),
-            )
-          : FloatingActionButton.extended(
-              onPressed: () => _createPlaylist(context, ref),
-              icon: const Icon(Symbols.add_rounded),
-              label: const Text('Nový playlist'),
-            ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _createPlaylist(context, ref),
+        icon: const Icon(Symbols.add_rounded),
+        label: const Text('Nový playlist'),
+      ),
       body: playlists.when(
-        data: (items) => RefreshIndicator(
-                onRefresh: () async {
-                  ref.invalidate(myPlaylistsProvider);
-                  ref.invalidate(likedSongsProvider);
-                },
-                child: ListView.builder(
-                  padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
-                  itemCount: items.length + 1 + (items.isEmpty ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == 0) return shared ? const SizedBox(height: AppSpacing.xs) : liked;
-                    if (items.isEmpty) {
-                      return EmptyState(
+        data: (all) {
+          final own = [for (final p in all) if (!p.isShared) p];
+          final shared = [for (final p in all) if (p.isShared) p];
+          return RefreshIndicator(
+            onRefresh: () async {
+              ref.invalidate(myPlaylistsProvider);
+              ref.invalidate(likedSongsProvider);
+            },
+            child: ListView(
+              padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
+              children: [
+                liked,
+                if (own.isEmpty)
+                  const EmptyState(
+                    compact: true,
+                    icon: Symbols.queue_music_rounded,
+                    message: 'Zatím žádné vlastní playlisty -- založ první tlačítkem vpravo dole.',
+                  ),
+                for (final p in own) card(p),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.md, AppSpacing.xs, AppSpacing.xs),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text('Sdílené ze Spotify', style: theme.textTheme.titleMedium)),
+                      GlassButton(
+                        label: 'Přidat',
+                        icon: Symbols.link_rounded,
+                        style: GlassButtonStyle.tonal,
                         compact: true,
-                        icon: shared ? Symbols.link_rounded : Symbols.queue_music_rounded,
-                        message: shared
-                            ? 'Playlisty, které ti někdo pošle ze Spotify: vlož odkaz tlačítkem vpravo dole, do Hledat, nebo ho sdílej zkratkou "Do Opentify".'
-                            : 'Zatím žádné vlastní playlisty -- založ první tlačítkem vpravo dole.',
-                      );
-                    }
-                    final playlist = items[index - 1];
-                    final artists = playlist.artistNames;
-                    final who = artists.isEmpty
-                        ? 'Playlist'
-                        : artists.length < 3
-                            ? artists.join(', ')
-                            : '${artists.take(2).join(', ')} a další';
-                    return MediaCard(
-                      layout: MediaCardLayout.row,
-                      placeholderIcon: Symbols.queue_music_rounded,
-                      artwork: PlaylistArtwork(
-                        title: playlist.title,
-                        coverUrls: playlist.coverUrls,
-                        showTitle: false,
+                        onPressed: () => showSpotifyLinkDialog(context, ref),
                       ),
-                      title: playlist.title,
-                      // Sdílené: autor ze Spotify ("Ze Spotify · jméno").
-                      subtitle: shared && playlist.description != null
-                          ? '${playlist.description} · ${playlist.itemCount} skladeb'
-                          : '$who · ${playlist.itemCount} skladeb',
-                      onTap: () => context.push('/playlists/${playlist.id}'),
-                      onLongPress: () => showCollectionActions(
-                        context,
-                        kind: CollectionKind.playlist,
-                        id: playlist.id,
-                        title: playlist.title,
-                        imageUrl: playlist.coverUrls.firstOrNull,
-                      ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
-              ),
+                if (shared.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                    child: Text(
+                      'Playlisty, které ti někdo pošle: vlož odkaz tlačítkem Přidat, do Hledat, nebo ho sdílej zkratkou "Do Opentify".',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                for (final p in shared) card(p),
+              ],
+            ),
+          );
+        },
         loading: () => const LoadingState(),
         error: (error, stack) => ErrorState(
           message: 'Playlisty se nepodařilo načíst.',
@@ -707,7 +723,7 @@ class _PlaylistsTab extends ConsumerWidget {
 class _LibraryTabSegments extends StatelessWidget {
   const _LibraryTabSegments();
 
-  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty', 'Sdílené'];
+  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty'];
 
   @override
   Widget build(BuildContext context) {
