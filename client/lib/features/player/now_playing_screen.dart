@@ -872,15 +872,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // spodní řádek přimáčknutý).
           const SizedBox(height: 6),
           // Spojená skupina Předchozí · Přehrát · Další (M3 Expressive, jako
-          // PixelPlay) uprostřed, náhodně/opakování malé po stranách.
+          // PixelPlay) přes celou šířku.
           Row(
             children: [
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: Icon(Symbols.shuffle_rounded, color: playback.shuffleEnabled ? accent : Colors.white54, size: 22),
-                tooltip: 'Náhodné přehrávání',
-                onPressed: controller.toggleShuffle,
-              ),
               Expanded(
                 child: ExpressivePlayerGroup(
                   isPlaying: playback.isPlaying,
@@ -901,16 +895,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       : null,
                 ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
-                  color: playback.repeatMode == RepeatMode.off ? Colors.white54 : accent,
-                  size: 22,
-                ),
-                tooltip: 'Opakování',
-                onPressed: controller.cycleRepeatMode,
-              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -919,8 +903,34 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
+              // Náhodně a opakování dole mezi ikonami (bez popisků se vejdou).
+              IconButton(
+                tooltip: 'Náhodné přehrávání',
+                style: IconButton.styleFrom(
+                  foregroundColor: playback.shuffleEnabled ? Colors.white : Colors.white70,
+                  backgroundColor: playback.shuffleEnabled ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+                  fixedSize: const Size.square(44),
+                ),
+                icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
+                onPressed: controller.toggleShuffle,
+              ),
               _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback),
               _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback),
+              IconButton(
+                tooltip: 'Opakování',
+                style: IconButton.styleFrom(
+                  foregroundColor: playback.repeatMode == RepeatMode.off ? Colors.white70 : Colors.white,
+                  backgroundColor:
+                      playback.repeatMode == RepeatMode.off ? Colors.transparent : Colors.white.withValues(alpha: 0.16),
+                  fixedSize: const Size.square(44),
+                ),
+                icon: Icon(
+                  playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
+                  size: 22,
+                  semanticLabel: 'Opakování',
+                ),
+                onPressed: controller.cycleRepeatMode,
+              ),
               // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
               if (MediaQuery.sizeOf(context).width < 600) _likeButton(playback),
             ],

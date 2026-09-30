@@ -1140,7 +1140,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       RepeatMode.all => RepeatMode.one,
       RepeatMode.one => RepeatMode.off,
     };
-    state = state.copyWith(repeatMode: next);
+    setRepeatMode(next);
+  }
+
+  void setRepeatMode(RepeatMode mode) {
+    if (mode == state.repeatMode) return;
+    state = state.copyWith(repeatMode: mode);
     _radioSyncUpcoming();
   }
 
