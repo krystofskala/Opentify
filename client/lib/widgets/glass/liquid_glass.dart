@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -445,6 +446,7 @@ class RenderLiquidGlass extends RenderBox {
   @override
   void detach() {
     _capture._glasses.remove(this);
+    _settleTimer?.cancel();
     super.detach();
   }
 
@@ -479,11 +481,53 @@ class RenderLiquidGlass extends RenderBox {
     layer = context.pushOpacity(offset, 255, _paintGlass, oldLayer: layer as OpacityLayer?);
   }
 
+  // Rychlý pohyb/změna velikosti skla: na webu je zachycený obsah o snímek
+  // (a interval zachytávání) pozadu, lom by "ujížděl" -- po dobu pohybu
+  // obyčejné rozmazání, lom až ~150 ms po zastavení (živě nahlášeno).
+  // V nativní appce (Impeller, bez zpoždění) se dá vypnout.
+  static const bool _calmWhileFast = kIsWeb;
+  static const double _fastPx = 4;
+  static const Duration _settle = Duration(milliseconds: 150);
+  Rect? _prevRect;
+  DateTime _lastFast = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _settleTimer;
+
+  bool _updateMotion(Rect now) {
+    final prev = _prevRect;
+    _prevRect = now;
+    if (!_calmWhileFast || prev == null) return false;
+    final moved = (now.topLeft - prev.topLeft).distance + (now.size.width - prev.size.width).abs() +
+        (now.size.height - prev.size.height).abs();
+    final t = DateTime.now();
+    if (moved > _fastPx) _lastFast = t;
+    final fast = t.difference(_lastFast) < _settle;
+    if (fast) {
+      // Po zastavení se samo překreslí zpátky na lom.
+      _settleTimer?.cancel();
+      _settleTimer = Timer(_settle + const Duration(milliseconds: 20), () {
+        if (attached) markNeedsPaint();
+      });
+    }
+    return fast;
+  }
+
   void _paintGlass(PaintingContext context, Offset offset) {
     globalRect = localToGlobal(Offset.zero) & size;
+    final fast = _updateMotion(globalRect!);
     _capture._schedule();
-    final canvas = context.canvas;
     final rrect = RRect.fromRectAndRadius(offset & size, Radius.circular(math.min(radius, size.shortestSide / 2)));
+    if (fast) {
+      // Obyčejné sklo: rozmazání pozadí + výplň, oříznuté do tvaru.
+      context.pushClipRRect(needsCompositing, offset, Offset.zero & size, rrect.shift(-offset), (ctx, off) {
+        ctx.pushLayer(
+          BackdropFilterLayer(filter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma)),
+          (c, o) => c.canvas.drawRect(o & size, Paint()..color = fill),
+          off,
+        );
+      });
+      return;
+    }
+    final canvas = context.canvas;
     final program = _program;
     final sharp = _capture._sharp, blurred = _capture._blurred, rect = _capture._rect;
     if (program == null || sharp == null || blurred == null || rect == null) {
