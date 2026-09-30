@@ -143,7 +143,7 @@ class _GlassSearchFieldState extends State<GlassSearchField> {
     );
 
     final capsule = widget.glass
-        ? GlassContainer(borderRadius: radius, child: field)
+        ? GlassContainer(borderRadius: radius, liquid: true, child: field)
         : DecoratedBox(decoration: ShapeDecoration(shape: glassShape(radius), color: tonalFill(context)), child: field);
 
     return Row(
@@ -178,6 +178,7 @@ class GlassSuggestionsPanel extends StatelessWidget {
       child: GlassContainer(
         borderRadius: const BorderRadius.all(Radius.circular(GlassTokens.panelRadius)),
         shadow: true,
+        liquid: true,
         child: ListView(
           shrinkWrap: true,
           padding: const EdgeInsets.symmetric(vertical: 4),

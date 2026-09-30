@@ -44,6 +44,7 @@ class WrappedLaunchCard extends StatelessWidget {
         minSize: Size.zero,
         onPressed: () => context.push('/wrapped/$period'),
         child: GlassContainer(
+          liquid: true,
           borderRadius: BorderRadius.circular(Expressive.cornerLarge),
           tint: HSLColor.fromAHSL(1, hue, 0.6, 0.45).toColor(),
           tintOpacity: 0.14,

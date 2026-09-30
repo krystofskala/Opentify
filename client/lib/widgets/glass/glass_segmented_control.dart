@@ -150,7 +150,7 @@ class GlassSegmentedControl<T> extends StatelessWidget {
         child: SizedBox(
           height: height,
           child: floating
-              ? GlassContainer(borderRadius: radius, child: track)
+              ? GlassContainer(borderRadius: radius, liquid: true, child: track)
               : DecoratedBox(
                   decoration: ShapeDecoration(shape: glassShape(radius), color: tonalFill(context)),
                   child: track,

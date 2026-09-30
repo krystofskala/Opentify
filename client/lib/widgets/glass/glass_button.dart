@@ -108,7 +108,7 @@ class GlassButton extends StatelessWidget {
         final radius = _radius(height, pressed, groupPosition);
         final content = Padding(padding: padding, child: SizedBox(height: height, child: labelRow));
         final Widget body = style == GlassButtonStyle.glass
-            ? GlassContainer(borderRadius: radius, child: content)
+            ? GlassContainer(borderRadius: radius, liquid: true, child: content)
             : _MorphingSurface(radius: radius, color: colors.background, child: content);
         return expand ? SizedBox(width: double.infinity, child: body) : body;
       },
@@ -235,9 +235,7 @@ class GlassIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final effectiveStyle = selected == null
-        ? style
-        : (selected! ? GlassButtonStyle.prominent : GlassButtonStyle.tonal);
+    final effectiveStyle = selected == null ? style : (selected! ? GlassButtonStyle.prominent : GlassButtonStyle.tonal);
     final colors = _colorsFor(context, effectiveStyle, false);
     final foreground = color ?? (effectiveStyle == GlassButtonStyle.plain ? scheme.onSurface : colors.foreground);
     return GlassPressable(
@@ -250,7 +248,8 @@ class GlassIconButton extends StatelessWidget {
         final radius = BorderRadius.circular(pressed ? size * Expressive.pressedCornerFraction : size / 2);
         final iconWidget = SizedBox(width: size, height: size, child: Icon(icon, size: iconSize, color: foreground));
         return switch (effectiveStyle) {
-          GlassButtonStyle.glass => GlassContainer(borderRadius: BorderRadius.circular(size / 2), child: iconWidget),
+          GlassButtonStyle.glass =>
+            GlassContainer(borderRadius: BorderRadius.circular(size / 2), liquid: true, child: iconWidget),
           GlassButtonStyle.plain => iconWidget,
           _ => _MorphingSurface(radius: radius, color: colors.background, child: iconWidget),
         };
@@ -302,7 +301,8 @@ class GlassToggleButton extends StatelessWidget {
               children: [
                 Icon(selected ? Icons.check_rounded : (icon ?? Icons.add_rounded), size: 18, color: foreground),
                 const SizedBox(width: 6),
-                Text(label, style: theme.textTheme.labelLarge?.copyWith(color: foreground, fontWeight: FontWeight.w700)),
+                Text(label,
+                    style: theme.textTheme.labelLarge?.copyWith(color: foreground, fontWeight: FontWeight.w700)),
               ],
             ),
           ),
@@ -321,6 +321,10 @@ class GlassButtonRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(spacing: AppSpacing.sm, runSpacing: AppSpacing.xs, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+    return Wrap(
+        spacing: AppSpacing.sm,
+        runSpacing: AppSpacing.xs,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: children);
   }
 }

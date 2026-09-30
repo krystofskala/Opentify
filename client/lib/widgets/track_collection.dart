@@ -229,6 +229,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
         child: GlassContainer(
           borderRadius: BorderRadius.circular(AppRadii.lg),
           shadow: true,
+          liquid: true,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
           child: Wrap(
             crossAxisAlignment: WrapCrossAlignment.center,

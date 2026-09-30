@@ -131,7 +131,8 @@ class GlassContainer extends StatelessWidget {
       if (emphasis > 0) Colors.white.withValues(alpha: emphasis),
     ];
     final fill = _flatten(fills);
-    Widget content = padding == null ? child : Padding(padding: padding!, child: child);
+    // Sklo na skle neláme (viz `NoLiquidScope`).
+    Widget content = NoLiquidScope(child: padding == null ? child : Padding(padding: padding!, child: child));
     // Sklo opačné než motiv: obsah na něm dostane motiv jeho jasu, ať text
     // a ikony zůstanou čitelné (bílá na světlém skle by zmizela).
     if (baseFill && isDark != themeDark) {

@@ -85,10 +85,21 @@ class LiquidCaptureScope extends StatelessWidget {
   Widget build(BuildContext context) => _LiquidScopeData(capture: capture, child: child);
 }
 
+/// Obsah uvnitř skla: vnořené sklo (tlačítko na liště, přepínač v menu)
+/// nesmí lámat to, co je pod celým panelem -- vypadalo by jako díra.
+class NoLiquidScope extends StatelessWidget {
+  const NoLiquidScope({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => _LiquidScopeData(capture: null, child: child);
+}
+
 class _LiquidScopeData extends InheritedWidget {
   const _LiquidScopeData({required this.capture, required super.child});
 
-  final LiquidCapture capture;
+  final LiquidCapture? capture;
 
   @override
   bool updateShouldNotify(_LiquidScopeData old) => old.capture != capture;
@@ -254,7 +265,7 @@ class LiquidSource extends SingleChildRenderObjectWidget {
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      RenderLiquidSource(_kind == _SourceKind.page ? LiquidScope.maybeOf(context) : null);
+      RenderLiquidSource(_kind == _SourceKind.page ? LiquidScope.maybeOf(context) : null, isPage: _kind == _SourceKind.page);
 
   @override
   void updateRenderObject(BuildContext context, RenderLiquidSource renderObject) {
@@ -263,7 +274,11 @@ class LiquidSource extends SingleChildRenderObjectWidget {
 }
 
 class RenderLiquidSource extends RenderRepaintBoundary {
-  RenderLiquidSource(this._scope);
+  RenderLiquidSource(this._scope, {this.isPage = false});
+
+  /// Stránka bez zachytávání nad sebou se neregistruje nikam (ne jako
+  /// globální pozadí).
+  final bool isPage;
 
   LiquidCapture? _scope;
   set scope(LiquidCapture? value) {
@@ -276,6 +291,7 @@ class RenderLiquidSource extends RenderRepaintBoundary {
   void _register() {
     final scope = _scope;
     if (scope == null) {
+      if (isPage) return;
       LiquidCapture._background = this;
     } else {
       scope._pages
@@ -287,7 +303,7 @@ class RenderLiquidSource extends RenderRepaintBoundary {
   void _unregister() {
     final scope = _scope;
     if (scope == null) {
-      if (LiquidCapture._background == this) LiquidCapture._background = null;
+      if (!isPage && LiquidCapture._background == this) LiquidCapture._background = null;
     } else {
       scope._pages.remove(this);
     }

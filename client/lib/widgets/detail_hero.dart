@@ -1422,6 +1422,7 @@ class _HeroCircleButton extends StatelessWidget {
           child: GlassContainer(
             borderRadius: BorderRadius.circular(22),
             rim: true,
+            liquid: true,
             child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),
           ),
         ),
