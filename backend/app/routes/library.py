@@ -68,11 +68,32 @@ from app.models import (
 # Admin: přepínač v Knihovně "Vše na serveru" (hlavička X-Library-Scope: all)
 # -- celá sdílená knihovna místo klasické. Async závislost, ať hodnota
 # doputuje i do synchronních endpointů (threadpool kopíruje kontext).
-_scope_all: ContextVar[bool] = ContextVar("library_scope_all", default=False)
+_scope: ContextVar[str] = ContextVar("library_scope", default="mine")
 
 
 async def _library_scope(request: Request) -> None:
-    _scope_all.set(request.headers.get("x-library-scope") == "all")
+    # "mine" (klasická knihovna) | "downloaded" (co si profil stáhl) |
+    # "all" (celý server, jen admin)
+    _scope.set(request.headers.get("x-library-scope") or "mine")
+
+
+def _downloaded_by(user_id: str):
+    """Co si profil stáhl/pustil. Admin: všechno stažené kromě skladeb, které
+    stáhl jen jiný profil (starší stažení nemají záznam úlohy), plus jeho
+    hudba z PC."""
+    if user_id == ADMIN_ID:
+        foreign_only = (
+            select(ProvisioningJob.recording_id)
+            .where(ProvisioningJob.requested_by_user_id != ADMIN_ID)
+            .where(
+                ProvisioningJob.recording_id.not_in(  # type: ignore[attr-defined]
+                    select(ProvisioningJob.recording_id).where(ProvisioningJob.requested_by_user_id == ADMIN_ID)
+                )
+            )
+        )
+        return and_(_IN_LIBRARY, MediaAsset.recording_id.not_in(foreign_only))  # type: ignore[attr-defined]
+    mine = select(ProvisioningJob.recording_id).where(ProvisioningJob.requested_by_user_id == user_id)
+    return and_(_IN_LIBRARY, MediaAsset.recording_id.in_(mine))  # type: ignore[attr-defined]
 
 
 library_router = APIRouter(prefix="/library", tags=["library"], dependencies=[Depends(_library_scope)])
@@ -110,8 +131,11 @@ def _in_library(user_id: str):
         MediaAsset.recording_id.in_(entries),  # type: ignore[attr-defined]
         MediaAsset.recording_id.in_(liked),  # type: ignore[attr-defined]
     )
-    if user_id == ADMIN_ID and _scope_all.get():
+    scope = _scope.get()
+    if scope == "all" and user_id == ADMIN_ID:
         return _IN_LIBRARY
+    if scope == "downloaded":
+        return _downloaded_by(user_id)
     if user_id == ADMIN_ID:
         own_music = MediaAsset.source_provider.in_(("local", "musicbrainz-local"))  # type: ignore[union-attr]
         mine = or_(mine, own_music)
@@ -515,9 +539,12 @@ def library_entries(
     current: tuple[str, str] = Depends(get_current_user),
 ):
     """Id skladeb v knihovně profilu (pro "Přidat/Odebrat z knihovny")."""
-    ids = session.exec(
-        select(MediaAsset.recording_id).where(_in_library(current[0]))
-    ).all()
+    # Vždy klasická knihovna, bez ohledu na přepínač pohledu v Knihovně.
+    token = _scope.set("mine")
+    try:
+        ids = session.exec(select(MediaAsset.recording_id).where(_in_library(current[0]))).all()
+    finally:
+        _scope.reset(token)
     return {"recordingIds": sorted(set(ids))}
 
 

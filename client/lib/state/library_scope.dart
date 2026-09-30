@@ -4,39 +4,41 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/remove_from_library.dart' show libraryRevisionProvider;
 import 'providers.dart';
 
-/// Admin: Knihovna ukazuje buď klasickou knihovnu (co si přidal), nebo
-/// úplně všechno stažené na serveru (i od ostatních profilů). Server to
-/// pozná z hlavičky `X-Library-Scope: all` (ostatním profilům ji ignoruje).
-class LibraryScopeController extends StateNotifier<bool> {
-  LibraryScopeController(this._ref) : super(false) {
+/// Pohled Knihovny (zatím jen admin): klasická knihovna, co si stáhl, nebo
+/// celý server. Server to pozná z hlavičky `X-Library-Scope`.
+enum LibraryScope { mine, downloaded, all }
+
+class LibraryScopeController extends StateNotifier<LibraryScope> {
+  LibraryScopeController(this._ref) : super(LibraryScope.mine) {
     _load();
   }
 
   final Ref _ref;
-  static const _prefKey = 'library.scope_all';
+  static const _prefKey = 'library.scope';
 
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if ((prefs.getBool(_prefKey) ?? false) && mounted) set(true, save: false);
+      final saved = LibraryScope.values.where((v) => v.name == prefs.getString(_prefKey)).firstOrNull;
+      if (saved != null && saved != LibraryScope.mine && mounted) set(saved, save: false);
     } catch (_) {}
   }
 
-  Future<void> set(bool all, {bool save = true}) async {
-    state = all;
+  Future<void> set(LibraryScope scope, {bool save = true}) async {
+    state = scope;
     final headers = _ref.read(apiClientProvider).extraHeaders;
-    all ? headers['X-Library-Scope'] = 'all' : headers.remove('X-Library-Scope');
+    scope == LibraryScope.mine ? headers.remove('X-Library-Scope') : headers['X-Library-Scope'] = scope.name;
     _ref.read(libraryRevisionProvider.notifier).state++;
     if (!save) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_prefKey, all);
+      await prefs.setString(_prefKey, scope.name);
     } catch (_) {}
   }
 }
 
-final libraryScopeAllProvider =
-    StateNotifierProvider<LibraryScopeController, bool>((ref) => LibraryScopeController(ref));
+final libraryScopeProvider =
+    StateNotifierProvider<LibraryScopeController, LibraryScope>((ref) => LibraryScopeController(ref));
 
 /// Id skladeb v knihovně profilu (klasická knihovna) -- pro "Přidat /
 /// Odebrat z knihovny" v menu skladby.
@@ -50,11 +52,4 @@ final libraryIdsProvider = FutureProvider<Set<String>>((ref) async {
 Future<void> addTrackToLibrary(WidgetRef ref, String recordingId) async {
   await ref.read(apiClientProvider).postJson('/library/tracks/$recordingId');
   ref.read(libraryRevisionProvider.notifier).state++;
-}
-
-/// "Přidat do knihovny" -- celé album.
-Future<int> addAlbumToLibrary(WidgetRef ref, String releaseId) async {
-  final json = await ref.read(apiClientProvider).postJson('/library/albums/$releaseId');
-  ref.read(libraryRevisionProvider.notifier).state++;
-  return json['added'] as int? ?? 0;
 }

@@ -737,23 +737,52 @@ class _LibraryTabSegments extends StatelessWidget {
 }
 
 
-/// Admin: "Moje" (klasická knihovna) / "Vše na serveru" (všechno stažené).
-/// Ostatní profily ho nevidí.
+/// Admin: pohled Knihovny -- Moje (klasická knihovna) / Staženo (co sám
+/// stáhl) / Vše na serveru. Ostatní profily ho zatím nevidí ("Staženo" pro
+/// ně přijde s offline režimem v nativní appce).
 class _LibraryScopeToggle extends ConsumerWidget {
   const _LibraryScopeToggle();
+
+  static const _labels = {
+    LibraryScope.mine: ('Moje', Symbols.person_rounded, 'Co sis přidal do knihovny a lajkl'),
+    LibraryScope.downloaded: ('Staženo', Symbols.download_done_rounded, 'Všechno, co sis stáhl nebo pustil'),
+    LibraryScope.all: ('Vše na serveru', Symbols.dns_rounded, 'Všechno stažené, i od ostatních profilů'),
+  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (ref.watch(authProvider).valueOrNull?.user?.role != 'admin') return const SizedBox.shrink();
-    final all = ref.watch(libraryScopeAllProvider);
+    final scope = ref.watch(libraryScopeProvider);
+    final (label, icon, _) = _labels[scope]!;
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: GlassButton(
-        label: all ? 'Vše na serveru' : 'Moje',
-        icon: all ? Symbols.dns_rounded : Symbols.person_rounded,
+        label: label,
+        icon: icon,
         style: GlassButtonStyle.tonal,
         compact: true,
-        onPressed: () => ref.read(libraryScopeAllProvider.notifier).set(!all),
+        onPressed: () => showGlassSheet<void>(
+          context,
+          builder: (sheetContext) => GlassSheet(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final entry in _labels.entries)
+                  ListTile(
+                    leading: Icon(entry.value.$2),
+                    title: Text(entry.value.$1),
+                    subtitle: Text(entry.value.$3),
+                    trailing: entry.key == scope ? const Icon(Symbols.check_rounded) : null,
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      ref.read(libraryScopeProvider.notifier).set(entry.key);
+                    },
+                  ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
