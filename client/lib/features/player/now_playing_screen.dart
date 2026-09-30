@@ -354,9 +354,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               Positioned.fill(
                                 child: LiquidCaptureScope(
                                   capture: routeLiquidCapture,
+                                  // Čiré sklo (bez tónu): pozadí přehrávače je
+                                  // animace a ta musí být vidět čistá.
                                   child: GlassContainer(
                                     liquid: true,
                                     rim: true,
+                                    baseFill: false,
                                     borderRadius: radius,
                                     blurSigma: lerpDouble(4, 22, v)!,
                                     fit: StackFit.expand,
