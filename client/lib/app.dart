@@ -12,6 +12,7 @@ import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
 import 'widgets/auth_gate.dart';
+import 'state/offline_controller.dart';
 import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
 
@@ -32,6 +33,8 @@ class OpentifyApp extends ConsumerWidget {
     final accent = ref.watch(effectiveAccentProvider);
     final seed = accent ?? _defaultSeed;
     final isPlaying = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
+    // Offline knihovna načtená hned (přehrávač se na ni ptá už u první skladby).
+    ref.watch(offlineControllerProvider.select((s) => s.tracks.length));
     ref.listen<String?>(playerNoticeProvider, (_, message) {
       if (message == null) return;
       appMessengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));

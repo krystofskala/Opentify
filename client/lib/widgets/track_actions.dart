@@ -17,6 +17,7 @@ import 'media_card.dart' show ArtworkImage;
 import 'remove_from_library.dart';
 import 'radio_station.dart';
 import '../state/library_scope.dart';
+import '../state/offline_controller.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -110,6 +111,9 @@ class _TrackActionsSheet extends ConsumerWidget {
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
     final isLater =
         ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, recording.id) != null));
+    final offlineState = ref.watch(offlineControllerProvider);
+    final isOffline = offlineState.tracks.containsKey(recording.id);
+    final offlinePending = offlineState.pending.containsKey(recording.id);
     // Klasická knihovna profilu: co si sám přidal (ne co jen poslouchal).
     final inLibrary = ref.watch(libraryIdsProvider).valueOrNull?.contains(recording.id) ?? false;
 
@@ -226,6 +230,24 @@ class _TrackActionsSheet extends ConsumerWidget {
                     label: 'Přejít na interpreta',
                     onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
                   ),
+                _Item(
+                  icon: isOffline
+                      ? Symbols.mobile_off_rounded
+                      : (offlinePending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded),
+                  label: isOffline
+                      ? 'Smazat ze zařízení'
+                      : (offlinePending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení'),
+                  onTap: () => run(() {
+                    final offline = ref.read(offlineControllerProvider.notifier);
+                    if (isOffline) {
+                      offline.remove(recording.id);
+                      toast('Smazáno ze zařízení');
+                    } else if (!offlinePending) {
+                      offline.add([info]);
+                      toast('Stahuje se do zařízení');
+                    }
+                  }),
+                ),
                 if (!inLibrary)
                   _Item(
                     icon: Symbols.library_add_rounded,

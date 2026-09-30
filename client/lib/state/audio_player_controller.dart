@@ -22,6 +22,7 @@ import '../theme/accent_color.dart';
 import 'artwork_provider.dart';
 import 'provisioning_controller.dart';
 import 'collection_progress.dart';
+import 'offline_controller.dart';
 import 'providers.dart';
 
 // `RepeatMode` už existuje jako 1:1 model `PlaybackSession.repeatMode` z WS
@@ -1514,6 +1515,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _awaitingProvisioning = false;
 
     final provisioning = _ref.read(provisioningControllerProvider.notifier);
+
+    // Offline: skladba je uložená v zařízení -> hrát odtud (i bez internetu).
+    // Mimo rádio (to je stream ze serveru), proto jako "progresivní" zdroj.
+    final offline = _ref.read(offlineControllerProvider.notifier);
+    if (offline.has(info.recordingId)) {
+      final local = await offline.localUrl(info.recordingId);
+      if (state.nowPlaying?.recordingId != info.recordingId) return;
+      if (local != null) {
+        unawaited(_startStream(info, local, isProgressive: true));
+        return;
+      }
+    }
 
     // Rychlá cesta bez síťového čekání: skladbu už známe jako stáhnutou
     // (typicky další ve frontě, připravená v 80 % předchozí -- viz

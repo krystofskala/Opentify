@@ -29,6 +29,7 @@ import '../../widgets/collection_actions.dart';
 import '../../core/cz_plural.dart';
 import '../../state/auth_controller.dart';
 import '../../state/library_scope.dart';
+import 'offline_tab.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -102,7 +103,7 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
   Widget build(BuildContext context) {
     final searching = _query.isNotEmpty;
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: SectionAppBar(
           'Knihovna',
@@ -150,7 +151,7 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
             Offstage(
               offstage: searching,
               child: const TabBarView(
-                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab()],
+                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab(), OfflineTab()],
               ),
             ),
             if (searching)
@@ -720,7 +721,7 @@ class _PlaylistsTab extends ConsumerWidget {
 class _LibraryTabSegments extends StatelessWidget {
   const _LibraryTabSegments();
 
-  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty'];
+  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty', 'Offline'];
 
   @override
   Widget build(BuildContext context) {

@@ -14,6 +14,7 @@ import 'radio_station.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
 import '../core/cz_plural.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
+import '../state/offline_controller.dart';
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -169,6 +170,14 @@ class _CollectionActionsSheet extends ConsumerWidget {
                 onTap: () => run((infos) async {
                   await controller.addAllToQueue(infos, sourceLabel: title);
                   toast('Do fronty: ${songs(infos.length)} z „$title“');
+                }),
+              ),
+              _Row(
+                icon: Symbols.download_for_offline_rounded,
+                label: 'Stáhnout do zařízení',
+                onTap: () => run((infos) async {
+                  container.read(offlineControllerProvider.notifier).add(infos);
+                  toast('Stahuje se do zařízení: ${songs(infos.length)}');
                 }),
               ),
               if (kind == CollectionKind.album)
