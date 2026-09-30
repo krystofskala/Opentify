@@ -21,6 +21,7 @@ import '../routing/app_router.dart';
 import '../theme/accent_color.dart';
 import 'artwork_provider.dart';
 import 'provisioning_controller.dart';
+import 'collection_progress.dart';
 import 'providers.dart';
 
 // `RepeatMode` už existuje jako 1:1 model `PlaybackSession.repeatMode` z WS
@@ -376,10 +377,31 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         groupLabel: j['gl'] as String?,
       );
 
+  /// Rozposlouchané album/playlist (ne náhodně, ne jedna skladba) -- detail
+  /// pak nabídne "Pokračovat". Pozice po 5 s jako relace.
+  bool _rememberProgress = true;
+
+  void _recordCollectionProgress(AudioPlayerState s) {
+    if (!_rememberProgress) return;
+    final route = _queueContext;
+    final np = s.nowPlaying;
+    if (np == null || !CollectionProgressController.isCollection(route) || s.shuffleEnabled || s.queue.length < 2) {
+      return;
+    }
+    _ref.read(collectionProgressProvider.notifier).record(route!, (
+      recordingId: np.recordingId,
+      title: np.title,
+      index: s.queueIndex,
+      total: s.queue.length,
+      positionMs: s.position.inMilliseconds,
+    ));
+  }
+
   /// Uloží stav: hned při změně skladby/fronty, pozici nejvýš jednou za 5 s.
   void _maybePersistSession(AudioPlayerState s) {
     final np = s.nowPlaying;
     if (np == null || _restoredIdle) return;
+    _recordCollectionProgress(s);
     final key = '${np.recordingId}|${s.queueIndex}|${s.queue.length}|${s.shuffleEnabled}|${s.repeatMode.name}';
     final now = DateTime.now();
     if (key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
@@ -841,12 +863,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     int startIndex, {
     String? sourceLabel,
     bool prefetchWholeQueue = false,
+    Duration? startPosition,
+    bool rememberProgress = true,
   }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
     _restoredIdle = false;
-    _resumeAt = null;
-    _resumeFor = null;
+    _rememberProgress = rememberProgress;
+    // "Pokračovat" v albu/playlistu: skladba začne tam, kde uživatel skončil.
+    _resumeAt = startPosition;
+    _resumeFor = startPosition == null ? null : items[index].recordingId;
     _queueContext = _currentRoute();
     _primeAudioElement(items[index].recordingId);
     state = AudioPlayerState(
@@ -1882,6 +1908,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (state.repeatMode == RepeatMode.one) {
         unawaited(_replayCurrent());
       } else {
+        // Doposlouchané album/playlist -- už nenabízet "Pokračovat".
+        final route = _queueContext;
+        if (state.nextIndex == null && CollectionProgressController.isCollection(route)) {
+          _ref.read(collectionProgressProvider.notifier).clear(route!);
+        }
         unawaited(next());
       }
     }
