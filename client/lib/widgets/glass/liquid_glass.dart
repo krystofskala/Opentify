@@ -60,8 +60,8 @@ class LiquidCapture {
 
   RenderLiquidSource? _page;
   final Set<RenderLiquidGlass> _glasses = {};
-  ui.Image? _bg;
-  ui.Image? _pg;
+  ui.Image? _sharp;
+  ui.Image? _blurred;
   Rect? _rect; // zachycený výřez (globálně, logické px)
   final List<ui.Image> _retired = [];
   bool _scheduled = false;
@@ -71,7 +71,7 @@ class LiquidCapture {
   static const double _margin = 40;
   static const Duration _interval = Duration(milliseconds: 32);
 
-  bool get ready => _bg != null && _rect != null;
+  bool get ready => _sharp != null && _rect != null;
 
   void _schedule() {
     if (_scheduled || _disposed || _glasses.isEmpty) return;
@@ -110,14 +110,43 @@ class LiquidCapture {
       pg?.dispose();
       return;
     }
+    // Složit pozadí + stránku do jednoho obrázku a z něj rozmazanou verzi
+    // (skutečný Gauss na GPU -- stejné rozmazání jako běžné sklo).
+    final w = bg.width, h = bg.height;
+    final r1 = ui.PictureRecorder();
+    final c1 = Canvas(r1);
+    c1.drawImage(bg, Offset.zero, Paint());
+    if (pg != null) {
+      c1.drawImageRect(pg, Rect.fromLTWH(0, 0, pg.width.toDouble(), pg.height.toDouble()),
+          Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), Paint());
+    }
+    final p1 = r1.endRecording();
+    final sharp = p1.toImageSync(w, h);
+    p1.dispose();
+    bg.dispose();
+    pg?.dispose();
+    var sigma = 0.0;
+    for (final g in _glasses) {
+      sigma = math.max(sigma, g.blurSigma);
+    }
+    final r2 = ui.PictureRecorder();
+    final c2 = Canvas(r2);
+    c2.drawImage(
+      sharp,
+      Offset.zero,
+      Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: sigma * dpr, sigmaY: sigma * dpr, tileMode: TileMode.clamp),
+    );
+    final p2 = r2.endRecording();
+    final blurred = p2.toImageSync(w, h);
+    p2.dispose();
     // Staré obrázky ještě může používat rozpracovaný snímek -- uvolnit se zpožděním.
-    if (_bg != null) _retired.add(_bg!);
-    if (_pg != null) _retired.add(_pg!);
+    if (_sharp != null) _retired.add(_sharp!);
+    if (_blurred != null) _retired.add(_blurred!);
     while (_retired.length > 6) {
       _retired.removeAt(0).dispose();
     }
-    _bg = bg;
-    _pg = pg;
+    _sharp = sharp;
+    _blurred = blurred;
     _rect = rect;
     for (final g in _glasses) {
       g.markNeedsPaint();
@@ -126,8 +155,8 @@ class LiquidCapture {
 
   void dispose() {
     _disposed = true;
-    _bg?.dispose();
-    _pg?.dispose();
+    _sharp?.dispose();
+    _blurred?.dispose();
     for (final i in _retired) {
       i.dispose();
     }
@@ -343,12 +372,11 @@ class RenderLiquidGlass extends RenderBox {
     final canvas = context.canvas;
     final rrect = RRect.fromRectAndRadius(offset & size, Radius.circular(math.min(radius, size.shortestSide / 2)));
     final program = _program;
-    final bg = _capture._bg, rect = _capture._rect;
-    if (program == null || bg == null || rect == null) {
+    final sharp = _capture._sharp, blurred = _capture._blurred, rect = _capture._rect;
+    if (program == null || sharp == null || blurred == null || rect == null) {
       canvas.drawRRect(rrect, Paint()..color = fill.withValues(alpha: math.max(fill.a, 0.55)));
       return;
     }
-    final pg = _capture._pg;
     // Nová instance na každý snímek (jako pozadí) -- sdílená instance
     // s přepisovanými uniformy v CanvasKitu rozbíjela obrázky.
     _shader?.dispose();
@@ -375,8 +403,8 @@ class RenderLiquidGlass extends RenderBox {
     f(saturation);
     f(_norm);
     f(view.devicePixelRatio);
-    shader.setImageSampler(0, bg);
-    shader.setImageSampler(1, pg ?? bg);
+    shader.setImageSampler(0, sharp);
+    shader.setImageSampler(1, blurred);
     canvas.save();
     canvas.translate(offset.dx, offset.dy);
     canvas.drawRect(Offset.zero & size, Paint()..shader = shader);

@@ -160,7 +160,8 @@ class GlassContainer extends StatelessWidget {
             BackdropFilter(filter: frosted(), child: surface)
           else
             surface,
-          if (showEdgeHighlight)
+          // Sklo s lomem si odlesk kreslí samo (pohyblivý podle obsahu).
+          if (showEdgeHighlight && liquidCapture == null)
             Positioned.fill(
               child: IgnorePointer(child: CustomPaint(painter: GlassEdgePainter(shape: shape))),
             ),
