@@ -567,18 +567,21 @@ class GrainPainter extends CustomPainter {
     return recorder.endRecording().toImageSync((_tile * 2).toInt(), (_tile * 2).toInt());
   }
 
-  @override
-  void paint(Canvas canvas, Size size) {
+  /// Zrno jako opakovaná dlaždice (výplň pro `Paint.shader`) -- sdílí ji
+  /// i `paintGrainShape` (tvary na dlaždicích Hledat, hlavička, Wrapped).
+  static Shader shader() {
     final image = _image ??= _build();
     final matrix = Float64List(16)
       ..[0] = 0.5
       ..[5] = 0.5
       ..[10] = 1
       ..[15] = 1;
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..shader = ImageShader(image, TileMode.repeated, TileMode.repeated, matrix),
-    );
+    return ImageShader(image, TileMode.repeated, TileMode.repeated, matrix);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader());
   }
 
   @override
