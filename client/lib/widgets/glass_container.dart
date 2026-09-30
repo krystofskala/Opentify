@@ -1,10 +1,13 @@
 import 'dart:ui';
 
 import 'package:figma_squircle/figma_squircle.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../state/glass_settings.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
+import 'app_background.dart' show AppBackgroundLens;
 
 /// Liquid Glass materiál (viz pravidla v `theme/glass_tokens.dart`):
 /// rozmazání + vibrance (sytost/jas obsahu ZA sklem), NEUTRÁLNÍ výplň,
@@ -32,6 +35,8 @@ class GlassContainer extends StatelessWidget {
     this.emphasis = 0,
     this.baseFill = true,
     this.fit = StackFit.loose,
+    this.lens = false,
+    this.lensVisibility,
   });
 
   /// Hustě namrzlé sklo přehrávače: silné rozmazání + vibrance, jemné
@@ -46,6 +51,8 @@ class GlassContainer extends StatelessWidget {
     this.shadow = false,
     this.showEdgeHighlight = true,
     this.fit = StackFit.loose,
+    this.lens = false,
+    this.lensVisibility,
   })  : saturation = GlassTokens.vibrancy,
         tintOpacity = GlassTokens.playerTint,
         blur = true,
@@ -80,24 +87,50 @@ class GlassContainer extends StatelessWidget {
   final bool baseFill;
   final StackFit fit;
 
+  /// Lom živého pozadí v pruhu u hrany (`AppBackgroundLens`) -- plovoucí
+  /// prvky nad pozadím (tab bar, mini přehrávač, panely přehrávače).
+  final bool lens;
+
+  /// Síla lomu 0..1 za běhu (viz `AppBackgroundLens.visibility`).
+  final ValueListenable<double>? lensVisibility;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final shape = glassShape(borderRadius);
+    // Profil › Vzhled › "Průhlednost skla": méně výplně i rozmazání.
+    final clarity = GlassSettings.clarityOf(context);
+    final veil = 1 - 0.7 * clarity;
 
     final fills = <Color>[
-      if (baseFill && isDark) Colors.black.withValues(alpha: GlassTokens.fillDark),
-      if (baseFill && isDark) Colors.white.withValues(alpha: GlassTokens.fillDarkWhiteHint),
-      if (baseFill && isDark) Colors.white.withValues(alpha: GlassTokens.frostDark),
-      if (baseFill && !isDark) Colors.white.withValues(alpha: GlassTokens.fillLight),
-      if (tint != null) tint!.withValues(alpha: tintOpacity),
-      if (frost > 0) Colors.white.withValues(alpha: frost),
+      if (baseFill && isDark) Colors.black.withValues(alpha: GlassTokens.fillDark * veil),
+      if (baseFill && isDark) Colors.white.withValues(alpha: GlassTokens.fillDarkWhiteHint * veil),
+      if (baseFill && isDark) Colors.white.withValues(alpha: GlassTokens.frostDark * veil),
+      if (baseFill && !isDark) Colors.white.withValues(alpha: GlassTokens.fillLight * veil),
+      if (tint != null) tint!.withValues(alpha: tintOpacity * veil),
+      if (frost > 0) Colors.white.withValues(alpha: frost * veil),
       if (emphasis > 0) Colors.white.withValues(alpha: emphasis),
     ];
+    final fill = _flatten(fills);
+    final content = padding == null ? child : Padding(padding: padding!, child: child);
     Widget surface = DecoratedBox(
-      decoration: ShapeDecoration(shape: shape, color: _flatten(fills)),
-      child: padding == null ? child : Padding(padding: padding!, child: child),
+      decoration: ShapeDecoration(shape: shape, color: fill),
+      // Lom živého pozadí na hraně -- nad výplní, pod obsahem.
+      child: lens
+          ? Stack(
+              fit: fit,
+              children: [
+                Positioned.fill(
+                  child: RepaintBoundary(
+                    child: AppBackgroundLens(borderRadius: borderRadius, fill: fill, visibility: lensVisibility),
+                  ),
+                ),
+                content,
+              ],
+            )
+          : content,
     );
+    final sigma = blurSigma * (1 - 0.75 * clarity);
 
     final glass = ClipPath(
       clipper: ShapeBorderClipper(shape: shape),
@@ -110,7 +143,7 @@ class GlassContainer extends StatelessWidget {
               // -- stejné pořadí jako CSS `backdrop-filter: blur() saturate()`.
               filter: ImageFilter.compose(
                 outer: vibrancyColorFilter(saturation: saturation),
-                inner: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                inner: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
               ),
               child: surface,
             )

@@ -9,6 +9,7 @@ import '../theme/accent_color.dart';
 import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart' show Expressive, Motion;
 import '../state/audio_player_controller.dart';
+import '../state/glass_settings.dart';
 import '../state/user_idle.dart';
 import '../theme/selected_accent.dart';
 import 'glass/expressive_shapes.dart';
@@ -305,6 +306,7 @@ class _HeroFlexible extends StatelessWidget {
     final titleT = (1 - collapse / 0.55).clamp(0.0, 1.0);
     final barT = ((collapse - 0.72) / 0.28).clamp(0.0, 1.0);
     final iconOnly = hero._iconOnly && !wide;
+    _HeroBackdrop.setCover(wide || iconOnly ? 0 : 1 - barT);
 
     return ClipRect(
       child: Stack(
@@ -342,6 +344,7 @@ class _HeroFlexible extends StatelessWidget {
                       height: imageHeight,
                       child: _AmbientFade(
                         enabled: !iconOnly,
+                        photo: true,
                         child: _FadedMedia(hero: hero, darken: iconOnly ? 0 : collapse * 0.45),
                       ),
                     ),
@@ -486,14 +489,39 @@ class _HeroFlexible extends StatelessWidget {
   }
 }
 
+/// Jak moc je pod tlačítky hlavičky vidět živé pozadí appky místo fotky
+/// (0 = fotka, 1 = pozadí). Skleněná tlačítka lámou pozadí jen v téhle
+/// míře -- nad fotkou by lom ukázal cizí barvy pozadí kolem tlačítka.
+class _HeroBackdrop {
+  static double _fade = 1;
+  static double _cover = 1;
+  static final ValueNotifier<double> background = ValueNotifier(0);
+
+  static void setFade(double v) {
+    _fade = v;
+    background.value = 1 - _fade * _cover;
+  }
+
+  /// `cover` = fotka je pod tlačítky vůbec (0 u ikony, širokého okna,
+  /// sbalené hlavičky).
+  static void setCover(double cover) {
+    _cover = cover;
+    background.value = 1 - _fade * _cover;
+  }
+}
+
 /// "Ambientní" hlavička: ~5 s bez doteku při přehrávání (~10 s bez hudby) se fotka
 /// pomalu rozplyne do živého pozadí (zůstane jen slabá stopa), dotek ji
 /// hned vrátí. Rozvržení se nehýbe -- mizí jen obraz, ne místo.
 class _AmbientFade extends ConsumerWidget {
-  const _AmbientFade({required this.enabled, required this.child});
+  const _AmbientFade({required this.enabled, required this.child, this.photo = false});
 
   final bool enabled;
   final Widget child;
+
+  /// Tahle vrstva je fotka pod tlačítky -- hlásí svou viditelnost
+  /// `_HeroBackdrop` (lom skleněných tlačítek).
+  final bool photo;
 
   static const _trace = 0.14;
 
@@ -516,7 +544,10 @@ class _AmbientFade extends ConsumerWidget {
               ? Duration.zero
               : (idle ? const Duration(milliseconds: 2200) : const Duration(milliseconds: 700)),
           curve: Curves.easeInOutCubic,
-          builder: (context, v, child) => v >= 0.999 ? child! : Opacity(opacity: v, child: child),
+          builder: (context, v, child) {
+            if (photo) _HeroBackdrop.setFade(v);
+            return v >= 0.999 ? child! : Opacity(opacity: v, child: child);
+          },
           child: child,
         );
       },
@@ -1381,6 +1412,24 @@ class _HeroCircleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Profil › Vzhled › "Skleněná tlačítka": skleněná kapka (rozmazání fotky
+    // pod ní + hrana) s lomem živého pozadí, který sílí, jak fotka pod
+    // tlačítkem mizí (`_HeroBackdrop`).
+    if (GlassSettings.maybeOf(context)?.glassButtons ?? false) {
+      return Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          onTap: onPressed,
+          child: GlassContainer(
+            borderRadius: BorderRadius.circular(22),
+            blurSigma: 12,
+            lens: true,
+            lensVisibility: _HeroBackdrop.background,
+            child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),
+          ),
+        ),
+      );
+    }
     return Tooltip(
       message: tooltip,
       child: Material(

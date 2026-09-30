@@ -16,7 +16,8 @@ import '../../theme/accent_color.dart';
 import '../../theme/glass_tokens.dart';
 import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
-import '../../widgets/app_background.dart' show AppBackgroundMirror;
+import '../../state/glass_settings.dart';
+import '../../widgets/app_background.dart' show AppBackgroundLens, AppBackgroundMirror;
 import '../../widgets/glass/expressive_shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart';
@@ -303,6 +304,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
     final provisioningPct = provisioningState?.pct;
 
     final dark = Theme.of(context).brightness == Brightness.dark;
+    // Skoro čiré sklo (schváleno): animace pozadí má být vidět čistě, vrstvu
+    // nad ní ukazuje hlavně lom na hraně. Průhlednost skla v Profilu ubírá dál.
+    final veil = 1 - 0.7 * GlassSettings.clarityOf(context);
+    final sheetFill = Color.alphaBlend(
+      accent.withValues(alpha: 0.08 * veil),
+      Colors.black.withValues(alpha: (dark ? 0.12 : 0.30) * veil),
+    );
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
@@ -312,13 +320,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
           // tónování barvou skladby + ztmavení kvůli čitelnosti bílého obsahu
           // (světlý režim víc -- pastelový gradient), vnitřní horní lesk a
           // vlasová zrcadlová hrana nahoře.
-          IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Color.alphaBlend(
-                  accent.withValues(alpha: 0.16),
-                  Colors.black.withValues(alpha: dark ? 0.22 : 0.34),
-                ),
+          IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: sheetFill))),
+          // Lom pozadí na horní zaoblené hraně panelu.
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: AppBackgroundLens(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(Expressive.cornerExtraLarge)),
+                fill: sheetFill,
               ),
             ),
           ),
@@ -626,6 +634,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Single
       blur: false,
       baseFill: false,
       emphasis: GlassTokens.emphasis,
+      lens: true,
       borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       child: Column(

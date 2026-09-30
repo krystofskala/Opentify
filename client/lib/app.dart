@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'routing/app_router.dart';
 import 'state/audio_player_controller.dart';
+import 'state/glass_settings.dart';
 import 'state/grain_controller.dart';
 import 'state/theme_mode_controller.dart';
 import 'state/user_idle.dart';
@@ -56,7 +57,11 @@ class OpentifyApp extends ConsumerWidget {
             fineGrain: ref.watch(fineGrainProvider),
             // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
             // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
-            child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
+            child: GlassSettings(
+              clarity: ref.watch(glassClarityProvider),
+              glassButtons: ref.watch(glassButtonsProvider),
+              child: NowPlayingSheetHost(child: child ?? const SizedBox.shrink()),
+            ),
           ))),
     );
   }

@@ -8,6 +8,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/library_repository.dart';
 import '../../state/providers.dart';
+import '../../state/glass_settings.dart';
 import '../../state/grain_controller.dart';
 import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
@@ -290,6 +291,48 @@ class _AppearanceCard extends ConsumerWidget {
                 semanticLabel: 'Jemnější zrno',
                 onChanged: ref.read(fineGrainProvider.notifier).set,
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Skleněná tlačítka', style: theme.textTheme.titleSmall),
+                    Text(
+                      'Šipka zpět a tlačítka v hlavičce jako sklo místo tmavých kroužků.',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              GlassSwitch(
+                value: ref.watch(glassButtonsProvider),
+                semanticLabel: 'Skleněná tlačítka',
+                onChanged: ref.read(glassButtonsProvider.notifier).set,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text('Průhlednost skla', style: theme.textTheme.titleSmall),
+          Text(
+            'Lišta, mini přehrávač, přehrávač a panely: od mléčného po čiré sklo.',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          Row(
+            children: [
+              Text('Mléčné', style: theme.textTheme.labelSmall),
+              Expanded(
+                child: Slider(
+                  value: ref.watch(glassClarityProvider),
+                  semanticFormatterCallback: (v) => '${(v * 100).round()} % průhlednosti',
+                  onChanged: ref.read(glassClarityProvider.notifier).preview,
+                  onChangeEnd: (_) => ref.read(glassClarityProvider.notifier).save(),
+                ),
+              ),
+              Text('Čiré', style: theme.textTheme.labelSmall),
             ],
           ),
         ],
