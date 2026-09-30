@@ -229,7 +229,7 @@ class _VerifyRow extends ConsumerWidget {
                           icon: Symbols.graphic_eq_rounded,
                           compact: true,
                           onPressed: onRedownload,
-                        )
+                        ),
                       if (item.ownFile)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
