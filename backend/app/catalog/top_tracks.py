@@ -99,7 +99,7 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
     if len(out) < 5:
         # Doplnit z Deezeru (pořadí oblíbenosti, bez počtů).
         if not deezer_id:
-            found = await dz.search_artist(primary_artist_name(name))
+            found = await dz.search_artist(primary_artist_name(name), trust_name=False)
             match = next((a for a in found if _normalize(a.get("name", "")) == _normalize(name)), None)
             deezer_id = str(match["id"]) if match else None
         tracks = await dz.artist_top(deezer_id, LIMIT) if deezer_id else None

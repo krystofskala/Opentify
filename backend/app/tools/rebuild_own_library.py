@@ -30,7 +30,6 @@ from datetime import datetime
 from pathlib import Path
 
 from mutagen import File as MutagenFile
-from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.db import engine
@@ -217,10 +216,8 @@ def _recording_for(session: Session, artist, release, f: dict) -> Recording:
     """Nahrávka pro TENHLE soubor: stejná skladba na albu i na výběru jsou
     dva záznamy (každý svůj soubor). Použije se jen nahrávka tohohle alba,
     nebo taková, která ještě žádný jiný soubor nemá."""
-    title = f["title"].strip()
-    same = session.exec(
-        select(Recording).where(Recording.artist_id == artist.id, func.lower(Recording.title) == title.lower())
-    ).all()
+    title = nfc(f["title"].strip())
+    same = session.exec(select(Recording).where(Recording.artist_id == artist.id, Recording.title == title)).all()
     for rec in same:
         if rec.release_id == release.id:
             asset = session.get(MediaAsset, rec.id)

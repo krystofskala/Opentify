@@ -83,7 +83,7 @@ async def _deezer_id(artist_id: str) -> str | None:
             return artist.deezer_id
         name = primary_artist_name(artist.name)
     try:
-        candidates = await get_deezer_client().search_artist(name)
+        candidates = await get_deezer_client().search_artist(name, trust_name=False)
     except Exception:  # noqa: BLE001
         return None
     for candidate in candidates:

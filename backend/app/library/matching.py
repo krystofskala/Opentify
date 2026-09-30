@@ -11,6 +11,8 @@ stejné nahrávce jako všude jinde v katalogu, ne v paralelní duplicitě.
 
 from __future__ import annotations
 
+import unicodedata
+
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -24,9 +26,18 @@ def primary_of(name: str) -> str:
     return name.split(";")[0].strip() or name.strip()
 
 
+def _nfc(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
+
+
 def find_or_create_artist(session: Session, name: str) -> Artist:
-    name = primary_of(name)
-    artist = session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).first()
+    name = _nfc(primary_of(name))
+    # Nejdřív přesná shoda: SQLite `lower()` mění jen ASCII -- "Mňága a Žďorp"
+    # se přes něj nikdy nenašel a každá skladba dostala nového interpreta
+    # (a s ním vlastní album).
+    artist = session.exec(select(Artist).where(Artist.name == name)).first()
+    if artist is None:
+        artist = session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).first()
     if artist is None:
         artist = Artist(name=name, sort_name=name)
         session.add(artist)
@@ -36,10 +47,12 @@ def find_or_create_artist(session: Session, name: str) -> Artist:
 
 
 def find_or_create_release(session: Session, artist: Artist, title: str) -> Release:
-    title = title.strip()
-    release = session.exec(
-        select(Release).where(Release.artist_id == artist.id, func.lower(Release.title) == title.lower())
-    ).first()
+    title = _nfc(title.strip())
+    release = session.exec(select(Release).where(Release.artist_id == artist.id, Release.title == title)).first()
+    if release is None:
+        release = session.exec(
+            select(Release).where(Release.artist_id == artist.id, func.lower(Release.title) == title.lower())
+        ).first()
     if release is None:
         release = Release(artist_id=artist.id, title=title, release_type="album")
         session.add(release)
@@ -56,10 +69,12 @@ def find_or_create_recording(
     track_number: int | None = None,
     duration_ms: int | None = None,
 ) -> Recording:
-    title = title.strip()
-    recording = session.exec(
-        select(Recording).where(Recording.artist_id == artist.id, func.lower(Recording.title) == title.lower())
-    ).first()
+    title = _nfc(title.strip())
+    recording = session.exec(select(Recording).where(Recording.artist_id == artist.id, Recording.title == title)).first()
+    if recording is None:
+        recording = session.exec(
+            select(Recording).where(Recording.artist_id == artist.id, func.lower(Recording.title) == title.lower())
+        ).first()
     if recording is None:
         recording = Recording(
             artist_id=artist.id,

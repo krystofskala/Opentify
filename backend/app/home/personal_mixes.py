@@ -172,7 +172,7 @@ async def _deezer_id(taste: Taste, artist_id: str) -> str | None:
     if not name:
         return None
     try:
-        candidates = await get_deezer_client().search_artist(name)
+        candidates = await get_deezer_client().search_artist(name, trust_name=False)
     except Exception:  # noqa: BLE001
         return None
     for candidate in candidates:

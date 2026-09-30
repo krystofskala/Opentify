@@ -192,7 +192,7 @@ async def _wikidata_image(artist_mbid: str) -> str | None:
 async def resolve_artist_image(name: str, artist_mbid: str | None, *, allow_musicbrainz: bool = True) -> str | None:
     wanted = primary_artist_name(name)
     try:
-        artists = await get_deezer_client().search_artist(wanted)
+        artists = await get_deezer_client().search_artist(wanted, trust_name=False)
     except Exception:  # noqa: BLE001
         artists = []
     for candidate in artists:
@@ -221,20 +221,6 @@ def _mark_checked(refs: dict[str, Any]) -> dict[str, Any]:
     return {**refs, _CHECKED_KEY: datetime.now(timezone.utc).isoformat()}
 
 
-# Tátova kapela: stejně pojmenovaných kapel je víc -- obal/fotku nikdy
-# nehledat na internetu (jen obal vložený v souborech, nebo ručně).
-_PROTECTED_NAMES = {"kontrast", "kde zustal raj"}
-
-
-def _is_protected(*names: str | None) -> bool:
-    import unicodedata
-
-    def norm(v: str | None) -> str:
-        return unicodedata.normalize("NFKD", v or "").encode("ascii", "ignore").decode().lower().strip()
-
-    return any(norm(n) in _PROTECTED_NAMES for n in names)
-
-
 async def fill_release(release_id: str, *, force: bool = False) -> bool:
     with Session(engine) as session:
         release = session.get(Release, release_id)
@@ -244,9 +230,11 @@ async def fill_release(release_id: str, *, force: bool = False) -> bool:
         mbid, title, artist_name = release.mbid, release.title, artist.name if artist else ""
         deezer_id = release.deezer_id
 
-    if _is_protected(title, artist_name):
-        cover = await asyncio.to_thread(extract_release_art, release_id)
-    else:
+    # Album z vlastních souborů (bez id): obal vložený v souborech má
+    # přednost; online jen podle interpreta i názvu alba zároveň.
+    own = not mbid and not deezer_id
+    cover = await asyncio.to_thread(extract_release_art, release_id) if own else None
+    if cover is None:
         cover = await resolve_release_cover(mbid, artist_name, title, deezer_id)
     if cover is None:
         # Poslední záchrana jen pro alba z knihovny: obal vložený v lokálních
@@ -275,8 +263,10 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
             return False
         name, mbid = artist.name, artist.mbid
 
-    if _is_protected(name):
-        return False  # fotka jen ručně (od táty), ne cizí kapely stejného jména
+    from app.catalog.identity import local_only_artist
+
+    if not mbid and await asyncio.to_thread(local_only_artist, name) is not None:
+        return False  # vlastní hudba: fotku ne podle jména (kapel stejného jména je víc)
     picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force)
 
     with Session(engine) as session:

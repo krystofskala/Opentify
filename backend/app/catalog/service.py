@@ -446,7 +446,15 @@ class CatalogService:
         matches = [c for c in candidates if norm(c.get("name")) == wanted and c.get("id")]
         if not matches:
             return
-        best = max(matches, key=lambda c: c.get("nb_fan") or 0)
+        from app.catalog.identity import local_only_artist, verified_deezer_artist
+
+        if local_only_artist(artist.name) is not None:
+            # Vlastní hudba: jen ověřený kandidát (shodné album), ne podle jména.
+            best = await verified_deezer_artist(artist, matches)
+            if best is None:
+                return
+        else:
+            best = max(matches, key=lambda c: c.get("nb_fan") or 0)
         deezer_id = str(best["id"])
         owner = self._session.exec(select(Artist).where(Artist.deezer_id == deezer_id)).first()
         if owner is not None and owner.id != artist.id:

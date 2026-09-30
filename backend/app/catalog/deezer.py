@@ -14,6 +14,8 @@ nezpůsobil frontu paralelních volání.
 
 from __future__ import annotations
 
+import asyncio
+
 import os
 from typing import Any
 
@@ -86,13 +88,15 @@ class DeezerClient:
 
         return await cached_json(cache_key, SEARCH_TTL_SECONDS, fetch)
 
-    async def search_artist(self, name: str, limit: int = 5) -> list[dict[str, Any]]:
-        # Tátova kapela Kontrast: stejně pojmenovaných kapel je na Deezeru víc
-        # -- nikdy nepřiřazovat cizí diskografii/fotku/skladby.
-        from app.catalog.artwork import _is_protected
+    async def search_artist(self, name: str, limit: int = 5, *, trust_name: bool = True) -> list[dict[str, Any]]:
+        """`trust_name=False`: interpret známý jen z vlastních souborů se
+        podle jména nepáruje (viz app/catalog/identity.py) -- prázdný výsledek.
+        Vyhledávání v appce jde přes `search_typed`, tohle ho neomezuje."""
+        if not trust_name:
+            from app.catalog.identity import local_only_artist
 
-        if _is_protected(name):
-            return []
+            if await asyncio.to_thread(local_only_artist, name) is not None:
+                return []
         cache_key = f"dz:search_artist:{name}:{limit}"
 
         async def fetch() -> dict[str, Any] | None:
