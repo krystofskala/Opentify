@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -44,3 +46,47 @@ class ThemeModeController extends StateNotifier<ThemeMode> {
 }
 
 final themeModeProvider = StateNotifierProvider<ThemeModeController, ThemeMode>((ref) => ThemeModeController());
+
+/// Jas systému pro "Systém" -- ale ustálený. Webová appka na ploše iPhonu
+/// po návratu z jiné appky na okamžik hlásí světlý režim a appka na vteřinu
+/// problikla světle (živě nahlášeno). Změna se proto přijme, až když trvá
+/// ~0,7 s, a hned po návratu do appky (1,5 s) se krátké změny ignorují.
+class StableBrightnessController extends StateNotifier<Brightness> with WidgetsBindingObserver {
+  StableBrightnessController() : super(WidgetsBinding.instance.platformDispatcher.platformBrightness) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  Timer? _check;
+  DateTime _resumedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Brightness get _platform => WidgetsBinding.instance.platformDispatcher.platformBrightness;
+
+  void _schedule(Duration after) {
+    _check?.cancel();
+    _check = Timer(after, () {
+      if (mounted && _platform != state) state = _platform;
+    });
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    final sinceResume = DateTime.now().difference(_resumedAt);
+    const settle = Duration(milliseconds: 1500);
+    _schedule(sinceResume < settle ? settle - sinceResume + const Duration(milliseconds: 700) : const Duration(milliseconds: 700));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _resumedAt = DateTime.now();
+  }
+
+  @override
+  void dispose() {
+    _check?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+}
+
+final stableBrightnessProvider =
+    StateNotifierProvider<StableBrightnessController, Brightness>((ref) => StableBrightnessController());

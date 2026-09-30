@@ -36,7 +36,11 @@ class OpentifyApp extends ConsumerWidget {
       darkTheme: buildAppTheme(seed: seed, brightness: Brightness.dark),
       // Volba "Vzhled" v Profilu (výchozí tmavý), přepnutí animuje stejná
       // `themeAnimation*` jako změna barvy.
-      themeMode: ref.watch(themeModeProvider),
+      // "Systém" přes ustálený jas (bez probliknutí světlého po návratu do appky).
+      themeMode: switch (ref.watch(themeModeProvider)) {
+        ThemeMode.system => ref.watch(stableBrightnessProvider) == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
+        final mode => mode,
+      },
       routerConfig: router,
       scrollBehavior: const TopFadeScrollBehavior(),
       // Změna seedu (jiné album/interpret/skladba) přebarví celé téma
