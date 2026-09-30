@@ -177,6 +177,7 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
   int _currentIndex = -1;
   bool _userScrolling = false;
   Timer? _resumeTimer;
+  final _scroll = ScrollController();
 
   @override
   void didUpdateWidget(covariant _SyncedLyricsList oldWidget) {
@@ -190,6 +191,7 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
   @override
   void dispose() {
     _resumeTimer?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -208,15 +210,43 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
   void _maybeAutoScroll() {
     final index = _indexForPosition(widget.position);
     if (index == _currentIndex) return;
+    final first = _currentIndex < 0;
     _currentIndex = index;
     if (_userScrolling || index < 0) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _keys[index].currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(ctx,
-            alignment: 0.4, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollTo(index, animate: !first));
+  }
+
+  /// ListView staví jen řádky kolem výřezu -- aktuální řádek dál v textu
+  /// (text otevřený uprostřed skladby) nemá context, `ensureVisible` pak
+  /// nedělalo nic a text zůstal na začátku bez zvýraznění (živě nahlášeno).
+  /// Proto nejdřív skok na odhad podle průměrné výšky řádku, pak doladit.
+  void _scrollTo(int index, {required bool animate, int attempt = 0}) {
+    if (!mounted || index != _currentIndex || _userScrolling) return;
+    final ctx = _keys[index].currentContext;
+    if (ctx != null) {
+      if (animate) {
+        Scrollable.ensureVisible(ctx, alignment: 0.4, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      } else {
+        Scrollable.ensureVisible(ctx, alignment: 0.4);
       }
-    });
+      return;
+    }
+    if (attempt >= 4 || !_scroll.hasClients) return;
+    final pos = _scroll.position;
+    // Průměrná výška z postavených řádků, jinak ~40 px.
+    var built = 0;
+    var height = 0.0;
+    for (final k in _keys) {
+      final box = k.currentContext?.findRenderObject() as RenderBox?;
+      if (box != null && box.hasSize) {
+        built++;
+        height += box.size.height;
+      }
+    }
+    final avg = built > 0 ? height / built : 40.0;
+    final target = (140 + index * avg - pos.viewportDimension * 0.4).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    pos.jumpTo(target);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollTo(index, animate: false, attempt: attempt + 1));
   }
 
   @override
@@ -238,6 +268,7 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
         return false;
       },
       child: ListView.builder(
+        controller: _scroll,
         padding: const EdgeInsets.symmetric(vertical: 140, horizontal: 28),
         itemCount: widget.lines.length,
         itemBuilder: (context, index) {

@@ -79,6 +79,32 @@
 </head>
 <body>
   <script>
+    // Pojistka k CSS výš: Flutter má i skryté textové prvky (přístupnost,
+    // stínový DOM), kam `body *` nedosáhne -- dlouhý stisk na nadpisu pak
+    // pořád otevřel lupu a "Kopírovat / Přeložit" (živě nahlášeno). Výběr
+    // mimo textová pole se zruší hned na začátku.
+    (function () {
+      var editable = function (el) {
+        for (; el; el = el.parentNode || el.host) {
+          if (el.nodeType !== 1) continue;
+          var tag = el.tagName;
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+        }
+        return false;
+      };
+      document.addEventListener('selectstart', function (e) {
+        var t = e.composedPath ? e.composedPath()[0] : e.target;
+        if (!editable(t)) e.preventDefault();
+      }, true);
+      document.addEventListener('selectionchange', function () {
+        var s = document.getSelection();
+        if (s && s.rangeCount && !s.isCollapsed && !editable(document.activeElement) && !editable(s.anchorNode)) {
+          s.removeAllRanges();
+        }
+      });
+    })();
+  </script>
+  <script>
     // Černá skříňka (diagnostika zamrzání na iPhonu): hlídač v samostatném
     // vlákně (Worker) nahlásí, když hlavní vlákno appky přestane odpovídat,
     // plus ztráta WebGL plátna a chyby. Hlásí jen na vlastní server

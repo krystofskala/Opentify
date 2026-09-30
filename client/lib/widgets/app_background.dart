@@ -99,6 +99,17 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   static const _tweenSeconds = 2.8;
   static const _staggerSeconds = 0.06;
 
+  // Hosté (další barvy obalu) ve světlém záblesku (slot p4): po jednom se
+  // objeví, chvíli zůstanou a zmizí; mezi nimi je záblesk palety. Celé
+  // kolo ~80 s, host s větší plochou na obalu zůstane déle. Pozadí jinak
+  // beze změny -- během písničky se nikdy celé nepřebarví.
+  static const _guestCycleSeconds = 80.0;
+  List<({_Lab slot, double w})> _guests = const [];
+  double _guestClock = 0;
+  // Host, který byl vidět při změně skladby -- dozní s přechodem palety.
+  _Lab? _leaving;
+  double _leavingEnv = 0;
+
   double get _now => _clock.elapsedMicroseconds / 1e6;
 
   @override
@@ -109,6 +120,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
         .toList();
     _from = palette;
     _to = palette;
+    _guests = _guestsFor(widget.selectedAccent, widget.brightness, widget.character, _to);
     _ticker = createTicker(_onTick);
     _program.then((program) {
       if (!mounted) return;
@@ -156,8 +168,20 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   void _startTween(List<Color> palette) {
     final now = _now;
     final retarget = _tweening(now);
-    _from = List.generate(6, (i) => _slotAt(i, now));
+    _from = List.generate(6, (i) => _slotAt(i, now, guests: false));
     _to = palette.map(_Lab.fromColor).toList();
+    // Právě viditelný host (nebo ten, co ještě dozníval) plynule zmizí
+    // s přechodem; nové kolo hostů začíná klidem.
+    final (lab, env) = _guestNow();
+    final fading = _leaving != null ? _leavingEnv * (1 - _tweenProgress(now)) : 0.0;
+    if (env >= fading) {
+      _leaving = lab;
+      _leavingEnv = env;
+    } else {
+      _leavingEnv = fading;
+    }
+    _guests = _guestsFor(widget.selectedAccent, widget.brightness, widget.character, _to);
+    _guestClock = 0;
     _tweenStart = now;
     _tweenCurve = retarget ? Curves.easeOutCubic : Curves.easeInOutCubic;
     _wake();
@@ -171,10 +195,40 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
   /// rozfázování obstará práh každého zrnka).
   double _mixAt(double now) => _tweenCurve.transform(((now - _tweenStart) / _tweenDuration).clamp(0.0, 1.0));
 
-  _Lab _slotAt(int i, double now) {
+  _Lab _slotAt(int i, double now, {bool guests = true}) {
     final raw = ((now - _tweenStart - i * _stagger) / _tweenDuration).clamp(0.0, 1.0);
     final t = _tweenCurve.transform(raw);
-    return _Lab.lerp(_from[i], _to[i], t);
+    final slot = _Lab.lerp(_from[i], _to[i], t);
+    return i == 4 && guests ? _withGuest(slot, now) : slot;
+  }
+
+  double _tweenProgress(double now) => ((now - _tweenStart) / _tweenDuration).clamp(0.0, 1.0);
+
+  /// Aktuální host a jak moc je vidět (0..1).
+  (_Lab?, double) _guestNow() {
+    if (_guests.isEmpty || _reducedMotion) return (null, 0);
+    var x = (_guestClock / _guestCycleSeconds) % 1;
+    var k = 0;
+    while (k < _guests.length - 1 && x > _guests[k].w) {
+      x -= _guests[k].w;
+      k++;
+    }
+    final local = x / _guests[k].w;
+    // 30 % úseku klid (jen záblesk palety), pak náběh, drží, odchod.
+    final v = math.max(0.0, (local - 0.3) / 0.7);
+    return (_guests[k].slot, _FlowMesh._smooth(v / 0.35) * _FlowMesh._smooth((1 - v) / 0.35));
+  }
+
+  _Lab _withGuest(_Lab highlight, double now) {
+    var c = highlight;
+    final leaving = _leaving;
+    if (leaving != null) {
+      final k = _leavingEnv * (1 - _tweenProgress(now));
+      if (k > 0) c = _Lab.lerp(c, leaving, k);
+    }
+    final (guest, env) = _guestNow();
+    if (guest != null && env > 0) c = _Lab.lerp(c, guest, env);
+    return c;
   }
 
   void _wake() {
@@ -206,6 +260,7 @@ class _AppBackgroundState extends State<AppBackground> with SingleTickerProvider
       _bloom *= math.exp(-step / 0.2);
       _phase = (_phase + step * _speed * (1 + 3 * _boost)) % 600;
       _flow = (_flow + step * _speed * (1 + 3 * _boost) * 0.02) % 256;
+      _guestClock += step;
     }
     _frame.value++;
 
@@ -775,6 +830,55 @@ List<Color> _paletteFor(
           tone(-6, 0.5, 0.93),
           tone(dA != null ? dA / 2 : 4, 1.0, 0.8),
         ];
+}
+
+/// Hosté pro světlý záblesk: výrazné barvy obalu, které paleta nemá
+/// (odstín dál než 30° od všech jejích barevných slotů), max 4. Barva hosta
+/// má sytost a světlost slotu "střed" palety (čitelnost textu jako zbytek
+/// pole). Host, kterého režim neumí věrně ukázat (žlutá v tmavém režimu =
+/// olivová, ztratí přes půlku barevnosti), se vynechá.
+List<({_Lab slot, double w})> _guestsFor(
+  Color? accent,
+  Brightness brightness,
+  CoverCharacter? character,
+  List<_Lab> palette,
+) {
+  final guests = character?.guests ?? const [];
+  if (accent == null || guests.isEmpty) return const [];
+  final dark = brightness == Brightness.dark;
+  double chroma(_Lab c) => math.sqrt(c.a * c.a + c.b * c.b);
+  double hueDiff(_Lab x, _Lab y) =>
+      ((((math.atan2(x.b, x.a) - math.atan2(y.b, y.a)) * 180 / math.pi) + 540) % 360 - 180).abs();
+  final coloured = palette.where((c) => chroma(c) >= 0.03).toList();
+
+  // Sytost a světlost jako `_paletteFor` (slot "střed").
+  final coverSat = (character?.saturation ?? HSLColor.fromColor(accent).saturation).clamp(0.0, 1.0);
+  final coverLight = (character?.lightness ?? 0.5).clamp(0.0, 1.0);
+  final s = math.max(0.26, ui.lerpDouble(0.26, 0.85, coverSat)!) * 0.9;
+  final brightness01 = coverLight - 0.5;
+  final spread = 1 - math.max(0.0, brightness01) * 0.5;
+  final l = dark
+      ? (0.40 + (0.55 - 0.40) * spread + brightness01 * 0.3).clamp(0.05, 0.8)
+      : (0.84 + (0.72 - 0.84) * spread + brightness01 * 0.12).clamp(0.72, 0.97);
+
+  final picked = <({_Lab slot, double share})>[];
+  for (final g in guests) {
+    final src = _Lab.fromColor(g.color);
+    if (coloured.any((c) => hueDiff(c, src) < 30)) continue;
+    if (picked.any((p) => hueDiff(p.slot, src) < 30)) continue;
+    final hsl = HSLColor.fromColor(g.color);
+    final slot = _Lab.fromColor(_keepOkHue(HSLColor.fromAHSL(1, hsl.hue, s.clamp(0.0, 1.0), l).toColor(), g.color));
+    // Tmavý režim kreslí se světlostí ×0.66 -- barevnost po stažení do gamutu.
+    var shown = _Lab(slot.l * (dark ? 0.66 : 1), slot.a, slot.b);
+    for (var i = 0; i < 24 && !shown.inGamut; i++) {
+      shown = _Lab(shown.l, shown.a * 0.9, shown.b * 0.9);
+    }
+    if (chroma(shown) < 0.5 * chroma(src)) continue;
+    picked.add((slot: slot, share: g.share));
+    if (picked.length == 4) break;
+  }
+  final total = picked.fold<double>(0, (a, p) => a + p.share.clamp(0.15, 0.5));
+  return [for (final p in picked) (slot: p.slot, w: p.share.clamp(0.15, 0.5) / total)];
 }
 
 /// Pestrá úvodní paleta (dokud nic není vybrané) -- stejné odstíny, jak je

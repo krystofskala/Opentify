@@ -316,14 +316,21 @@ class _HeroFlexible extends StatelessWidget {
           if (!wide)
             // Prolnutí do pozadí vždy k AKTUÁLNÍ spodní hraně hlavičky -- při
             // částečném sbalení jinak obrázek končil ostrou hranou nad seznamem.
-            Positioned.fill(
+            // Končí 2 px nad spodní hranou a maska je průhledná už od 94 % --
+            // na iPhonu (zlomkové pixely) jinak poslední řádek fotky vyklouzl
+            // masce a nad popiskem problikávala tenká čára (živě nahlášeno).
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 2,
               child: ShaderMask(
                 blendMode: BlendMode.dstIn,
                 shaderCallback: (rect) => const LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.black, Colors.black, Color(0x00000000)],
-                  stops: [0, 0.42, 0.97],
+                  colors: [Colors.black, Colors.black, Color(0x00000000), Color(0x00000000)],
+                  stops: [0, 0.42, 0.94, 1],
                 ).createShader(rect),
                 child: Stack(
                   fit: StackFit.expand,
