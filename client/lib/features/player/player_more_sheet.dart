@@ -145,7 +145,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                 final sheet = NowPlayingSheetController.of(context);
                                 final id = playback.nowPlaying!.recordingId;
                                 final closed = Completer<bool>();
-                                goToRadio(context, ref, RadioSeed.track, id,
+                                goToRadio(context, RadioSeed.track, id,
                                     openAfter: closed.future, replaceTop: true);
                                 Navigator.of(context).pop();
                                 closed.complete(sheet.slideDown());

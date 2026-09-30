@@ -13,6 +13,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../state/artwork_provider.dart';
 import 'artist_screen.dart' show discographyProvider;
+import '../../widgets/collection_actions.dart';
 
 const _typeLabels = {'album': 'Album', 'ep': 'EP', 'single': 'Singl', 'compilation': 'Kompilace'};
 const _filterLabels = {'all': 'Vše', 'album': 'Alba', 'ep': 'EP', 'single': 'Singly', 'compilation': 'Kompilace'};
@@ -170,6 +171,14 @@ class _TimelineRow extends ConsumerWidget {
     final lineColor = scheme.outlineVariant;
     return InkWell(
       onTap: () => context.push('/releases/${release.id}'),
+      onLongPress: () => showCollectionActions(
+        context,
+        kind: CollectionKind.album,
+        id: release.id,
+        title: release.title,
+        subtitle: release.yearLabel,
+        imageUrl: cover,
+      ),
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,

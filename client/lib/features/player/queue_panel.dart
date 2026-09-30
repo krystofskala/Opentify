@@ -93,7 +93,7 @@ class QueueView extends ConsumerWidget {
   }
 }
 
-class _QueueList extends ConsumerWidget {
+class _QueueList extends ConsumerStatefulWidget {
   const _QueueList({this.scrollController, required this.queue, required this.currentIndex});
 
   final ScrollController? scrollController;
@@ -101,12 +101,53 @@ class _QueueList extends ConsumerWidget {
   final int currentIndex;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_QueueList> createState() => _QueueListState();
+}
+
+class _QueueListState extends ConsumerState<_QueueList> {
+  /// Rozbalené bloky (album/playlist přidané najednou). Výchozí = sbalené:
+  /// 50 skladeb jednoho alba je ve frontě jeden řádek, který jde celý odebrat
+  /// (živě chtěné: "nechci mazat 50 omylem přidaných skladeb po jedné").
+  final Set<String> _expanded = {};
+
+  Widget _dismissible({
+    required Key key,
+    required VoidCallback onDismissed,
+    required Widget child,
+    String label = 'Odebrat',
+  }) =>
+      Dismissible(
+        key: key,
+        direction: DismissDirection.endToStart,
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: Colors.redAccent.withValues(alpha: 0.75),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Symbols.remove_circle_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 6),
+              Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        onDismissed: (_) => onDismissed(),
+        child: child,
+      );
+
+  @override
+  Widget build(BuildContext context) {
     final controller = ref.read(audioPlayerControllerProvider.notifier);
+    final queue = widget.queue;
+    final currentIndex = widget.currentIndex;
     final upcomingCount = queue.length - currentIndex - 1;
 
     return CustomScrollView(
-      controller: scrollController,
+      controller: widget.scrollController,
       slivers: [
         if (currentIndex >= 0) ...[
           const SliverToBoxAdapter(child: _SectionLabel('Právě hraje')),
@@ -119,33 +160,49 @@ class _QueueList extends ConsumerWidget {
             itemBuilder: (context, i) {
               final queueIndex = currentIndex + 1 + i;
               final info = queue[queueIndex];
-              // Tah doleva odebere skladbu z fronty (Apple Music).
-              return Dismissible(
+              final group = info.groupId;
+              final row = _dismissible(
                 key: ValueKey('${info.recordingId}_$queueIndex'),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                  decoration: BoxDecoration(
-                    color: Colors.redAccent.withValues(alpha: 0.75),
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Symbols.remove_circle_rounded, color: Colors.white, size: 20),
-                      SizedBox(width: 6),
-                      Text('Odebrat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-                onDismissed: (_) => controller.removeFromQueue(queueIndex),
+                onDismissed: () => controller.removeFromQueue(queueIndex),
                 child: _QueueRow(
                   info: info,
                   isCurrent: false,
+                  inGroup: group != null,
                   onTap: () => controller.skipToIndex(queueIndex),
                   dragIndex: i,
                 ),
+              );
+              if (group == null) return row;
+
+              final isStart = queueIndex == currentIndex + 1 || queue[queueIndex - 1].groupId != group;
+              final expanded = _expanded.contains(group);
+              if (!isStart) {
+                return expanded ? row : SizedBox.shrink(key: ValueKey('hidden_${info.recordingId}_$queueIndex'));
+              }
+              var count = 0;
+              while (queueIndex + count < queue.length && queue[queueIndex + count].groupId == group) {
+                count++;
+              }
+              final header = _GroupHeader(
+                label: info.groupLabel ?? 'Přidáno najednou',
+                count: count,
+                expanded: expanded,
+                artworkUrl: info.artworkUrl,
+                onToggle: () => setState(() => expanded ? _expanded.remove(group) : _expanded.add(group)),
+                onRemove: () => controller.removeGroup(group),
+              );
+              if (!expanded) {
+                return _dismissible(
+                  key: ValueKey('group_${group}_$queueIndex'),
+                  label: 'Odebrat vše',
+                  onDismissed: () => controller.removeGroup(group),
+                  child: header,
+                );
+              }
+              return Column(
+                key: ValueKey('groupopen_${group}_$queueIndex'),
+                mainAxisSize: MainAxisSize.min,
+                children: [header, row],
               );
             },
             onReorderItem: (oldIndex, newIndex) {
@@ -157,6 +214,90 @@ class _QueueList extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// Hlavička bloku ve frontě: název alba/playlistu, počet skladeb, rozbalit a
+/// odebrat celý blok najednou.
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({
+    required this.label,
+    required this.count,
+    required this.expanded,
+    required this.onToggle,
+    required this.onRemove,
+    this.artworkUrl,
+  });
+
+  final String label;
+  final int count;
+  final bool expanded;
+  final String? artworkUrl;
+  final VoidCallback onToggle;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final songs = count == 1 ? '1 skladba' : (count <= 4 ? '$count skladby' : '$count skladeb');
+    return Material(
+      color: Colors.white.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.xs, AppSpacing.xs),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.sm),
+                child: SizedBox.square(
+                  dimension: 44,
+                  child: artworkUrl != null
+                      ? NetImage(url: artworkUrl!, placeholder: const _StackIcon())
+                      : const _StackIcon(),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      '$songs · ${expanded ? 'klepnutím sbalíš' : 'klepnutím rozbalíš'}',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded, color: Colors.white70),
+              IconButton(
+                tooltip: 'Odebrat celý blok z fronty',
+                icon: const Icon(Symbols.playlist_remove_rounded, color: Colors.white),
+                onPressed: onRemove,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StackIcon extends StatelessWidget {
+  const _StackIcon();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: Colors.white.withValues(alpha: 0.15),
+        child: const Icon(Symbols.library_music_rounded, color: Colors.white, size: 20),
+      );
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -174,10 +315,19 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _QueueRow extends ConsumerWidget {
-  const _QueueRow({required this.info, required this.isCurrent, required this.onTap, this.dragIndex});
+  const _QueueRow({
+    required this.info,
+    required this.isCurrent,
+    required this.onTap,
+    this.dragIndex,
+    this.inGroup = false,
+  });
 
   final NowPlayingInfo info;
   final bool isCurrent;
+
+  /// Skladba rozbaleného bloku -- odsazená pod jeho hlavičkou.
+  final bool inGroup;
   final VoidCallback? onTap;
   final int? dragIndex;
 
@@ -198,7 +348,12 @@ class _QueueRow extends ConsumerWidget {
         borderRadius: BorderRadius.circular(AppRadii.md),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+          padding: EdgeInsets.fromLTRB(
+            inGroup ? AppSpacing.xl : AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+            AppSpacing.xs,
+          ),
           child: Row(
             children: [
               ClipRRect(

@@ -17,7 +17,6 @@ enum RadioSeed { track, album, playlist, artist }
 /// volající (menu, sheet) se mezitím může zavřít.
 Future<void> goToRadio(
   BuildContext context,
-  WidgetRef ref,
   RadioSeed seed,
   String id, {
   Future<bool>? openAfter,
@@ -25,7 +24,9 @@ Future<void> goToRadio(
 }) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
-  final api = ref.read(apiClientProvider);
+  // Kontejner appky, ne `ref` volajícího -- volá se i ze zavíraného menu,
+  // jehož `ref` už neplatí.
+  final api = ProviderScope.containerOf(context, listen: false).read(apiClientProvider);
   messenger
     ?..hideCurrentSnackBar()
     ..showSnackBar(const SnackBar(

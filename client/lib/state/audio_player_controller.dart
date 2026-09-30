@@ -44,6 +44,8 @@ class NowPlayingInfo {
     this.artistId,
     this.releaseId,
     this.artworkUrl,
+    this.groupId,
+    this.groupLabel,
   });
 
   final String recordingId;
@@ -59,6 +61,23 @@ class NowPlayingInfo {
   /// `NowPlayingScreen` kam routovat, i kdyby byl název klikatelný.
   final String? releaseId;
   final String? artworkUrl;
+
+  /// Blok ve frontě: skladby přidané najednou (album/playlist přes "Přehrát
+  /// jako další" / "Přidat do fronty") -- ve frontě se ukazují a odebírají
+  /// jako celek, ne po jedné (živě chtěné: "nechci mazat 50 skladeb").
+  final String? groupId;
+  final String? groupLabel;
+
+  NowPlayingInfo withGroup(String? id, String? label) => NowPlayingInfo(
+        recordingId: recordingId,
+        title: title,
+        artistName: artistName,
+        artistId: artistId,
+        releaseId: releaseId,
+        artworkUrl: artworkUrl,
+        groupId: id,
+        groupLabel: label,
+      );
 }
 
 class AudioPlayerState {
@@ -339,6 +358,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         if (i.artistId != null) 'ai': i.artistId,
         if (i.releaseId != null) 'r': i.releaseId,
         if (i.artworkUrl != null) 'art': i.artworkUrl,
+        if (i.groupId != null) 'g': i.groupId,
+        if (i.groupLabel != null) 'gl': i.groupLabel,
       };
 
   static NowPlayingInfo _infoFromJson(Map<String, dynamic> j) => NowPlayingInfo(
@@ -348,6 +369,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         artistId: j['ai'] as String?,
         releaseId: j['r'] as String?,
         artworkUrl: j['art'] as String?,
+        groupId: j['g'] as String?,
+        groupLabel: j['gl'] as String?,
       );
 
   /// Uloží stav: hned při změně skladby/fronty, pozici nejvýš jednou za 5 s.
@@ -956,6 +979,82 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     unawaited(_ref.read(provisioningControllerProvider.notifier).provision(info.recordingId));
   }
 
+  /// Označí skladby jako jeden blok fronty (viz `NowPlayingInfo.groupId`).
+  /// Jedna skladba blok netvoří.
+  List<NowPlayingInfo> _asGroup(List<NowPlayingInfo> infos, String? label) {
+    if (infos.length < 2) return infos;
+    final id = 'g${DateTime.now().microsecondsSinceEpoch}';
+    return [for (final i in infos) i.withGroup(id, label)];
+  }
+
+  /// Odebere celý blok z fronty najednou (kromě právě hrající skladby).
+  void removeGroup(String groupId) {
+    final queue = state.queue;
+    final removed = <int>{
+      for (var i = 0; i < queue.length; i++)
+        if (queue[i].groupId == groupId && i != state.queueIndex) i,
+    };
+    if (removed.isEmpty) return;
+    int shift(int i) => i - removed.where((r) => r < i).length;
+    final newQueue = [
+      for (var i = 0; i < queue.length; i++)
+        if (!removed.contains(i)) queue[i],
+    ];
+    var newShuffleOrder = state.shuffleOrder;
+    if (newShuffleOrder != null) {
+      newShuffleOrder = [
+        for (final i in newShuffleOrder)
+          if (!removed.contains(i)) shift(i),
+      ];
+    }
+    state = state.copyWith(queue: newQueue, queueIndex: shift(state.queueIndex), shuffleOrder: newShuffleOrder);
+    _radioSyncUpcoming();
+  }
+
+  /// Celé album/playlist hned za aktuální skladbu (dlouhý stisk na kartě ->
+  /// "Přehrát jako další") -- nepřeruší, co hraje. Když nic nehraje, spustí.
+  Future<void> playNextAll(List<NowPlayingInfo> infos, {String? sourceLabel}) async {
+    if (infos.isEmpty) return;
+    infos = _asGroup(infos, sourceLabel);
+    if (state.nowPlaying == null) {
+      await playQueue(infos, 0, sourceLabel: sourceLabel);
+      return;
+    }
+    final insertAt = state.queueIndex + 1;
+    final n = infos.length;
+    final newQueue = [...state.queue]..insertAll(insertAt, infos);
+    var newShuffleOrder = state.shuffleOrder;
+    if (state.shuffleEnabled && newShuffleOrder != null) {
+      // Stejně jako `playNext`: posunout indexy a vložit nové hned za
+      // aktuální -- v pořadí, v jakém jsou na albu/v playlistu.
+      final shifted = newShuffleOrder.map((i) => i >= insertAt ? i + n : i).toList();
+      shifted.insertAll(shifted.indexOf(state.queueIndex) + 1, [for (var k = 0; k < n; k++) insertAt + k]);
+      newShuffleOrder = shifted;
+    }
+    state = state.copyWith(queue: newQueue, shuffleOrder: newShuffleOrder);
+    _radioSyncUpcoming();
+    // Jen první -- stáhnout celé album dopředu by zahltilo frontu stahování.
+    unawaited(_ref.read(provisioningControllerProvider.notifier).provision(infos.first.recordingId));
+  }
+
+  /// Celé album/playlist na konec fronty. Když nic nehraje, spustí.
+  Future<void> addAllToQueue(List<NowPlayingInfo> infos, {String? sourceLabel}) async {
+    if (infos.isEmpty) return;
+    infos = _asGroup(infos, sourceLabel);
+    if (state.nowPlaying == null) {
+      await playQueue(infos, 0, sourceLabel: sourceLabel);
+      return;
+    }
+    final start = state.queue.length;
+    final newQueue = [...state.queue, ...infos];
+    var newShuffleOrder = state.shuffleOrder;
+    if (state.shuffleEnabled && newShuffleOrder != null) {
+      newShuffleOrder = [...newShuffleOrder, for (var k = 0; k < infos.length; k++) start + k];
+    }
+    state = state.copyWith(queue: newQueue, shuffleOrder: newShuffleOrder);
+    _radioSyncUpcoming();
+  }
+
   /// Přidá skladbu na konec fronty, ať hraje/nehraje cokoliv jiného. Když
   /// zrovna nic nehraje, chová se jako `playTrack`.
   Future<void> addToQueue(NowPlayingInfo info) async {
@@ -1556,6 +1655,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         artistId: info.artistId,
         releaseId: info.releaseId,
         artworkUrl: artworkUrl,
+        groupId: info.groupId,
+        groupLabel: info.groupLabel,
       );
       final queueIndex = state.queue.indexWhere((i) => i.recordingId == info.recordingId);
       state = state.copyWith(

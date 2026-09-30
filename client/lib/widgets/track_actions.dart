@@ -218,7 +218,7 @@ class _TrackActionsSheet extends ConsumerWidget {
                 _Item(
                   icon: Symbols.radio_rounded,
                   label: 'Přejít na rádio',
-                  onTap: () => run(() => goToRadio(hostContext, ref, RadioSeed.track, recording.id)),
+                  onTap: () => run(() => goToRadio(hostContext, RadioSeed.track, recording.id)),
                 ),
                 if (recording.releaseId != null)
                   _Item(

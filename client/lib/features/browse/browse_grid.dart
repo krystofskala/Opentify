@@ -9,6 +9,8 @@ import '../../theme/design_tokens.dart';
 import '../../theme/glass_tokens.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/mix_artwork.dart' show GrainPainter;
+import '../../widgets/glass/expressive_shapes.dart';
 import '../../widgets/state_views.dart';
 
 /// "Procházet" -- barevné dlaždice nálad a žánrů (jako Spotify), každá vede
@@ -83,8 +85,30 @@ IconData browseIcon(String? name) => switch (name) {
       _ => Symbols.music_note_rounded,
     };
 
-/// Barevná dlaždice kategorie: gradient z barvy kategorie, název vlevo
-/// nahoře, velká natočená ikona vpravo dole (Spotify motiv).
+/// Žánry mají ze serveru všechny stejnou ikonu (notu) -- vlastní symbol
+/// podle id, ať se od sebe dají rozeznat.
+IconData _genreIcon(String id) => switch (id) {
+      'pop' => Symbols.mic_external_on_rounded,
+      'hiphop' => Symbols.mic_rounded,
+      'rock' => Symbols.electric_bolt_rounded,
+      'indie' => Symbols.album_rounded,
+      'electronic' => Symbols.graphic_eq_rounded,
+      'dance' => Symbols.nightlife_rounded,
+      'rnb' => Symbols.headphones_rounded,
+      'jazz' => Symbols.local_bar_rounded,
+      'classical' => Symbols.piano_rounded,
+      'folk' => Symbols.forest_rounded,
+      'metal' => Symbols.skull_rounded,
+      'soul' => Symbols.radio_rounded,
+      _ => Symbols.music_note_rounded,
+    };
+
+IconData categoryIcon(BrowseCategory c) => c.group == 'genre' ? _genreIcon(c.id) : browseIcon(c.icon);
+
+/// Dlaždice kategorie (varianta "Tvar"): tmavý tón barvy kategorie, jeden
+/// velký M3 Expressive tvar se zrnitým gradientem, vyjíždějící zprava dole,
+/// a v něm symbol kategorie. Nálady = cookie, žánry = květ, soundtracky =
+/// čtyřlístek; natočení podle id, takže každá dlaždice je stálá a jiná.
 class BrowseTile extends StatelessWidget {
   const BrowseTile({super.key, required this.category});
   final BrowseCategory category;
@@ -93,7 +117,11 @@ class BrowseTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final shape = AppShapes.of(Expressive.cornerMedium);
     final hsl = HSLColor.fromColor(category.color);
-    final darker = hsl.withLightness((hsl.lightness * 0.6).clamp(0.0, 1.0)).toColor();
+    Color tone(double s, double l, [double dh = 0]) => hsl
+        .withHue((hsl.hue + dh) % 360)
+        .withSaturation((hsl.saturation * s).clamp(0.0, 1.0))
+        .withLightness(l.clamp(0.0, 1.0))
+        .toColor();
     return GlassPressable(
       shape: shape,
       minSize: Size.zero,
@@ -107,41 +135,87 @@ class BrowseTile extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [category.color, darker],
+                colors: [tone(0.7, hsl.lightness * 0.5 + 0.02), tone(0.7, hsl.lightness * 0.32, 15)],
               ),
             ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Positioned(
-                  right: -8,
-                  bottom: -10,
-                  child: Transform.rotate(
-                    angle: 0.35,
-                    child: Icon(browseIcon(category.icon), size: 64, color: Colors.white.withValues(alpha: 0.35)),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: Text(
-                      category.title,
-                      maxLines: 2,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        height: 1.1,
-                        shadows: const [Shadow(blurRadius: 6, color: Colors.black26)],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final h = constraints.maxHeight;
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    const RepaintBoundary(child: CustomPaint(painter: GrainPainter())),
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _TileShapePainter(
+                          group: category.group,
+                          seed: category.id,
+                          from: tone(1.15, 0.66, 10),
+                          to: tone(1.0, 0.38, 40),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              ],
+                    Positioned(
+                      right: constraints.maxWidth * 0.13,
+                      bottom: h * 0.13,
+                      child: Icon(
+                        categoryIcon(category),
+                        size: h * 0.34,
+                        fill: 1,
+                        color: Colors.white,
+                        shadows: const [Shadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2))],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(AppSpacing.sm),
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: Text(
+                          category.title,
+                          maxLines: 2,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
+                            shadows: const [Shadow(blurRadius: 6, color: Colors.black26)],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
       ),
     );
   }
+}
+
+class _TileShapePainter extends CustomPainter {
+  const _TileShapePainter({required this.group, required this.seed, required this.from, required this.to});
+
+  final String group;
+  final String seed;
+  final Color from;
+  final Color to;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shape = switch (group) {
+      'genre' => const ExpressiveShape.cookie(lobes: 5, depth: 0.26),
+      'soundtrack' => const ExpressiveShape.cookie(lobes: 4, depth: 0.22),
+      _ => const ExpressiveShape.cookie(lobes: 9, depth: 0.08),
+    };
+    final h = size.height;
+    final r = h * 0.78;
+    final rect = Rect.fromCircle(center: Offset(size.width * 0.84, h * 0.78), radius: r);
+    final spin = (seed.codeUnits.fold<int>(7, (a, c) => (a * 31 + c) & 0xffff) % 628) / 100;
+    paintGrainShape(canvas, expressivePath(rect, shape, null, 0, spin), rect, 0, from: from, to: to);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TileShapePainter old) =>
+      old.group != group || old.seed != seed || old.from != from || old.to != to;
 }

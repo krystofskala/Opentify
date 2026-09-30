@@ -9,6 +9,7 @@ import '../theme/shapes.dart';
 import 'net_image.dart';
 
 enum MediaCardShape { roundedSquare, circle }
+
 enum MediaCardLayout { card, row }
 
 /// Karta/řádek alba, interpreta nebo playlistu -- jediná komponenta pro
@@ -32,6 +33,7 @@ class MediaCard extends ConsumerWidget {
     this.animationIndex,
     this.artwork,
     required this.onTap,
+    this.onLongPress,
   });
 
   /// Vlastní obrázek místo `imageUrl` (např. mozaika playlistu).
@@ -49,12 +51,15 @@ class MediaCard extends ConsumerWidget {
   final int? animationIndex;
   final VoidCallback onTap;
 
+  /// Dlouhý stisk (album: přehrát jako další / do fronty...).
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isCircle = shape == MediaCardShape.circle;
     final cardShape = AppShapes.of(isCircle ? AppRadii.pill : AppRadii.md);
-    final resolved = imageUrl ??
-        (artworkKey != null ? ref.watch(recordingArtworkProvider(artworkKey!)).valueOrNull : null);
+    final resolved =
+        imageUrl ?? (artworkKey != null ? ref.watch(recordingArtworkProvider(artworkKey!)).valueOrNull : null);
     final image = artwork ?? ArtworkImage(url: resolved, icon: placeholderIcon);
 
     Widget card = layout == MediaCardLayout.row
@@ -77,6 +82,7 @@ class MediaCard extends ConsumerWidget {
       child: InkWell(
         customBorder: AppShapes.md,
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Column(
           crossAxisAlignment: isCircle ? CrossAxisAlignment.center : CrossAxisAlignment.start,
           children: [
@@ -120,6 +126,7 @@ class MediaCard extends ConsumerWidget {
       child: InkWell(
         customBorder: AppShapes.md,
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
           child: Row(

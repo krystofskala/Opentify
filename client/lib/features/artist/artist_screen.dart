@@ -24,6 +24,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
 import '../../widgets/radio_station.dart';
+import '../../widgets/collection_actions.dart';
 
 final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getDiscography(artistId);
@@ -171,7 +172,7 @@ class _ArtistBody extends ConsumerWidget {
                 HeroAction(
                   icon: Symbols.radio_rounded,
                   tooltip: 'Rádio interpreta',
-                  onPressed: () => goToRadio(context, ref, RadioSeed.artist, artist.id),
+                  onPressed: () => goToRadio(context, RadioSeed.artist, artist.id),
                 ),
                 HeroAction(
                   icon: artistLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
@@ -452,6 +453,14 @@ class _ReleaseRail extends StatelessWidget {
                 imageUrl: release.coverImageUrl,
                 artworkKey: (releaseId: release.id, artistId: release.artistId),
                 onTap: () => context.push('/releases/${release.id}'),
+                onLongPress: () => showCollectionActions(
+                  context,
+                  kind: CollectionKind.album,
+                  id: release.id,
+                  title: release.title,
+                  subtitle: release.yearLabel,
+                  imageUrl: release.coverImageUrl,
+                ),
               ),
             ),
           );
@@ -533,6 +542,14 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
                             imageUrl: release.coverImageUrl,
                             artworkKey: (releaseId: release.id, artistId: release.artistId),
                             onTap: () => context.push('/releases/${release.id}'),
+                            onLongPress: () => showCollectionActions(
+                              context,
+                              kind: CollectionKind.album,
+                              id: release.id,
+                              title: release.title,
+                              subtitle: release.yearLabel,
+                              imageUrl: release.coverImageUrl,
+                            ),
                           ),
                           Positioned(
                             left: AppSpacing.xs,

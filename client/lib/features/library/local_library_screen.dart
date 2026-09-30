@@ -21,6 +21,7 @@ import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/view_mode_toggle.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
+import '../../widgets/collection_actions.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -424,6 +425,14 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                         imageUrl: album.coverImageUrl,
                         artworkKey: (releaseId: album.id, artistId: album.artistId),
                         onTap: () => context.push('/releases/${album.id}'),
+                        onLongPress: () => showCollectionActions(
+                          context,
+                          kind: CollectionKind.album,
+                          id: album.id,
+                          title: album.title,
+                          subtitle: album.artistName,
+                          imageUrl: album.coverImageUrl,
+                        ),
                         animationIndex: index % 12,
                       );
                     },
@@ -443,6 +452,14 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                         imageUrl: album.coverImageUrl,
                         artworkKey: (releaseId: album.id, artistId: album.artistId),
                         onTap: () => context.push('/releases/${album.id}'),
+                        onLongPress: () => showCollectionActions(
+                          context,
+                          kind: CollectionKind.album,
+                          id: album.id,
+                          title: album.title,
+                          subtitle: album.artistName,
+                          imageUrl: album.coverImageUrl,
+                        ),
                       );
                     },
                   ),
@@ -646,6 +663,13 @@ class _PlaylistsTab extends ConsumerWidget {
                       title: playlist.title,
                       subtitle: '$who · ${playlist.itemCount} skladeb',
                       onTap: () => context.push('/playlists/${playlist.id}'),
+                      onLongPress: () => showCollectionActions(
+                        context,
+                        kind: CollectionKind.playlist,
+                        id: playlist.id,
+                        title: playlist.title,
+                        imageUrl: playlist.coverUrls.firstOrNull,
+                      ),
                     );
                   },
                 ),

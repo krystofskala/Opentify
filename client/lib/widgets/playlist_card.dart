@@ -119,10 +119,11 @@ class _GradientArtwork extends StatelessWidget {
 
 /// Karta playlistu do vodorovné řady na Domů.
 class PlaylistCardView extends StatelessWidget {
-  const PlaylistCardView({super.key, required this.card, required this.onTap, this.width = 150});
+  const PlaylistCardView({super.key, required this.card, required this.onTap, this.width = 150, this.onLongPress});
 
   final HomePlaylistCard card;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final double width;
 
   @override
@@ -134,6 +135,7 @@ class PlaylistCardView extends StatelessWidget {
       width: width,
       child: GlassPressable(
         onPressed: onTap,
+        onLongPress: onLongPress,
         shape: AppShapes.of(Expressive.cornerLarge),
         minSize: Size.zero,
         child: Column(
@@ -229,10 +231,11 @@ class RankBadge extends StatelessWidget {
 /// Kompaktní dlaždice "Rychlého výběru" (2 sloupce, jako Spotify) --
 /// tónový kontejner s mozaikou vlevo a názvem.
 class QuickPickTile extends StatelessWidget {
-  const QuickPickTile({super.key, required this.card, required this.onTap});
+  const QuickPickTile({super.key, required this.card, required this.onTap, this.onLongPress});
 
   final HomePlaylistCard card;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -240,6 +243,7 @@ class QuickPickTile extends StatelessWidget {
     final shape = AppShapes.of(Expressive.cornerMedium);
     return GlassPressable(
       onPressed: onTap,
+      onLongPress: onLongPress,
       shape: shape,
       minSize: Size.zero,
       child: DecoratedBox(

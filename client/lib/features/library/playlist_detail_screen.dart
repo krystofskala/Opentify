@@ -125,7 +125,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   HeroAction(
                     icon: Symbols.radio_rounded,
                     tooltip: 'Přejít na rádio',
-                    onPressed: () => goToRadio(context, ref, RadioSeed.playlist, detail.id),
+                    onPressed: () => goToRadio(context, RadioSeed.playlist, detail.id),
                   ),
                 if (readOnly)
                   HeroAction(

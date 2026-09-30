@@ -170,7 +170,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                 HeroAction(
                   icon: Symbols.radio_rounded,
                   tooltip: 'Přejít na rádio',
-                  onPressed: () => goToRadio(context, ref, RadioSeed.album, release.id),
+                  onPressed: () => goToRadio(context, RadioSeed.album, release.id),
                 ),
                 HeroAction(
                   icon: albumLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,

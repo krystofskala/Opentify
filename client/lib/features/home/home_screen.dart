@@ -19,6 +19,7 @@ import '../../widgets/playlist_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
+import '../../widgets/collection_actions.dart';
 
 /// Domů -- celá obrazovka z `GET /home` (žebříčky, mixy, nová a populární
 /// alba, žánry, nálady), sekce se vykreslují podle `type`. Prázdné sekce
@@ -115,6 +116,23 @@ class _ContinueListening extends StatelessWidget {
                       child: GlassPressable(
                         shape: shape,
                         minSize: Size.zero,
+                        // Dlouhý stisk: přehrát jako další / do fronty (alba a playlisty).
+                        onLongPress: switch (item.kind) {
+                          'album' => () => showCollectionActions(context,
+                              kind: CollectionKind.album,
+                              id: item.id,
+                              title: item.title,
+                              subtitle: item.artistName,
+                              imageUrl: item.imageUrl),
+                          'playlist' => () => showCollectionActions(context,
+                              kind: CollectionKind.playlist,
+                              id: item.id,
+                              title: item.title,
+                              imageUrl: item.imageUrls.firstOrNull),
+                          'liked' => () => showCollectionActions(context,
+                              kind: CollectionKind.liked, id: item.id, title: item.title),
+                          _ => null,
+                        },
                         onPressed: () => switch (item.kind) {
                           'album' => context.push('/releases/${item.id}'),
                           'playlist' => context.push('/playlists/${item.id}'),
@@ -251,7 +269,11 @@ class _HomeSectionView extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
                 itemBuilder: (context, index) {
                   final card = section.playlists[index];
-                  return PlaylistCardView(card: card, onTap: () => context.push('/playlists/${card.id}'));
+                  return PlaylistCardView(
+                    card: card,
+                    onTap: () => context.push('/playlists/${card.id}'),
+                    onLongPress: () => _playlistActions(context, card),
+                  );
                 },
               ),
             ),
@@ -301,7 +323,24 @@ Widget _albumCard(BuildContext context, HomeAlbumCard album, int? index) => Medi
       imageUrl: album.images.isEmpty ? null : album.images.first,
       artworkKey: (releaseId: album.id, artistId: album.artistId),
       onTap: () => context.push('/releases/${album.id}'),
+      onLongPress: () => showCollectionActions(
+        context,
+        kind: CollectionKind.album,
+        id: album.id,
+        title: album.title,
+        subtitle: album.artistName,
+        imageUrl: album.images.isEmpty ? null : album.images.first,
+      ),
       animationIndex: index == null ? null : index % 8,
+    );
+
+void _playlistActions(BuildContext context, HomePlaylistCard card) => showCollectionActions(
+      context,
+      kind: CollectionKind.playlist,
+      id: card.id,
+      title: card.title,
+      subtitle: card.description,
+      imageUrl: card.coverUrls.firstOrNull,
     );
 
 /// Rychlý výběr -- 2 sloupce kompaktních dlaždic.
@@ -326,7 +365,11 @@ class _QuickPicks extends StatelessWidget {
                 SizedBox(
                   width: width,
                   height: 56,
-                  child: QuickPickTile(card: card, onTap: () => context.push('/playlists/${card.id}')),
+                  child: QuickPickTile(
+                    card: card,
+                    onTap: () => context.push('/playlists/${card.id}'),
+                    onLongPress: () => _playlistActions(context, card),
+                  ),
                 ),
             ],
           );

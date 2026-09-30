@@ -22,6 +22,7 @@ import '../../widgets/track_collection.dart' show foldForSearch;
 import '../../widgets/track_tile.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../theme/glass_tokens.dart';
+import '../../widgets/collection_actions.dart';
 
 const _searchSourceLabel = 'Výsledky hledání';
 
@@ -530,6 +531,14 @@ class _ReleaseCard extends ConsumerWidget {
       imageUrl: item.imageUrl,
       artworkKey: (releaseId: item.id, artistId: item.artistId),
       onTap: () => context.push('/releases/${item.id}'),
+      onLongPress: () => showCollectionActions(
+        context,
+        kind: CollectionKind.album,
+        id: item.id,
+        title: item.title,
+        subtitle: item.subtitle,
+        imageUrl: item.imageUrl,
+      ),
     );
   }
 }

@@ -17,7 +17,8 @@ import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
-import 'browse_grid.dart' show browseIcon;
+import 'browse_grid.dart' show categoryIcon;
+import '../../widgets/collection_actions.dart';
 
 /// Stránka jedné kategorie z Procházet: playlisty (redakční Deezer), u žánrů
 /// i populární skladby, alba a interpreti. Barva kategorie tónuje appku.
@@ -113,7 +114,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
                   padding: const EdgeInsets.only(right: AppSpacing.lg),
                   child: Transform.rotate(
                     angle: 0.3,
-                    child: Icon(browseIcon(c.icon), size: 110, color: Colors.white.withValues(alpha: 0.22)),
+                    child: Icon(categoryIcon(c), size: 110, color: Colors.white.withValues(alpha: 0.22)),
                   ),
                 ),
               ),
@@ -171,6 +172,14 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
                       imageUrl: a.images.isEmpty ? null : a.images.first,
                       artworkKey: (releaseId: a.id, artistId: a.artistId),
                       onTap: () => context.push('/releases/${a.id}'),
+                      onLongPress: () => showCollectionActions(
+                        context,
+                        kind: CollectionKind.album,
+                        id: a.id,
+                        title: a.title,
+                        subtitle: a.artistName,
+                        imageUrl: a.images.isEmpty ? null : a.images.first,
+                      ),
                     ),
                   ),
               ],
@@ -237,6 +246,13 @@ class _YourMix extends ConsumerWidget {
                       card: card,
                       width: 170,
                       onTap: () => context.push('/playlists/${card.id}'),
+                      onLongPress: () => showCollectionActions(
+                        context,
+                        kind: CollectionKind.playlist,
+                        id: card.id,
+                        title: card.title,
+                        imageUrl: card.coverUrls.firstOrNull,
+                      ),
                     ),
                   ),
                 ],
