@@ -822,16 +822,7 @@ List<Color> _paletteFor(
     // Kontrastní akcent obalu (žlutá kresba na modré) = jedno světlo místo
     // "nejsvětlejšího" tónu; u tmavého režimu tlumené, ať nekřičí.
     final accentTone = character?.accent;
-    // Akcent je to jediné, co pozadí z kontrastní barvy obalu ukáže -- musí
-    // být čitelný (cihlová kšiltovka na modrém obalu vycházela v tmavém
-    // režimu jako olivově hnědá a ztratila se, živě nahlášeno): víc světla
-    // a aspoň střední sytost.
-    Color vivid(Color c, double l) {
-      final base = HSLColor.fromColor(from(c, l));
-      return _keepOkHue(base.withSaturation(math.max(base.saturation, 0.6)).toColor(), c);
-    }
-
-    final glowDark = accentTone != null ? vivid(accentTone, 0.66) : from(lightest, 0.72);
+    final glowDark = accentTone != null ? from(accentTone, 0.55) : from(lightest, 0.72);
     final glowLight = accentTone != null ? from(accentTone, 0.88) : from(t1, 0.93);
     return dark
         ? [from(darkest, 0.13), from(t0, 0.24), from(t0, 0.42), from(t1, 0.55), glowDark, from(t2, 0.32)]
