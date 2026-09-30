@@ -255,7 +255,9 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                                   return WavySeekBar(
                                     progress: position.inMilliseconds.clamp(0, ms) / ms,
                                     isPlaying: playback.isPlaying,
-                                    tapToSeek: false,
+                                    // PC (myš): klik na osu přetočí. Mobil:
+                                    // klepnutí dál rozbalí přehrávač.
+                                    tapToSeek: MediaQuery.sizeOf(context).width >= 600,
                                     onChangeEnd: (value) => ref
                                         .read(audioPlayerControllerProvider.notifier)
                                         .seek(Duration(milliseconds: (value * ms).round())),

@@ -326,6 +326,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _installMediaHandlers();
     addListener(_syncMediaSession, fireImmediately: false);
     _ref.listen<AbRepeat?>(abRepeatProvider, _onAbChanged);
+    // Po návratu do appky dopočítat barvu skladby, pokud se na pozadí
+    // nespočítala (viz `_refreshAccentIfMissing`).
+    _lifecycle = AppLifecycleListener(onResume: _refreshAccentIfMissing, onShow: _refreshAccentIfMissing);
   }
 
   final MediaSessionBridge _mediaSession = MediaSessionBridge();
@@ -1667,13 +1670,35 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Kontroluje `recordingId` proti aktuálnímu stavu, aby pozdě doběhnuvší
   /// extrakce ze staré skladby nepřepsala barvu té, na kterou uživatel
   /// mezitím přepnul.
-  Future<void> _extractAccentColor(String recordingId, String artworkUrl) async {
+  Future<void> _extractAccentColor(String recordingId, String artworkUrl, {bool retry = true}) async {
     final color = await extractAccentColor(artworkUrl);
-    if (color == null) return;
+    if (color == null) {
+      // Nepovedlo se (typicky automatický přechod na zamčeném telefonu --
+      // Safari na pozadí obrázky nedekóduje). Jinak by skladba zůstala
+      // v barvách té předchozí až do reloadu (živě nahlášeno).
+      if (retry) {
+        Timer(const Duration(seconds: 4), () {
+          if (state.nowPlaying?.recordingId == recordingId && !_accentColorCache.containsKey(recordingId)) {
+            unawaited(_extractAccentColor(recordingId, artworkUrl, retry: false));
+          }
+        });
+      }
+      return;
+    }
     _accentColorCache[recordingId] = color;
     if (state.nowPlaying?.recordingId == recordingId) {
       state = state.copyWith(accentColor: color);
     }
+  }
+
+  AppLifecycleListener? _lifecycle;
+
+  /// Hrající skladba ještě nemá svou barvu (drží se barva předchozí) --
+  /// spočítat znovu.
+  void _refreshAccentIfMissing() {
+    final info = state.nowPlaying;
+    if (info == null || _accentColorCache.containsKey(info.recordingId)) return;
+    unawaited(_resolveArtworkAndAccent(info));
   }
 
   /// Doplní chybějící obal/barvu pro `nowPlaying`. `NowPlayingInfo.artworkUrl`
@@ -1919,6 +1944,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     _sleepTimer?.cancel();
     _fadeTimer?.cancel();
     _gainRampTimer?.cancel();
