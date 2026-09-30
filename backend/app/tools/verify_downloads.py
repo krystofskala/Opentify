@@ -83,7 +83,12 @@ async def main() -> None:
         ).all()
     # Stažené napřed (tam jsou známé chyby), vlastní knihovna potom.
     rows = sorted(rows, key=lambda row: row[0].source_provider in ("musicbrainz-local", "local"))
-    todo = [(a, r, ar, rel) for a, r, ar, rel in rows if r.id not in report and a.storage_path]
+    # Znovu stažené (přehled v appce, "Stáhnout znovu") se zkontrolují znovu.
+    todo = [
+        (a, r, ar, rel)
+        for a, r, ar, rel in rows
+        if a.storage_path and (r.id not in report or report[r.id].get("review") == "redownload")
+    ]
     print(f"celkem {len(rows)}, zbývá {len(todo)}", flush=True)
     for i, (asset, rec, artist, release) in enumerate(todo, 1):
         expected_artist = artist.name if artist else ""

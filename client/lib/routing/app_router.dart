@@ -22,6 +22,7 @@ import '../features/tuner/tuner_screen.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
 import 'home_shell.dart';
+import '../features/profile/verify_downloads_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
@@ -93,6 +94,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/shazam',
         builder: (context, state) => const ShazamScreen(),
+      ),
+      GoRoute(
+        path: '/verify-downloads',
+        builder: (context, state) => const VerifyDownloadsScreen(),
       ),
       GoRoute(
         path: '/tuner',

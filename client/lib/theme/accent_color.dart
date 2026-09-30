@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -159,9 +160,29 @@ Future<List<Color>> extractSupportTones(String imageUrl) {
 
 final Map<String, Future<List<Color>>> _supportFutures = {};
 
-final supportTonesProvider = FutureProvider.autoDispose.family<List<Color>, String>((ref, imageUrl) {
-  return extractSupportTones(imageUrl);
+final supportTonesProvider = FutureProvider.autoDispose.family<List<Color>, String>((ref, imageUrl) async {
+  final tones = await extractSupportTones(imageUrl);
+  // Neúspěch (ne legitimně prázdné tóny šedého obalu) -- zkusit znovu.
+  if (!_supportFutures.containsKey(imageUrl)) _retryLater(ref, imageUrl);
+  return tones;
 });
+
+/// Analýza obalu se na pozadí (zamčený telefon, Safari) občas nepovede --
+/// výsledek pak zůstal prázdný až do reloadu a pozadí vyšlo jen z akcentu
+/// (celé červené místo modrého s červenou, živě nahlášeno). Zkusí se znovu
+/// po 4 s, 15 s a 60 s.
+final Map<String, int> _retries = {};
+
+void _retryLater(Ref ref, String imageUrl) {
+  final n = _retries[imageUrl] ?? 0;
+  if (n >= 3) return;
+  _retries[imageUrl] = n + 1;
+  final timer = Timer(const [Duration(seconds: 4), Duration(seconds: 15), Duration(seconds: 60)][n], ref.invalidateSelf);
+  ref.onDispose(timer.cancel);
+}
+
+/// Po návratu do appky: dát neúspěšným obalům další šanci (znovu 3 pokusy).
+void resetCoverRetries() => _retries.clear();
 
 /// "Charakter" obalu -- průměrná barevnost (chroma, 0..1) a světlost celé plochy (vážená
 /// zastoupením barev), ne jen odstín hlavní barvy. Pastelový krémový obal
@@ -256,8 +277,10 @@ Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
 
 final Map<String, Future<CoverCharacter?>> _characterFutures = {};
 
-final coverCharacterProvider = FutureProvider.autoDispose.family<CoverCharacter?, String>((ref, imageUrl) {
-  return extractCoverCharacter(imageUrl);
+final coverCharacterProvider = FutureProvider.autoDispose.family<CoverCharacter?, String>((ref, imageUrl) async {
+  final character = await extractCoverCharacter(imageUrl);
+  if (character == null) _retryLater(ref, imageUrl);
+  return character;
 });
 
 /// Pod touhle sytostí je barva prakticky šedá/černobílá -- nemá odstín.

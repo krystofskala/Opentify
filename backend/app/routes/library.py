@@ -724,3 +724,104 @@ def unlike_song(
             session.delete(existing)
             session.commit()
     return {"recordingId": recording_id, "liked": False}
+
+
+# --- Kontrola stažených skladeb Shazamem (app/tools/verify_downloads.py) ---
+
+_VERIFY_REPORT = Path("/data/db/verify_downloads.json")
+_VERIFY_LOCK = asyncio.Lock()
+
+
+def _read_verify_report() -> dict[str, dict]:
+    try:
+        return json.loads(_VERIFY_REPORT.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _write_verify_report(report: dict[str, dict]) -> None:
+    _VERIFY_REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=1))
+
+
+@library_router.get("/verify-report")
+def verify_report(
+    session: Session = Depends(get_session),
+    _current: tuple[str, str] = Depends(get_current_user),
+):
+    """Podezřelé skladby z kontroly (Shazam slyší jinou skladbu, soubor nejde
+    přečíst) k ručnímu projití v appce. Nic se samo nemaže ani nemění."""
+    report = _read_verify_report()
+    items = []
+    for rid, e in report.items():
+        if e.get("verdict") not in ("mismatch", "broken") or e.get("review") == "ok":
+            continue
+        rec = session.get(Recording, rid)
+        path = e.get("path")
+        own = not (path and Path(path).resolve().is_relative_to(MEDIA_ROOT.resolve()))
+        items.append({
+            "recordingId": rid,
+            "title": e.get("title"),
+            "artist": e.get("artist"),
+            "album": e.get("album"),
+            "releaseId": rec.release_id if rec else None,
+            "artistId": rec.artist_id if rec else None,
+            "verdict": e.get("verdict"),
+            "gotTitle": e.get("gotTitle"),
+            "gotArtist": e.get("gotArtist"),
+            "provider": e.get("provider"),
+            "ownFile": own,
+            "review": e.get("review"),
+        })
+    items.sort(key=lambda i: (i["review"] is not None, (i["artist"] or "").lower(), (i["title"] or "").lower()))
+    return {"items": items}
+
+
+@library_router.post("/verify-report/{recording_id}/ok")
+async def verify_mark_ok(recording_id: str, _current: tuple[str, str] = Depends(get_current_user)):
+    """"Je to v pořádku" -- z přehledu zmizí, při další kontrole se neukáže."""
+    async with _VERIFY_LOCK:
+        report = _read_verify_report()
+        if recording_id not in report:
+            raise HTTPException(status_code=404, detail="skladba v kontrole není")
+        report[recording_id]["review"] = "ok"
+        _write_verify_report(report)
+    return {"recordingId": recording_id, "review": "ok"}
+
+
+@library_router.post("/verify-report/{recording_id}/redownload")
+async def verify_redownload(
+    recording_id: str,
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """"Stáhnout znovu": smaže stažený soubor a stáhne skladbu znovu z jiného
+    výsledku (přeskočí dřívější výběr). Vlastní hudba (mimo MEDIA_ROOT) ani
+    chráněná alba (Kontrast) se nemažou."""
+    from app.provisioning_service import enqueue, get_or_create_job
+
+    user_id, device_id = current
+    async with _VERIFY_LOCK:
+        report = _read_verify_report()
+        entry = report.get(recording_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="skladba v kontrole není")
+        if entry.get("verdict") == "protected":
+            raise HTTPException(status_code=400, detail="chráněná skladba se nemění")
+        with Session(engine) as session:
+            asset = session.get(MediaAsset, recording_id)
+            path = Path(asset.storage_path) if asset and asset.storage_path else None
+            if path is None or not path.resolve().is_relative_to(MEDIA_ROOT.resolve()):
+                raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby -- ten appka nemaže.")
+            rec = session.get(Recording, recording_id)
+            if rec is not None:
+                refs = dict(rec.external_refs or {})
+                refs["youtubeSkip"] = int(refs.get("youtubeSkip", 0)) + 1
+                rec.external_refs = refs
+                session.add(rec)
+                session.commit()
+            _remove_from_library(session, recording_id)
+            _asset, job, created = get_or_create_job(session, recording_id, user_id, device_id)
+        if job is not None and created:
+            await enqueue(job)
+        entry["review"] = "redownload"
+        _write_verify_report(report)
+    return {"recordingId": recording_id, "review": "redownload"}

@@ -155,6 +155,8 @@ def _start_job(job_id: str) -> dict | None:
             "recording_mbid": recording.mbid if recording else None,
             "recording_duration_ms": recording.duration_ms if recording else None,
             "artist_name": artist.name if artist else None,
+            # "Stáhnout znovu" z kontroly Shazamem: přeskočit dřívější výběr.
+            "skip_candidates": int((recording.external_refs or {}).get("youtubeSkip", 0)) if recording else 0,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
         }
@@ -557,6 +559,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         artist_name=ctx.get("artist_name"),
         mbid=ctx.get("recording_mbid"),
         duration_ms=ctx.get("recording_duration_ms"),
+        skip_candidates=ctx.get("skip_candidates", 0),
     )
 
     async def on_progress(pct: int) -> None:

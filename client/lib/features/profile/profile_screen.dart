@@ -117,6 +117,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 12),
             _ActionCard(
+              icon: Symbols.fact_check_rounded,
+              title: 'Kontrola stažených',
+              description: 'Skladby, u kterých Shazam slyší něco jiného, než by měly být. '
+                  'Pusť si je a rozhodni: je to v pořádku, nebo stáhnout znovu.',
+              buttonLabel: 'Projít',
+              onPressed: () => context.push('/verify-downloads'),
+            ),
+            const SizedBox(height: 12),
+            _ActionCard(
               icon: Symbols.folder_rounded,
               title: 'Lokální knihovna',
               description:

@@ -81,6 +81,9 @@ class TrackMetadata:
     artist_name: str | None = None
     mbid: str | None = None
     duration_ms: int | None = None
+    # Kolik nejlepších kandidátů přeskočit (opakované stažení po špatném
+    # výsledku -- jinak by se stáhlo totéž video znovu).
+    skip_candidates: int = 0
 
     @property
     def search_query(self) -> str:
@@ -700,7 +703,19 @@ class YoutubeProvider:
                     return abs(d - target) <= max(20.0, target * 0.15)
                 return 30 <= d <= 15 * 60
 
-            chosen = next((e for e in entries if acceptable(e)), None)
+            # Přednost videím, jejichž název obsahuje název skladby (dřív
+            # vyhrál první výsledek s dobrou délkou -- občas úplně jiná
+            # skladba stejného interpreta, viz kontrola Shazamem).
+            wanted = _title_tokens(track.title)
+
+            def title_hit(e: dict) -> bool:
+                return bool(wanted) and wanted <= _title_tokens(e.get("title") or "")
+
+            ok = [e for e in entries if acceptable(e)]
+            ok.sort(key=lambda e: 0 if title_hit(e) else 1)
+            if track.skip_candidates and ok:
+                ok = ok[track.skip_candidates % len(ok):] + ok[: track.skip_candidates % len(ok)]
+            chosen = ok[0] if ok else None
             if chosen is None:
                 # Nic délkou nesedí (katalog může mít jinou verzi) -- aspoň ne
                 # mixy/streamy: nejkratší rozumný výsledek.

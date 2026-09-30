@@ -1722,6 +1722,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Hrající skladba ještě nemá svou barvu (drží se barva předchozí) --
   /// spočítat znovu.
   void _refreshAccentIfMissing() {
+    // Obal hrající skladby: nepovedené analýzy (tóny, charakter) znovu.
+    final art = state.nowPlaying?.artworkUrl;
+    if (art != null) {
+      resetCoverRetries();
+      if (_ref.read(coverCharacterProvider(art)).valueOrNull == null) _ref.invalidate(coverCharacterProvider(art));
+      if ((_ref.read(supportTonesProvider(art)).valueOrNull ?? const []).isEmpty) {
+        _ref.invalidate(supportTonesProvider(art));
+      }
+    }
     final info = state.nowPlaying;
     if (info == null || _accentColorCache.containsKey(info.recordingId)) return;
     unawaited(_resolveArtworkAndAccent(info));
