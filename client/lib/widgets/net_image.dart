@@ -17,7 +17,7 @@ import 'package:flutter/material.dart';
 /// Domů černé, jen obal v mini přehrávači (kreslený i během přehrávače) OK.
 /// [RasterizedImage] proto na webu každý obrázek jednou převede na běžný
 /// pixelový (CPU) obrázek, který na GPU kontextu/cache nezávisí.
-class NetImage extends StatelessWidget {
+class NetImage extends StatefulWidget {
   const NetImage({
     super.key,
     required this.url,
@@ -34,25 +34,58 @@ class NetImage extends StatelessWidget {
   final Duration fadeIn;
 
   @override
+  State<NetImage> createState() => _NetImageState();
+}
+
+class _NetImageState extends State<NetImage> {
+  // URL obrázku, který je právě vidět. Při změně URL (další skladba
+  // v mini přehrávači, přeskládaný seznam) zůstane starý obrázek, dokud se
+  // nový nenačte, a pak se prolnou -- dřív to mezitím bliklo zástupným
+  // obrázkem.
+  String? _shownUrl;
+
+  // Velikost dekódování se drží: roztahování hlavičky tak nepřepíná mezi
+  // velikostmi (každá = nové načtení a probliknutí). Jen zvětšuje.
+  int? _decodeSize;
+
+  @override
   Widget build(BuildContext context) {
-    final fallback = placeholder ?? const SizedBox.shrink();
+    final fallback = widget.placeholder ?? const SizedBox.shrink();
     final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
     return LayoutBuilder(builder: (context, constraints) {
       final longest = [constraints.maxWidth, constraints.maxHeight].where((v) => v.isFinite).fold<double>(0, math.max);
-      return _image(fallback, longest > 0 ? decodeBucket(longest * dpr) : null);
+      if (longest > 0) {
+        final bucket = decodeBucket(longest * dpr);
+        if (_decodeSize == null || bucket > _decodeSize!) _decodeSize = bucket;
+      }
+      return _image(fallback, _decodeSize);
     });
   }
 
   Widget _image(Widget fallback, int? decodeSize) {
+    final url = widget.url;
     return Image(
       image: netImageProvider(url, decodeSize: decodeSize),
-      fit: fit,
-      alignment: alignment,
+      fit: widget.fit,
+      alignment: widget.alignment,
       gaplessPlayback: true,
       frameBuilder: (context, child, frame, wasSyncLoaded) {
-        if (wasSyncLoaded) return child;
+        if (wasSyncLoaded) {
+          _shownUrl = url;
+          return child;
+        }
+        final Widget current;
+        if (frame != null) {
+          _shownUrl = url;
+          current = KeyedSubtree(key: ValueKey(url), child: child);
+        } else if (_shownUrl != null) {
+          // Nový se ještě načítá -- `gaplessPlayback` kreslí ten starý.
+          current = KeyedSubtree(key: ValueKey(_shownUrl), child: child);
+        } else {
+          current = KeyedSubtree(key: const ValueKey('placeholder'), child: fallback);
+        }
         return AnimatedSwitcher(
-          duration: fadeIn,
+          duration: widget.fadeIn,
           // `passthrough` -- výchozí layout AnimatedSwitcheru (Stack) dává
           // dětem VOLNÁ omezení, takže obrázek načtený asynchronně ignoroval
           // `fit: cover` a kreslil se v přirozeném poměru (živě: široká
@@ -62,7 +95,7 @@ class NetImage extends StatelessWidget {
             alignment: Alignment.center,
             children: [...previous, if (current != null) current],
           ),
-          child: frame == null ? KeyedSubtree(key: const ValueKey('placeholder'), child: fallback) : child,
+          child: current,
         );
       },
       errorBuilder: (context, _, __) => fallback,

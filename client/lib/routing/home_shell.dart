@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../theme/glass_tokens.dart';
 import '../widgets/glass/glass.dart';
 import '../widgets/glass/liquid_glass.dart';
 import '../widgets/now_playing_sheet.dart' show HiddenUnderPlayer;
@@ -50,12 +51,21 @@ class HomeShell extends StatelessWidget {
               MediaQuery.removePadding(
                 context: context,
                 removeBottom: true,
-                child: const PlayerBar(),
+                // Mini přehrávač při prvním puštění vyjede, po zavření
+                // zajede -- dřív se tab bar skokem posunul.
+                child: AnimatedSize(
+                  duration: Motion.sheetIn.duration,
+                  curve: Motion.sheetIn,
+                  alignment: Alignment.bottomCenter,
+                  child: const PlayerBar(),
+                ),
               ),
               GlassTabBar(
                 items: _tabs,
                 selectedIndex: navigationShell.currentIndex,
-                onSelected: navigationShell.goBranch,
+                // Znovu klepnutý aktivní tab = zpět na jeho první stránku (iOS).
+                onSelected: (index) =>
+                    navigationShell.goBranch(index, initialLocation: index == navigationShell.currentIndex),
               ),
             ],
           ),

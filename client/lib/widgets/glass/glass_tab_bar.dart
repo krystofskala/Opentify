@@ -79,7 +79,8 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
 
   void _select(int index) {
     _springPos(index.toDouble(), _settle);
-    if (index != widget.selectedIndex) widget.onSelected(index);
+    // I klepnutí na aktivní tab (iOS: návrat na začátek tabu).
+    widget.onSelected(index);
   }
 
   void _onTapUp(TapUpDetails d) {
