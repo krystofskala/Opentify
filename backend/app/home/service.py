@@ -87,12 +87,21 @@ async def _build_years() -> int:
     """"Tvoje top skladby <rok>" -- 1. ledna přibude právě skončený rok."""
     from app.library.spotify_history import build_year_playlists
 
-    return len(await asyncio.to_thread(build_year_playlists, g.HOME_USER_ID))
+    return len(await asyncio.to_thread(build_year_playlists, g.home_user()))
+
+
+def _profile_ids() -> list[str]:
+    """Admin první, pak ostatní profily."""
+    from app.models import AppUser
+
+    with Session(engine) as session:
+        others = [u.id for u in session.exec(select(AppUser)).all() if u.id != g.HOME_USER_ID]
+    return [g.HOME_USER_ID, *others]
 
 
 def _last_success(name: str) -> datetime | None:
     with Session(engine) as session:
-        snapshot = session.get(HomeSnapshot, f"gen:{name}")
+        snapshot = g.load_snapshot(session, f"gen:{name}")
         if snapshot is None:
             return None
         stamp = snapshot.generated_at
@@ -112,18 +121,26 @@ async def run_generators(*, force: bool = False) -> dict[str, Any]:
     report: dict[str, Any] = {}
     now = datetime.now(timezone.utc)
     for name, ttl, build in _generator_registry():
-        last = _last_success(name)
-        if not force and last is not None and now - last < ttl:
-            continue
-        try:
-            count = await build()
-        except Exception as exc:  # noqa: BLE001 - izolace generátorů
-            logger.warning("home: generátor %s selhal: %s", name, exc)
-            report[name] = f"error: {exc}"
-            continue
-        g._save_snapshot(f"gen:{name}", {"count": count})
-        report[name] = count
-        await asyncio.sleep(g._BACKGROUND_GAP_S)
+        # Osobní generátory postupně pro každý profil (každý má své mixy).
+        users = _profile_ids() if name.startswith("personal:") else [g.HOME_USER_ID]
+        for user_id in users:
+            token = g.set_home_user(user_id)
+            try:
+                last = _last_success(name)
+                if not force and last is not None and now - last < ttl:
+                    continue
+                label = name if user_id == g.HOME_USER_ID else f"{name}@{user_id}"
+                try:
+                    count = await build()
+                except Exception as exc:  # noqa: BLE001 - izolace generátorů
+                    logger.warning("home: generátor %s selhal: %s", label, exc)
+                    report[label] = f"error: {exc}"
+                    continue
+                g._save_snapshot(f"gen:{name}", {"count": count})
+                report[label] = count
+            finally:
+                g.reset_home_user(token)
+            await asyncio.sleep(g._BACKGROUND_GAP_S)
     if any(isinstance(v, int) for v in report.values()):
         await invalidate_home_cache()
     return report
@@ -352,6 +369,11 @@ def build_home(user_id: str) -> dict[str, Any]:
 
 async def get_home(user_id: str) -> dict[str, Any]:
     async def build() -> dict[str, Any]:
-        return await asyncio.to_thread(build_home, user_id)
+        # Osobní snapshoty (výběr kategorií...) tohoto profilu.
+        token = g.set_home_user(user_id)
+        try:
+            return await asyncio.to_thread(build_home, user_id)
+        finally:
+            g.reset_home_user(token)
 
     return await cached_json(f"home:{user_id}", HOME_CACHE_TTL_S, build)

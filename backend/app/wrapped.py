@@ -278,7 +278,7 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
                 out["playlists"] = _decade_playlists(ranked_tracks, evergreens, year_track)
             else:
                 playlist = session.exec(
-                    select(Playlist).where(Playlist.owner_user_id == g.HOME_USER_ID, Playlist.source == f"personal:year:{period}")
+                    select(Playlist).where(Playlist.owner_user_id == g.home_user(), Playlist.source == f"personal:year:{period}")
                 ).first()
                 out["playlists"] = [{"id": playlist.id, "title": playlist.title}] if playlist else []
             return out
@@ -303,7 +303,7 @@ def _decade_playlists(ranked: list[str], evergreens: list[str], year_track: dict
         if not ids:
             continue
         playlist_id = g._save_playlist(
-            owner=g.HOME_USER_ID,
+            owner=g.home_user(),
             # Roky ve zdroji -- klient z nich skládá popisek obalu ("16–26").
             source=f"personal:decade:{FIRST_YEAR}-{DECADE_LAST_YEAR}:{key}",
             title=title,
@@ -374,11 +374,11 @@ async def snippet(recording_id: str) -> dict[str, Any] | None:
 async def warm_all() -> int:
     """Generátor Domů: předpočítá odemčená období (první výpočet roku zařazuje
     interprety do žánrů přes Deezer -- ať na to uživatel nečeká)."""
-    periods = available_periods(g.HOME_USER_ID)
+    periods = available_periods(g.home_user())
     done = 0
     for item in periods["years"] + [periods["decade"]]:
         if item["locked"]:
             continue
-        await period_stats(g.HOME_USER_ID, item["id"])
+        await period_stats(g.home_user(), item["id"])
         done += 1
     return done

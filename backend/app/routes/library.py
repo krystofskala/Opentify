@@ -492,6 +492,23 @@ async def import_spotify(
 ):
     user_id, _device_id = current
     raw = await file.read()
+    # ZIP s historií poslechů (Extended streaming history) -> poslechy
+    # profilu, za který se jedná (Wrapped, mixy); jinak playlisty/knihovna.
+    try:
+        from app.library.spotify_history import import_history, read_zip
+
+        plays = read_zip(raw)
+    except (zipfile.BadZipFile, ValueError, KeyError):
+        plays = []
+    if plays:
+        from app.home import generators as g
+
+        token = g.set_home_user(user_id)
+        try:
+            result = await asyncio.to_thread(import_history, user_id, plays)
+        finally:
+            g.reset_home_user(token)
+        return {"kind": "history", **{k: v for k, v in result.items() if isinstance(v, (int, str, float, bool))}}
     try:
         # Stovky skladeb do DB -- mimo event loop, ať mezitím hraje hudba.
         def run():

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Awaitable, Callable
@@ -49,6 +50,32 @@ from app.utils import utcnow
 logger = logging.getLogger(__name__)
 
 HOME_USER_ID = os.environ.get("HOME_USER_ID", "demo-user")
+
+# Profil, pro který se právě generují osobní mixy (každý profil má své --
+# generátory běží postupně pro všechny, viz `service.run_generators`).
+# Výchozí = admin (dosavadní chování).
+_home_user: ContextVar[str] = ContextVar("home_user", default=HOME_USER_ID)
+
+
+def home_user() -> str:
+    return _home_user.get()
+
+
+def set_home_user(user_id: str) -> Token:
+    return _home_user.set(user_id)
+
+
+def reset_home_user(token: Token) -> None:
+    _home_user.reset(token)
+
+
+def _scoped(key: str) -> str:
+    """Osobní snapshoty ("už postaveno dnes", výběr kategorií...) zvlášť
+    pro každý profil; adminovy klíče beze změny (stará data platí dál)."""
+    user = home_user()
+    if user == HOME_USER_ID or not key.startswith(("personal:", "gen:personal:")):
+        return key
+    return f"{key}@{user}"
 LISTENBRAINZ_USERNAME = os.environ.get("LISTENBRAINZ_USERNAME", "demo-user")
 
 CHART_TTL = timedelta(hours=6)
@@ -414,6 +441,9 @@ async def build_personal_mixes() -> int:
     from app.recommendations.listenbrainz import get_listenbrainz_client, get_listenbrainz_public_client
     from app.recommendations.service import RecommendationService
 
+    # ListenBrainz účet je adminův -- ostatní profily mají jen vlastní mixy.
+    if home_user() != HOME_USER_ID:
+        return 0
     built = 0
     with Session(engine) as session:
         service = RecommendationService(session, get_listenbrainz_client(), get_listenbrainz_public_client())
@@ -453,6 +483,7 @@ async def build_personal_mixes() -> int:
 
 
 def _save_snapshot(key: str, payload: dict[str, Any]) -> None:
+    key = _scoped(key)
     with Session(engine) as session:
         snapshot = session.get(HomeSnapshot, key) or HomeSnapshot(key=key)
         snapshot.payload = payload
@@ -462,4 +493,4 @@ def _save_snapshot(key: str, payload: dict[str, Any]) -> None:
 
 
 def load_snapshot(session: Session, key: str) -> HomeSnapshot | None:
-    return session.get(HomeSnapshot, key)
+    return session.get(HomeSnapshot, _scoped(key))

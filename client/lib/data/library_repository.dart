@@ -233,14 +233,18 @@ class LibraryRepository {
     return LibraryScanStatus.fromJson(json);
   }
 
-  Future<SpotifyImportResult> importSpotifyLibrary(List<int> bytes, String filename) async {
+  /// Playlisty/knihovna, NEBO historie poslechů (ZIP "Extended streaming
+  /// history" -- server ho pozná sám; pak `historyListens`).
+  Future<({SpotifyImportResult? result, int? historyListens})> importSpotifyLibrary(
+      List<int> bytes, String filename) async {
     final json = await _api.postMultipart(
       '/library/import/spotify',
       fieldName: 'file',
       bytes: bytes,
       filename: filename,
     );
-    return SpotifyImportResult.fromJson(json);
+    if (json['kind'] == 'history') return (result: null, historyListens: json['listens'] as int? ?? 0);
+    return (result: SpotifyImportResult.fromJson(json), historyListens: null);
   }
 
   Future<LibrarySearchResult> searchLibrary(String query, {int limit = 20}) async {

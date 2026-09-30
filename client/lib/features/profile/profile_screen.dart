@@ -102,7 +102,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   'Nahraj export playlistů (ZIP s CSV, např. z Exportify) nebo '
                   'YourLibrary.json z oficiálního Spotify exportu. Liked Songs se '
                   'použijí pro tvůj denní mix, ostatní playlisty se naimportují '
-                  'pod svým jménem.',
+                  'pod svým jménem. ZIP s historií poslechů (Extended streaming history) '
+                  'nahraje poslechy pro Wrapped a mixy.',
               buttonLabel: 'Vybrat soubor…',
               onPressed: () => _importFromSpotify(context),
             ),
@@ -196,12 +197,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('Importuji…')));
     try {
-      final result = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
+      final imported = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
       ref.invalidate(likedSongsProvider);
       ref.invalidate(homeProvider);
       ref.invalidate(myPlaylistsProvider);
       messenger.hideCurrentSnackBar();
       if (!context.mounted) return;
+      if (imported.historyListens != null) {
+        messenger.showSnackBar(SnackBar(
+          content: Text('Historie poslechů nahraná (${imported.historyListens} poslechů) – Wrapped a mixy '
+              'se podle ní přepočítají.'),
+        ));
+        return;
+      }
+      final result = imported.result!;
       if (result.playlists.isEmpty) {
         messenger.showSnackBar(const SnackBar(content: Text('V souboru nebyly žádné playlisty ani skladby.')));
         return;

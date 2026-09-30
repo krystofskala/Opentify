@@ -126,7 +126,7 @@ def import_history(user_id: str, plays: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _playlist_owner() -> str:
-    return g.HOME_USER_ID
+    return g.home_user()
 
 
 def build_year_playlists(user_id: str) -> dict[int, int]:
@@ -183,6 +183,7 @@ def main() -> None:
     with open(path, "rb") as fh:
         plays = read_zip(fh.read())
     started = datetime.now(timezone.utc)
+    g.set_home_user(user_id)  # roční playlisty patří tomu profilu
     result = import_history(user_id, plays)
     print(json.dumps(result, default=str), "za", round((datetime.now(timezone.utc) - started).total_seconds()), "s")
 

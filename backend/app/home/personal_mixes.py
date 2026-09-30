@@ -114,7 +114,14 @@ def load_taste(user_id: str) -> Taste:
             ).all()
         )
         since = now - timedelta(days=365)
-        for listen in session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all():
+        listens = session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
+        if user_id != g.HOME_USER_ID:
+            # Sdílená knihovna je stažená podle vkusu admina -- u jiného
+            # profilu se počítá jen to, co sám poslouchal nebo lajkl (jinak
+            # by prázdný profil dostal mixy podle cizího vkusu).
+            own = set(taste.liked) | {listen.recording_id for listen in listens}
+            taste.library &= own
+        for listen in listens:
             played = _aware(listen.played_at)
             taste.listen_counts[listen.recording_id] += 1
             if listen.recording_id not in taste.last_played or played > taste.last_played[listen.recording_id]:
@@ -388,13 +395,13 @@ async def build_daily_mixes() -> int:
     done = _already_built("personal:daily-mixes", day)
     if done is not None:
         return done
-    taste = await asyncio.to_thread(load_taste, g.HOME_USER_ID)
+    taste = await asyncio.to_thread(load_taste, g.home_user())
     if len(taste.known) < 20:
         raise RuntimeError("osobní mixy: málo dat o chuti (oblíbené/poslechy)")
     clusters = await build_clusters(taste)
     known = taste.known
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
-    later = await asyncio.to_thread(_listen_later_candidates, g.HOME_USER_ID)
+    later = await asyncio.to_thread(_listen_later_candidates, g.home_user())
     later_used: set[str] = set()
     built = 0
     for index, cluster in enumerate(clusters, start=1):
@@ -428,7 +435,7 @@ async def build_daily_mixes() -> int:
         genre = _genre_label(taste, cluster, familiar)
         description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
         g._save_playlist(
-            owner=g.HOME_USER_ID,
+            owner=g.home_user(),
             source=f"personal:daily-mix:{built}",
             title=f"Denní mix {built}",
             description=description,
@@ -446,7 +453,7 @@ async def build_daily_mixes() -> int:
     if built == 0:
         raise RuntimeError("osobní mixy: žádná skupina nedala dost skladeb")
     await asyncio.to_thread(
-        _clear_playlists, g.HOME_USER_ID, [f"personal:daily-mix:{n}" for n in range(built + 1, MAX_DAILY_MIXES + 1)]
+        _clear_playlists, g.home_user(), [f"personal:daily-mix:{n}" for n in range(built + 1, MAX_DAILY_MIXES + 1)]
     )
     g._save_snapshot("personal:daily-mixes", {"stamp": day, "count": built})
     return built
@@ -457,7 +464,7 @@ async def build_discover_weekly() -> int:
     done = _already_built("personal:discover-weekly", week)
     if done is not None:
         return done
-    taste = await asyncio.to_thread(load_taste, g.HOME_USER_ID)
+    taste = await asyncio.to_thread(load_taste, g.home_user())
     rng = random.Random(f"discover:{week}")
     recent = {r for r, t in taste.last_played.items() if utcnow() - t <= timedelta(days=60)}
     exclude = taste.known | recent
@@ -499,7 +506,7 @@ async def build_discover_weekly() -> int:
         raise RuntimeError(f"objevy týdne: jen {len(picked)} nových skladeb")
     rng.shuffle(picked)
     g._save_playlist(
-        owner=g.HOME_USER_ID,
+        owner=g.home_user(),
         source="personal:discover-weekly",
         title="Objevy týdne",
         description="Nová hudba od interpretů podobných těm, které posloucháš. Každé pondělí nová.",
@@ -515,14 +522,14 @@ async def build_discover_weekly() -> int:
 
 
 async def build_on_repeat() -> int:
-    taste = await asyncio.to_thread(load_taste, g.HOME_USER_ID)
+    taste = await asyncio.to_thread(load_taste, g.home_user())
     ranked = [r for r, _ in sorted(taste.recent_listens.items(), key=lambda kv: (-kv[1], -taste.last_played[kv[0]].timestamp()))]
     if len(ranked) < 10:
-        await asyncio.to_thread(_clear_playlists, g.HOME_USER_ID, ["personal:on-repeat"])
+        await asyncio.to_thread(_clear_playlists, g.home_user(), ["personal:on-repeat"])
         return 0
     ids = ranked[:30]
     g._save_playlist(
-        owner=g.HOME_USER_ID,
+        owner=g.home_user(),
         source="personal:on-repeat",
         title="Na opakování",
         description="Co teď posloucháš nejvíc (posledních 30 dní)",
@@ -537,7 +544,7 @@ async def build_on_repeat() -> int:
 
 async def build_throwback() -> int:
     day = _day_key()
-    taste = await asyncio.to_thread(load_taste, g.HOME_USER_ID)
+    taste = await asyncio.to_thread(load_taste, g.home_user())
     now = utcnow()
     candidates = [
         r
@@ -552,10 +559,10 @@ async def build_throwback() -> int:
     rng.shuffle(rest)
     ids = _cap_per_artist(played_before + rest, taste.artist_of, 2)[:30]
     if len(ids) < 10:
-        await asyncio.to_thread(_clear_playlists, g.HOME_USER_ID, ["personal:throwback"])
+        await asyncio.to_thread(_clear_playlists, g.home_user(), ["personal:throwback"])
         return 0
     g._save_playlist(
-        owner=g.HOME_USER_ID,
+        owner=g.home_user(),
         source="personal:throwback",
         title="Návrat do minulosti",
         description="Oblíbené skladby, které jsi přes 3 měsíce neslyšel",

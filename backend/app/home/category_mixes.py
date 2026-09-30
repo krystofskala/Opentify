@@ -274,7 +274,7 @@ async def _mood_mix(
 async def _listen_later_fitting(c: Category, taste: pm.Taste, mix_artists: list[str]) -> list[str]:
     """Skladby z "Poslechnout později", které do kategorie sedí: interpret v
     žánru (u nálady v žánrech nálady) nebo přímo mezi interprety mixu."""
-    candidates = await asyncio.to_thread(listen_later.mix_candidates, g.HOME_USER_ID)
+    candidates = await asyncio.to_thread(listen_later.mix_candidates, g.home_user())
     if not candidates:
         return []
     artist_ids = list(dict.fromkeys(a for _, a in candidates))
@@ -318,7 +318,7 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
             if state and state.get("stamp") == day:
                 return state.get("playlistId")
 
-        taste = taste or await asyncio.to_thread(pm.load_taste, g.HOME_USER_ID)
+        taste = taste or await asyncio.to_thread(pm.load_taste, g.home_user())
         rng = random.Random(f"{day}:{c.id}")
         if shares is None:
             shares = await artist_shares(taste, _CLASSIFY_BUDGET_PAGE)
@@ -333,7 +333,7 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
         if len(familiar) >= MIN_FAMILIAR and len(tracks) >= MIN_MIX_SIZE:
             names = [taste.artist_name[a] for a in top_artists[:2] if a in taste.artist_name]
             playlist_id = g._save_playlist(
-                owner=g.HOME_USER_ID,
+                owner=g.home_user(),
                 source=_source(c.id),
                 title=f"Tvůj mix · {c.title}",
                 description=(f"{', '.join(names)} a další" if names else "Podle toho, co posloucháš"),
@@ -345,7 +345,7 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
             )
             logger.info("category mix %s: %d skladeb (%d známých, %d nových)", c.id, len(tracks), len(familiar), len(new))
         else:
-            await asyncio.to_thread(pm._clear_playlists, g.HOME_USER_ID, [_source(c.id)])
+            await asyncio.to_thread(pm._clear_playlists, g.home_user(), [_source(c.id)])
             logger.info("category mix %s: málo skladeb (%d známých, %d celkem)", c.id, len(familiar), len(tracks))
         g._save_snapshot(f"{_source(c.id)}:state", {"stamp": day, "playlistId": playlist_id})
         return playlist_id
@@ -382,7 +382,7 @@ def _set_sections(picks: list[str]) -> None:
     with Session(engine) as session:
         for c in CATEGORIES:
             playlist = session.exec(
-                select(Playlist).where(Playlist.owner_user_id == g.HOME_USER_ID, Playlist.source == _source(c.id))
+                select(Playlist).where(Playlist.owner_user_id == g.home_user(), Playlist.source == _source(c.id))
             ).first()
             if playlist is None:
                 continue
@@ -399,7 +399,7 @@ async def build_home_category_mixes() -> int:
         payload = (snapshot.payload or {}) if snapshot else {}
     if payload.get("stamp") == day:
         return len(payload.get("picks") or [])
-    taste = await asyncio.to_thread(pm.load_taste, g.HOME_USER_ID)
+    taste = await asyncio.to_thread(pm.load_taste, g.home_user())
     shares = await artist_shares(taste, _CLASSIFY_BUDGET_BACKGROUND)
     scores = genre_scores(taste, shares)
     picks = update_picks(scores, payload.get("picks") or [])
