@@ -32,7 +32,7 @@ LISTENBRAINZ_BASE_URL = os.environ.get("LISTENBRAINZ_BASE_URL", "http://listenbr
 PLAYLISTS_INDEX_TTL_SECONDS = 60 * 60
 PLAYLIST_DETAIL_TTL_SECONDS = 30 * 60
 
-_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.2)
+_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.2, key="listenbrainz")
 
 
 class ListenBrainzError(RuntimeError):
@@ -130,7 +130,7 @@ SITEWIDE_STATS_TTL_SECONDS = 60 * 60
 SIMILAR_USERS_TTL_SECONDS = 60 * 60 * 6
 USER_STATS_TTL_SECONDS = 60 * 60
 
-_public_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.2)
+_public_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.2, key="listenbrainz")
 
 
 class ListenBrainzPublicClient:

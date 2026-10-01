@@ -31,7 +31,7 @@ LOOKUP_TTL_SECONDS = 24 * 60 * 60
 
 # Deezer povoluje ~50 req / 5 s -> 0.1 s je přesně na hraně, bez rezervy
 # by se občas vrátila kvóta (HTTP 200 s `error`), proto 0.11.
-_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.11)
+_rate_limiter = AsyncRateLimiter(min_interval_seconds=0.11, key="deezer")
 
 
 class DeezerUnavailable(RuntimeError):

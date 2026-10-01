@@ -32,7 +32,7 @@ LOOKUP_TTL_SECONDS = 24 * 60 * 60     # 24h — detail/diskografie jsou téměř
 # Anonymní přístup: max 1 request/s, jinak MB dočasně banuje IP (503).
 # `max_waiters`: víc čekajících = odpověď za >6 s, to už uživatel nepočká a
 # jen by držel DB spojení -- selže hned (-> 503 "zkus znovu"), viz RateLimitBusy.
-_rate_limiter = AsyncRateLimiter(min_interval_seconds=1.0, max_waiters=6)
+_rate_limiter = AsyncRateLimiter(min_interval_seconds=1.0, max_waiters=6, key="musicbrainz")
 
 
 class MusicBrainzError(RuntimeError):
