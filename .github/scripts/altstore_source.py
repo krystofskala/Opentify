@@ -34,6 +34,8 @@ source = {
                     # CFBundleVersion appky (= číslo běhu CI); SideStore podle
                     # verze + buildu pozná, že je update.
                     "buildVersion": version.rsplit(".", 1)[-1],
+                    # Bez toho SideStore pod verzí ukazuje "nil".
+                    "localizedDescription": f"Noční build Opentify {version}.",
                     "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "size": size,
                     "downloadURL": url,
