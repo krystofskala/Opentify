@@ -906,6 +906,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   Future<void> playTrack(NowPlayingInfo info, {String? sourceLabel}) => playQueue([info], 0, sourceLabel: sourceLabel);
 
+  /// "Zkusit znovu" po chybě přehrávání: tatáž skladba ve STEJNÉ frontě.
+  /// Dřív to bylo `playTrack(nowPlaying)` -- fronta se zúžila na jedinou
+  /// skladbu a zmizel playlist ("Přehráváno z X") i kontext pro Domů.
+  Future<void> retryCurrent() async {
+    if (state.nowPlaying == null || state.queue.isEmpty) return;
+    _restoredIdle = false;
+    await _playAtIndex(state.queueIndex);
+  }
+
   /// Přehraje `items[startIndex]` a zbytek seznamu si uloží jako frontu pro
   /// `next()`/`previous()`. `sourceLabel` (např. název alba/playlistu) se
   /// zobrazí v `NowPlayingScreen` jako "Přehráváno z X". Shuffle/repeat/

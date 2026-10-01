@@ -46,6 +46,7 @@ class HomeScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(homeProvider);
+          ref.invalidate(recentContextsProvider);
           try {
             await ref.read(homeProvider.future);
           } catch (_) {}

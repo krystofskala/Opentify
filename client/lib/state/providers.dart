@@ -1,3 +1,4 @@
+import '../core/diagnostics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api_client.dart';
@@ -85,7 +86,12 @@ final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
 /// předchozí je tou dobou uložený).
 final recentContextsProvider = FutureProvider.autoDispose<List<RecentContext>>((ref) {
   ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying?.recordingId));
-  return ref.watch(homeRepositoryProvider).recent();
+  // Selhání dřív jen tiše schovalo řadu "Pokračovat v poslechu" (živě na
+  // iPhonu po updatu) -- do logu API, ať je vidět proč.
+  return ref.watch(homeRepositoryProvider).recent().catchError((Object e) {
+    diagReport('home-recent', '$e');
+    throw e;
+  });
 });
 
 /// Oblíbené skladby -- sdílené Knihovnou (karta + detail); dřív žily v Profilu.

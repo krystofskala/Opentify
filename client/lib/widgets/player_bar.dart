@@ -298,7 +298,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                             onPressed: playback.isBuffering
                                 ? null
                                 : hasError
-                                    ? () => ref.read(audioPlayerControllerProvider.notifier).playTrack(nowPlaying)
+                                    ? () => ref.read(audioPlayerControllerProvider.notifier).retryCurrent()
                                     : () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
                           ),
                           // Na širokém displeji (desktop) chybí swipe prstem --
