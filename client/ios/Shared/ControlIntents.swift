@@ -8,7 +8,7 @@ import Foundation
 /// s otevřenou appkou) -- vlastní adresu tudy iOS neotevře. Teď:
 ///  - Ladička: `openAppWhenRun` otevře appku a cesta `/tuner` se předá
 ///    Flutteru přes kanál `opentify/nav` (OpentifyShared.pendingRoute).
-///  - Shazam: stejně, `/shazam?start=1` (rozpoznávání se spustí samo).
+///  - Shazam: na pozadí (viz `OpenOpentifyShazamIntent`), pojistka otevře appku.
 @available(iOS 18.0, *)
 struct OpenOpentifyTunerIntent: AppIntent {
   static var title: LocalizedStringResource = "Ladička"
@@ -23,22 +23,54 @@ struct OpenOpentifyTunerIntent: AppIntent {
   }
 }
 
-/// Shazam: otevře appku a rozpoznávání rovnou spustí (`/shazam?start=1`).
-/// Varianta na pozadí (`AudioRecordingIntent`, Runner/BackgroundShazam.swift)
-/// nefungovala: iOS ji spouštěl v ROZŠÍŘENÍ, kde mikrofon nejde (živě, log
-/// "perform v rozšíření") -- stejný postup jako Ladička je spolehlivý.
+/// Shazam z Ovládacího centra NA POZADÍ (jako oficiální Shazam): appka se
+/// neotevře, nahraje a pozná (Runner/BackgroundShazam.swift), bez internetu
+/// si záznam schová. iOS 26: `supportedModes = .background` -> běží v APPCE
+/// na pozadí. Dřív (bez toho) ho iOS spouštěl v ROZŠÍŘENÍ, kde mikrofon
+/// nejde (živě, log "perform v rozšíření") -- pak pojistka: otevřít appku
+/// a poznat tam (`OpenOpentifyShazamInAppIntent`).
 @available(iOS 18.0, *)
-struct OpenOpentifyShazamIntent: AppIntent {
+struct OpenOpentifyShazamIntent: AudioRecordingIntent {
   static var title: LocalizedStringResource = "Open Shazam"
-  static var description = IntentDescription("Otevře Opentify a začne poznávat skladbu.")
+  static var description = IntentDescription("Na pozadí pozná hrající skladbu a pošle upozornění.")
+
+  #if compiler(>=6.2)
+  @available(iOS 26.0, *)
+  static var supportedModes: IntentModes { .background }
+  #endif
+
+  func perform() async throws -> some IntentResult & OpensIntent {
+    OpentifyShared.report("control-shazam", "perform v \(OpentifyShared.processName)")
+    #if OPENTIFY_APP
+    await BackgroundShazam.shared.run()
+    return .result(opensIntent: OpentifyNoopIntent())
+    #else
+    return .result(opensIntent: OpenOpentifyShazamInAppIntent())
+    #endif
+  }
+}
+
+/// Pojistka: otevřít appku a poznat tam (`/shazam?start=1`).
+@available(iOS 18.0, *)
+struct OpenOpentifyShazamInAppIntent: AppIntent {
+  static var title: LocalizedStringResource = "Open Shazam v appce"
   static var openAppWhenRun: Bool = true
+  static var isDiscoverable: Bool = false
 
   @MainActor
   func perform() async throws -> some IntentResult {
     OpentifyShared.requestRoute("/shazam?start=1")
-    OpentifyShared.report("control-shazam", "perform v \(OpentifyShared.processName)")
     return .result()
   }
+}
+
+/// Nic nedělá -- `OpensIntent` musí něco vrátit i v úspěšné větvi.
+@available(iOS 18.0, *)
+struct OpentifyNoopIntent: AppIntent {
+  static var title: LocalizedStringResource = "Opentify"
+  static var isDiscoverable: Bool = false
+
+  func perform() async throws -> some IntentResult { .result() }
 }
 
 /// Sdílená data appky a rozšíření (App Group): adresa serveru a klíč

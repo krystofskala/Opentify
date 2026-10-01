@@ -18,6 +18,7 @@ enum NativeNavBridge {
     channel.setMethodCallHandler { call, result in
       switch call.method {
       case "config":
+        if #available(iOS 18.0, *) { Task { await BackgroundShazam.shared.flushQueue() } }
         let args = call.arguments as? [String: Any] ?? [:]
         let defaults = OpentifyShared.defaults
         for key in ["apiBase", "token", "actAs"] {
@@ -51,7 +52,9 @@ enum NativeNavBridge {
 /// z mikrofonu, pošle je vlastnímu serveru (`POST /recognize`, ten skladbu
 /// uloží do sbírky Shazam) a výsledek oznámí upozorněním. Během nahrávání
 /// musí běžet Live Activity (podmínka iOS pro nahrávání na pozadí).
-/// Zvuk se nikam neukládá -- dočasný soubor se hned maže.
+/// Bez internetu (jako oficiální Shazam): klip se uloží JEN v telefonu
+/// (Application Support/ShazamQueue), rozpozná se, až je server zase
+/// dostupný (`flushQueue` -- otevření appky / další Shazam), a hned se smaže.
 @available(iOS 18.0, *)
 actor BackgroundShazam {
   static let shared = BackgroundShazam()
@@ -80,9 +83,47 @@ actor BackgroundShazam {
       try? await Task.sleep(nanoseconds: 45_000_000_000)
       await self.watchdog()
     }
+    await flushQueue()
     await work()
     finished = true
     OpentifyShared.log("shazam: done")
+  }
+
+  // MARK: offline fronta
+
+  private static var queueDir: URL {
+    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let dir = base.appendingPathComponent("ShazamQueue", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+  }
+
+  private func enqueue(_ clip: Data) {
+    let url = Self.queueDir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString).wav")
+    try? clip.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    OpentifyShared.log("shazam: offline, uloženo do fronty")
+  }
+
+  /// Rozpoznat uložené klipy (byly bez internetu); po výsledku klip smazat.
+  func flushQueue() async {
+    let files = (try? FileManager.default.contentsOfDirectory(at: Self.queueDir, includingPropertiesForKeys: nil)) ?? []
+    for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+      guard let clip = try? Data(contentsOf: file) else {
+        try? FileManager.default.removeItem(at: file)
+        continue
+      }
+      let outcome = await recognize(clip)
+      if case .offline = outcome { return }  // pořád bez spojení -- zkusit příště
+      try? FileManager.default.removeItem(at: file)
+      switch outcome {
+      case let .found(title, artist):
+        await notify(title: title, body: "\(artist) · poznáno dodatečně, uloženo do Shazamu v Opentify")
+      case .notFound:
+        await notify(title: "Shazam nic nepoznal", body: "Uložený záznam bez internetu se nepodařilo poznat.")
+      default:
+        break
+      }
+    }
   }
 
   private func watchdog() async {
@@ -119,6 +160,10 @@ actor BackgroundShazam {
       OpentifyShared.log("shazam: nahráno \(clip.count) B")
       outcome = await recognize(clip)
       OpentifyShared.log("shazam: výsledek \(outcome)")
+      if case .offline = outcome {
+        enqueue(clip)
+        break
+      }
       if case .notFound = outcome { continue }
       break
     }
@@ -131,6 +176,9 @@ actor BackgroundShazam {
     case .notFound:
       await endActivity(title: "Nic jsem nepoznal", artist: "Open Shazam")
       await notify(title: "Shazam nic nepoznal", body: "Zkus to blíž u reproduktoru.")
+    case .offline:
+      await endActivity(title: "Bez internetu", artist: "Poznám, až se připojíš")
+      await notify(title: "Shazam bez internetu", body: "Záznam jsem uložil – poznám ho, až bude spojení.")
     case let .failed(reason):
       await endActivity(title: "Shazam selhal", artist: reason)
       await notify(title: "Shazam selhal", body: reason)
@@ -141,6 +189,7 @@ actor BackgroundShazam {
   private enum Outcome {
     case found(String, String)
     case notFound
+    case offline
     case failed(String)
   }
 
@@ -195,7 +244,8 @@ actor BackgroundShazam {
       guard json["found"] as? Bool == true else { return .notFound }
       return .found(json["title"] as? String ?? "?", json["artist"] as? String ?? "")
     } catch {
-      return .failed("server nedostupný (Tailscale?)")
+      // Bez spojení (žádný internet / Tailscale) -- do offline fronty.
+      return .offline
     }
   }
 
