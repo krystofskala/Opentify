@@ -208,6 +208,15 @@ class RecordingDislike(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class HeardFully(SQLModel, table=True):
+    """Skladba, kterou profil aspoň jednou poslechl celou (>= 90 % délky
+    skutečně odehráno) -- v appce nenápadná trvalá značka u skladby."""
+
+    user_id: str = Field(primary_key=True)
+    recording_id: str = Field(primary_key=True, foreign_key="recording.id")
+    first_at: datetime = Field(default_factory=utcnow)
+
+
 class AppUser(SQLModel, table=True):
     """Profil v appce. Admin (`demo-user` -- všechna dosavadní data) může
     zakládat další profily a přepínat se na ně (viz app/auth.py)."""

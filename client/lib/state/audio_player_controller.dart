@@ -24,6 +24,7 @@ import 'provisioning_controller.dart';
 import 'collection_progress.dart';
 import 'offline_controller.dart';
 import 'providers.dart';
+import 'heard_controller.dart';
 
 // `RepeatMode` už existuje jako 1:1 model `PlaybackSession.repeatMode` z WS
 // `playback.*` protokolu (docs/asyncapi.yaml, viz `models/playback_model.dart`)
@@ -1981,6 +1982,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Duration _scrobbleAccum = Duration.zero;
   Duration? _scrobbleLastPos;
   bool _scrobbled = false;
+  bool _heardMarked = false;
 
   /// Nové přehrávání skladby (i opakované přehrání téže) = nový poslech.
   void _beginScrobble(String recordingId) {
@@ -1989,6 +1991,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _scrobbleAccum = Duration.zero;
     _scrobbleLastPos = null;
     _scrobbled = false;
+    _heardMarked = false;
     unawaited(_ref.read(listensRepositoryProvider).playingNow(recordingId).catchError((Object _) {}));
   }
 
@@ -1997,7 +2000,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// pravidlo ListenBrainz/Last.fm; skladby kratší než 30 s se nehlásí.
   void _trackScrobble(Duration position) {
     final id = _scrobbleId;
-    if (id == null || _scrobbled || state.nowPlaying?.recordingId != id) return;
+    if (id == null || (_scrobbled && _heardMarked) || state.nowPlaying?.recordingId != id) return;
     final last = _scrobbleLastPos;
     _scrobbleLastPos = position;
     if (last == null || !_player.playing) return;
@@ -2005,6 +2008,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (delta <= Duration.zero || delta > const Duration(seconds: 3)) return;
     _scrobbleAccum += delta;
     final duration = state.duration;
+    // Poslechnuto celé (>= 90 % délky skutečně odehráno) -> trvalá značka.
+    if (!_heardMarked && duration != null && _scrobbleAccum >= duration * 0.9) {
+      _heardMarked = true;
+      unawaited(_ref.read(heardProvider.notifier).mark(id));
+    }
+    if (_scrobbled) return;
     if (duration != null && duration < const Duration(seconds: 30)) return;
     final half = duration == null ? const Duration(minutes: 4) : duration ~/ 2;
     final threshold = half < const Duration(minutes: 4) ? half : const Duration(minutes: 4);

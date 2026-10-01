@@ -539,6 +539,50 @@ def _remove_for(session: Session, user_id: str, recording_id: str, dry_run: bool
     return {"recordingId": recording_id, "result": "hidden", "freedBytes": 0}
 
 
+@library_router.get("/heard")
+def heard_fully(
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Id skladeb, které profil aspoň jednou poslechl celé: zapsané z appky
+    (`POST /library/heard/{id}`) + poslechy z historie (import ze Spotify),
+    kde odehraný čas pokryl aspoň 90 % délky skladby."""
+    from app.models import HeardFully, Listen
+
+    user_id = current[0]
+    ids = set(session.exec(select(HeardFully.recording_id).where(HeardFully.user_id == user_id)).all())
+    ids |= set(
+        session.exec(
+            select(Listen.recording_id)
+            .join(Recording, Recording.id == Listen.recording_id)
+            .where(
+                Listen.user_id == user_id,
+                Listen.duration_played_ms.is_not(None),  # type: ignore[union-attr]
+                Recording.duration_ms.is_not(None),  # type: ignore[union-attr]
+                Listen.duration_played_ms >= Recording.duration_ms * 0.9,  # type: ignore[operator]
+            )
+            .distinct()
+        ).all()
+    )
+    return {"recordingIds": sorted(ids)}
+
+
+@library_router.post("/heard/{recording_id}")
+def mark_heard_fully(
+    recording_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    from app.models import HeardFully
+
+    if session.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="skladba nenalezena")
+    if session.get(HeardFully, (current[0], recording_id)) is None:
+        session.add(HeardFully(user_id=current[0], recording_id=recording_id))
+        session.commit()
+    return {"recordingId": recording_id, "heard": True}
+
+
 @library_router.get("/entries")
 def library_entries(
     session: Session = Depends(get_session),

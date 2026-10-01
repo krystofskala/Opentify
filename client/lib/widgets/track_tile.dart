@@ -10,6 +10,7 @@ import '../models/availability.dart';
 import '../models/recording_model.dart';
 import '../state/artwork_provider.dart';
 import '../state/audio_player_controller.dart';
+import '../state/heard_controller.dart';
 import '../state/liked_songs_controller.dart';
 import '../state/listen_later_controller.dart';
 import '../state/provisioning_controller.dart';
@@ -401,6 +402,7 @@ class _RowTileState extends State<_RowTile> {
                             ),
                             Row(
                               children: [
+                                HeardDot(recordingId: w.recording.id),
                                 if (w.badge case final badge?) ...[badge, const SizedBox(width: 6)],
                                 Flexible(
                                   child: _LinkText(
@@ -580,10 +582,17 @@ class _CardTile extends StatelessWidget {
                       fontWeight: isPlaying ? FontWeight.w700 : null,
                     ),
                   ),
-                  _LinkText(
-                    text: subtitle ?? recording.durationLabel,
-                    onTap: onArtistTap,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  Row(
+                    children: [
+                      HeardDot(recordingId: recording.id),
+                      Flexible(
+                        child: _LinkText(
+                          text: subtitle ?? recording.durationLabel,
+                          onTap: onArtistTap,
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -688,4 +697,32 @@ class _Thumbnail extends StatelessWidget {
   }
 
   Widget _artwork(ThemeData theme) => ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded, iconSize: 18);
+}
+
+/// Nenápadná trvalá značka: skladbu jsi aspoň jednou poslechl celou
+/// (drobná tečka v barvě motivu před druhým řádkem). Sleduje jen svou
+/// skladbu, ať se při novém poslechu nepřestavuje celý seznam.
+class HeardDot extends ConsumerWidget {
+  const HeardDot({super.key, required this.recordingId});
+
+  final String recordingId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final heard = ref.watch(heardProvider.select((s) => s.contains(recordingId)));
+    if (!heard) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Semantics(
+        label: 'Poslechnuto celé',
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+          ),
+          child: const SizedBox.square(dimension: 5),
+        ),
+      ),
+    );
+  }
 }
