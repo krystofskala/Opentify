@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -18,7 +19,6 @@ import '../../widgets/track_actions.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/glass/glass.dart';
-import '../../widgets/radio_station.dart';
 import '../../core/cz_plural.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
@@ -110,8 +110,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 if (detail.isReadOnly && detail.generatedAt != null)
                   HeroMetaItem(Symbols.update_rounded, heroUpdatedLabel(detail.generatedAt!)),
                 HeroMetaItem(Symbols.queue_music_rounded, heroTrackCount(items.length)),
-                if (heroTotalDuration(items.map((r) => r.durationMs)) case final total?)
-                  HeroMetaItem(Symbols.schedule_rounded, total),
               ],
               mosaicUrls: detail.coverUrls,
               // Vlastní mixy (roky, Denní mixy, mixy kategorií): stejný
@@ -120,26 +118,30 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               // třikrát "Tvůj mix", design audit #3).
               artwork: mixSpec == null ? null : MixArtwork(spec: mixSpec, labels: false),
               artworkBackdrop: mixSpec == null ? null : MixArtwork(spec: mixSpec, labels: false),
+              // Audit UI: hlavní akce + ⋯ (rádio, sdílení a mazání v menu --
+              // koš už není jako kolečko v hlavičce).
               actions: [
-                // Rádio z rádia by se jen točilo v kruhu.
-                if (!(detail.source?.startsWith('radio:') ?? false))
-                  HeroAction(
-                    icon: Symbols.radio_rounded,
-                    tooltip: 'Přejít na rádio',
-                    onPressed: () => goToRadio(context, RadioSeed.playlist, detail.id),
-                  ),
                 if (readOnly)
                   HeroAction(
                     icon: Symbols.library_add_rounded,
-                    tooltip: 'Přidat do knihovny',
+                    tooltip: 'Uložit do mých playlistů',
                     onPressed: () => _copyToLibrary(context, detail),
-                  )
-                else
-                  HeroAction(
-                    icon: Symbols.delete_outline_rounded,
-                    tooltip: 'Smazat playlist',
-                    onPressed: () => _confirmDelete(context),
                   ),
+                HeroAction(
+                  icon: Symbols.more_horiz_rounded,
+                  tooltip: 'Další možnosti',
+                  onPressed: () => showCollectionActions(
+                    context,
+                    kind: CollectionKind.playlist,
+                    id: detail.id,
+                    title: detail.title,
+                    subtitle: detail.description,
+                    imageUrl: detail.coverUrls.firstOrNull,
+                    isRadio: detail.source?.startsWith('radio:') ?? false,
+                    onSaveCopy: readOnly ? () => _copyToLibrary(context, detail) : null,
+                    onDelete: readOnly ? null : () => _confirmDelete(context),
+                  ),
+                ),
               ],
             ),
             ...detailContentSlivers(context, [

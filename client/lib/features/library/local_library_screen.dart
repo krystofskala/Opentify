@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../widgets/artist_actions.dart';
 import 'soulseek_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -633,6 +634,8 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                         imageUrl: artist.imageUrl,
                         artworkKey: (releaseId: null, artistId: artist.id),
                         onTap: () => context.push('/artists/${artist.id}'),
+                        onLongPress: () =>
+                            showArtistActions(context, id: artist.id, name: artist.name, imageUrl: artist.imageUrl),
                         animationIndex: index % 12,
                       );
                     },
@@ -654,6 +657,8 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                         imageUrl: artist.imageUrl,
                         artworkKey: (releaseId: null, artistId: artist.id),
                         onTap: () => context.push('/artists/${artist.id}'),
+                        onLongPress: () =>
+                            showArtistActions(context, id: artist.id, name: artist.name, imageUrl: artist.imageUrl),
                       );
                     },
                   ),

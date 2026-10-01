@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -116,8 +117,18 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                   subtitle: const [HeroMeta('Všechno, co má u tebe srdíčko')],
                   meta: [
                     HeroMetaItem(Symbols.queue_music_rounded, heroTrackCount(items.length)),
-                    if (heroTotalDuration(items.map((r) => r.durationMs)) case final total?)
-                      HeroMetaItem(Symbols.schedule_rounded, total),
+                  ],
+                  actions: [
+                    HeroAction(
+                      icon: Symbols.more_horiz_rounded,
+                      tooltip: 'Další možnosti',
+                      onPressed: () => showCollectionActions(
+                        context,
+                        kind: CollectionKind.liked,
+                        id: 'liked',
+                        title: _title,
+                      ),
+                    ),
                   ],
                 ),
                 ...detailContentSlivers(context, [

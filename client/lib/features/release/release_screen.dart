@@ -4,8 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/share_link.dart';
-import '../../data/listen_later_repository.dart' show LaterKind;
-import '../../state/listen_later_controller.dart';
 import '../../models/artist_model.dart';
 import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
@@ -16,9 +14,10 @@ import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
-import '../../widgets/track_actions.dart' show shareWithToast;
+import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
+import '../../widgets/remove_from_library.dart' show confirmRemoveFromLibrary, libraryRevisionProvider;
+import '../../state/library_scope.dart' show libraryIdsProvider;
 import '../../widgets/track_tile.dart';
-import '../../widgets/radio_station.dart';
 
 final releaseProvider = FutureProvider.autoDispose.family<ReleaseModel, String>((ref, releaseId) {
   return ref.watch(catalogRepositoryProvider).getRelease(releaseId);
@@ -118,6 +117,23 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     });
   }
 
+  /// Hlavní akce hlavičky: celé album do knihovny / z ní.
+  Future<void> _toggleLibrary(
+      BuildContext context, ReleaseModel release, List<RecordingModel>? recordings, bool inLibrary) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (inLibrary) {
+      if (recordings != null) await confirmRemoveFromLibrary(context, recordings);
+      return;
+    }
+    try {
+      await ref.read(apiClientProvider).postJson('/library/albums/${release.id}');
+      ref.read(libraryRevisionProvider.notifier).state++;
+      messenger?.showSnackBar(SnackBar(content: Text('„${release.title}“ je v knihovně')));
+    } catch (_) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Album se nepodařilo přidat')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final release = widget.release;
@@ -135,8 +151,12 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     final recordings = tracks.valueOrNull;
     final ShareTarget albumShare = (kind: 'releases', id: release.id);
     ref.watch(shareLinkProvider(albumShare)); // přednačíst (Safari sdílí jen hned po klepnutí)
-    final albumLater =
-        ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.album, release.id) != null));
+    // Je celé album v knihovně? (všechny jeho skladby)
+    final libraryIds = ref.watch(libraryIdsProvider).valueOrNull;
+    final inLibrary = recordings != null &&
+        recordings.isNotEmpty &&
+        libraryIds != null &&
+        recordings.every((r) => libraryIds.contains(r.id));
 
     return ScreenAccent(
       imageUrl: release.coverImageUrl,
@@ -163,38 +183,28 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
               meta: [
                 if (release.yearLabel != '—') HeroMetaItem(Symbols.calendar_today_rounded, release.yearLabel),
                 if (recordings != null) HeroMetaItem(Symbols.queue_music_rounded, heroTrackCount(recordings.length)),
-                if (recordings != null && heroTotalDuration(recordings.map((r) => r.durationMs)) != null)
-                  HeroMetaItem(Symbols.schedule_rounded, heroTotalDuration(recordings.map((r) => r.durationMs))!),
               ],
+              // Audit UI: jen hlavní „uložit" + ⋯ (dřív 4 nepopsaná kolečka --
+              // klepnutí na rádio trefovalo i sousední „Na později").
               actions: [
                 HeroAction(
-                  icon: Symbols.radio_rounded,
-                  tooltip: 'Přejít na rádio',
-                  onPressed: () => goToRadio(context, RadioSeed.album, release.id),
+                  icon: inLibrary ? Symbols.library_add_check_rounded : Symbols.library_add_rounded,
+                  tooltip: inLibrary ? 'V knihovně' : 'Přidat do knihovny',
+                  onPressed: () => _toggleLibrary(context, release, recordings, inLibrary),
                 ),
                 HeroAction(
-                  icon: albumLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
-                  tooltip: albumLater ? 'Odebrat z „Na později“' : 'Uložit na později',
-                  onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.album, release.id),
-                ),
-                HeroAction(
-                  icon: Symbols.send_rounded,
-                  tooltip: 'Poslat v Opentify',
-                  onPressed: () => shareInOpentifyWithToast(
-                    ScaffoldMessenger.maybeOf(context),
-                    path: '/releases/${release.id}',
+                  icon: Symbols.more_horiz_rounded,
+                  tooltip: 'Další možnosti',
+                  onPressed: () => showCollectionActions(
+                    context,
+                    kind: CollectionKind.album,
+                    id: release.id,
                     title: release.title,
+                    subtitle: artistName,
+                    imageUrl: release.coverImageUrl,
+                    artistId: release.artistId,
                     artistName: artistName,
-                  ),
-                ),
-                // Univerzální odkaz na album (album.link) -- načtený dopředu.
-                HeroAction(
-                  icon: Symbols.ios_share_rounded,
-                  tooltip: 'Sdílet album',
-                  onPressed: () => shareWithToast(
-                    ref.read(shareLinkProvider(albumShare)).valueOrNull,
-                    ScaffoldMessenger.maybeOf(context),
-                    () => ref.read(shareLinkProvider(albumShare).future),
+                    inLibrary: inLibrary,
                   ),
                 ),
               ],

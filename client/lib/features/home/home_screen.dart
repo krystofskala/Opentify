@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -136,6 +137,8 @@ class _ContinueListening extends StatelessWidget {
                               imageUrl: item.imageUrls.firstOrNull),
                           'liked' => () => showCollectionActions(context,
                               kind: CollectionKind.liked, id: item.id, title: item.title),
+                          'artist' => () =>
+                              showArtistActions(context, id: item.id, name: item.title, imageUrl: item.imageUrl),
                           _ => null,
                         },
                         onPressed: () => switch (item.kind) {

@@ -454,12 +454,14 @@ class _RowTileState extends State<_RowTile> {
                           onRetry: w.onRetry,
                         ),
                         LikeHeart(recordingId: w.recording.id),
-                        if (wide)
-                          IconButton(
-                            icon: const Icon(Symbols.more_horiz_rounded),
-                            tooltip: 'Další možnosti',
-                            onPressed: w.onLongPress,
-                          ),
+                        // ⋯ i na telefonu (audit UI: menu šlo otevřít jen
+                        // dlouhým stiskem, který nikdo nehledá).
+                        IconButton(
+                          icon: const Icon(Symbols.more_horiz_rounded),
+                          tooltip: 'Další možnosti',
+                          visualDensity: wide ? null : VisualDensity.compact,
+                          onPressed: w.onLongPress,
+                        ),
                       ],
                     ],
                   ),

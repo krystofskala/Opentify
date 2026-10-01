@@ -246,7 +246,9 @@ class DetailHeroAppBar extends StatelessWidget {
           height: constraints.maxHeight,
           expanded: expanded,
           leadingWidth: (canPop ? kToolbarHeight : AppSpacing.md) + side,
-          trailingInset: AppSpacing.md + actions.length * 48.0 + side,
+          // Kolečko 44 + mezera AppSpacing.xs na akci (dřív 48 -- velký název
+          // vjížděl pod tlačítka).
+          trailingInset: AppSpacing.md + actions.length * (44.0 + AppSpacing.xs) + side,
           wide: wide,
           side: side,
         ),

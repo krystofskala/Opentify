@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
+import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../../data/listen_later_repository.dart' show LaterKind;
 import '../../models/artist_bio_model.dart';
 import '../../models/artist_model.dart';
-import '../../state/listen_later_controller.dart';
 import '../../models/discography_model.dart';
 import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
@@ -23,7 +22,6 @@ import '../../widgets/queue_action_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
-import '../../widgets/radio_station.dart';
 import '../../widgets/collection_actions.dart';
 import 'artist_support.dart';
 
@@ -146,8 +144,6 @@ class _ArtistBody extends ConsumerWidget {
     final topRelease = sortedReleases.isEmpty ? null : sortedReleases.first;
     final topTracks = topRelease == null ? null : ref.watch(releaseTracksProvider(topRelease.id));
     final bio = ref.watch(artistBioProvider(artist.id));
-    final artistLater =
-        ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.artist, artist.id) != null));
 
     return ScreenAccent(
       imageUrl: artist.coverImageUrl,
@@ -169,16 +165,13 @@ class _ArtistBody extends ConsumerWidget {
               // portrét jako kulatý avatar vedle jména, ať je jasné, kdo to je.
               thumbnailUrl: artist.bannerUrl != null ? artist.coverImageUrl : null,
               thumbnailCircle: true,
+              // Audit UI: jen ⋯ (rádio, na později, sdílení v menu interpreta).
               actions: [
                 HeroAction(
-                  icon: Symbols.radio_rounded,
-                  tooltip: 'Rádio interpreta',
-                  onPressed: () => goToRadio(context, RadioSeed.artist, artist.id),
-                ),
-                HeroAction(
-                  icon: artistLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
-                  tooltip: artistLater ? 'Odebrat z „Na později“' : 'Uložit na později',
-                  onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.artist, artist.id),
+                  icon: Symbols.more_horiz_rounded,
+                  tooltip: 'Další možnosti',
+                  onPressed: () =>
+                      showArtistActions(context, id: artist.id, name: artist.name, imageUrl: artist.coverImageUrl),
                 ),
               ],
               meta: [
@@ -419,6 +412,7 @@ class _RelatedArtistsSection extends StatelessWidget {
                       imageUrl: a.coverImageUrl,
                       artworkKey: (releaseId: null, artistId: a.id),
                       onTap: () => context.push('/artists/${a.id}'),
+                      onLongPress: () => showArtistActions(context, id: a.id, name: a.name, imageUrl: a.coverImageUrl),
                     ),
                   ),
                 );

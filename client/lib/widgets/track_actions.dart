@@ -21,6 +21,7 @@ import '../state/library_scope.dart';
 import '../state/offline_controller.dart';
 import '../state/auth_controller.dart';
 import 'verify_track_sheet.dart';
+import 'share_sheet.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -123,6 +124,7 @@ class _TrackActionsSheet extends ConsumerWidget {
     final offlinePending = offlineState.pending.containsKey(recording.id);
     // Klasická knihovna profilu: co si sám přidal (ne co jen poslouchal).
     final inLibrary = ref.watch(libraryIdsProvider).valueOrNull?.contains(recording.id) ?? false;
+    final isDisliked = ref.watch(dislikedProvider.select((d) => d.contains(recording.id)));
 
     void run(VoidCallback action) {
       Navigator.of(context).pop();
@@ -173,6 +175,8 @@ class _TrackActionsSheet extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.xs),
               const Divider(height: 1),
+              // Pořadí skupin jako v každém menu (audit UI): fronta · uložit ·
+              // objevovat · Sdílet… · odebrat (červeně) · admin.
               _Item(
                 icon: Symbols.play_arrow_rounded,
                 label: 'Přehrát',
@@ -183,17 +187,18 @@ class _TrackActionsSheet extends ConsumerWidget {
                 label: 'Přehrát jako další',
                 onTap: () => run(() {
                   controller.playNext(info);
-                  toast('Zařazeno jako další');
+                  toast('Jako další: ${recording.title}');
                 }),
               ),
               _Item(
-                icon: Symbols.queue_music_rounded,
+                icon: Symbols.add_to_queue_rounded,
                 label: 'Přidat do fronty',
                 onTap: () => run(() {
                   controller.addToQueue(info);
-                  toast('Přidáno do fronty');
+                  toast('Do fronty: ${recording.title}');
                 }),
               ),
+              const _Divider(),
               _Item(
                 icon: isLiked ? Symbols.heart_minus_rounded : Symbols.favorite_rounded,
                 label: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
@@ -201,7 +206,7 @@ class _TrackActionsSheet extends ConsumerWidget {
               ),
               _Item(
                 icon: Symbols.playlist_add_rounded,
-                label: 'Přidat do playlistu',
+                label: 'Přidat do playlistu…',
                 onTap: () => run(() => showAddToPlaylistSheet(hostContext, recordingId: recording.id)),
               ),
               _Item(
@@ -211,46 +216,18 @@ class _TrackActionsSheet extends ConsumerWidget {
                   () => ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id),
                 ),
               ),
-              _Item(
-                icon: Symbols.ios_share_rounded,
-                label: 'Sdílet',
-                onTap: () {
-                  final link = shareLinkAsync.valueOrNull;
-                  run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
-                },
-              ),
-              if (shareLinkAsync.valueOrNull?.youtubeUrl case final yt?)
+              if (!inLibrary)
                 _Item(
-                  icon: Symbols.smart_display_rounded,
-                  label: 'Zdrojové video na YouTube',
-                  onTap: () => run(() => openExternal(yt)),
-                ),
-              _Item(
-                icon: Symbols.send_rounded,
-                label: 'Poslat v Opentify',
-                onTap: () => run(() => shareInOpentifyWithToast(
-                      messenger,
-                      path: '/track/${recording.id}',
-                      title: recording.title,
-                      artistName: recording.artistName ?? artistNameFallback,
-                    )),
-              ),
-              _Item(
-                icon: Symbols.radio_rounded,
-                label: 'Přejít na rádio',
-                onTap: () => run(() => goToRadio(hostContext, RadioSeed.track, recording.id)),
-              ),
-              if (recording.releaseId != null)
-                _Item(
-                  icon: Symbols.album_rounded,
-                  label: 'Přejít na album',
-                  onTap: () => run(() => hostContext.push('/releases/${recording.releaseId}?track=${recording.id}')),
-                ),
-              if (recording.artistId != null)
-                _Item(
-                  icon: Symbols.person_rounded,
-                  label: 'Přejít na interpreta',
-                  onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
+                  icon: Symbols.library_add_rounded,
+                  label: 'Přidat do knihovny',
+                  onTap: () => run(() async {
+                    try {
+                      await addTrackToLibrary(ref, recording.id);
+                      toast('Přidáno do knihovny');
+                    } catch (_) {
+                      toast('Nepodařilo se přidat do knihovny');
+                    }
+                  }),
                 ),
               _Item(
                 icon: isOffline
@@ -270,19 +247,58 @@ class _TrackActionsSheet extends ConsumerWidget {
                   }
                 }),
               ),
-              if (!inLibrary)
+              const _Divider(),
+              _Item(
+                icon: Symbols.radio_rounded,
+                label: 'Přejít na rádio',
+                onTap: () => run(() => goToRadio(hostContext, RadioSeed.track, recording.id)),
+              ),
+              if (recording.releaseId != null)
                 _Item(
-                  icon: Symbols.library_add_rounded,
-                  label: 'Přidat do knihovny',
-                  onTap: () => run(() async {
-                    try {
-                      await addTrackToLibrary(ref, recording.id);
-                      toast('Přidáno do knihovny');
-                    } catch (_) {
-                      toast('Nepodařilo se přidat do knihovny');
-                    }
-                  }),
+                  icon: Symbols.album_rounded,
+                  label: 'Přejít na album',
+                  onTap: () => run(() => hostContext.push('/releases/${recording.releaseId}?track=${recording.id}')),
                 ),
+              if (recording.artistId != null)
+                _Item(
+                  icon: Symbols.person_rounded,
+                  label: 'Přejít na interpreta',
+                  onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
+                ),
+              if (shareLinkAsync.valueOrNull?.youtubeUrl case final yt?)
+                _Item(
+                  icon: Symbols.smart_display_rounded,
+                  label: 'Zdrojové video na YouTube',
+                  onTap: () => run(() => openExternal(yt)),
+                ),
+              const _Divider(),
+              _Item(
+                icon: Symbols.ios_share_rounded,
+                label: 'Sdílet…',
+                onTap: () => run(() => showShareSheet(
+                      hostContext,
+                      title: recording.title,
+                      artistName: recording.artistName ?? artistNameFallback,
+                      opentifyPath: '/track/${recording.id}',
+                      external: shareTarget,
+                    )),
+              ),
+              const _Divider(),
+              for (final action in extraActions)
+                _Item(
+                  icon: action.icon,
+                  label: action.label,
+                  destructive: action.destructive,
+                  onTap: () => run(action.onSelected),
+                ),
+              _Item(
+                icon: isDisliked ? Symbols.heart_check_rounded : Symbols.heart_broken_rounded,
+                label: isDisliked ? 'Zrušit „Nelíbí se mi“' : 'Nelíbí se mi',
+                onTap: () => run(() async {
+                  final ok = await ref.read(dislikedProvider.notifier).toggle(recording.id);
+                  if (ok) toast(isDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi');
+                }),
+              ),
               if (inLibrary)
                 _Item(
                   icon: Symbols.delete_rounded,
@@ -296,13 +312,6 @@ class _TrackActionsSheet extends ConsumerWidget {
                   icon: Symbols.graphic_eq_rounded,
                   label: 'Něco nesedí? Zkontrolovat Shazamem',
                   onTap: () => run(() => checkTrackWithShazam(hostContext, ref, recording)),
-                ),
-              for (final action in extraActions)
-                _Item(
-                  icon: action.icon,
-                  label: action.label,
-                  destructive: action.destructive,
-                  onTap: () => run(action.onSelected),
                 ),
             ],
           ),
@@ -331,4 +340,15 @@ class _Item extends StatelessWidget {
       onTap: onTap,
     );
   }
+}
+
+/// Oddělovač skupin v menu (fronta · uložit · objevovat · sdílet · odebrat).
+class _Divider extends StatelessWidget {
+  const _Divider();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.xxs, horizontal: AppSpacing.md),
+        child: Divider(height: 1),
+      );
 }

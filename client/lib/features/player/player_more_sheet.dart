@@ -9,12 +9,11 @@ import '../../core/share_link.dart';
 import '../../data/listen_later_repository.dart' show LaterKind;
 import '../../state/listen_later_controller.dart';
 import '../../state/audio_player_controller.dart';
-import '../../widgets/track_actions.dart' show shareWithToast;
 import '../../theme/design_tokens.dart';
 import '../../widgets/add_to_playlist_sheet.dart';
 import '../../widgets/now_playing_sheet.dart';
-import 'queue_panel.dart';
 import '../share/share_card_screen.dart';
+import '../../widgets/share_sheet.dart';
 import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProvider;
@@ -114,19 +113,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                   ? LyricsTimingRow(recordingId: playback.nowPlaying!.recordingId)
                                   : const SizedBox.shrink(),
                             ),
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(Symbols.queue_music_rounded),
-                            title: const Text('Fronta'),
-                            subtitle: playback.queueSourceLabel != null
-                                ? Text('Přehráváno z ${playback.queueSourceLabel}')
-                                : null,
-                            trailing: const Icon(Symbols.chevron_right_rounded),
-                            onTap: () {
-                              Navigator.of(context).pop();
-                              showQueuePanel(context, accentColor: accent);
-                            },
-                          ),
+                          // Fronta je dole v přehrávači jako tlačítko -- tady už ne (audit UI).
+                          if (playback.nowPlaying != null) const _SectionLabel('Skladba'),
                           if (playback.nowPlaying != null)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
@@ -157,11 +145,11 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                 closed.complete(sheet.slideDown());
                               },
                             ),
-                          if (playback.nowPlaying != null) _shareTile(context, playback),
-                          if (playback.nowPlaying != null) _sendInOpentifyTile(context, playback),
-                          if (playback.nowPlaying != null) _shareImageTile(context, playback),
-                          if (playback.nowPlaying != null) _abRepeatTile(context, playback),
+                          // Jediné „Sdílet…" (Poslat v Opentify / odkaz / jako obrázek).
+                          if (playback.nowPlaying != null) _shareAllTile(context, playback),
                           const Divider(),
+                          const _SectionLabel('Přehrávání'),
+                          if (playback.nowPlaying != null) _abRepeatTile(context, playback),
                           const Row(
                             children: [
                               Icon(Symbols.speed_rounded),
@@ -296,64 +284,27 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     );
   }
 
-  /// Univerzální odkaz na právě hrající skladbu (song.link) -- načtený hned
-  /// při otevření menu, ať sdílení na iPhonu proběhne přímo po klepnutí.
-  Widget _shareTile(BuildContext context, AudioPlayerState playback) {
-    final ShareTarget target = (kind: 'recordings', id: playback.nowPlaying!.recordingId);
-    final link = ref.watch(shareLinkProvider(target));
-    final messenger = ScaffoldMessenger.maybeOf(context);
+  Widget _shareAllTile(BuildContext context, AudioPlayerState playback) {
+    final np = playback.nowPlaying!;
+    final ShareTarget target = (kind: 'recordings', id: np.recordingId);
+    ref.watch(shareLinkProvider(target)); // načíst dopředu (Safari)
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Symbols.ios_share_rounded),
-      title: const Text('Sdílet skladbu'),
-      subtitle: const Text('Odkaz, který kamarád otevře v jakékoliv hudební appce'),
-      onTap: () {
-        final ready = link.valueOrNull;
-        Navigator.of(context).pop();
-        shareWithToast(ready, messenger, () => ref.read(shareLinkProvider(target).future));
-      },
-    );
-  }
-
-  /// Karta jako obrázek (obal / právě hrající řádky textu) pro stories.
-  Widget _shareImageTile(BuildContext context, AudioPlayerState playback) {
-    final np = playback.nowPlaying!;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Symbols.image_rounded),
-      title: const Text('Sdílet jako obrázek'),
-      subtitle: const Text('Obal nebo právě hrající text – třeba do stories'),
+      title: const Text('Sdílet…'),
+      subtitle: const Text('Poslat v Opentify, odkaz pro jiné aplikace, jako obrázek'),
       onTap: () {
         final nav = Navigator.of(context);
-        final accent = playback.accentColor ?? Theme.of(context).colorScheme.primary;
+        final host = nav.context;
         nav.pop();
-        nav.push(MaterialPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (_) => ShareCardScreen(
-            recordingId: np.recordingId,
-            title: np.title,
-            artist: np.artistName,
-            artworkUrl: np.artworkUrl,
-            accent: accent,
-            position: playback.position,
-          ),
-        ));
-      },
-    );
-  }
-
-  /// Odkaz přímo do Opentify (pro lidi se sdíleným Opentify).
-  Widget _sendInOpentifyTile(BuildContext context, AudioPlayerState playback) {
-    final np = playback.nowPlaying!;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Symbols.send_rounded),
-      title: const Text('Poslat v Opentify'),
-      subtitle: const Text('Odkaz pro ty, kdo mají Opentify – otevře se přímo tady'),
-      onTap: () {
-        Navigator.of(context).pop();
-        shareInOpentifyWithToast(messenger, path: '/track/${np.recordingId}', title: np.title, artistName: np.artistName);
+        showShareSheet(
+          host,
+          title: np.title,
+          artistName: np.artistName,
+          opentifyPath: '/track/${np.recordingId}',
+          external: target,
+          asImage: () => openShareCard(host),
+        );
       },
     );
   }
@@ -416,5 +367,20 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     final minutes = remaining.inMinutes;
     final seconds = remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+}
+
+/// Nadpis sekce v menu přehrávače (Skladba / Přehrávání).
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs, bottom: AppSpacing.xxs),
+      child: Text(text, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+    );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../models/recording_model.dart';
@@ -11,6 +12,8 @@ import '../theme/shapes.dart';
 import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'radio_station.dart';
+import 'share_sheet.dart';
+import 'remove_from_library.dart' show confirmRemoveFromLibrary;
 import 'track_actions.dart' show nowPlayingInfoFor;
 import '../core/cz_plural.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
@@ -38,6 +41,12 @@ Future<void> showCollectionActions(
   Widget? artwork,
   String? fromArtistId,
   VoidCallback? onNotArtist,
+  String? artistId,
+  String? artistName,
+  bool? inLibrary,
+  bool isRadio = false,
+  VoidCallback? onSaveCopy,
+  VoidCallback? onDelete,
 }) {
   HapticFeedback.selectionClick();
   return showGlassSheet<void>(
@@ -52,6 +61,12 @@ Future<void> showCollectionActions(
       artwork: artwork,
       fromArtistId: fromArtistId,
       onNotArtist: onNotArtist,
+      artistId: artistId,
+      artistName: artistName,
+      inLibrary: inLibrary,
+      isRadio: isRadio,
+      onSaveCopy: onSaveCopy,
+      onDelete: onDelete,
     ),
   );
 }
@@ -67,6 +82,12 @@ class _CollectionActionsSheet extends ConsumerWidget {
     this.artwork,
     this.fromArtistId,
     this.onNotArtist,
+    this.artistId,
+    this.artistName,
+    this.inLibrary,
+    this.isRadio = false,
+    this.onSaveCopy,
+    this.onDelete,
   });
 
   final BuildContext hostContext;
@@ -81,6 +102,22 @@ class _CollectionActionsSheet extends ConsumerWidget {
   /// album stejnojmenné cizí kapely (Deezer je občas slučuje).
   final String? fromArtistId;
   final VoidCallback? onNotArtist;
+
+  /// Album: interpret (Přejít na interpreta, název do sdílení).
+  final String? artistId;
+  final String? artistName;
+
+  /// Album: je celé v knihovně? `null` = nevíme (nabídne se Přidat).
+  final bool? inLibrary;
+
+  /// Rádio-playlist: "Přejít na rádio" nenabízet (už je rádio).
+  final bool isRadio;
+
+  /// Cizí playlist (mix, žebříček, sdílený): uložit kopii do mých.
+  final VoidCallback? onSaveCopy;
+
+  /// Vlastní playlist: smazat (dole, červeně).
+  final VoidCallback? onDelete;
 
   // Přes kontejner appky -- načítá se až po zavření sheetu, jeho `ref` už
   // v tu chvíli neplatí.
@@ -186,6 +223,24 @@ class _CollectionActionsSheet extends ConsumerWidget {
               }),
             ),
             _Row(
+              icon: Symbols.shuffle_rounded,
+              label: 'Zamíchat a přidat do fronty',
+              onTap: () => run((infos) async {
+                await controller.addAllToQueue([...infos]..shuffle(), sourceLabel: title);
+                toast('Do fronty zamíchaně: ${songs(infos.length)}');
+              }),
+            ),
+            const _MenuDivider(),
+            if (onSaveCopy != null)
+              _Row(
+                icon: Symbols.library_add_rounded,
+                label: 'Uložit do mých playlistů',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onSaveCopy!();
+                },
+              ),
+            _Row(
               icon: Symbols.download_for_offline_rounded,
               label: 'Stáhnout do zařízení',
               onTap: () => run((infos) async {
@@ -193,7 +248,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
                 toast('Stahuje se do zařízení: ${songs(infos.length)}');
               }),
             ),
-            if (kind == CollectionKind.album)
+            if (kind == CollectionKind.album && inLibrary != true)
               _Row(
                 icon: Symbols.library_add_rounded,
                 label: 'Přidat do knihovny',
@@ -223,20 +278,71 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   },
                 );
               }),
-            _Row(
-              icon: Symbols.radio_rounded,
-              label: 'Přejít na rádio',
-              onTap: () async {
-                Navigator.of(context).pop();
-                // Oblíbené mají v "Pokračovat" jen id "liked" -- skutečné
-                // id playlistu až z knihovny.
-                final seedId = kind == CollectionKind.liked
-                    ? (await container.read(libraryRepositoryProvider).likedSongs()).id
-                    : id;
-                if (!hostContext.mounted) return;
-                goToRadio(hostContext, kind == CollectionKind.album ? RadioSeed.album : RadioSeed.playlist, seedId);
-              },
-            ),
+            const _MenuDivider(),
+            if (!isRadio)
+              _Row(
+                icon: Symbols.radio_rounded,
+                label: 'Přejít na rádio',
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  // Oblíbené mají v "Pokračovat" jen id "liked" -- skutečné
+                  // id playlistu až z knihovny.
+                  final seedId = kind == CollectionKind.liked
+                      ? (await container.read(libraryRepositoryProvider).likedSongs()).id
+                      : id;
+                  if (!hostContext.mounted) return;
+                  goToRadio(hostContext, kind == CollectionKind.album ? RadioSeed.album : RadioSeed.playlist, seedId);
+                },
+              ),
+            if (kind == CollectionKind.album && artistId != null)
+              _Row(
+                icon: Symbols.person_rounded,
+                label: 'Přejít na interpreta',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  hostContext.push('/artists/$artistId');
+                },
+              ),
+            if (kind != CollectionKind.liked) ...[
+              const _MenuDivider(),
+              _Row(
+                icon: Symbols.ios_share_rounded,
+                label: 'Sdílet…',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  showShareSheet(
+                    hostContext,
+                    title: title,
+                    artistName: kind == CollectionKind.album ? (artistName ?? subtitle) : null,
+                    opentifyPath: kind == CollectionKind.album ? '/releases/$id' : '/playlists/$id',
+                    external: kind == CollectionKind.album ? (kind: 'releases', id: id) : null,
+                  );
+                },
+              ),
+            ],
+            if (kind == CollectionKind.album && inLibrary == true)
+              _Row(
+                icon: Symbols.delete_rounded,
+                label: 'Odebrat z knihovny',
+                destructive: true,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _load(container).then((_) async {
+                    final tracks = await container.read(catalogRepositoryProvider).getReleaseTracks(id);
+                    if (hostContext.mounted) await confirmRemoveFromLibrary(hostContext, tracks);
+                  });
+                },
+              ),
+            if (onDelete != null)
+              _Row(
+                icon: Symbols.delete_rounded,
+                label: 'Smazat playlist',
+                destructive: true,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onDelete!();
+                },
+              ),
             if (kind == CollectionKind.album &&
                 fromArtistId != null &&
                 ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
@@ -271,22 +377,35 @@ class _CollectionActionsSheet extends ConsumerWidget {
 }
 
 class _Row extends StatelessWidget {
-  const _Row({required this.icon, required this.label, required this.onTap});
+  const _Row({required this.icon, required this.label, required this.onTap, this.destructive = false});
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool destructive;
 
   @override
   Widget build(BuildContext context) {
+    final color = destructive ? Theme.of(context).colorScheme.error : null;
     return ListTile(
       dense: true,
       shape: AppShapes.md,
-      leading: Icon(icon),
-      title: Text(label),
+      leading: Icon(icon, color: color),
+      title: Text(label, style: TextStyle(color: color)),
       onTap: onTap,
     );
   }
+}
+
+/// Oddělovač skupin (fronta · uložit · objevovat · sdílet · odebrat).
+class _MenuDivider extends StatelessWidget {
+  const _MenuDivider();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.xxs, horizontal: AppSpacing.md),
+        child: Divider(height: 1),
+      );
 }
 
 /// Dlouhý stisk na "Přehrát" nad seznamem skladeb: skladby už jsou načtené,

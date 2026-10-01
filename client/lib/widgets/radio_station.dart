@@ -22,6 +22,10 @@ Future<void> goToRadio(
   Future<bool>? openAfter,
   bool replaceTop = false,
 }) async {
+  // Pojistka: rádio se ladí pár sekund -- další klepnutí ho nesmí spustit
+  // znovu (audit UI: opakované klepnutí trefovalo i sousední akce).
+  if (_tuning) return;
+  _tuning = true;
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
   // Kontejner appky, ne `ref` volajícího -- volá se i ze zavíraného menu,
@@ -51,8 +55,12 @@ Future<void> goToRadio(
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(_message(e))));
+  } finally {
+    _tuning = false;
   }
 }
+
+bool _tuning = false;
 
 String _message(Object error) {
   if (error is ApiException) {

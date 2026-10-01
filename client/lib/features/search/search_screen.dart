@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -530,6 +531,7 @@ class _ArtistCard extends StatelessWidget {
         imageUrl: item.imageUrl,
         artworkKey: (releaseId: null, artistId: item.id),
         onTap: () => context.push('/artists/${item.id}'),
+        onLongPress: () => showArtistActions(context, id: item.id, name: item.title, imageUrl: item.imageUrl),
       );
 }
 
