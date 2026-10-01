@@ -65,7 +65,7 @@ async def stream(session_id: str, request: Request):
 
 
 @radio_router.get("/{session_id}/timeline")
-def timeline(session_id: str, playedMs: float | None = None):
+def timeline(session_id: str, playedMs: float | None = None, _current=Depends(get_current_user)):
     s = radio.get_session(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail="relace neexistuje")
@@ -119,7 +119,7 @@ def hls_segment(session_id: str, name: str):
 
 
 @radio_router.put("/{session_id}/queue")
-def update_queue(session_id: str, body: QueueBody):
+def update_queue(session_id: str, body: QueueBody, _current=Depends(get_current_user)):
     s = radio.get_session(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail="relace neexistuje")

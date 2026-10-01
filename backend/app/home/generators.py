@@ -26,6 +26,7 @@ import httpx
 from sqlmodel import Session, select
 
 from app.library.dislikes import without_disliked
+from app.apple_http import apple_http
 from app.catalog.deezer import get_deezer_client
 from app.catalog.deezer_ingest import ingest_track_with_context
 from app.catalog.upsert import upsert_artist, upsert_release
@@ -301,7 +302,10 @@ async def build_apple_chart(country: str, title: str, description: str) -> int:
     """Apple Music RSS nemá ISRC -- každou položku napáruje Deezer hledání
     "interpret + název" (pomalu, s pauzou, ať nezdržuje uživatelské hledání)."""
     url = f"https://rss.marketingtools.apple.com/api/v2/{country}/music/most-played/50/songs.json"
-    resp = await _http.get(url)
+    client = apple_http()
+    if client is None:
+        raise RuntimeError("apple rss: chybí VPN proxy, Apple se z domácí IP nevolá")
+    resp = await client.get(url)
     resp.raise_for_status()
     entries = (resp.json().get("feed") or {}).get("results") or []
     if not entries:
@@ -409,8 +413,11 @@ async def build_top_albums() -> int:
 
     dz = get_deezer_client()
     matched: list[dict[str, Any]] = []
+    client = apple_http()
+    if client is None:
+        raise RuntimeError("apple rss: chybí VPN proxy, Apple se z domácí IP nevolá")
     for country in ("us", "cz"):
-        resp = await _http.get(f"https://rss.marketingtools.apple.com/api/v2/{country}/music/most-played/25/albums.json")
+        resp = await client.get(f"https://rss.marketingtools.apple.com/api/v2/{country}/music/most-played/25/albums.json")
         resp.raise_for_status()
         for entry in (resp.json().get("feed") or {}).get("results") or []:
             artist_name, title = entry.get("artistName", ""), entry.get("name", "")

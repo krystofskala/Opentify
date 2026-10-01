@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, HTTPException, Query
+from app.auth import get_current_user
+from fastapi import Depends, APIRouter, HTTPException, Query
 
 from app import browse
 
@@ -35,7 +36,7 @@ async def category(category_id: str):
 
 
 @browse_router.get("/{category_id}/mix")
-async def category_mix(category_id: str):
+async def category_mix(category_id: str, current: tuple[str, str] = Depends(get_current_user)):
     """"Tvůj mix" kategorie podle poslechů -- `playlist: null`, když na mix
     není dost tvých skladeb v téhle náladě/žánru."""
     from app.home import category_mixes as cm
@@ -43,7 +44,14 @@ async def category_mix(category_id: str):
     c = browse.get_category(category_id)
     if c is None:
         raise HTTPException(status_code=404, detail="kategorie neexistuje")
-    playlist_id = await cm.build_category_mix(c)
+    # Mix TOHO profilu (dřív vždy adminův -- výchozí home_user).
+    from app.home import generators as g
+
+    token = g.set_home_user(current[0])
+    try:
+        playlist_id = await cm.build_category_mix(c)
+    finally:
+        g.reset_home_user(token)
     return {"playlist": cm.playlist_card(playlist_id) if playlist_id else None}
 
 

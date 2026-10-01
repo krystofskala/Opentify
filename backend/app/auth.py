@@ -36,7 +36,7 @@ ACT_AS_COOKIE = "opentify_act_as"
 
 
 def auth_mode() -> str:
-    return os.environ.get("AUTH_MODE", "open").lower()
+    return os.environ.get("AUTH_MODE", "login").lower()
 
 
 def hash_secret(value: str) -> str:

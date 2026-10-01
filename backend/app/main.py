@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 
 import logging
 
 import httpx
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,6 +24,7 @@ from app.listens import lb_submit_loop
 from app.loudness import backfill_loop
 from app.realtime import redis_listener, websocket_endpoint
 from app.routes.blends import blends_router
+from app.auth import get_current_user
 from app.recommendations.listenbrainz import close_listenbrainz_client, close_listenbrainz_public_client
 from app.routes.artwork import artwork_router
 from app.routes.auth import auth_router
@@ -63,14 +65,23 @@ async def _upstream_timeout(_request: Request, exc: httpx.TimeoutException) -> J
 async def _upstream_down(_request: Request, exc: httpx.TransportError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": "Zdroj dat je nedostupný, zkus to za chvíli."})
 
-# Flutter web klient (client/) běží při vývoji na jiném originu než backend
-# (`flutter run -d chrome` má vlastní dev server port), takže bez CORS by
-# prohlížeč každý REST request zablokoval. Celý systém žije jen za
-# Tailscale/VPN (docs/ARCHITECTURE.md) -- povolit origin natvrdo na
-# "*" tady neotevírá nic navíc, co by VPN perimetr nekryl už teď; přesto
-# jde přepsat na konkrétní origin(y) přes env, jakmile bude jasné, odkud se
-# web klient reálně servíruje.
+# Povolené originy webu: docker-compose je nastaví na oba Tailscale uzly
+# a lokální nginx; "*" zůstává jen jako výchozí pro `flutter run -d chrome`.
 _cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
+
+
+class _MaskTokenInLog(logging.Filter):
+    """Klíč zařízení v `?t=` (přehrávač na webu/iOS) nesmí skončit v logu."""
+
+    _re = re.compile(r"([?&]t=)[^&\s]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._re.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_MaskTokenInLog())
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),
@@ -80,22 +91,22 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(tracks_router, prefix="/api/v1")
-app.include_router(jobs_router, prefix="/api/v1")
+app.include_router(tracks_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+app.include_router(jobs_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(recommendations_router, prefix="/api/v1")
 app.include_router(library_router, prefix="/api/v1")
-app.include_router(lyrics_router, prefix="/api/v1")
+app.include_router(lyrics_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(playlists_router, prefix="/api/v1")
 app.include_router(artwork_router, prefix="/api/v1")
 app.include_router(home_router, prefix="/api/v1")
 app.include_router(listens_router, prefix="/api/v1")
-app.include_router(share_router, prefix="/api/v1")
+app.include_router(share_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(radio_router, prefix="/api/v1")
-app.include_router(browse_router, prefix="/api/v1")
+app.include_router(browse_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(wrapped_router, prefix="/api/v1")
 app.include_router(listen_later_router, prefix="/api/v1")
-app.include_router(client_log_router, prefix="/api/v1")
+app.include_router(client_log_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(recognize_router, prefix="/api/v1")
 app.include_router(blends_router, prefix="/api/v1")
 

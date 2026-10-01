@@ -23,6 +23,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
+from app.apple_http import apple_http
 from app.catalog.identity import is_own_id
 from app.catalog.artwork import _normalize, clean_album_title, primary_artist_name
 from app.catalog.deezer import get_deezer_client
@@ -77,8 +78,11 @@ async def _spotify_track_id(artist: str, release: str | None, title: str) -> str
 
 
 async def _itunes(entity: str, artist: str, title: str) -> dict[str, Any] | None:
+    client = apple_http()
+    if client is None:  # bez VPN proxy Apple nevoláme (domácí IP)
+        return None
     try:
-        resp = await _http.get(
+        resp = await client.get(
             "https://itunes.apple.com/search",
             params={"term": f"{artist} {title}", "entity": entity, "limit": 10, "country": "CZ"},
         )

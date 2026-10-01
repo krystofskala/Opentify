@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from app.redis_bus import get_redis
 from app.auth import (
     ACT_AS_COOKIE,
     ADMIN_ID,
@@ -93,6 +94,9 @@ SIGNUP = "*signup*"
 @auth_router.post("/join")
 def join(body: JoinIn, request: Request, response: Response):
     """Pozvánka -> klíč tohoto zařízení (jednou na zařízení)."""
+    if auth_mode() == "login":
+        # S přihlašováním jde pozvánka jen přes /claim (jméno + heslo).
+        raise HTTPException(status_code=403, detail="Použij pozvánku v přihlášení.")
     with Session(engine) as session:
         invite = session.exec(select(InviteCode).where(InviteCode.code_hash == hash_secret(body.code.strip()))).first()
         if invite is not None and invite.user_id == SIGNUP:
@@ -142,7 +146,7 @@ def signup_link(_admin=Depends(require_admin)):
             session.delete(old)
         session.commit()
         code = secrets.token_urlsafe(9)
-        session.add(InviteCode(code_hash=hash_secret(code), user_id=SIGNUP, expires_at=utcnow() + timedelta(days=3650)))
+        session.add(InviteCode(code_hash=hash_secret(code), user_id=SIGNUP, expires_at=utcnow() + timedelta(days=7)))
         session.commit()
     return {"invite": code}
 
@@ -350,29 +354,55 @@ class LoginIn(BaseModel):
 
 
 _MIN_PASSWORD = 6
+_LOGIN_FAILS = (8, 30)  # neúspěšných pokusů na jméno / na adresu ...
+# (adresa je sdílená, když proxy nepošle X-Forwarded-For -- proto volněji)
+_LOGIN_WINDOW = 15 * 60  # ... za 15 minut, pak stop do konce okna
+
+
+def _client_ip(request: Request) -> str:
+    return request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else "?"
+    )
+
+
+def _fail_keys(request: Request, username: str) -> list[str]:
+    return [f"login-fail:user:{username.lower()}", f"login-fail:ip:{_client_ip(request)}"]
+
+
+async def _login_throttle(request: Request, username: str) -> None:
+    try:
+        r = get_redis()
+        counts = [int(await r.get(k) or 0) for k in _fail_keys(request, username)]
+    except Exception:  # noqa: BLE001 -- bez Redisu jen pomalé odmítnutí níž
+        return
+    if any(c >= limit for c, limit in zip(counts, _LOGIN_FAILS)):
+        raise HTTPException(status_code=429, detail="Moc pokusů. Zkus to za čtvrt hodiny.")
+
+
+async def _login_failed(request: Request, username: str) -> None:
+    try:
+        r = get_redis()
+        for k in _fail_keys(request, username):
+            if await r.incr(k) == 1:
+                await r.expire(k, _LOGIN_WINDOW)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @auth_router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response):
     """Jméno + heslo -> klíč zařízení (appka si ho pamatuje, web v cookie).
-    Profil bez hesla (nový nebo vynulovaný adminem) si ho tady vytvoří:
-    bez `new_password` vrátí `needsPassword`, klient se zeptá na nové."""
+    Profil bez hesla se tu přihlásit nedá -- heslo si nastaví jen přes
+    pozvánku (`/claim`), jinak by si ho mohl zvolit kdokoli, kdo zná jméno."""
     username = body.username.strip()
+    await _login_throttle(request, username)
     with Session(engine) as session:
         rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
         user = next((u for u in rows if u.username.lower() == username.lower()), None)
-        if user is None or (user.password_hash is not None and not verify_password(body.password, user.password_hash)):
+        if user is None or user.password_hash is None or not verify_password(body.password, user.password_hash):
+            await _login_failed(request, username)
             await asyncio.sleep(1.0)  # zpomalit hádání
             raise HTTPException(status_code=401, detail="Špatné jméno nebo heslo.")
-        if user.password_hash is None:
-            if body.new_password is None:
-                return {"needsPassword": True, "name": user.name}
-            if len(body.new_password) < _MIN_PASSWORD:
-                raise HTTPException(status_code=400, detail=f"Heslo aspoň {_MIN_PASSWORD} znaků.")
-            user.password_hash = hash_password(body.new_password)
-            session.add(user)
-            session.commit()
-            session.refresh(user)
         token = _issue_token(session, user.id, _token_label(request, body.device))
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
@@ -466,8 +496,8 @@ def update_user(user_id: str, body: UserPatchIn, _admin=Depends(require_admin)):
 
 @auth_router.post("/users/{user_id}/reset-password")
 def reset_password(user_id: str, _admin=Depends(require_admin)):
-    """Zapomenuté heslo: vynulovat (při dalším přihlášení si vytvoří nové)
-    a odhlásit všechna jeho zařízení."""
+    """Zapomenuté heslo: zrušit ho, odhlásit všechna zařízení a vydat novou
+    pozvánku -- přes ni si člověk nastaví nové heslo (jméno mu zůstane)."""
     with Session(engine) as session:
         user = session.get(AppUser, user_id)
         if user is None:
@@ -477,4 +507,5 @@ def reset_password(user_id: str, _admin=Depends(require_admin)):
         for row in session.exec(select(AuthToken).where(AuthToken.user_id == user_id)).all():
             session.delete(row)
         session.commit()
-    return {"userId": user_id, "reset": True}
+        code = _new_invite(session, user_id)
+    return {"userId": user_id, "reset": True, "invite": code}

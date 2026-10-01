@@ -200,7 +200,7 @@ class ProfilesSection extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Vynulovat heslo – ${p.name}?'),
-        content: const Text('Odhlásí se na všech zařízeních a při dalším přihlášení si vytvoří nové heslo.'),
+        content: const Text('Odhlásí se na všech zařízeních. Dostaneš novou pozvánku, přes kterou si nastaví nové heslo.'),
         actions: [
           GlassButton(
             label: 'Zrušit',
@@ -219,9 +219,10 @@ class ProfilesSection extends ConsumerWidget {
     );
     if (ok != true || !context.mounted) return;
     try {
-      await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/reset-password');
+      final json = await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/reset-password');
       ref.invalidate(profilesProvider);
-      if (context.mounted && p.username != null) await _showLoginInfo(context, p.name, p.username!);
+      // Nové heslo si nastaví jen přes pozvánku (ne kdokoli, kdo zná jméno).
+      if (context.mounted) await _showInvite(context, p.name, json['invite'] as String);
     } catch (e) {
       if (context.mounted) _snack(context, e);
     }

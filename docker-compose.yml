@@ -29,6 +29,8 @@ services:
       # Open Shazam (app/recognize.py) -- dotazy na Shazam VÝHRADNĚ přes
       # Mullvad (gluetun proxy, kill switch). Prázdná hodnota rozpoznávání vypne.
       SHAZAM_PROXY: ${SHAZAM_PROXY:-http://gluetun:8888}
+      # Web smí API volat jen z vlastních adres (oba Tailscale uzly + lokálně).
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://desktop-2lissjt.tail343940.ts.net,https://opentify.tail343940.ts.net,http://127.0.0.1:5000,http://localhost:5000}
       # Výchozí `http://listenbrainz:8080` čeká na vlastní self-hostnutou
       # instanci (viz zakomentovaná `listenbrainz:` služba níž) -- pro reálný
       # účet na veřejném listenbrainz.org přepiš v `.env` na
