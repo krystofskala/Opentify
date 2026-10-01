@@ -21,14 +21,16 @@ final recordingArtworkProvider = FutureProvider.autoDispose.family<String?, Artw
   final repo = ref.watch(catalogRepositoryProvider);
 
   if (key.releaseId != null) {
+    // Skladba/album S albem: jen obal alba. Fotka interpreta jako "obal"
+    // byla zavádějící -- u Deezeru je to navíc občas obal JINÉHO alba
+    // (živě: Small Talk na iPhonu, "Jeder Rappen zählt" s fotkou kapely).
     try {
       final release = await repo.getRelease(key.releaseId!);
-      if (release.coverImageUrl != null) return release.coverImageUrl;
+      return release.coverImageUrl;
     } catch (e, st) {
-      // Album se nedohledalo -- zkusíme ještě interpreta níž. Nahlásit:
-      // na iPhonu tak naskočila fotka interpreta místo obalu (živě).
       final trace = st.toString().split('\n').take(6).join('\n');
       diagReport('artwork-release', '${key.releaseId}: $e\n$trace');
+      return null;
     }
   }
 

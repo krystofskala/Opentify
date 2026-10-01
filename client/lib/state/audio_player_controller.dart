@@ -1831,16 +1831,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// a zapíše zpátky do `nowPlaying`/fronty, ať UI nemusí mít vlastní
   /// fallback logiku navíc.
   Future<void> _resolveArtworkAndAccent(NowPlayingInfo info) async {
-    var artworkUrl = info.artworkUrl ?? _artworkCache[info.recordingId];
-    if (artworkUrl == null && (info.releaseId != null || info.artistId != null)) {
-      artworkUrl = await _ref.read(
-        recordingArtworkProvider((releaseId: info.releaseId, artistId: info.artistId)).future,
-      );
+    // Skladba s albem: VŽDY obal jejího alba -- obrázek předaný z obrazovky,
+    // odkud se hrálo (třeba fotka interpreta na jeho stránce), byl zavádějící
+    // a počítaly se z něj i barvy (živě: špatný obal a barvy na iPhonu).
+    var artworkUrl = _artworkCache[info.recordingId];
+    if (artworkUrl == null && info.releaseId != null) {
+      artworkUrl = await _ref.read(recordingArtworkProvider((releaseId: info.releaseId, artistId: null)).future);
+    }
+    artworkUrl ??= info.artworkUrl;
+    if (artworkUrl == null && info.artistId != null) {
+      artworkUrl = await _ref.read(recordingArtworkProvider((releaseId: null, artistId: info.artistId)).future);
     }
     if (artworkUrl == null) return;
     _artworkCache[info.recordingId] = artworkUrl;
 
-    if (info.artworkUrl == null && state.nowPlaying?.recordingId == info.recordingId) {
+    if (info.artworkUrl != artworkUrl && state.nowPlaying?.recordingId == info.recordingId) {
       final updatedInfo = NowPlayingInfo(
         recordingId: info.recordingId,
         title: info.title,

@@ -8,8 +8,7 @@ import Foundation
 /// s otevřenou appkou) -- vlastní adresu tudy iOS neotevře. Teď:
 ///  - Ladička: `openAppWhenRun` otevře appku a cesta `/tuner` se předá
 ///    Flutteru přes kanál `opentify/nav` (OpentifyShared.pendingRoute).
-///  - Shazam: `AudioRecordingIntent` -- poslouchá na pozadí bez otevření
-///    appky a výsledek pošle jako upozornění (Runner/BackgroundShazam.swift).
+///  - Shazam: stejně, `/shazam?start=1` (rozpoznávání se spustí samo).
 @available(iOS 18.0, *)
 struct OpenOpentifyTunerIntent: AppIntent {
   static var title: LocalizedStringResource = "Ladička"
@@ -24,19 +23,20 @@ struct OpenOpentifyTunerIntent: AppIntent {
   }
 }
 
+/// Shazam: otevře appku a rozpoznávání rovnou spustí (`/shazam?start=1`).
+/// Varianta na pozadí (`AudioRecordingIntent`, Runner/BackgroundShazam.swift)
+/// nefungovala: iOS ji spouštěl v ROZŠÍŘENÍ, kde mikrofon nejde (živě, log
+/// "perform v rozšíření") -- stejný postup jako Ladička je spolehlivý.
 @available(iOS 18.0, *)
-struct OpenOpentifyShazamIntent: AudioRecordingIntent {
+struct OpenOpentifyShazamIntent: AppIntent {
   static var title: LocalizedStringResource = "Open Shazam"
-  static var description = IntentDescription("Na pozadí pozná hrající skladbu a pošle upozornění.")
+  static var description = IntentDescription("Otevře Opentify a začne poznávat skladbu.")
+  static var openAppWhenRun: Bool = true
 
+  @MainActor
   func perform() async throws -> some IntentResult {
+    OpentifyShared.requestRoute("/shazam?start=1")
     OpentifyShared.report("control-shazam", "perform v \(OpentifyShared.processName)")
-    #if OPENTIFY_APP
-    await BackgroundShazam.shared.run()
-    #else
-    // Sem by se to dostat nemělo (nahrávání běží v appce) -- jen do logu.
-    OpentifyShared.report("control-shazam", "běží v rozšíření, nahrávat tu nejde")
-    #endif
     return .result()
   }
 }
