@@ -190,6 +190,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
               ],
             ),
             ...detailContentSlivers(context, [
+              if (release.notes != null) SliverToBoxAdapter(child: HeroTeaser(text: release.notes!)),
               ...tracks.when(
                 data: (recordings) => recordings.isEmpty
                     ? [

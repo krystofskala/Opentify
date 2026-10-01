@@ -154,13 +154,43 @@ def _new_invite(session: Session, user_id: str) -> str:
     return code
 
 
+def device_label(label: str | None) -> str:
+    """Čitelný název zařízení: appka ho posílá při přihlášení (`device`),
+    u starších klíčů se odhadne z User-Agent."""
+    text = (label or "").strip()
+    if text.startswith("device:"):
+        return text[7:] or "Zařízení"
+    for needle, name in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"),
+                         ("Windows", "Windows"), ("Macintosh", "Mac"), ("Linux", "Linux")):
+        if needle in text:
+            return f"{name} – prohlížeč" if "Mozilla" in text else f"{name} – appka"
+    if "Dart/" in text or "opentify_client" in text:
+        return "Appka"
+    return "Zařízení"
+
+
 @auth_router.get("/users")
 def users(_admin=Depends(require_admin)):
     with Session(engine) as session:
         ensure_admin(session)
         rows = session.exec(select(AppUser).order_by(AppUser.created_at)).all()
-        devices = {u.id: len(session.exec(select(AuthToken).where(AuthToken.user_id == u.id)).all()) for u in rows}
-        return {"items": [{**_user_out(u), "devices": devices[u.id]} for u in rows]}
+        items = []
+        for u in rows:
+            tokens = session.exec(
+                select(AuthToken).where(AuthToken.user_id == u.id).order_by(AuthToken.created_at.desc())  # type: ignore[union-attr]
+            ).all()
+            items.append({
+                **_user_out(u),
+                "devices": len(tokens),
+                "deviceList": [
+                    {
+                        "label": device_label(t.label),
+                        "lastUsedAt": (aware(t.last_used_at) or aware(t.created_at)).isoformat(),
+                    }
+                    for t in tokens
+                ],
+            })
+        return {"items": items}
 
 
 class NewUserIn(BaseModel):
@@ -187,7 +217,8 @@ def create_user(body: NewUserIn, _admin=Depends(require_admin)):
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profil potřebuje jméno.")
-    username = _clean_username(body.username) or _clean_username(name.replace(" ", ""))
+    # Přihlašovací jméno si člověk vybere sám z pozvánky (`/auth/claim`).
+    username = _clean_username(body.username)
     with Session(engine) as session:
         if username and _username_taken(session, username):
             raise HTTPException(status_code=409, detail="Tohle přihlašovací jméno už někdo má.")
@@ -308,6 +339,8 @@ def disconnect_listenbrainz(request: Request):
 class LoginIn(BaseModel):
     username: str
     password: str = ""
+    # Název zařízení pro přehled admina ("iPhone – appka"...).
+    device: str | None = None
     # První přihlášení / po vynulování: nové heslo (klient ho chce 2×).
     new_password: str | None = None
 
@@ -336,7 +369,53 @@ async def login(body: LoginIn, request: Request, response: Response):
             session.add(user)
             session.commit()
             session.refresh(user)
-        token = _issue_token(session, user.id, request.headers.get("user-agent", "")[:120])
+        token = _issue_token(session, user.id, _token_label(request, body.device))
+        out = _user_out(user)
+    _set_cookie(response, TOKEN_COOKIE, token)
+    response.delete_cookie(ACT_AS_COOKIE, path="/")
+    return {"user": out, "acting": out, "token": token}
+
+
+def _token_label(request: Request, device: str | None) -> str:
+    device = (device or "").strip()[:60]
+    return f"device:{device}" if device else request.headers.get("user-agent", "")[:120]
+
+
+class ClaimIn(BaseModel):
+    code: str
+    username: str | None = None
+    password: str | None = None
+    device: str | None = None
+
+
+@auth_router.post("/claim")
+async def claim(body: ClaimIn, request: Request, response: Response):
+    """Pozvánka od admina -> člověk si sám vybere přihlašovací jméno a heslo.
+    Bez jména/hesla jen ověří pozvánku (`needsAccount` + jméno profilu)."""
+    with Session(engine) as session:
+        invite = session.exec(select(InviteCode).where(InviteCode.code_hash == hash_secret(body.code.strip()))).first()
+        if invite is None or invite.user_id == SIGNUP or invite.used_at is not None or aware(invite.expires_at) < utcnow():
+            raise HTTPException(status_code=400, detail="Pozvánka neplatí (už použitá nebo prošlá). Požádej o novou.")
+        user = session.get(AppUser, invite.user_id)
+        if user is None:
+            raise HTTPException(status_code=400, detail="Profil k pozvánce už neexistuje.")
+        if body.username is None or body.password is None:
+            return {"needsAccount": True, "name": user.name, "username": user.username}
+        username = _clean_username(body.username)
+        if not username:
+            raise HTTPException(status_code=400, detail="Vyber si přihlašovací jméno.")
+        if _username_taken(session, username, except_id=user.id):
+            raise HTTPException(status_code=409, detail="Tohle jméno už někdo má, zkus jiné.")
+        if len(body.password) < _MIN_PASSWORD:
+            raise HTTPException(status_code=400, detail=f"Heslo aspoň {_MIN_PASSWORD} znaků.")
+        user.username = username
+        user.password_hash = hash_password(body.password)
+        invite.used_at = utcnow()
+        session.add(user)
+        session.add(invite)
+        session.commit()
+        session.refresh(user)
+        token = _issue_token(session, user.id, _token_label(request, body.device))
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
     response.delete_cookie(ACT_AS_COOKIE, path="/")

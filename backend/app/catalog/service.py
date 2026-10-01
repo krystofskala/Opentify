@@ -196,8 +196,9 @@ class CatalogService:
     def _to_artist_out(self, artist: Artist) -> ArtistOut:
         return ArtistOut(
             id=artist.id,
-            mbid=artist.mbid,
-            deezer_id=artist.deezer_id,
+            # Zástupná `own:` id (vlastní interpret) klient nevidí.
+            mbid=_real_id(artist.mbid),
+            deezer_id=_real_id(artist.deezer_id),
             name=artist.name,
             sort_name=artist.sort_name,
             images=artist.images,
@@ -207,24 +208,25 @@ class CatalogService:
     def _to_release_out(self, release: Release) -> ReleaseOut:
         return ReleaseOut(
             id=release.id,
-            mbid=release.mbid,
+            mbid=_real_id(release.mbid),
             artist_id=release.artist_id,
             title=release.title,
             release_date=release.release_date,
             release_type=_effective_type(release),
             images=release.images,
+            notes=(release.external_refs or {}).get("notes"),
         )
 
     def _to_recording_out(self, recording: Recording) -> RecordingOut:
         return RecordingOut(
             id=recording.id,
-            mbid=recording.mbid,
+            mbid=_real_id(recording.mbid),
             release_id=recording.release_id,
             artist_id=recording.artist_id,
             artist_name=resolve_artist_name(self._session, recording.artist_id),
             title=recording.title,
             duration_ms=recording.duration_ms,
-            isrc=recording.isrc,
+            isrc=_real_id(recording.isrc),
             track_number=recording.track_number,
             availability=compute_availability(self._session, recording.id),
             preview_url=recording.external_refs.get("previewUrl"),
@@ -245,8 +247,12 @@ class CatalogService:
         fetched = await asyncio.gather(
             *(self._dz.search_typed(_DEEZER_KIND_FOR_TYPE[t], query, limit, offset) for t in types_to_query)
         )
+        # Vlastní hudba (tátův Kontrast) online není -- z DB, a navrch.
+        own = self._own_matches(query, types_to_query) if offset == 0 else []
         if all(data is None for data in fetched):
-            return await self._search_musicbrainz(query, entity_type, limit, offset)
+            found = await self._search_musicbrainz(query, entity_type, limit, offset)
+            found["results"] = own + found.get("results", [])
+            return found
 
         # Upsert až po všech `await`ech a bez dalších -- viz deezer_ingest
         # (souběžná hledání se tu nemůžou proložit a zdvojit řádky).
@@ -283,7 +289,31 @@ class CatalogService:
                             {"entityType": "recording", **self._to_recording_out(recording).model_dump(by_alias=True)}
                         )
         self._session.commit()
+        results = own + results
         return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
+
+    def _own_matches(self, query: str, types: list[str]) -> list[dict[str, Any]]:
+        """Vlastní interpreti/alba/skladby (`own:` id), jejichž název obsahuje
+        hledaný text -- bez diakritiky a velikosti písmen."""
+        wanted = norm(query)
+        if len(wanted) < 2:
+            return []
+        out: list[dict[str, Any]] = []
+        own = Artist.mbid.like("own:%")  # type: ignore[union-attr]
+        if "artist" in types:
+            for artist in self._session.exec(select(Artist).where(own)).all():
+                if wanted in norm(artist.name):
+                    out.append({"entityType": "artist", **self._to_artist_out(artist).model_dump(by_alias=True)})
+        if "release" in types:
+            for release in self._session.exec(select(Release).where(Release.mbid.like("own:%"))).all():  # type: ignore[union-attr]
+                artist = self._session.get(Artist, release.artist_id)
+                if wanted in norm(release.title) or (artist and wanted in norm(artist.name)):
+                    out.append({"entityType": "release", **self._to_release_out(release).model_dump(by_alias=True)})
+        if "recording" in types:
+            for rec in self._session.exec(select(Recording).where(Recording.mbid.like("own:%"))).all():  # type: ignore[union-attr]
+                if wanted in norm(rec.title):
+                    out.append({"entityType": "recording", **self._to_recording_out(rec).model_dump(by_alias=True)})
+        return out
 
     async def _search_musicbrainz(
         self, query: str, entity_type: str | None, limit: int, offset: int
@@ -630,6 +660,9 @@ class CatalogService:
         artist = self._get_artist_row(artist_id)
         if artist is None:
             return None
+        if (artist.mbid or "").startswith("own:"):
+            # Vlastní interpret: vlastní text (členové kapely...), nic online.
+            return ArtistBioOut(bio=(artist.external_refs or {}).get("bio"), related_artists=[])
         if artist.mbid is None:
             return ArtistBioOut(bio=None, related_artists=[])
 
@@ -1028,3 +1061,7 @@ class CatalogService:
 
         await asyncio.gather(*(enrich_one(r) for r in recordings))
         self._session.commit()
+
+
+def _real_id(value: str | None) -> str | None:
+    return None if value is None or value.startswith("own:") else value

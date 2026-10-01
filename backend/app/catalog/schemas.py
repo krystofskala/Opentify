@@ -47,6 +47,8 @@ class ReleaseOut(CamelModel):
     # Jen u `/artists/{id}/rarities`: "demo" | "live" | "bootleg" -- materiál
     # bez oficiálního vydání (viz CatalogService.get_rarities).
     rarity: str | None = None
+    # Vlastní poznámka k albu (obsazení apod.) -- `external_refs["notes"]`.
+    notes: str | None = None
 
 
 class RecordingOut(CamelModel):

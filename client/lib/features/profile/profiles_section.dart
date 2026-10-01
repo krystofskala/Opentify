@@ -68,9 +68,63 @@ class ProfilesSection extends ConsumerWidget {
     );
   }
 
-  /// Dialog se dvěma poli (jméno + přihlašovací jméno); null = zrušeno.
+  /// Pozvánka: člověk si přes ni sám vybere přihlašovací jméno a heslo.
+  Future<void> _showInvite(BuildContext context, String name, String code) async {
+    final link = '$_sharedOrigin/?join=$code';
+    final text = 'Pozvánka do Opentify: $link\n'
+        'Otevři ji se zapnutým Tailscale a vyber si jméno a heslo. '
+        'V Android appce ji vlož na přihlašovací obrazovce (Mám pozvánku od správce).';
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Pozvánka pro $name'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Pošli mu tohle. Platí 14 dní a jen jednou – jméno i heslo si vybere sám.'),
+            const SizedBox(height: AppSpacing.sm),
+            SelectableText(link, style: const TextStyle(fontWeight: FontWeight.w700)),
+          ],
+        ),
+        actions: [
+          GlassButton(
+            label: 'Zavřít',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          GlassButton(
+            label: 'Kopírovat',
+            icon: Symbols.content_copy_rounded,
+            style: GlassButtonStyle.prominent,
+            compact: true,
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _newInvite(BuildContext context, WidgetRef ref, ProfileRow p) async {
+    try {
+      final json = await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/invite');
+      if (context.mounted) await _showInvite(context, p.name, json['invite'] as String);
+    } catch (e) {
+      if (context.mounted) _snack(context, e);
+    }
+  }
+
+  /// Dialog se jménem (a u úpravy i přihlašovacím jménem); null = zrušeno.
   Future<(String, String)?> _askNames(BuildContext context,
-      {required String title, String name = '', String username = '', required String confirm}) {
+      {required String title,
+      String name = '',
+      String username = '',
+      required String confirm,
+      bool withUsername = true}) {
     final nameCtl = TextEditingController(text: name);
     final userCtl = TextEditingController(text: username);
     return showDialog<(String, String)>(
@@ -85,13 +139,14 @@ class ProfilesSection extends ConsumerWidget {
               autofocus: name.isEmpty,
               decoration: const InputDecoration(labelText: 'Jméno (třeba Táta)'),
             ),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: userCtl,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: const InputDecoration(labelText: 'Přihlašovací jméno', hintText: 'bez mezer'),
-            ),
+            if (withUsername) const SizedBox(height: AppSpacing.sm),
+            if (withUsername)
+              TextField(
+                controller: userCtl,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: const InputDecoration(labelText: 'Přihlašovací jméno', hintText: 'bez mezer'),
+              ),
           ],
         ),
         actions: [
@@ -113,26 +168,25 @@ class ProfilesSection extends ConsumerWidget {
   }
 
   Future<void> _create(BuildContext context, WidgetRef ref) async {
-    final names = await _askNames(context, title: 'Nový profil', confirm: 'Vytvořit');
+    final names = await _askNames(context, title: 'Nový profil', confirm: 'Vytvořit', withUsername: false);
     if (names == null || names.$1.isEmpty || !context.mounted) return;
     try {
-      final json = await ref
-          .read(apiClientProvider)
-          .postJson('/auth/users', body: {'name': names.$1, if (names.$2.isNotEmpty) 'username': names.$2});
+      final json = await ref.read(apiClientProvider).postJson('/auth/users', body: {'name': names.$1});
       ref.invalidate(profilesProvider);
-      final user = json['user'] as Map<String, dynamic>;
-      if (context.mounted) await _showLoginInfo(context, names.$1, user['username'] as String? ?? names.$2);
+      if (context.mounted) await _showInvite(context, names.$1, json['invite'] as String);
     } catch (e) {
       if (context.mounted) _snack(context, e);
     }
   }
 
   Future<void> _edit(BuildContext context, WidgetRef ref, ProfileRow p) async {
-    final names = await _askNames(context,
-        title: 'Upravit profil', name: p.name, username: p.username ?? '', confirm: 'Uložit');
+    final names =
+        await _askNames(context, title: 'Upravit profil', name: p.name, username: p.username ?? '', confirm: 'Uložit');
     if (names == null || !context.mounted) return;
     try {
-      await ref.read(apiClientProvider).patchJson('/auth/users/${p.id}', body: {'name': names.$1, 'username': names.$2});
+      await ref
+          .read(apiClientProvider)
+          .patchJson('/auth/users/${p.id}', body: {'name': names.$1, 'username': names.$2});
       ref.invalidate(profilesProvider);
       ref.invalidate(authProvider);
     } catch (e) {
@@ -214,12 +268,12 @@ class ProfilesSection extends ConsumerWidget {
                       Text(p.role == 'admin' ? '${p.name} (ty)' : p.name, style: theme.textTheme.bodyLarge),
                       Text(
                         [
-                          p.username == null ? 'bez přihlašovacího jména' : p.username!,
-                          p.hasPassword ? 'heslo nastavené' : 'čeká na první přihlášení',
-                          if (p.devices > 0) 'zařízení: ${p.devices}',
+                          if (p.username == null) 'čeká na založení účtu (pozvánka)' else p.username!,
+                          if (p.username != null && !p.hasPassword) 'heslo vynulované',
                         ].join(' · '),
                         style: muted,
                       ),
+                      for (final d in p.deviceList) Text('${d.label} · ${_ago(d.lastUsedAt)}', style: muted),
                     ],
                   ),
                 ),
@@ -237,11 +291,14 @@ class ProfilesSection extends ConsumerWidget {
                     'edit' => _edit(context, ref, p),
                     'reset' => _resetPassword(context, ref, p),
                     'info' => p.username == null ? null : _showLoginInfo(context, p.name, p.username!),
+                    'invite' => _newInvite(context, ref, p),
                     _ => null,
                   },
                   itemBuilder: (context) => [
                     const PopupMenuItem(value: 'edit', child: Text('Upravit jméno')),
-                    if (p.username != null && p.role != 'admin')
+                    if (p.username == null && p.role != 'admin')
+                      const PopupMenuItem(value: 'invite', child: Text('Nová pozvánka')),
+                    if (p.username != null && !p.hasPassword && p.role != 'admin')
                       const PopupMenuItem(value: 'info', child: Text('Údaje k přihlášení')),
                     if (p.hasPassword && p.role != 'admin')
                       const PopupMenuItem(value: 'reset', child: Text('Vynulovat heslo')),
@@ -303,4 +360,16 @@ class ActingAsBanner extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// "před 5 min" / "včera" -- poslední použití zařízení.
+String _ago(String iso) {
+  final t = DateTime.tryParse(iso);
+  if (t == null) return '';
+  final d = DateTime.now().difference(t.toLocal());
+  if (d.inMinutes < 2) return 'teď';
+  if (d.inHours < 1) return 'před ${d.inMinutes} min';
+  if (d.inDays < 1) return 'před ${d.inHours} h';
+  if (d.inDays == 1) return 'včera';
+  return 'před ${d.inDays} dny';
 }

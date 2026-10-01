@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../core/api_client.dart' show ApiException;
 import '../core/device_token.dart';
+import '../core/page_location.dart' show clearJoinFromUrl;
 import '../state/auth_controller.dart';
 import '../state/providers.dart';
 import 'glass/glass.dart';
@@ -22,7 +23,11 @@ class AuthGate extends ConsumerWidget {
     final auth = ref.watch(authProvider);
     final signedOut = auth.hasValue && auth.value!.user == null;
     if (!signedOut) return child;
-    return const Material(type: MaterialType.transparency, child: _LoginForm());
+    final invite = auth.value!.inviteCode;
+    return Material(
+      type: MaterialType.transparency,
+      child: invite != null ? _ClaimForm(code: invite) : const _LoginForm(),
+    );
   }
 }
 
@@ -76,6 +81,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
       final json = await ref.read(apiClientProvider).postJson('/auth/login', body: {
         'username': username,
         'password': _password.text,
+        'device': deviceName(),
         if (_createFor != null) 'new_password': _newPassword.text,
       });
       if (json['needsPassword'] == true) {
@@ -93,6 +99,49 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Appka pozvánkový odkaz otevřít neumí -- vložit ho sem.
+  Future<void> _pasteInvite(BuildContext context) async {
+    final controller = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Pozvánka'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: const InputDecoration(hintText: 'Vlož odkaz z pozvánky'),
+          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+        ),
+        actions: [
+          GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          GlassButton(
+            label: 'Pokračovat',
+            style: GlassButtonStyle.prominent,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (text == null || text.isEmpty || !context.mounted) return;
+    final code = Uri.tryParse(text)?.queryParameters['join'] ?? (text.contains('/') ? null : text);
+    if (code == null) {
+      setState(() => _error = 'Tohle nevypadá jako pozvánkový odkaz.');
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => Scaffold(backgroundColor: Colors.transparent, body: _ClaimForm(code: code)),
+    ));
   }
 
   @override
@@ -167,6 +216,178 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                   style: GlassButtonStyle.prominent,
                   onPressed: _busy ? null : _submit,
                 ),
+                if (!creating) ...[
+                  const SizedBox(height: 8),
+                  GlassButton(
+                    label: 'Mám pozvánku od správce',
+                    style: GlassButtonStyle.plain,
+                    onPressed: () => _pasteInvite(context),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pozvánka od správce: člověk si sám vybere přihlašovací jméno a heslo.
+class _ClaimForm extends ConsumerStatefulWidget {
+  const _ClaimForm({required this.code});
+  final String code;
+
+  @override
+  ConsumerState<_ClaimForm> createState() => _ClaimFormState();
+}
+
+class _ClaimFormState extends ConsumerState<_ClaimForm> {
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  final _confirm = TextEditingController();
+  String? _name;
+  bool _busy = true;
+  bool _invalid = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  @override
+  void dispose() {
+    for (final c in [_username, _password, _confirm]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _check() async {
+    try {
+      final json = await ref.read(apiClientProvider).postJson('/auth/claim', body: {'code': widget.code});
+      if (!mounted) return;
+      setState(() {
+        _name = json['name'] as String?;
+        _username.text = json['username'] as String? ?? '';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _invalid = true;
+        _error = e is ApiException ? e.detail : 'Server není dostupný (zapnutý Tailscale?).';
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    final username = _username.text.trim();
+    if (username.length < 3 || username.contains(' ')) {
+      setState(() => _error = 'Přihlašovací jméno: aspoň 3 znaky, bez mezer.');
+      return;
+    }
+    if (_password.text.length < 6) {
+      setState(() => _error = 'Heslo aspoň 6 znaků.');
+      return;
+    }
+    if (_password.text != _confirm.text) {
+      setState(() => _error = 'Hesla se neshodují.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final json = await ref.read(apiClientProvider).postJson('/auth/claim', body: {
+        'code': widget.code,
+        'username': username,
+        'password': _password.text,
+        'device': deviceName(),
+      });
+      if (json['token'] case final String token) await saveDeviceToken(token);
+      clearJoinFromUrl();
+      ref.invalidate(authProvider);
+      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = e is ApiException ? (e.detail ?? 'Nepovedlo se.') : 'Server není dostupný.');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: AutofillGroup(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Icon(Symbols.waving_hand_rounded, size: 56, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(height: 16),
+                Text(
+                  _name == null ? 'Opentify' : 'Ahoj, $_name!',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _invalid
+                      ? (_error ?? 'Pozvánka neplatí.')
+                      : 'Vyber si přihlašovací jméno a heslo. Zadáš je jen na novém zařízení – '
+                          'tohle si přihlášení zapamatuje.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                if (!_invalid) ...[
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: _username,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    autofillHints: const [AutofillHints.newUsername],
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Přihlašovací jméno'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _password,
+                    obscureText: true,
+                    autofillHints: const [AutofillHints.newPassword],
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Heslo (aspoň 6 znaků)'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _confirm,
+                    obscureText: true,
+                    autofillHints: const [AutofillHints.newPassword],
+                    decoration: const InputDecoration(labelText: 'Heslo znovu'),
+                    onSubmitted: (_) => _submit(),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+                  ],
+                  const SizedBox(height: 20),
+                  GlassButton(
+                    label: _busy ? 'Moment…' : 'Založit účet a přihlásit',
+                    style: GlassButtonStyle.prominent,
+                    onPressed: _busy ? null : _submit,
+                  ),
+                ],
               ],
             ),
           ),

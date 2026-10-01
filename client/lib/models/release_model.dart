@@ -10,6 +10,7 @@ class ReleaseModel {
     this.releaseDate,
     required this.releaseType,
     this.images = const [],
+    this.notes,
   });
 
   final String id;
@@ -19,6 +20,9 @@ class ReleaseModel {
   final String? releaseDate; // ISO řetězec, může být jen rok ("1997") — viz backend Release.release_date
   final String releaseType; // album | ep | single | compilation
   final List<String> images;
+
+  /// Vlastní poznámka k albu (obsazení apod.), jen u vlastní hudby.
+  final String? notes;
 
   String? get coverImageUrl => images.isEmpty ? null : images.first;
 
@@ -36,5 +40,6 @@ class ReleaseModel {
         releaseDate: json['releaseDate'] as String?,
         releaseType: json['releaseType'] as String? ?? 'album',
         images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
+        notes: json['notes'] as String?,
       );
 }

@@ -11,6 +11,8 @@ services:
       DATABASE_URL: sqlite:////data/db/vault.db
       MEDIA_ROOT: /data/media
       REDIS_URL: redis://redis:6379/0
+      # Přihlášení jménem a heslem (app/auth.py); `open` = bez přihlašování.
+      AUTH_MODE: ${AUTH_MODE:-login}
       MUSICBRAINZ_BASE_URL: https://musicbrainz.org/ws/2
       MUSICBRAINZ_USER_AGENT: ${MUSICBRAINZ_USER_AGENT:?nastav v .env dle MusicBrainz API etiquette, např. "VaultPersonal/0.1 (tvuj@email)"}
       # Wikidata/Wikipedia (artist bio) mají stejnou User-Agent politiku --
