@@ -249,6 +249,23 @@ class _CollectionActionsSheet extends ConsumerWidget {
               icon: Symbols.cloud_download_rounded,
               label: kind == CollectionKind.album ? 'Stáhnout celé album' : 'Stáhnout všechny skladby',
               onTap: () => run((infos) async {
+                if (kind == CollectionKind.album) {
+                  // Album jako celek: jedna složka ze Soulseeku (jedna verze
+                  // od jednoho člověka), zbytek po skladbách.
+                  toast('Hledám album na Soulseeku…');
+                  try {
+                    final res = await container.read(apiClientProvider).postJson(
+                          '/library/albums/$id/download',
+                          timeout: const Duration(seconds: 60),
+                        );
+                    toast(res['found'] == true
+                        ? 'Celé album z jedné složky: ${res['matched']}/${res['total']} skladeb, zbytek dohledám'
+                        : 'Album jako celek jsem nenašel – stahuju po skladbách');
+                  } catch (_) {
+                    toast('Album se nepodařilo zařadit ke stažení');
+                  }
+                  return;
+                }
                 final provisioning = container.read(provisioningControllerProvider.notifier);
                 for (final info in infos) {
                   unawaited(provisioning.provision(info.recordingId));

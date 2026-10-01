@@ -99,6 +99,9 @@ class TrackMetadata:
     # alba / video s jeho názvem má přednost (správná verze, ne live/remaster
     # z jiné desky).
     album_title: str | None = None
+    # Soubor z vybrané složky celého alba (`app/library/album_download.py`):
+    # {"username", "filename", "size"} -- stáhne se rovnou on, bez hledání.
+    preferred_source: dict | None = None
 
     @property
     def search_query(self) -> str:
@@ -275,7 +278,50 @@ class SlskdProvider:
     # Hledání
     # ------------------------------------------------------------------
 
+    async def search_raw(self, query: str, cap_s: float = 20.0) -> list[dict]:
+        """Surové odpovědi hledání (pro výběr složky celého alba)."""
+        async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
+            for attempt in range(4):
+                await _slskd_search_limiter.wait()
+                created = await client.post(
+                    "/api/v0/searches", json={"searchText": query, "searchTimeout": int(cap_s * 1000)}
+                )
+                if created.status_code != 429:
+                    break
+                await asyncio.sleep(2.0 * (attempt + 1))
+            created.raise_for_status()
+            search_id = created.json()["id"]
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            try:
+                while loop.time() - started < cap_s:
+                    payload = (await client.get(f"/api/v0/searches/{search_id}")).json()
+                    if bool(payload.get("isComplete")) or str(payload.get("state", "")).lower().startswith("completed"):
+                        break
+                    await asyncio.sleep(1.0)
+                responses = await client.get(f"/api/v0/searches/{search_id}/responses")
+                responses.raise_for_status()
+                return [r for r in responses.json() if r.get("username") and not self._is_blocked(r["username"])]
+            finally:
+                try:
+                    await client.delete(f"/api/v0/searches/{search_id}")
+                except httpx.HTTPError:
+                    pass
+
     async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        pref = track.preferred_source
+        if (
+            pref
+            and not self._is_blocked(pref["username"])
+            and f"slskd:{pref['username']}|{pref['filename']}" not in track.rejected_sources
+        ):
+            # Soubor ze složky celého alba -- jedna verze pro celé album.
+            peer = {k: pref.get(k) for k in ("username", "filename", "size", "bitrate_kbps")}
+            return ProviderCandidate(
+                source_provider="slskd",
+                source_ref=f"{peer['username']}/{peer['filename']}",
+                extra={**peer, "alternates": [], "interactive": interactive},
+            )
         query = track.soulseek_query
         if not query:
             return None
