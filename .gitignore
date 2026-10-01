@@ -14,3 +14,5 @@ __pycache__/
 # Naklonované cizí repo (Musify, GPL-3.0) jen jako referenční zdroj UI/gest
 # patterns -- vlastní git historie, do naší commitovat nepatří.
 /.reference/
+# Podpisový klíč Androidu -- NIKDY do gitu
+.android-signing/
