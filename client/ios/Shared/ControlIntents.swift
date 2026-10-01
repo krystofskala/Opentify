@@ -72,8 +72,12 @@ enum OpentifyShared {
   }
 
   /// Záznam do logu API (`POST /client-log`), stejně jako z Flutteru --
-  /// bez toho není z nativní části vidět nic.
+  /// bez toho není z nativní části vidět nic. Navíc do lokálního deníku
+  /// (`takeLog`): appku na pozadí může iOS uspat dřív, než požadavek odejde
+  /// (živě: Shazam z Ovládacího centra nenahlásil nic) -- deník pak odešle
+  /// Flutter při dalším otevření.
   static func report(_ kind: String, _ detail: String) {
+    log("\(kind): \(detail)")
     guard let base = apiBase, let url = URL(string: "\(base)/client-log") else { return }
     var request = URLRequest(url: url, timeoutInterval: 10)
     request.httpMethod = "POST"
@@ -83,5 +87,18 @@ enum OpentifyShared {
       "kind": kind, "detail": detail, "platform": "ios-native",
     ])
     URLSession.shared.dataTask(with: request).resume()
+  }
+
+  static func log(_ line: String) {
+    let stamp = ISO8601DateFormatter().string(from: Date())
+    var lines = defaults.stringArray(forKey: "nativeLog") ?? []
+    lines.append("\(stamp) [\(processName)] \(line)")
+    defaults.set(Array(lines.suffix(80)), forKey: "nativeLog")
+  }
+
+  static func takeLog() -> [String] {
+    let lines = defaults.stringArray(forKey: "nativeLog") ?? []
+    defaults.removeObject(forKey: "nativeLog")
+    return lines
   }
 }

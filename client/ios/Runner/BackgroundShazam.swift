@@ -2,6 +2,7 @@ import ActivityKit
 import AVFoundation
 import Flutter
 import Foundation
+import UIKit
 import UserNotifications
 
 /// Kanál `opentify/nav` (Flutter: lib/core/native_nav.dart): konfigurace pro
@@ -24,6 +25,8 @@ enum NativeNavBridge {
         result(nil)
       case "pending":
         result(OpentifyShared.takeRoute())
+      case "takeLog":
+        result(OpentifyShared.takeLog())
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -47,12 +50,43 @@ actor BackgroundShazam {
   static let shared = BackgroundShazam()
 
   private var running = false
+  private var finished = false
   private var activity: Activity<NowPlayingAttributes>?
+  private var recorder: AVAudioRecorder?
 
   func run() async {
     guard !running else { return }
     running = true
+    finished = false
     defer { running = false }
+    OpentifyShared.log("shazam: start")
+    // Čas na dokončení: bez toho iOS appku spuštěnou na pozadí uspal uprostřed
+    // nahrávání -- mikrofon "svítil" a nic se nedělo (živě).
+    let bgTask = await MainActor.run {
+      UIApplication.shared.beginBackgroundTask(withName: "opentify.shazam") {
+        OpentifyShared.log("shazam: background time expired")
+      }
+    }
+    defer { Task { @MainActor in UIApplication.shared.endBackgroundTask(bgTask) } }
+    // Pojistka: ať se stane cokoli, do 45 s mikrofon i karta skončí.
+    Task {
+      try? await Task.sleep(nanoseconds: 45_000_000_000)
+      await self.watchdog()
+    }
+    await work()
+    finished = true
+    OpentifyShared.log("shazam: done")
+  }
+
+  private func watchdog() async {
+    guard running, !finished else { return }
+    OpentifyShared.report("control-shazam", "watchdog: nedoběhlo do 45 s")
+    recorder?.stop()
+    try? AVAudioSession.sharedInstance().setCategory(.playback)
+    await endActivity(title: "Shazam nedoběhl", artist: "Zkus to v appce")
+  }
+
+  private func work() async {
 
     guard AVAudioApplication.shared.recordPermission == .granted else {
       await notify(title: "Shazam potřebuje mikrofon", body: "Otevři jednou Shazam v appce a povol mikrofon.")
@@ -60,11 +94,13 @@ actor BackgroundShazam {
       return
     }
     await startActivity(title: "Poslouchám…", artist: "Open Shazam")
+    OpentifyShared.log("shazam: activity \(activity == nil ? "NE" : "ok")")
     let session = AVAudioSession.sharedInstance()
     let previousCategory = session.category
     do {
       try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP])
       try session.setActive(true)
+      OpentifyShared.log("shazam: session ok")
     } catch {
       OpentifyShared.report("control-shazam", "audio session: \(error)")
     }
@@ -73,7 +109,9 @@ actor BackgroundShazam {
     // Jako v appce: zkusit krátký úsek, když nic, ještě jeden.
     for seconds in [7.0, 8.0] {
       guard let clip = await record(seconds: seconds) else { break }
+      OpentifyShared.log("shazam: nahráno \(clip.count) B")
       outcome = await recognize(clip)
+      OpentifyShared.log("shazam: výsledek \(outcome)")
       if case .notFound = outcome { continue }
       break
     }
@@ -112,6 +150,8 @@ actor BackgroundShazam {
     ]
     do {
       let recorder = try AVAudioRecorder(url: url, settings: settings)
+      self.recorder = recorder
+      defer { self.recorder = nil }
       guard recorder.record(forDuration: seconds) else {
         OpentifyShared.report("control-shazam", "record() vrátil false")
         return nil

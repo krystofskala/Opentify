@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import 'config.dart';
+import 'diagnostics.dart';
 import 'device_token.dart';
 
 /// Most k nativní části iOS (kanál `opentify/nav`):
@@ -35,6 +36,9 @@ class NativeNav {
     try {
       final route = await _channel.invokeMethod<String>('pending');
       if (route != null) _open(router, route);
+      // Deník nativní části (Shazam na pozadí apod.) -- co nestihlo odejít.
+      final log = await _channel.invokeListMethod<String>('takeLog');
+      if (log != null && log.isNotEmpty) diagReport('native-log', log.join('\n'));
     } catch (e) {
       debugPrint('NativeNav.pending: $e');
     }
