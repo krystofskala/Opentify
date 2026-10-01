@@ -24,6 +24,13 @@ class AppConfig {
   /// Web otevřený přes Tailscale mluví se serverem, ze kterého se načetl --
   /// stejný build pak funguje na `desktop-…ts.net` (moje zařízení) i na
   /// samostatném `opentify.…ts.net` (sdílený jen tenhle stroj, ne celé PC).
+  /// Adresa Opentify pro ostatní (samostatný Tailscale stroj jen s Opentify,
+  /// sdílený tátovi/kamarádům) -- pozvánky a odkazy „Poslat v Opentify".
+  static const sharedOrigin = String.fromEnvironment(
+    'SHARED_ORIGIN',
+    defaultValue: 'https://opentify.tail343940.ts.net',
+  );
+
   static String get apiBaseUrl => _sameOrigin(_apiBaseDefine, 'https');
   static String get wsBaseUrl => _sameOrigin(_wsBaseDefine, 'wss');
 

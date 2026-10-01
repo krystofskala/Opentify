@@ -79,6 +79,10 @@ Future<void> shareWithToast(
       messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
   try {
     final link = ready ?? await load();
+    if (link.url == null) {
+      toast('Tahle skladba je jen v Opentify – pošli ji přes „Poslat v Opentify“');
+      return;
+    }
     final outcome = await shareLink(link);
     if (outcome == ShareOutcome.copied) toast('Odkaz zkopírován – otevře se v jakékoliv hudební appce');
     if (outcome == ShareOutcome.failed) toast('Odkaz se nepodařilo zkopírovat: ${link.url}');
@@ -213,6 +217,16 @@ class _TrackActionsSheet extends ConsumerWidget {
                   final link = shareLinkAsync.valueOrNull;
                   run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
                 },
+              ),
+              _Item(
+                icon: Symbols.send_rounded,
+                label: 'Poslat v Opentify',
+                onTap: () => run(() => shareInOpentifyWithToast(
+                      messenger,
+                      path: '/track/${recording.id}',
+                      title: recording.title,
+                      artistName: recording.artistName ?? artistNameFallback,
+                    )),
               ),
               _Item(
                 icon: Symbols.radio_rounded,

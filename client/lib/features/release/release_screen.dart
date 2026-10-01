@@ -177,6 +177,16 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                   tooltip: albumLater ? 'Odebrat z „Na později“' : 'Uložit na později',
                   onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.album, release.id),
                 ),
+                HeroAction(
+                  icon: Symbols.send_rounded,
+                  tooltip: 'Poslat v Opentify',
+                  onPressed: () => shareInOpentifyWithToast(
+                    ScaffoldMessenger.maybeOf(context),
+                    path: '/releases/${release.id}',
+                    title: release.title,
+                    artistName: artistName,
+                  ),
+                ),
                 // Univerzální odkaz na album (album.link) -- načtený dopředu.
                 HeroAction(
                   icon: Symbols.ios_share_rounded,

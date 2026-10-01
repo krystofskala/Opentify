@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../core/device_token.dart';
 
 import '../../core/api_client.dart';
+import '../../core/config.dart';
 import '../../core/page_location.dart';
 import '../../state/auth_controller.dart';
 import '../../state/providers.dart';
@@ -17,7 +18,7 @@ import '../../widgets/glass/glass.dart';
 /// Ostatní tuhle sekci nevidí vůbec.
 /// Adresa pro ostatní: samostatný Tailscale stroj jen s Opentify
 /// (docker-compose `tailscale`), ne celé PC.
-const _sharedOrigin = String.fromEnvironment('SHARED_ORIGIN', defaultValue: 'https://opentify.tail343940.ts.net');
+const _sharedOrigin = AppConfig.sharedOrigin;
 
 class ProfilesSection extends ConsumerWidget {
   const ProfilesSection({super.key});

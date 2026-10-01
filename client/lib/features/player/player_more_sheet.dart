@@ -157,6 +157,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               },
                             ),
                           if (playback.nowPlaying != null) _shareTile(context, playback),
+                          if (playback.nowPlaying != null) _sendInOpentifyTile(context, playback),
                           if (playback.nowPlaying != null) _abRepeatTile(context, playback),
                           const Divider(),
                           const Row(
@@ -308,6 +309,22 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
         final ready = link.valueOrNull;
         Navigator.of(context).pop();
         shareWithToast(ready, messenger, () => ref.read(shareLinkProvider(target).future));
+      },
+    );
+  }
+
+  /// Odkaz přímo do Opentify (pro lidi se sdíleným Opentify).
+  Widget _sendInOpentifyTile(BuildContext context, AudioPlayerState playback) {
+    final np = playback.nowPlaying!;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Symbols.send_rounded),
+      title: const Text('Poslat v Opentify'),
+      subtitle: const Text('Odkaz pro ty, kdo mají Opentify – otevře se přímo tady'),
+      onTap: () {
+        Navigator.of(context).pop();
+        shareInOpentifyWithToast(messenger, path: '/track/${np.recordingId}', title: np.title, artistName: np.artistName);
       },
     );
   }
