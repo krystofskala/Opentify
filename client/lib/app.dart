@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'routing/app_router.dart';
@@ -134,9 +136,44 @@ class _DismissKeyboard extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-        child: child,
-      );
+  Widget build(BuildContext context) {
+    // Otevřená klávesnice (dotyková zařízení): tlačítko „Skrýt" těsně nad ní
+    // -- klepnutí mimo pole nestačilo (živě: "pořád problém zavřít").
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final touch = defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android;
+    return Stack(
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+          child: child,
+        ),
+        if (touch && keyboard > 80)
+          Positioned(
+            right: 12,
+            bottom: keyboard + 8,
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.95),
+              shape: const StadiumBorder(),
+              elevation: 3,
+              child: InkWell(
+                customBorder: const StadiumBorder(),
+                onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Symbols.keyboard_hide_rounded, size: 20, color: Theme.of(context).colorScheme.onSurface),
+                      const SizedBox(width: 6),
+                      Text('Skrýt', style: Theme.of(context).textTheme.labelLarge),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
