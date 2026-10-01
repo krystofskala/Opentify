@@ -101,6 +101,9 @@ app.include_router(recognize_router, prefix="/api/v1")
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
+    from app.auth import bind_admin_tailscale
+
+    bind_admin_tailscale()
     # Klasická knihovna: adminovi nic nezmizí (jednorázově, viz entries).
     from app.library.entries import seed_admin_library
 

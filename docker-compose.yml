@@ -3,7 +3,10 @@ services:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      # Jen na tomhle PC: zvenku se k API jde výhradně přes `tailscale serve`
+      # (ten přidává hlavičky Tailscale-User-*, podle kterých se určuje
+      # profil -- z domácí sítě by je šlo podvrhnout).
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: sqlite:////data/db/vault.db
       MEDIA_ROOT: /data/media
@@ -29,6 +32,8 @@ services:
       # Uživatelský token (listenbrainz.org -> Settings) pro odesílání poslechů.
       LISTENBRAINZ_TOKEN: ${LISTENBRAINZ_TOKEN:-}
       JWT_SECRET: ${JWT_SECRET:?set a real secret in .env}
+      # Tailscale účet admina (profil podle Tailscale, viz app/auth.py).
+      TAILSCALE_ADMIN_LOGIN: ${TAILSCALE_ADMIN_LOGIN:-}
       LOCAL_MUSIC_ROOT: /data/local-music
     volumes:
       - vault-db:/data/db

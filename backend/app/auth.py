@@ -81,10 +81,44 @@ def _user_for_token(session: Session, token: str | None) -> AppUser | None:
     return session.get(AppUser, row.user_id)
 
 
+def _user_for_tailscale(session: Session, login: str, display_name: str | None) -> AppUser:
+    """Profil podle Tailscale účtu. Hlavičky `Tailscale-User-*` přidává
+    `tailscale serve` (klient je podvrhnout nemůže -- API poslouchá jen na
+    127.0.0.1, jediná cesta zvenku vede přes Tailscale). Neznámý účet
+    (někdo, komu admin nasdílel server) dostane rovnou vlastní běžný profil
+    pojmenovaný podle Tailscale -- žádná pozvánka ani přihlašování."""
+    user = session.exec(select(AppUser).where(AppUser.tailscale_login == login)).first()
+    if user is None:
+        name = (display_name or login.split("@")[0]).strip() or login
+        user = AppUser(name=name, role="user", tailscale_login=login)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return user
+
+
+def bind_admin_tailscale() -> None:
+    """Tailscale účet admina z `.env` (`TAILSCALE_ADMIN_LOGIN`) -- při
+    startu, dřív než první požadavek bez klíče stihne pro admina založit
+    nový běžný profil."""
+    login = os.environ.get("TAILSCALE_ADMIN_LOGIN", "").strip()
+    if not login:
+        return
+    with Session(engine) as session:
+        admin = ensure_admin(session)
+        if admin.tailscale_login != login:
+            admin.tailscale_login = login
+            session.add(admin)
+            session.commit()
+
+
 def resolve_user(request: Request) -> tuple[AppUser | None, AppUser | None]:
     """(přihlášený, za koho jedná) -- admin se může přepnout na jiný profil."""
     with Session(engine) as session:
         user = _user_for_token(session, token_from_request(request))
+        login = (request.headers.get("tailscale-user-login") or "").strip()
+        if user is None and login:
+            user = _user_for_tailscale(session, login, request.headers.get("tailscale-user-name"))
         if user is None and auth_mode() == "open":
             user = ensure_admin(session)
         if user is None:

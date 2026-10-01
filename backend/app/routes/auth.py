@@ -37,7 +37,7 @@ def _set_cookie(response: Response, name: str, value: str) -> None:
 
 
 def _user_out(u: AppUser | None) -> dict | None:
-    return None if u is None else {"id": u.id, "name": u.name, "role": u.role}
+    return None if u is None else {"id": u.id, "name": u.name, "role": u.role, "tailscaleLogin": u.tailscale_login}
 
 
 def _issue_token(session: Session, user_id: str, label: str | None) -> str:
@@ -54,11 +54,17 @@ def me(request: Request, response: Response):
     user, acting = resolve_user(request)
     if user is None:
         return {"user": None, "acting": None, "mode": auth_mode()}
-    if token_from_request(request) is None and auth_mode() == "open" and user.id == ADMIN_ID:
+    issued = None
+    # Bez Tailscale účtu (ten zařízení pozná sám) a bez klíče: admin si ho
+    # v otevřeném režimu vezme potichu.
+    tailscale = bool(request.headers.get("tailscale-user-login"))
+    if token_from_request(request) is None and not tailscale and auth_mode() == "open" and user.id == ADMIN_ID:
         with Session(engine) as session:
-            token = _issue_token(session, ADMIN_ID, request.headers.get("user-agent", "")[:120])
-        _set_cookie(response, TOKEN_COOKIE, token)
-    return {"user": _user_out(user), "acting": _user_out(acting), "mode": auth_mode()}
+            issued = _issue_token(session, ADMIN_ID, request.headers.get("user-agent", "")[:120])
+        # Web: cookie; nativní appka si klíč vezme z těla a posílá ho jako Bearer.
+        _set_cookie(response, TOKEN_COOKIE, issued)
+    return {"user": _user_out(user), "acting": _user_out(acting), "mode": auth_mode(), "token": issued,
+            "tailscaleLogin": request.headers.get("tailscale-user-login")}
 
 
 class JoinIn(BaseModel):

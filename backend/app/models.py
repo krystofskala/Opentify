@@ -225,6 +225,9 @@ class AppUser(SQLModel, table=True):
     name: str
     role: str = "user"  # "admin" | "user"
     created_at: datetime = Field(default_factory=utcnow)
+    # Tailscale účet (`Tailscale-User-Login` z `tailscale serve`) -- zařízení
+    # bez klíče se podle něj přiřadí k profilu (viz app/auth.py).
+    tailscale_login: str | None = Field(default=None, index=True)
 
 
 class AuthToken(SQLModel, table=True):
