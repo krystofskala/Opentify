@@ -204,6 +204,28 @@ services:
       - redis-data:/data
     restart: unless-stopped
 
+  # Opentify jako SAMOSTATNÉ zařízení v Tailscale (`opentify.…ts.net`):
+  # kamarádům se sdílí jen tohle, ne celé PC (desktop-…ts.net). Vystavuje
+  # jen web + API Opentify (tailscale/serve.json). Bez TS_AUTHKEY vypíše do
+  # logu přihlašovací odkaz -- otevřít, schválit, hotovo (stav ve volume).
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: opentify
+    environment:
+      TS_HOSTNAME: opentify
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./tailscale/serve.json:/config/serve.json:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [api]
+    mem_limit: 128m
+    restart: unless-stopped
+
   # Volitelné, mimo scope tohoto sketche — vlastní ListenBrainz instance
   # pro doporučení. Dokud neběží, /recommendations/* endpointy vrací
   # prázdný výsledek nebo 503.
@@ -222,6 +244,7 @@ volumes:
   vault-db:
   redis-data:
   slskd-data:
+  tailscale-state:
 
 networks:
   # Pevná podsíť (místo Dockerem náhodně přiděleného rozsahu) -- `gluetun`

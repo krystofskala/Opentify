@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 /// Konfigurace prostředí, přepsatelná přes `--dart-define` při buildu/spuštění,
 /// např.:
 ///
@@ -9,15 +11,28 @@
 class AppConfig {
   const AppConfig._();
 
-  static const apiBaseUrl = String.fromEnvironment(
+  static const _apiBaseDefine = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:8000/api/v1',
   );
 
-  static const wsBaseUrl = String.fromEnvironment(
+  static const _wsBaseDefine = String.fromEnvironment(
     'WS_BASE_URL',
     defaultValue: 'ws://localhost:8000/ws',
   );
+
+  /// Web otevřený přes Tailscale mluví se serverem, ze kterého se načetl --
+  /// stejný build pak funguje na `desktop-…ts.net` (moje zařízení) i na
+  /// samostatném `opentify.…ts.net` (sdílený jen tenhle stroj, ne celé PC).
+  static String get apiBaseUrl => _sameOrigin(_apiBaseDefine, 'https');
+  static String get wsBaseUrl => _sameOrigin(_wsBaseDefine, 'wss');
+
+  static String _sameOrigin(String url, String scheme) {
+    if (!kIsWeb) return url;
+    final page = Uri.base;
+    if (!page.host.endsWith('.ts.net')) return url;
+    return Uri.parse(url).replace(scheme: scheme, host: page.host).toString();
+  }
 
   /// Backend (app/auth.py) má zatím jen zjednodušenou auth přes hlavičky
   /// `X-User-Id`/`X-Device-Id` — TODO tamtéž počítá s náhradou za device

@@ -52,8 +52,8 @@ jobs:
           flutter build apk --release
           --build-name=0.1.${{ github.run_number }}
           --build-number=${{ github.run_number }}
-          --dart-define=API_BASE_URL=https://desktop-2lissjt.tail343940.ts.net/api/v1
-          --dart-define=WS_BASE_URL=wss://desktop-2lissjt.tail343940.ts.net/ws
+          --dart-define=API_BASE_URL=https://opentify.tail343940.ts.net/api/v1
+          --dart-define=WS_BASE_URL=wss://opentify.tail343940.ts.net/ws
 
       - name: Přejmenovat
         working-directory: client

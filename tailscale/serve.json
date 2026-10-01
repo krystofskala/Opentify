@@ -1,0 +1,12 @@
+{
+  "TCP": { "443": { "HTTPS": true } },
+  "Web": {
+    "${TS_CERT_DOMAIN}:443": {
+      "Handlers": {
+        "/": { "Proxy": "http://host.docker.internal:5000" },
+        "/api": { "Proxy": "http://api:8000/api" },
+        "/ws": { "Proxy": "http://api:8000/ws" }
+      }
+    }
+  }
+}
