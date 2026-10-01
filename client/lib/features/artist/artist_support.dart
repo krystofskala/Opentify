@@ -114,41 +114,45 @@ Future<void> showCharitySheet(BuildContext context, String artistName) {
     builder: (context) {
       final theme = Theme.of(context);
       final dedication = 'Dar jménem $artistName';
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Charita jménem: $artistName', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              'Vyber charitu – otevře se její stránka pro dary. Věnování „$dedication“ se '
-              'zkopíruje, vlož ho do poznámky k daru (pole "na počest / věnování"). Dar je '
-              'oficiálně od tebe, jméno interpreta je v jeho věnování.',
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            for (final c in _charities)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Symbols.volunteer_activism_rounded),
-                title: Text(c.name),
-                subtitle: Text(c.about),
-                trailing: const Icon(Symbols.open_in_new_rounded),
-                onTap: () async {
-                  final messenger = ScaffoldMessenger.maybeOf(context);
-                  // Safari otevře novou kartu jen přímo z klepnutí -- proto
-                  // nejdřív odkaz, věnování do schránky až potom.
-                  final opened = openExternal(c.url);
-                  try {
-                    await Clipboard.setData(ClipboardData(text: dedication));
-                    messenger?.showSnackBar(SnackBar(content: Text('Zkopírováno: $dedication')));
-                  } catch (_) {}
-                  await opened;
-                },
+      // Stejné sklo jako všechny ostatní sheety (dřív chybělo -- text ležel
+      // přímo přes stránku, živě nahlášeno).
+      return GlassSheet(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Charita jménem: $artistName', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 6),
+              Text(
+                'Vyber charitu – otevře se její stránka pro dary. Věnování „$dedication“ se '
+                'zkopíruje, vlož ho do poznámky k daru (pole "na počest / věnování"). Dar je '
+                'oficiálně od tebe, jméno interpreta je v jeho věnování.',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
-          ],
+              const SizedBox(height: AppSpacing.sm),
+              for (final c in _charities)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Symbols.volunteer_activism_rounded),
+                  title: Text(c.name),
+                  subtitle: Text(c.about),
+                  trailing: const Icon(Symbols.open_in_new_rounded),
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.maybeOf(context);
+                    // Safari otevře novou kartu jen přímo z klepnutí -- proto
+                    // nejdřív odkaz, věnování do schránky až potom.
+                    final opened = openExternal(c.url);
+                    try {
+                      await Clipboard.setData(ClipboardData(text: dedication));
+                      messenger?.showSnackBar(SnackBar(content: Text('Zkopírováno: $dedication')));
+                    } catch (_) {}
+                    await opened;
+                  },
+                ),
+            ],
+          ),
         ),
       );
     },

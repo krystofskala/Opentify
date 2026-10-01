@@ -55,6 +55,11 @@ jobs:
         working-directory: client
         run: flutter pub get
 
+      - name: Kontrola jednotného vzhledu
+        if: steps.changes.outputs.build == 'true'
+        working-directory: client
+        run: flutter test test/design_consistency_test.dart
+
       - name: Rozšíření (Live Activity, Ovládací centrum)
         if: steps.changes.outputs.build == 'true'
         working-directory: client

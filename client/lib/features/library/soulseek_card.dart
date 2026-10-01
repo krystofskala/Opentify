@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
 
 /// `GET /library/soulseek` (admin) -- co sdílíme a kdo si co stáhl.
@@ -57,10 +58,9 @@ class SoulseekCard extends ConsumerWidget {
 
   void _showUploads(BuildContext context, Map<String, dynamic> data) {
     final items = (data['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
+    showGlassSheet<void>(
+      context,
+      builder: (context) => GlassSheet(
         child: items.isEmpty
             ? const Padding(
                 padding: EdgeInsets.all(AppSpacing.lg),
