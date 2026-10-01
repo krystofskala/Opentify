@@ -265,24 +265,59 @@ class _LaterRow extends ConsumerWidget {
         style: theme.textTheme.bodySmall,
       ),
       onTap: () => context.push(route),
-      trailing: PopupMenuButton<String>(
-        icon: const Icon(Symbols.more_vert_rounded),
-        onSelected: (value) {
-          switch (value) {
-            case 'note':
-              editLaterNote(context, notifier, item);
-            case 'restore':
-              notifier.restore(item.id);
-            case 'remove':
-              notifier.remove(item.id);
-          }
+      onLongPress: () => _showActions(context, notifier, listened),
+      trailing: IconButton(
+        tooltip: 'Další možnosti',
+        icon: const Icon(Symbols.more_horiz_rounded),
+        onPressed: () => _showActions(context, notifier, listened),
+      ),
+    );
+  }
+
+  /// Stejný skleněný sheet jako ostatní menu (dřív vyskakovací menu s ⋮).
+  void _showActions(BuildContext context, ListenLaterController notifier, bool listened) {
+    Widget row(BuildContext sheet, IconData icon, String label, VoidCallback onTap, {bool destructive = false}) {
+      final color = destructive ? Theme.of(sheet).colorScheme.error : null;
+      return ListTile(
+        dense: true,
+        shape: AppShapes.md,
+        leading: Icon(icon, color: color),
+        title: Text(label, style: TextStyle(color: color)),
+        onTap: () {
+          Navigator.of(sheet).pop();
+          onTap();
         },
-        itemBuilder: (context) => [
-          if (!listened)
-            PopupMenuItem(value: 'note', child: Text(item.note == null ? 'Přidat poznámku' : 'Upravit poznámku')),
-          if (listened) const PopupMenuItem(value: 'restore', child: Text('Vrátit do seznamu')),
-          const PopupMenuItem(value: 'remove', child: Text('Odebrat')),
-        ],
+      );
+    }
+
+    showGlassSheet<void>(
+      context,
+      builder: (sheet) => GlassSheet(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(sheet).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              const Divider(height: 1),
+              if (!listened)
+                row(sheet, Symbols.edit_note_rounded, item.note == null ? 'Přidat poznámku' : 'Upravit poznámku',
+                    () => editLaterNote(context, notifier, item)),
+              if (listened)
+                row(sheet, Symbols.undo_rounded, 'Vrátit do seznamu', () => notifier.restore(item.id)),
+              row(sheet, Symbols.delete_rounded, 'Odebrat', () => notifier.remove(item.id), destructive: true),
+            ],
+          ),
+        ),
       ),
     );
   }

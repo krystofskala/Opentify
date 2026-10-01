@@ -762,7 +762,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               // Mobil: srdíčko je v řádku pod ovládáním -- lišta by jinak
               // titulek "Přehrává se" zmáčkla do dvou řádků (živě nahlášeno).
               IconButton(
-                icon: Icon(Symbols.more_vert_rounded, color: playerFg(context), size: 24),
+                icon: Icon(Symbols.more_horiz_rounded, color: playerFg(context), size: 24),
                 tooltip: 'Další možnosti',
                 onPressed: () => showPlayerMoreSheet(context),
               ),

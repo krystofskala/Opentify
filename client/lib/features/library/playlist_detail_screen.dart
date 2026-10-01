@@ -168,7 +168,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                       onRemoveSelected: readOnly ? null : (selected) => _removeTracks(selected),
                       // Vlastní playlist: stáhnout celý na pozadí (žebříček ne --
                       // 100 skladeb najednou by zahltilo stahování).
-                      downloadWholeList: !readOnly,
                     ),
                   ),
                 ),

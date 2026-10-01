@@ -288,7 +288,7 @@ class ProfilesSection extends ConsumerWidget {
                     onPressed: () => _switch(ref, p.role == 'admin' ? null : p.id),
                   ),
                 PopupMenuButton<String>(
-                  icon: const Icon(Symbols.more_vert_rounded),
+                  icon: const Icon(Symbols.more_horiz_rounded),
                   onSelected: (action) => switch (action) {
                     'edit' => _edit(context, ref, p),
                     'reset' => _resetPassword(context, ref, p),

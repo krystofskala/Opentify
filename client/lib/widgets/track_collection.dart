@@ -144,7 +144,6 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
     this.onRemoveSelected,
     this.removeLabel = 'Odebrat',
     this.trailing,
-    this.downloadWholeList = false,
     this.showFilter = true,
   });
 
@@ -164,8 +163,6 @@ class TrackCollectionToolbar extends ConsumerStatefulWidget {
   /// Extra ovladač vpravo (např. seznam/karty přepínač v Knihovně).
   final Widget? trailing;
 
-  /// Viz `QueueActionBar.downloadWholeList` -- jen album a vlastní playlist.
-  final bool downloadWholeList;
 
   /// `false` v Knihovně -- tam filtr zastane horní "Hledat v knihovně"
   /// (dvě pole pod sebou působila jako dvě různé věci).
@@ -291,7 +288,6 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
                     sourceLabel: widget.sourceLabel,
                     albumArtUrl: widget.albumArtUrl,
                     artistName: widget.artistName,
-                    downloadWholeList: widget.downloadWholeList,
                   ),
                 ),
               ),

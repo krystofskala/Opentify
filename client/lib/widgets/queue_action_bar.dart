@@ -21,17 +21,12 @@ class QueueActionBar extends ConsumerWidget {
     this.sourceLabel,
     this.albumArtUrl,
     this.artistName,
-    this.downloadWholeList = false,
   });
 
   final List<RecordingModel> tracks;
   final String? sourceLabel;
   final String? albumArtUrl;
   final String? artistName;
-
-  /// Nepoužívá se: Přehrát stahuje jen na vyžádání (hrající a další
-  /// skladbu), ne celé album najednou -- uživatel to tak chce.
-  final bool downloadWholeList;
 
   List<NowPlayingInfo> _infosFor(List<RecordingModel> ordered) => ordered
       .map((r) => nowPlayingInfoFor(r, artworkUrl: albumArtUrl, artistNameFallback: artistName))
