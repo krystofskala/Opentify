@@ -48,11 +48,14 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
   RecognizeResult? _result;
   String? _error;
   int _session = 0;
+  bool _micUsed = false;
+  late final AudioPlayerController _player = ref.read(audioPlayerControllerProvider.notifier);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _player; // načíst hned -- v dispose už se ref použít nesmí
     if (widget.autoStart && !kIsWeb) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _listen();
@@ -64,7 +67,11 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _session++;
-    stopRecording();
+    final used = _micUsed;
+    stopRecording().whenComplete(() {
+      // Viz AudioPlayerController.recoverAfterMicrophone (ladička).
+      if (used) _player.recoverAfterMicrophone();
+    });
     super.dispose();
   }
 
@@ -92,6 +99,7 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
     final String mime;
     try {
       mime = await startRecording();
+      _micUsed = true;
     } on RecorderException catch (e) {
       return _fail(
           session,

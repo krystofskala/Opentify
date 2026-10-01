@@ -909,6 +909,20 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// "Zkusit znovu" po chybě přehrávání: tatáž skladba ve STEJNÉ frontě.
   /// Dřív to bylo `playTrack(nowPlaying)` -- fronta se zúžila na jedinou
   /// skladbu a zmizel playlist ("Přehráváno z X") i kontext pro Domů.
+  /// Po mikrofonu (ladička, Shazam v appce): iOS po nahrávání nechá zvukovou
+  /// relaci v nahrávacím / neaktivním stavu a pozastavená skladba se pak už
+  /// nerozjela ("nenačítá se" -- živě po ladičce). Relaci vrátit na hudbu a
+  /// další Play načte skladbu znovu od stejného místa (jako po znovuotevření
+  /// appky); nic se nespustí samo.
+  Future<void> recoverAfterMicrophone() async {
+    try {
+      await _configureSession();
+    } catch (_) {}
+    if (state.nowPlaying == null || _player.playing) return;
+    _maybePersistSession(state, force: true);
+    _restoredIdle = true;
+  }
+
   Future<void> retryCurrent() async {
     if (state.nowPlaying == null || state.queue.isEmpty) return;
     _restoredIdle = false;

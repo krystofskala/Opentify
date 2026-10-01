@@ -44,10 +44,13 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
 
   _Phase _phase = _Phase.idle;
   TunerStartException? _error;
+  bool _micUsed = false;
+  late final AudioPlayerController _player = ref.read(audioPlayerControllerProvider.notifier);
 
   @override
   void initState() {
     super.initState();
+    _player; // načíst hned -- v dispose už se ref použít nesmí
     WidgetsBinding.instance.addObserver(this);
     _loadPrefs();
   }
@@ -75,7 +78,7 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
-    stopTuner();
+    _stopMic();
     _out.dispose();
     _needle.dispose();
     super.dispose();
@@ -112,6 +115,7 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
           if (state == 'suspended' || state == 'interrupted' || state == 'closed') _pause();
         },
       );
+      _micUsed = true;
       if (!mounted) return;
       setState(() => _phase = _Phase.listening);
       if (!_ticker.isActive) _ticker.start();
@@ -130,8 +134,17 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
     });
   }
 
+  /// Zavřít mikrofon a pak vrátit přehrávač do použitelného stavu.
+  void _stopMic() {
+    final used = _micUsed;
+    _micUsed = false;
+    stopTuner().whenComplete(() {
+      if (used) _player.recoverAfterMicrophone();
+    });
+  }
+
   void _pause() {
-    stopTuner();
+    _stopMic();
     _ticker.stop();
     _out.value = TunerOutput.idle;
     if (mounted) setState(() => _phase = _Phase.paused);
