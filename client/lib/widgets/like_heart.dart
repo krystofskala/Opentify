@@ -47,8 +47,20 @@ class LikeHeart extends ConsumerWidget {
         onLongPress: () async {
           HapticFeedback.mediumImpact();
           final messenger = ScaffoldMessenger.maybeOf(context);
-          final ok = await ref.read(dislikedProvider.notifier).toggle(recordingId);
-          if (!ok) messenger?.showSnackBar(const SnackBar(content: Text('Nepodařilo se uložit.')));
+          final wasDisliked = disliked;
+          final notifier = ref.read(dislikedProvider.notifier);
+          final ok = await notifier.toggle(recordingId);
+          if (!ok) {
+            messenger?.showSnackBar(const SnackBar(content: Text('Nepodařilo se uložit.')));
+            return;
+          }
+          // Dlouhý stisk se dá udělat omylem (na iOS čte jako "menu") -- vždy
+          // potvrdit a nabídnout Zpět.
+          messenger?.hideCurrentSnackBar();
+          messenger?.showSnackBar(SnackBar(
+            content: Text(wasDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi'),
+            action: SnackBarAction(label: 'Zpět', onPressed: () => notifier.toggle(recordingId)),
+          ));
         },
         child: SizedBox.square(
           dimension: 48,

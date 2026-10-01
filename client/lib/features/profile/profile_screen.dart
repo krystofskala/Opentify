@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/api_client.dart' show ApiException;
 import '../../data/library_repository.dart';
 import '../../state/providers.dart';
 import '../../state/glass_settings.dart';
@@ -235,7 +236,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       }
       await showSpotifyImportReport(context, result);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Import selhal: $e')));
+      final detail = e is ApiException ? e.detail : null;
+      messenger.showSnackBar(SnackBar(content: Text(detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify.')));
     }
   }
 
@@ -245,7 +247,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       await ref.read(libraryRepositoryProvider).startScan();
       ref.invalidate(scanStatusProvider);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Sken se nepodařilo spustit: $e')));
+      final detail = e is ApiException ? e.detail : null;
+      messenger.showSnackBar(SnackBar(content: Text(detail ?? 'Sken se nepodařilo spustit.')));
     }
   }
 }

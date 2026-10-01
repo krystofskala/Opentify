@@ -623,10 +623,21 @@ class _PlaylistsTab extends ConsumerWidget {
         ],
       ),
     );
-    if (title == null || title.isEmpty) return;
-    final created = await ref.read(playlistsRepositoryProvider).create(title);
-    ref.invalidate(myPlaylistsProvider);
-    if (context.mounted) context.push('/playlists/${created.id}');
+    if (title == null || title.isEmpty) {
+      if (title != null && context.mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Playlist potřebuje název.')));
+      }
+      return;
+    }
+    try {
+      final created = await ref.read(playlistsRepositoryProvider).create(title);
+      ref.invalidate(myPlaylistsProvider);
+      if (context.mounted) context.push('/playlists/${created.id}');
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Playlist se nepodařilo vytvořit.')));
+      }
+    }
   }
 
   @override
