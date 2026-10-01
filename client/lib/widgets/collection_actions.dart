@@ -336,6 +336,15 @@ Future<void> showPlayOptions(BuildContext context, {required String title, requi
                   toast('Do fronty zamíchaně: ${songs(infos.length)}');
                 }),
               ),
+              // Celé album / playlist do offline knihovny v zařízení.
+              _Row(
+                icon: Symbols.download_for_offline_rounded,
+                label: 'Stáhnout do zařízení',
+                onTap: () => run(() async {
+                  container.read(offlineControllerProvider.notifier).add(infos);
+                  toast('Stahuje se do zařízení: ${songs(infos.length)}');
+                }),
+              ),
             ],
           ),
         ),
