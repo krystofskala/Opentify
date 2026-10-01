@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'core/desktop_audio.dart';
 import 'core/device_token.dart';
 import 'core/media_session.dart';
+import 'core/now_playing_activity.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
@@ -18,6 +19,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Nativní appka: uložený klíč zařízení dřív, než odejde první požadavek.
   await loadDeviceToken();
+  await NowPlayingActivity.loadSetting();
   // Windows: just_audio přes media_kit (libmpv).
   initDesktopAudio();
   // Nativní appka: ovládání na zamčené obrazovce (audio_service).

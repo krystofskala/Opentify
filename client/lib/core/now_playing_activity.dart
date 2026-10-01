@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Live Activity "Právě hraje" (iOS 16.2+): zamčená obrazovka a Dynamic
 /// Island s obalem ve "fun shape" výřezu (vzhled: ios/OpentifyWidgets).
@@ -17,6 +18,28 @@ class NowPlayingActivity {
   static String? _artKey;
   static Uint8List? _art;
 
+  /// Ve výchozím stavu VYPNUTO: na zámku je už systémový přehrávač s obalem
+  /// a karta pod ním byla zbytečně podruhé (živě nahlášeno). Profil › Vzhled.
+  static const _prefKey = 'appearance.live_activity';
+  static bool enabled = false;
+
+  static Future<void> loadSetting() async {
+    try {
+      enabled = (await SharedPreferences.getInstance()).getBool(_prefKey) ?? false;
+    } catch (_) {}
+    // Vypnuto -> případnou kartu z předchozího spuštění sklidit.
+    if (!enabled) unawaited(end());
+  }
+
+  static Future<void> setEnabled(bool value) async {
+    enabled = value;
+    _artKey = null; // při zapnutí poslat obal znovu
+    if (!value) await end();
+    try {
+      await (await SharedPreferences.getInstance()).setBool(_prefKey, value);
+    } catch (_) {}
+  }
+
   /// Stav skladby. `artworkUrl` se stáhne a zmenší jen při změně.
   static Future<void> update({
     required String recordingId,
@@ -26,7 +49,7 @@ class NowPlayingActivity {
     required Color color,
     required bool playing,
   }) async {
-    if (!_supported) return;
+    if (!_supported || !enabled) return;
     try {
       if (artworkUrl != _artKey) {
         _artKey = artworkUrl;

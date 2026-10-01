@@ -24,6 +24,8 @@ import '../../widgets/spotify_import_report.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import 'profiles_section.dart';
 import '../../core/share_image.dart' show shareFile;
+import '../../core/now_playing_activity.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -359,6 +361,22 @@ class _AppearanceSettings extends ConsumerWidget {
           value: ref.watch(fineGrainProvider),
           onChanged: ref.read(fineGrainProvider.notifier).set,
         ),
+        // Jen iOS appka: karta s obalem ve "fun shape" na zámku a v Dynamic
+        // Islandu. Výchozí vypnuto -- systémový přehrávač na zámku stačí.
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
+          const SizedBox(height: 12),
+          StatefulBuilder(
+            builder: (context, setState) => _SwitchRow(
+              title: 'Live Activity',
+              subtitle: 'Karta s obalem ve tvaru na zamčené obrazovce a v Dynamic Islandu (vedle systémového přehrávače).',
+              value: NowPlayingActivity.enabled,
+              onChanged: (v) async {
+                await NowPlayingActivity.setEnabled(v);
+                setState(() {});
+              },
+            ),
+          ),
+        ],
         if (!glassOff) ...[
           const SizedBox(height: 8),
           const _Section(
