@@ -352,7 +352,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
             if (onDelete != null)
               _Row(
                 icon: Symbols.delete_rounded,
-                label: 'Smazat playlist',
+                label: kind == CollectionKind.album ? 'Smazat album' : 'Smazat playlist',
                 destructive: true,
                 onTap: () {
                   Navigator.of(context).pop();

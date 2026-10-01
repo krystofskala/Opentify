@@ -11,6 +11,7 @@ class ReleaseModel {
     required this.releaseType,
     this.images = const [],
     this.notes,
+    this.imported = false,
   });
 
   final String id;
@@ -23,6 +24,9 @@ class ReleaseModel {
 
   /// Vlastní poznámka k albu (obsazení apod.), jen u vlastní hudby.
   final String? notes;
+
+  /// Přidané z YouTube / ručně -- jde smazat (⋯ › Smazat album).
+  final bool imported;
 
   String? get coverImageUrl => images.isEmpty ? null : images.first;
 
@@ -41,5 +45,6 @@ class ReleaseModel {
         releaseType: json['releaseType'] as String? ?? 'album',
         images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
         notes: json['notes'] as String?,
+        imported: json['imported'] as bool? ?? false,
       );
 }

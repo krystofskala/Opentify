@@ -216,6 +216,7 @@ class CatalogService:
             release_type=_effective_type(release),
             images=release.images,
             notes=(release.external_refs or {}).get("notes"),
+            imported=(release.external_refs or {}).get("source") in ("youtube", "manual"),
         )
 
     def _to_recording_out(self, recording: Recording) -> RecordingOut:
@@ -565,7 +566,9 @@ class CatalogService:
         return [
             r
             for r in self._session.exec(select(Release).where(Release.artist_id == artist.id)).all()
-            if (r.external_refs or {}).get("source") == "youtube"
+            # "manual" = album ručně přiřazené k interpretovi (MB ho vede u
+            # stejnojmenného cizího, viz No Phun Intended u Tylera Josepha).
+            if (r.external_refs or {}).get("source") in ("youtube", "manual")
         ]
 
     async def _deezer_discography(self, artist: Artist) -> list[Release]:
@@ -862,7 +865,7 @@ class CatalogService:
             return None
         # Album jen na YouTube / vlastní (Kontrast): tracklist zná jen naše DB
         # (živě: "No Phun Intended" z odkazu na YouTube ukazovalo 0 skladeb).
-        if (release.external_refs or {}).get("source") == "youtube" or is_own_id(release.mbid):
+        if (release.external_refs or {}).get("source") in ("youtube", "manual") or is_own_id(release.mbid):
             return self._local_release_tracks(release)
         if release.mbid is None:
             return await self._deezer_release_tracks(release) or self._local_release_tracks(release)

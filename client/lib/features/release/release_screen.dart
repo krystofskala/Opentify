@@ -10,6 +10,7 @@ import '../../models/release_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/detail_hero.dart';
+import '../../widgets/glass/glass.dart';
 import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
@@ -117,6 +118,55 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     });
   }
 
+  /// ⋯ › Smazat album -- jen alba přidaná z YouTube / ručně.
+  Future<void> _deleteImported(BuildContext context, ReleaseModel release) async {
+    final ok = await showGlassSheet<bool>(
+      context,
+      builder: (sheet) => GlassSheet(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Smazat „${release.title}“?', style: Theme.of(sheet).textTheme.titleLarge),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Album zmizí z diskografie i z knihovny a stažené soubory se smažou. Historie poslechů zůstane.',
+                style: Theme.of(sheet).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              GlassButton(
+                label: 'Smazat album',
+                icon: Symbols.delete_rounded,
+                destructive: true,
+                expand: true,
+                onPressed: () => Navigator.of(sheet).pop(true),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              GlassButton(
+                label: 'Zrušit',
+                style: GlassButtonStyle.plain,
+                expand: true,
+                onPressed: () => Navigator.of(sheet).pop(false),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await ref.read(apiClientProvider).deleteJson('/library/imported-releases/${release.id}');
+      ref.read(libraryRevisionProvider.notifier).state++;
+      messenger?.showSnackBar(SnackBar(content: Text('„${release.title}“ smazáno')));
+      if (context.mounted) context.pop();
+    } catch (e) {
+      messenger?.showSnackBar(SnackBar(content: Text('Smazat se nepodařilo: $e')));
+    }
+  }
+
   /// Hlavní akce hlavičky: celé album do knihovny / z ní.
   Future<void> _toggleLibrary(
       BuildContext context, ReleaseModel release, List<RecordingModel>? recordings, bool inLibrary) async {
@@ -205,6 +255,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                     artistId: release.artistId,
                     artistName: artistName,
                     inLibrary: inLibrary,
+                    onDelete: release.imported ? () => _deleteImported(context, release) : null,
                   ),
                 ),
               ],

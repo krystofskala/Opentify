@@ -49,6 +49,8 @@ class ReleaseOut(CamelModel):
     rarity: str | None = None
     # Vlastní poznámka k albu (obsazení apod.) -- `external_refs["notes"]`.
     notes: str | None = None
+    # Přidané ručně (odkaz z YouTube / ručně přiřazené) -- jde smazat.
+    imported: bool = False
 
 
 class RecordingOut(CamelModel):

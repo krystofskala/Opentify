@@ -520,6 +520,9 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                           title: album.title,
                           subtitle: album.artistName,
                           imageUrl: album.coverImageUrl,
+                          // V Knihovně je album vždy (aspoň částečně) -- jinak
+                          // menu nenabídlo "Odebrat z knihovny".
+                          inLibrary: true,
                         ),
                         animationIndex: index % 12,
                       );
@@ -547,6 +550,9 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                           title: album.title,
                           subtitle: album.artistName,
                           imageUrl: album.coverImageUrl,
+                          // V Knihovně je album vždy (aspoň částečně) -- jinak
+                          // menu nenabídlo "Odebrat z knihovny".
+                          inLibrary: true,
                         ),
                       );
                     },

@@ -12,6 +12,7 @@ import '../../data/library_repository.dart';
 import '../../state/providers.dart';
 import '../../state/glass_settings.dart';
 import '../../state/auth_controller.dart';
+import 'home_genres_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../state/grain_controller.dart';
 import '../../state/theme_mode_controller.dart';
@@ -140,6 +141,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               summary: 'Motiv, sklo nebo plné plochy, zrno',
               initiallyOpen: true,
               child: _AppearanceSettings(),
+            ),
+            const SizedBox(height: 12),
+            _Section(
+              id: 'home',
+              icon: Symbols.home_rounded,
+              title: 'Domů',
+              summary: 'Vlastní řady žánrů',
+              child: _ActionRow(
+                icon: Symbols.category_rounded,
+                title: 'Žánry na Domů',
+                description: 'Vybrané žánry dostanou na Domů vlastní řadu hned pod Rychlým výběrem. '
+                    'Bez výběru je Domů stejné jako pro ostatní.',
+                buttonLabel: 'Vybrat',
+                onPressed: () => showHomeGenresSheet(context),
+              ),
             ),
             const SizedBox(height: 12),
             _Section(

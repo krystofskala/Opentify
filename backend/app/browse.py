@@ -424,6 +424,72 @@ def _aware(value):
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def new_key(category_id: str) -> str:
+    return f"genre-new:{category_id}"
+
+
+NEW_WITHIN_DAYS = 365
+
+
+async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
+    """"Novinky": co interpreti žánru (vlastní výběr, `SEED_ARTISTS`) vydali
+    za poslední rok -- nejnovější první, ze každé desky pár skladeb. Jen pro
+    žánry s vlastním výběrem interpretů (bluegrass). Obnova denně."""
+    from datetime import date
+
+    from app.catalog.artwork import _normalize
+    from app.models import HomeSnapshot
+
+    if c.id not in SEED_ARTISTS:
+        return None
+    with Session(engine) as session:
+        snap = session.get(HomeSnapshot, new_key(c.id))
+        if snap is not None and not force and utcnow() - _aware(snap.generated_at) < RAIL_FRESH:
+            return snap.payload.get("playlistId")
+    dz = get_deezer_client()
+    cutoff = date.today().toordinal() - NEW_WITHIN_DAYS
+    albums: list[dict[str, Any]] = []
+    for name in SEED_ARTISTS[c.id]:
+        found = await dz.search_artist(name, limit=5)
+        artist = next((a for a in found if _normalize(a.get("name", "")) == _normalize(name)), None)
+        if artist is None or not artist.get("id"):
+            continue
+        for album in await dz.artist_albums(str(artist["id"])) or []:
+            try:
+                released = date.fromisoformat(album.get("release_date") or "")
+            except ValueError:
+                continue
+            if released.toordinal() >= cutoff and album.get("id"):
+                albums.append({**album, "_date": released, "_artist": artist})
+    albums.sort(key=lambda a: a["_date"], reverse=True)
+    tracks: list[dict[str, Any]] = []
+    seen_albums: set[str] = set()
+    for album in albums:
+        if album["id"] in seen_albums or len(tracks) >= RAIL_SIZE:
+            continue
+        seen_albums.add(album["id"])
+        items = await dz.album_tracks(str(album["id"])) or []
+        own = [t for t in items if str((t.get("artist") or {}).get("id")) == str(album["_artist"]["id"])]
+        # Singl celý, z desky první tři skladby.
+        for t in own[:3]:
+            tracks.append({**t, "album": {"id": album["id"], "title": album.get("title"), "cover_xl": album.get("cover_xl"), "cover_big": album.get("cover_big")}})
+    ids = await asyncio.to_thread(g._ingest_tracks, tracks) if tracks else []
+    if not ids:
+        return snap.payload.get("playlistId") if snap is not None else None
+    playlist_id = g._save_playlist(
+        owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:new:{c.id}", title=f"Novinky: {c.title}",
+        description=f"Co vyšlo za poslední rok -- {c.title.lower()} od klasiků po mladé", kind=PlaylistKind.EDITORIAL,
+        section="browse", recording_ids=ids[:RAIL_SIZE], cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
+    )
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, new_key(c.id)) or HomeSnapshot(key=new_key(c.id))
+        row.payload = {"playlistId": playlist_id}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    return playlist_id
+
+
 def pinned_genres(user_id: str) -> list[Category]:
     from app.models import AppUser
 
@@ -445,6 +511,8 @@ async def build_genre_rails() -> int:
     built = 0
     for c in genres:
         if await genre_rail(c):
+            built += 1
+        if c.id in wanted and await genre_new_releases(c):
             built += 1
     return built
 

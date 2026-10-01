@@ -1084,6 +1084,50 @@ async def verify_redownload(
     return {"recordingId": recording_id, "review": "redownload"}
 
 
+@library_router.delete("/imported-releases/{release_id}")
+async def delete_imported_release(release_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Smaže album přidané z odkazu na YouTube (nebo ručně přiřazené): stažené
+    soubory, skladby i album. Skladby s historií poslechů zůstanou (bez alba),
+    ať se nesmaže Wrapped. Oficiální alba z katalogu takhle smazat nejde."""
+    from app.catalog.cache import CACHE_PREFIX
+    from app.models import Listen, ListenLater, PlaylistItem
+    from app.redis_bus import get_redis
+
+    with Session(engine) as session:
+        release = session.get(Release, release_id)
+        if release is None:
+            raise HTTPException(status_code=404, detail="Album neexistuje.")
+        if (release.external_refs or {}).get("source") not in ("youtube", "manual"):
+            raise HTTPException(status_code=400, detail="Smazat jde jen album přidané z YouTube.")
+        artist_id = release.artist_id
+        deleted = kept = 0
+        for rec in session.exec(select(Recording).where(Recording.release_id == release_id)).all():
+            _remove_from_library(session, rec.id)
+            for model, column in ((LibraryEntry, LibraryEntry.recording_id), (PlaylistItem, PlaylistItem.recording_id)):
+                for row in session.exec(select(model).where(column == rec.id)).all():
+                    session.delete(row)
+            for row in session.exec(select(ListenLater).where(ListenLater.target_id == rec.id)).all():
+                session.delete(row)
+            if session.exec(select(Listen).where(Listen.recording_id == rec.id)).first() is not None:
+                rec.release_id = None  # historie poslechů zůstává
+                session.add(rec)
+                kept += 1
+                continue
+            asset = session.get(MediaAsset, rec.id)
+            if asset is not None:
+                session.delete(asset)
+            session.delete(rec)
+            deleted += 1
+        for row in session.exec(select(ListenLater).where(ListenLater.target_id == release_id)).all():
+            session.delete(row)
+        session.delete(release)
+        session.commit()
+    r = get_redis()
+    async for key in r.scan_iter(match=f"{CACHE_PREFIX}swr:discography:v1:{artist_id}:*"):
+        await r.delete(key)
+    return {"deleted": deleted, "keptWithHistory": kept}
+
+
 @library_router.post("/tracks/{recording_id}/wrong-version")
 async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(get_current_user)):
     """"Špatná verze -- stáhnout jinou": zapamatuje si přesný zdroj staženého

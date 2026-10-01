@@ -346,19 +346,24 @@ def build_home(user_id: str) -> dict[str, Any]:
         from app.models import HomeSnapshot as _Snap
 
         for c in browse.pinned_genres(user_id):
-            snap = session.get(_Snap, browse.rail_key(c.id))
-            playlist_id = (snap.payload or {}).get("playlistId") if snap else None
-            tracks = _playlist_tracks(session, playlist_id, 20) if playlist_id else []
-            if tracks:
-                sections.append(
-                    {
-                        "id": f"genre_{c.id}",
-                        "title": c.title,
-                        "type": "track_rail",
-                        "playlistId": playlist_id,
-                        "items": [t.model_dump(mode="json", by_alias=True) for t in tracks],
-                    }
-                )
+            # Řada žánru a u bluegrassu i jeho novinky z posledního roku.
+            for key, section_id, title in (
+                (browse.rail_key(c.id), f"genre_{c.id}", c.title),
+                (browse.new_key(c.id), f"genre_new_{c.id}", f"Novinky: {c.title}"),
+            ):
+                snap = session.get(_Snap, key)
+                playlist_id = (snap.payload or {}).get("playlistId") if snap else None
+                tracks = _playlist_tracks(session, playlist_id, 20) if playlist_id else []
+                if tracks:
+                    sections.append(
+                        {
+                            "id": section_id,
+                            "title": title,
+                            "type": "track_rail",
+                            "playlistId": playlist_id,
+                            "items": [t.model_dump(mode="json", by_alias=True) for t in tracks],
+                        }
+                    )
 
         worldwide = next((p for p in by_section.get("charts", []) if p.source == "deezer:playlist:3155776842"), None)
         for key, title, kind in _SECTION_ORDER:
