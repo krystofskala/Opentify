@@ -57,7 +57,7 @@ class LikeHeart extends ConsumerWidget {
           // Dlouhý stisk se dá udělat omylem (na iOS čte jako "menu") -- vždy
           // potvrdit a nabídnout Zpět.
           messenger?.hideCurrentSnackBar();
-          messenger?.showSnackBar(SnackBar(
+          messenger?.showSnackBar(SnackBar(persist: false, 
             content: Text(wasDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi'),
             action: SnackBarAction(label: 'Zpět', onPressed: () => notifier.toggle(recordingId)),
           ));

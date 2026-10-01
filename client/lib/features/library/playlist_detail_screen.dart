@@ -346,7 +346,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       final copy = await ref.read(playlistsRepositoryProvider).copy(detail.id);
       ref.invalidate(myPlaylistsProvider);
       messenger?.showSnackBar(
-        SnackBar(
+        SnackBar(persist: false, 
           content: Text('„${detail.title}“ přidán do knihovny'),
           action: SnackBarAction(label: 'Otevřít', onPressed: () => context.push('/playlists/${copy.id}')),
         ),

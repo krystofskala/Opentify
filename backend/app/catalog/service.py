@@ -25,7 +25,7 @@ import re
 import unicodedata
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.availability import compute_availability, resolve_artist_name
@@ -292,8 +292,62 @@ class CatalogService:
                             {"entityType": "recording", **self._to_recording_out(recording).model_dump(by_alias=True)}
                         )
         self._session.commit()
+        results = await self._merge_verified_duplicates(results)
         results = own + results
         return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
+
+    async def _merge_verified_duplicates(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Deezer má jednoho interpreta občas víckrát (živě: Lana Del Rey 3×,
+        různá id, stejná fotka). Sloučit jen OVĚŘENĚ: stejné jméno, stejná
+        fotka A společná alba -- fake profil se stejnou fotkou zůstane zvlášť."""
+        from app.catalog.deezer_ingest import is_placeholder_picture
+
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in results:
+            if item.get("entityType") != "artist":
+                out.append(item)
+                continue
+            artist = self._session.get(Artist, item["id"])
+            image = (artist.images or [None])[0] if artist else None
+            canonical = None
+            if artist is not None and image and not is_placeholder_picture(image) and artist.deezer_id:
+                others = [
+                    a
+                    for a in self._session.exec(select(Artist).where(func.lower(Artist.name) == artist.name.lower())).all()
+                    if a.id != artist.id
+                    and not (a.external_refs or {}).get("mergedInto")
+                    and a.images
+                    and a.images[0] == image
+                ]
+                others.sort(key=lambda a: (a.mbid is None, a.id))
+                for other in others:
+                    if await self._same_discography(artist, other):
+                        canonical = self._merge_artist_into(artist, other)
+                        self._session.commit()
+                        break
+            target = canonical or artist
+            if target is None or target.id in seen:
+                continue
+            seen.add(target.id)
+            out.append({"entityType": "artist", **self._to_artist_out(target).model_dump(by_alias=True)} if canonical else item)
+        return out
+
+    async def _same_discography(self, candidate: Artist, other: Artist) -> bool:
+        """Aspoň jedno album (normalizovaný název) Deezer profilu `candidate`
+        je i v diskografii `other` -- ověření, že jde o téhož interpreta."""
+        albums = await self._dz.artist_albums(candidate.deezer_id) if candidate.deezer_id else None
+        theirs = {norm(clean_album_title(a.get("title") or "")) for a in albums or []} - {""}
+        if not theirs:
+            return False
+        ours = {
+            norm(clean_album_title(r.title))
+            for r in self._session.exec(select(Release).where(Release.artist_id == other.id)).all()
+        }
+        if other.deezer_id and not ours:
+            other_albums = await self._dz.artist_albums(other.deezer_id) or []
+            ours = {norm(clean_album_title(a.get("title") or "")) for a in other_albums}
+        return bool(theirs & ours)
 
     def _own_matches(self, query: str, types: list[str]) -> list[dict[str, Any]]:
         """Vlastní interpreti/alba/skladby (`own:` id), jejichž název obsahuje

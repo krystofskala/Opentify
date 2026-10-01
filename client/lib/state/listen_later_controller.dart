@@ -85,7 +85,7 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
       }
       final item = await add(kind, targetId);
       messenger?.showSnackBar(
-        SnackBar(
+        SnackBar(persist: false, 
           content: const Row(
             children: [
               Icon(Symbols.schedule_rounded, size: 18),

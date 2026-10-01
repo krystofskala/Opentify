@@ -51,7 +51,7 @@ class NativeNav {
     if (router.routerDelegate.currentConfiguration.uri.path != '/now-playing') return;
     final context = router.routerDelegate.navigatorKey.currentContext;
     if (context == null) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(persist: false, 
       content: const Text('Sdílet jako obrázek?'),
       duration: const Duration(seconds: 5),
       action: SnackBarAction(label: 'Sdílet', onPressed: () => openShareCard(context)),

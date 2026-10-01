@@ -3,10 +3,9 @@
 1. Řádky se `mergedInto` (sloučené duplikáty) -- jejich alba a skladby, co
    u nich zůstaly, přesunout na hlavní řádek; sám na sebe ukazující
    `mergedInto` smazat.
-2. Stejné jméno + STEJNÁ fotka z Deezeru (Deezer má jednoho interpreta
-   občas víckrát s různými id) -> sloučit do jednoho: přednost má řádek
-   s MBID, pak s nejvíc skladbami. Ostatní zůstanou jako aliasy
-   (`mergedInto`, Deezer id si nechají).
+2. Stejné jméno + stejná fotka + STEJNÉ Deezer id -> jeden řádek (jistý
+   duplikát). Různá Deezer id se slučují jen ověřeně podle diskografie
+   (hledání), fotka sama nestačí -- fake/výběrové profily ji přebírají.
 
     python -m app.tools.merge_duplicate_artists [--dry-run]
 """
@@ -71,7 +70,13 @@ def run(dry: bool) -> None:
         for a in artists:
             refs = a.external_refs or {}
             # Ručně oddělení jmenovci (Marsyas CZ × FR) a vlastní hudba -- nikdy.
-            if refs.get("mergedInto") or refs.get("homonymOf") or refs.get("notMine") or (a.mbid or "").startswith("own:"):
+            if (
+                refs.get("mergedInto")
+                or refs.get("homonymOf")
+                or refs.get("notMine")
+                or refs.get("notSameAs")
+                or (a.mbid or "").startswith("own:")
+            ):
                 continue
             image = (a.images or [None])[0]
             if image and not is_placeholder_picture(image):
@@ -85,6 +90,11 @@ def run(dry: bool) -> None:
             mbids = {r.mbid for r in rows if r.mbid}
             if len(mbids) > 1:
                 continue  # dvě různá MBID = různí interpreti, nesahat
+            # Fotka nestačí (fake/výběrový profil ji převezme) -- tady jen
+            # jistota: stejné Deezer id. Ostatní slučuje ověřeně (společná alba)
+            # hledání, viz CatalogService._merge_verified_duplicates.
+            if len({r.deezer_id for r in rows}) != 1:
+                continue
             rows.sort(key=lambda r: (r.mbid is None, -counts.get(r.id, 0)))
             canon = rows[0]
             for dup in rows[1:]:

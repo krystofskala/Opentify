@@ -101,6 +101,8 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
     // v tmavém režimu dřív svítila bílá `inverseSurface` jako cizí prvek.
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
+      // Odhodit prstem do strany (dolů nad plovoucí lištou skoro nešlo).
+      dismissDirection: DismissDirection.horizontal,
       backgroundColor: brightness == Brightness.dark
           ? const Color(0xEB2A2A30)
           : colorScheme.inverseSurface.withValues(alpha: 0.92),

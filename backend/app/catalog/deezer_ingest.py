@@ -73,14 +73,9 @@ def ingest_artist(session: Session, dz: dict[str, Any]) -> Artist | None:
         # napojí na existující diskografii a přehratelné skladby.
         candidates.sort(key=lambda a: a.mbid is None)
         artist = next((a for a in candidates if a.deezer_id in (None, dzid)), None)
-        if artist is None and picture and not is_placeholder_picture(picture):
-            # Deezer má jednoho interpreta občas víckrát (živě: Lana Del Rey
-            # 3×, různá id, STEJNÁ fotka). Stejné jméno + stejná fotka = tentýž:
-            # tohle id si zapamatovat jako alias, ať se příště nezaloží nový.
-            same = next((a for a in candidates if a.images and a.images[0] == picture), None)
-            if same is not None:
-                session.add(Artist(name=name, sort_name=name, deezer_id=dzid, external_refs={"mergedInto": same.id}))
-                return same
+        # Stejné jméno + stejná fotka ještě NENÍ tentýž interpret (fake profil
+        # může fotku převzít) -- sloučení až po ověření diskografie, viz
+        # `CatalogService._merge_verified_duplicates`.
     if artist is None:
         artist = Artist(name=name, sort_name=name, deezer_id=dzid)
     else:

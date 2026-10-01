@@ -16,12 +16,18 @@ class SearchHistoryController extends StateNotifier<List<String>> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    state = prefs.getStringList(_prefsKey) ?? const [];
+    // Odkazy (Spotify/Apple Music/…) do historie nepatří -- uklidit i staré.
+    state = (prefs.getStringList(_prefsKey) ?? const []).where((q) => !_isLink(q)).toList();
   }
+
+  /// Vložený odkaz není hledání -- nenavrhovat ho (živě: dlouhá Apple Music
+  /// adresa pořád visela v návrzích).
+  static bool _isLink(String text) =>
+      RegExp(r'^(https?://|www\.|spotify:)|\.(com|net|cz|link|be)/', caseSensitive: false).hasMatch(text.trim());
 
   Future<void> add(String query) async {
     final trimmed = query.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty || _isLink(trimmed)) return;
     final next = [trimmed, ...state.where((q) => q.toLowerCase() != trimmed.toLowerCase())];
     state = next.take(_maxEntries).toList();
     final prefs = await SharedPreferences.getInstance();
