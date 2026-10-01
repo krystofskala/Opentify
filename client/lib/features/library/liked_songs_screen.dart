@@ -7,16 +7,14 @@ import '../../models/recording_model.dart';
 import '../../state/liked_songs_controller.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
-import '../../theme/glass_tokens.dart';
-import '../../theme/shapes.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
-import '../../widgets/glass/glass.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../core/cz_plural.dart';
+import 'pinned_tile.dart';
 
 const _title = 'Oblíbené skladby';
 
@@ -43,54 +41,17 @@ class LikedSongsCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     _listenForLikes(ref);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
     final count = ref.watch(likedSongsControllerProvider).valueOrNull?.length;
-    final shape = AppShapes.of(Expressive.cornerExtraLarge);
-    return GlassPressable(
-      onPressed: () => context.push('/library/liked'),
-      shape: shape,
-      minSize: Size.zero,
-      child: DecoratedBox(
-        decoration: ShapeDecoration(
-          shape: shape,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [scheme.primaryContainer, scheme.tertiaryContainer],
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Row(
-            children: [
-              DecoratedBox(
-                decoration: ShapeDecoration(shape: AppShapes.of(Expressive.cornerLarge), color: scheme.primary),
-                child: SizedBox(
-                  width: 64,
-                  height: 64,
-                  child: Icon(Symbols.favorite_rounded, fill: 1, color: scheme.onPrimary, size: 32),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_title, style: theme.textTheme.titleLarge?.copyWith(color: scheme.onPrimaryContainer)),
-                    Text(
-                      count == null ? 'Playlist' : 'Playlist · ${songsCount(count)}',
-                      style:
-                          theme.textTheme.bodyMedium?.copyWith(color: scheme.onPrimaryContainer.withValues(alpha: 0.8)),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Symbols.chevron_right_rounded, color: scheme.onPrimaryContainer),
-            ],
-          ),
-        ),
-      ),
+    return PinnedTile(
+      icon: Symbols.favorite_rounded,
+      title: 'Oblíbené',
+      subtitle: count == null ? 'Playlist' : songsCount(count),
+      colors: [scheme.primaryContainer, scheme.tertiaryContainer],
+      iconBackground: scheme.primary,
+      iconColor: scheme.onPrimary,
+      textColor: scheme.onPrimaryContainer,
+      onTap: () => context.push('/library/liked'),
     );
   }
 }

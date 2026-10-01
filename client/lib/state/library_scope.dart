@@ -4,9 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/remove_from_library.dart' show libraryRevisionProvider;
 import 'providers.dart';
 
-/// Pohled Knihovny (zatím jen admin): klasická knihovna, co si stáhl, nebo
-/// celý server. Server to pozná z hlavičky `X-Library-Scope`.
-enum LibraryScope { mine, downloaded, all }
+/// Pohled Knihovny: klasická knihovna, co si stáhl, celý server (admin),
+/// nebo offline skladby v tomhle zařízení (všichni). Server pozná pohled
+/// z hlavičky `X-Library-Scope`; offline je čistě v zařízení.
+enum LibraryScope { mine, downloaded, all, offline }
 
 class LibraryScopeController extends StateNotifier<LibraryScope> {
   LibraryScopeController(this._ref) : super(LibraryScope.mine) {
@@ -27,7 +28,8 @@ class LibraryScopeController extends StateNotifier<LibraryScope> {
   Future<void> set(LibraryScope scope, {bool save = true}) async {
     state = scope;
     final headers = _ref.read(apiClientProvider).extraHeaders;
-    scope == LibraryScope.mine ? headers.remove('X-Library-Scope') : headers['X-Library-Scope'] = scope.name;
+    final server = scope == LibraryScope.downloaded || scope == LibraryScope.all;
+    server ? headers['X-Library-Scope'] = scope.name : headers.remove('X-Library-Scope');
     _ref.read(libraryRevisionProvider.notifier).state++;
     if (!save) return;
     try {

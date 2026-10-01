@@ -18,6 +18,8 @@ import '../../widgets/media_card.dart';
 import '../../widgets/playlist_card.dart' show PlaylistArtwork;
 import 'liked_songs_screen.dart' show LikedSongsCard;
 import 'listen_later_screen.dart' show ListenLaterCard;
+import 'pinned_tile.dart' show PinnedGrid;
+import 'shazam_collection_screen.dart' show ShazamCard;
 import '../../widgets/remove_from_library.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -49,17 +51,17 @@ final _localArtistsProvider = FutureProvider.autoDispose((ref) {
 /// Knihovna -- všechno, co je na disku k okamžitému přehrání, v pilulkových
 /// tabech Skladby/Alba/Interpreti/Playlisty (PixelPlayer styl). Karty
 /// alb/interpretů vedou na sdílené Album/Interpret obrazovky.
-class LocalLibraryScreen extends StatefulWidget {
+class LocalLibraryScreen extends ConsumerStatefulWidget {
   const LocalLibraryScreen({super.key});
 
   @override
-  State<LocalLibraryScreen> createState() => _LocalLibraryScreenState();
+  ConsumerState<LocalLibraryScreen> createState() => _LocalLibraryScreenState();
 }
 
 /// Hledání přes CELOU knihovnu (backend `GET /library/search`, bez
 /// diakritiky) -- ne jen přes právě načtenou stránku skladeb. Během hledání
 /// taby nahradí čipy rozsahu a obsah seskupené výsledky, stejné jako v Hledání.
-class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
+class _LocalLibraryScreenState extends ConsumerState<LocalLibraryScreen> {
   final _controller = TextEditingController();
   Timer? _debounce;
   String _query = '';
@@ -103,16 +105,17 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final searching = _query.isNotEmpty;
+    final offline = ref.watch(libraryScopeProvider) == LibraryScope.offline;
     return DefaultTabController(
-      length: 5,
+      length: 4,
       child: Scaffold(
         appBar: SectionAppBar(
           'Knihovna',
           // Admin: celá sdílená knihovna na serveru, nebo jen ta jeho.
           actions: const [_LibraryScopeToggle()],
           bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(64 + 48),
-            child: Column(
+            preferredSize: Size.fromHeight(offline ? 0 : 64 + 48),
+            child: offline ? const SizedBox.shrink() : Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
@@ -147,12 +150,12 @@ class _LocalLibraryScreenState extends State<LocalLibraryScreen> {
         ),
         // Taby zůstávají ve stromu (Offstage) i během hledání -- jinak by se
         // po vymazání dotazu znovu načítala celá knihovna a ztratil se scroll.
-        body: Stack(
+        body: offline ? const OfflineTab() : Stack(
           children: [
             Offstage(
               offstage: searching,
               child: const TabBarView(
-                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab(), OfflineTab()],
+                children: [_SongsTab(), _AlbumsTab(), _ArtistsTab(), _PlaylistsTab()],
               ),
             ),
             if (searching)
@@ -629,17 +632,11 @@ class _PlaylistsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlists = ref.watch(myPlaylistsProvider);
-    // Připnuté nahoře: Oblíbené + Poslechnout později.
+    // Připnuté nahoře v mřížce 2×2 (pod nimi je tak vidět víc playlistů).
     const liked = Padding(
       padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.xs),
-      child: Column(
-        children: [
-          LikedSongsCard(),
-          SizedBox(height: AppSpacing.sm),
-          ListenLaterCard(),
-          SizedBox(height: AppSpacing.sm),
-          SharedPlaylistsCard(),
-        ],
+      child: PinnedGrid(
+        children: [LikedSongsCard(), ListenLaterCard(), SharedPlaylistsCard(), ShazamCard()],
       ),
     );
     final grid = ref.watch(_playlistGridProvider);
@@ -770,7 +767,7 @@ class _PlaylistsTab extends ConsumerWidget {
 class _LibraryTabSegments extends StatelessWidget {
   const _LibraryTabSegments();
 
-  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty', 'Offline'];
+  static const _labels = ['Skladby', 'Alba', 'Interpreti', 'Playlisty'];
 
   @override
   Widget build(BuildContext context) {
@@ -796,13 +793,20 @@ class _LibraryScopeToggle extends ConsumerWidget {
   static const _labels = {
     LibraryScope.mine: ('Moje', Symbols.person_rounded, 'Co sis přidal do knihovny a lajkl'),
     LibraryScope.downloaded: ('Staženo', Symbols.download_done_rounded, 'Všechno, co sis stáhl nebo pustil'),
-    LibraryScope.all: ('Vše na serveru', Symbols.dns_rounded, 'Všechno stažené, i od ostatních profilů'),
+    LibraryScope.all: ('Server', Symbols.dns_rounded, 'Všechno stažené na serveru, i od ostatních profilů'),
+    LibraryScope.offline: ('Offline', Symbols.download_for_offline_rounded, 'Skladby uložené v tomhle zařízení'),
   };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (ref.watch(authProvider).valueOrNull?.user?.role != 'admin') return const SizedBox.shrink();
-    final scope = ref.watch(libraryScopeProvider);
+    final admin = ref.watch(authProvider).valueOrNull?.user?.role == 'admin';
+    // Offline (v zařízení) mají všichni; Staženo a Server jen admin.
+    final options = {
+      for (final e in _labels.entries)
+        if (admin || e.key == LibraryScope.mine || e.key == LibraryScope.offline) e.key: e.value,
+    };
+    var scope = ref.watch(libraryScopeProvider);
+    if (!options.containsKey(scope)) scope = LibraryScope.mine;
     final (label, icon, _) = _labels[scope]!;
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
@@ -817,7 +821,7 @@ class _LibraryScopeToggle extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (final entry in _labels.entries)
+                for (final entry in options.entries)
                   ListTile(
                     leading: Icon(entry.value.$2),
                     title: Text(entry.value.$1),

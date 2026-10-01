@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../core/diagnostics.dart';
 
 import '../features/library/shared_playlists_screen.dart';
+import '../features/library/shazam_collection_screen.dart';
 import '../features/artist/artist_discography_screen.dart';
 import '../features/artist/artist_screen.dart';
 import '../features/home/home_screen.dart';
@@ -74,6 +75,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/library/shared',
         builder: (context, state) => const SharedPlaylistsScreen(),
+      ),
+      GoRoute(
+        path: '/library/shazam',
+        builder: (context, state) => const ShazamCollectionScreen(),
       ),
       GoRoute(
         path: '/library/liked',

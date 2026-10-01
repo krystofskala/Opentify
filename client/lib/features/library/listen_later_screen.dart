@@ -21,6 +21,7 @@ import '../../widgets/track_actions.dart' show TrackMenuAction, nowPlayingInfoFo
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../shazam/open_shazam_badge.dart';
+import 'pinned_tile.dart';
 
 const _title = 'Poslechnout později';
 const _sourceLabel = 'Poslechnout později';
@@ -31,55 +32,17 @@ class ListenLaterCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
     final count = ref.watch(listenLaterProvider).valueOrNull?.active.length;
-    final shape = AppShapes.of(Expressive.cornerExtraLarge);
-    return GlassPressable(
-      onPressed: () => context.push('/library/later'),
-      shape: shape,
-      minSize: Size.zero,
-      child: DecoratedBox(
-        decoration: ShapeDecoration(
-          shape: shape,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [scheme.tertiaryContainer, scheme.secondaryContainer],
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Row(
-            children: [
-              DecoratedBox(
-                decoration: ShapeDecoration(shape: AppShapes.of(Expressive.cornerLarge), color: scheme.tertiary),
-                child: SizedBox(
-                  width: 64,
-                  height: 64,
-                  child: Icon(Symbols.schedule_rounded, fill: 1, color: scheme.onTertiary, size: 32),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_title, style: theme.textTheme.titleLarge?.copyWith(color: scheme.onTertiaryContainer)),
-                    Text(
-                      count == null || count == 0 ? 'Hudba na potom' : '$count ${_items(count)} na potom',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: scheme.onTertiaryContainer.withValues(alpha: 0.8),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Symbols.chevron_right_rounded, color: scheme.onTertiaryContainer),
-            ],
-          ),
-        ),
-      ),
+    return PinnedTile(
+      icon: Symbols.schedule_rounded,
+      title: 'Na později',
+      subtitle: count == null || count == 0 ? 'Hudba na potom' : '$count ${_items(count)}',
+      colors: [scheme.tertiaryContainer, scheme.secondaryContainer],
+      iconBackground: scheme.tertiary,
+      iconColor: scheme.onTertiary,
+      textColor: scheme.onTertiaryContainer,
+      onTap: () => context.push('/library/later'),
     );
   }
 }

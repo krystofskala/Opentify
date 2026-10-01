@@ -954,8 +954,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
                   child: ExpressiveMorph(
                     size: 76,
-                    // Barva alba (živě chtěné místo bílé plochy).
-                    color: accent,
+                    // Plocha černá/bílá podle motivu, barva alba jen uvnitř.
+                    color: playerFg(context),
                     shape: playback.isPlaying
                         ? const ExpressiveShape.squircle()
                         : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
@@ -964,13 +964,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             ? SizedBox.square(
                                 dimension: 40,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 3, color: _onAccent(accent), value: provisioningPct / 100),
+                                    strokeWidth: 3, color: accent, value: provisioningPct / 100),
                               )
-                            : ExpressiveLoadingIndicator(size: 40, color: _onAccent(accent)))
+                            : ExpressiveLoadingIndicator(size: 40, color: accent))
                         : Icon(
                             playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
                             size: 44,
-                            color: _onAccent(accent),
+                            color: accent,
                             fill: 1,
                           ),
                   ),
@@ -1354,6 +1354,3 @@ final _releaseOfRecording = FutureProvider.family<String?, String>((ref, recordi
 /// zanikalo).
 Color playerFg(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).colorScheme.onSurface;
-
-/// Ikona na tlačítku v barvě alba: bílá nebo černá podle jasu.
-Color _onAccent(Color accent) => accent.computeLuminance() > 0.45 ? Colors.black87 : Colors.white;

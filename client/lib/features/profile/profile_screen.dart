@@ -14,7 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../state/grain_controller.dart';
 import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
-import '../../theme/glass_tokens.dart' show Motion;
+import '../../theme/shapes.dart';
+import '../../theme/glass_tokens.dart' show Expressive, Motion;
 import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/section_app_bar.dart';
@@ -97,6 +98,26 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 children: [
             // Admin jedná za jiný profil -- pruh se "Zpět na můj".
             const ActingAsBanner(),
+            // Rychlý přístup nahoře (živě chtěné): Wrapped, Shazam, ladička.
+            Row(
+              children: [
+                Expanded(
+                  child: _QuickButton(
+                      icon: Symbols.equalizer_rounded, label: 'Wrapped', onTap: () => context.push('/wrapped')),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: _QuickButton(
+                      icon: Symbols.graphic_eq_rounded, label: 'Shazam', onTap: () => context.push('/shazam')),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: _QuickButton(
+                      icon: Symbols.music_note_rounded, label: 'Ladička', onTap: () => context.push('/tuner')),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             // Sbalitelné skupiny místo jednoho dlouhého seznamu karet (pro
             // tátu: otevře jen to, co potřebuje; stav se pamatuje).
             const _Section(
@@ -164,42 +185,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       orElse: () => const SizedBox.shrink(),
                     ),
                   ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            _Section(
-              id: 'tools',
-              icon: Symbols.apps_rounded,
-              title: 'Nástroje',
-              summary: 'Wrapped, Open Shazam, ladička',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _ActionRow(
-                    icon: Symbols.equalizer_rounded,
-                    title: 'Wrapped',
-                    description: 'Tvoje roky v hudbě od 2016 – minuty, interpreti, skladby a žánry, '
-                        'každou obrazovku jde sdílet jako obrázek.',
-                    buttonLabel: 'Otevřít',
-                    onPressed: () => context.push('/wrapped'),
-                  ),
-                  _ActionRow(
-                    icon: Symbols.graphic_eq_rounded,
-                    title: 'Open Shazam',
-                    description: 'Pozná skladbu, která zrovna hraje kolem, a uloží ji do Poslechnout později. '
-                        'Anonymně: Shazamu jde přes VPN jen otisk zvuku.',
-                    buttonLabel: 'Poznat skladbu',
-                    onPressed: () => context.push('/shazam'),
-                  ),
-                  _ActionRow(
-                    icon: Symbols.music_note_rounded,
-                    title: 'Ladička',
-                    description: 'Ladička na kytaru – standardní i alternativní ladění, struna se pozná '
-                        'sama. Zvuk z mikrofonu zůstává v zařízení.',
-                    buttonLabel: 'Ladit',
-                    onPressed: () => context.push('/tuner'),
-                  ),
                 ],
               ),
             ),
@@ -703,6 +688,42 @@ class _ActionRow extends StatelessWidget {
             child: GlassButton(label: buttonLabel, compact: true, onPressed: onPressed),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Velké tónové tlačítko nahoře v Profilu (ikona nad popiskem).
+class _QuickButton extends StatelessWidget {
+  const _QuickButton({required this.icon, required this.label, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final shape = AppShapes.of(Expressive.cornerLarge);
+    return GlassPressable(
+      onPressed: onTap,
+      shape: shape,
+      minSize: Size.zero,
+      semanticLabel: label,
+      child: DecoratedBox(
+        decoration: ShapeDecoration(shape: shape, color: scheme.secondaryContainer),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 30, color: scheme.onSecondaryContainer),
+              const SizedBox(height: 6),
+              Text(label, style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSecondaryContainer)),
+            ],
+          ),
+        ),
       ),
     );
   }
