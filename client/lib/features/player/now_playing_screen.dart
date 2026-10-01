@@ -15,6 +15,7 @@ import '../../state/audio_player_controller.dart';
 import '../../state/glass_settings.dart';
 import '../../state/provisioning_controller.dart';
 import '../../theme/accent_color.dart';
+import '../../theme/app_theme.dart' show buildAppTheme;
 import '../../theme/glass_tokens.dart';
 import '../../theme/selected_accent.dart';
 import '../../theme/shapes.dart';
@@ -282,6 +283,48 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     if (mounted) _carousel.value = 0;
   }
 
+  ThemeData? _darkTheme;
+  Color? _darkThemeSeed;
+
+  /// Přehrávač má popředí vždy bílé (text, ikony, vlnovka) -- ve světlém
+  /// režimu byl panel ovládání světlé sklo a bílé ikony na něm zanikaly
+  /// (živě nahlášeno). Uvnitř přehrávače proto tmavý motiv a tmavé sklo
+  /// (i plné plochy "Bez skla" jsou pak tmavé).
+  Widget _darkPlayer(BuildContext context, Widget child) {
+    final theme = Theme.of(context);
+    final settings = GlassSettings.maybeOf(context);
+    Widget out = child;
+    if (theme.brightness != Brightness.dark) {
+      // Zaokrouhleno (16 stupňů na kanál) -- během přebarvení se jinak motiv
+      // skládal každý snímek (stejně jako `GlassContainer._themeFor`).
+      int q(double v) => ((v * 15).round() * 17);
+      final p = theme.colorScheme.primary;
+      final seed = Color.fromARGB(255, q(p.r), q(p.g), q(p.b));
+      if (_darkTheme == null || _darkThemeSeed != seed) {
+        _darkTheme = buildAppTheme(seed: seed, brightness: Brightness.dark);
+        _darkThemeSeed = seed;
+      }
+      out = Theme(data: _darkTheme!, child: out);
+    }
+    if (settings != null && settings.tone != GlassToneMode.dark) {
+      out = GlassSettings(
+        frost: settings.frost,
+        tint: settings.tint,
+        tintColor: settings.tintColor,
+        darkness: settings.darkness,
+        colorfulness: settings.colorfulness,
+        tone: GlassToneMode.dark,
+        grain: settings.grain,
+        fineGrain: settings.fineGrain,
+        glassButtons: settings.glassButtons,
+        liquid: settings.liquid,
+        solid: settings.solid,
+        child: out,
+      );
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Pozice (5x za vteřinu) přestavuje jen vlnovku a časy (`_SeekRow`),
@@ -297,7 +340,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       return Scaffold(appBar: AppBar(), body: const EmptyState(message: 'Nic nehraje.'));
     }
 
-    return PopScope(
+    return _darkPlayer(context, PopScope(
       canPop: false,
       // Systémové "zpět" = zasunout stejnou animací jako tažení.
       onPopInvokedWithResult: (didPop, _) {
@@ -403,7 +446,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           builder: (context, accent) => _buildSheet(context, playback, accent),
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildSheet(BuildContext context, AudioPlayerState playback, Color accent) {
