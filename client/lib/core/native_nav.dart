@@ -2,12 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'config.dart';
 import 'diagnostics.dart';
 import 'device_token.dart';
+import '../features/share/share_card_screen.dart' show openShareCard;
 
 /// Most k nativní části iOS (kanál `opentify/nav`):
 ///  - tlačítka v Ovládacím centru (Ladička) a klepnutí na upozornění Shazamu
@@ -27,6 +28,7 @@ class NativeNav {
     if (!_supported) return;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'open' && call.arguments is String) _open(router, call.arguments as String);
+      if (call.method == 'screenshot') _offerShareCard(router);
     });
     _lifecycle ??= AppLifecycleListener(onResume: () => unawaited(_pull(router)));
     unawaited(_pull(router));
@@ -42,6 +44,18 @@ class NativeNav {
     } catch (e) {
       debugPrint('NativeNav.pending: $e');
     }
+  }
+
+  /// Screenshot v přehrávači: nabídnout kartu ke sdílení (jako Spotify).
+  static void _offerShareCard(GoRouter router) {
+    if (router.routerDelegate.currentConfiguration.uri.path != '/now-playing') return;
+    final context = router.routerDelegate.navigatorKey.currentContext;
+    if (context == null) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+      content: const Text('Sdílet jako obrázek?'),
+      duration: const Duration(seconds: 5),
+      action: SnackBarAction(label: 'Sdílet', onPressed: () => openShareCard(context)),
+    ));
   }
 
   static void _open(GoRouter router, String route) {

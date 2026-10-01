@@ -10,6 +10,7 @@ import UserNotifications
 enum NativeNavBridge {
   private static var channel: FlutterMethodChannel?
   private static var observer: NSObjectProtocol?
+  private static var screenshotObserver: NSObjectProtocol?
 
   static func register(with messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "opentify/nav", binaryMessenger: messenger)
@@ -30,6 +31,12 @@ enum NativeNavBridge {
       default:
         result(FlutterMethodNotImplemented)
       }
+    }
+    // Screenshot v přehrávači -> Flutter nabídne „Sdílet jako obrázek" (jako Spotify).
+    screenshotObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.userDidTakeScreenshotNotification, object: nil, queue: .main
+    ) { _ in
+      self.channel?.invokeMethod("screenshot", arguments: nil)
     }
     // Appka už běží (Ovládací centrum nad otevřenou appkou): předat hned.
     observer = NotificationCenter.default.addObserver(

@@ -14,6 +14,7 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/add_to_playlist_sheet.dart';
 import '../../widgets/now_playing_sheet.dart';
 import 'queue_panel.dart';
+import '../share/share_card_screen.dart';
 import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProvider;
@@ -158,6 +159,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             ),
                           if (playback.nowPlaying != null) _shareTile(context, playback),
                           if (playback.nowPlaying != null) _sendInOpentifyTile(context, playback),
+                          if (playback.nowPlaying != null) _shareImageTile(context, playback),
                           if (playback.nowPlaying != null) _abRepeatTile(context, playback),
                           const Divider(),
                           const Row(
@@ -309,6 +311,33 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
         final ready = link.valueOrNull;
         Navigator.of(context).pop();
         shareWithToast(ready, messenger, () => ref.read(shareLinkProvider(target).future));
+      },
+    );
+  }
+
+  /// Karta jako obrázek (obal / právě hrající řádky textu) pro stories.
+  Widget _shareImageTile(BuildContext context, AudioPlayerState playback) {
+    final np = playback.nowPlaying!;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Symbols.image_rounded),
+      title: const Text('Sdílet jako obrázek'),
+      subtitle: const Text('Obal nebo právě hrající text – třeba do stories'),
+      onTap: () {
+        final nav = Navigator.of(context);
+        final accent = playback.accentColor ?? Theme.of(context).colorScheme.primary;
+        nav.pop();
+        nav.push(MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => ShareCardScreen(
+            recordingId: np.recordingId,
+            title: np.title,
+            artist: np.artistName,
+            artworkUrl: np.artworkUrl,
+            accent: accent,
+            position: playback.position,
+          ),
+        ));
       },
     );
   }
