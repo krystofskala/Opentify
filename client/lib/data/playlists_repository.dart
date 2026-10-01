@@ -22,7 +22,7 @@ class PlaylistSummaryModel {
   final String? description;
 
   /// Naimportované z odkazu na Spotify (záložka Sdílené v Knihovně).
-  bool get isShared => source?.startsWith('spotify-link:') ?? false;
+  bool get isShared => (source?.startsWith('spotify-link:') ?? false) || (source?.startsWith('apple-link:') ?? false);
 
   /// Playlist z tvé staré vlastní hudby (výběry, soundtracky) -- značka
   /// "před 2016" na náhledu.
@@ -162,7 +162,7 @@ class SpotifyLinkImport {
   final bool truncated;
 }
 
-/// Je v textu odkaz na Spotify (playlist, album, skladba, krátký odkaz)?
+/// Je v textu odkaz na Spotify nebo Apple Music (playlist, album, skladba)?
 bool looksLikeSpotifyLink(String text) =>
-    RegExp(r'^\s*(https?://)?(open\.spotify\.com/(intl-[a-z-]+/)?(playlist|album|track)/|spotify\.link/|spotify:(playlist|album|track):)\S*\s*$')
+    RegExp(r'^\s*(https?://)?(open\.spotify\.com/(intl-[a-z-]+/)?(playlist|album|track)/|spotify\.link/|spotify:(playlist|album|track):|music\.apple\.com/[a-z]{2}/(playlist|album|song)/)\S*\s*$')
         .hasMatch(text);

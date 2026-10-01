@@ -747,7 +747,7 @@ async def import_spotify_link_route(
     except SpotifyLinkError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Spotify se nepodařilo načíst, zkus to za chvíli.") from exc
+        raise HTTPException(status_code=502, detail="Odkaz se nepodařilo načíst, zkus to za chvíli.") from exc
     if result.recording_id is not None:
         recording = session.get(Recording, result.recording_id)
         return {

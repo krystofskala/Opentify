@@ -74,7 +74,7 @@ def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) ->
     mozaika z aktuálních položek; uložená (kopie z Domů) jen jako záloha."""
     ids = [item.recording_id for item in items]
     # Sdílené ze Spotify: jejich vlastní obal (uložený u nás), ne mozaika.
-    if (playlist.source or "").startswith("spotify-link:") and playlist.cover_urls:
+    if (playlist.source or "").startswith(("spotify-link:", "apple-link:")) and playlist.cover_urls:
         covers = list(playlist.cover_urls)
     else:
         covers = _covers_for(ids[:40]) or list(playlist.cover_urls or [])

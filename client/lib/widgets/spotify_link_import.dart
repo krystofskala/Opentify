@@ -80,7 +80,7 @@ Future<void> showSpotifyLinkDialog(BuildContext context, WidgetRef ref) async {
       content: TextField(
         controller: controller,
         autofocus: controller.text.isEmpty,
-        decoration: const InputDecoration(hintText: 'Odkaz ze Spotify na playlist, album nebo skladbu'),
+        decoration: const InputDecoration(hintText: 'Odkaz ze Spotify nebo Apple Music'),
         onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
       ),
       actions: [

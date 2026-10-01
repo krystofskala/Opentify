@@ -120,7 +120,18 @@ async def fetch_spotify_link(text: str) -> tuple[str, str, str, str | None, list
 
 
 async def import_spotify_link(session: Session, user_id: str, text: str) -> SpotifyLinkResult:
-    kind, sid, name, owner, rows, cover = await fetch_spotify_link(text)
+    """Odkaz na Spotify NEBO Apple Music (app/library/apple_link.py)."""
+    from app.library.apple_link import fetch_apple_link, is_apple_music_url
+
+    if is_apple_music_url(text):
+        try:
+            kind, sid, name, owner, rows, cover = await fetch_apple_link(text, _proxy())
+        except ValueError as exc:
+            raise SpotifyLinkError(str(exc)) from exc
+        prefix, origin = "apple-link:", "Z Apple Music"
+    else:
+        kind, sid, name, owner, rows, cover = await fetch_spotify_link(text)
+        prefix, origin = _SOURCE_PREFIX, "Ze Spotify"
     if not rows:
         raise SpotifyLinkError("V odkazu nejsou žádné skladby.")
     if kind == "track":
@@ -130,12 +141,9 @@ async def import_spotify_link(session: Session, user_id: str, text: str) -> Spot
         recording = find_or_create_recording(session, artist, track_name, duration_ms=duration_ms)
         session.commit()
         return SpotifyLinkResult(report=None, kind=kind, truncated=False, owner=owner, recording_id=recording.id)
-    playlist = _get_or_create_playlist(session, user_id, f"{_SOURCE_PREFIX}{kind}:{sid}", name)
+    playlist = _get_or_create_playlist(session, user_id, f"{prefix}{kind}:{sid}", name)
     # Autor ("Ze Spotify · Jméno") a obal pro záložku Sdílené v Knihovně.
-    if owner and kind == "playlist":
-        playlist.description = f"Ze Spotify · {owner}"
-    elif kind != "playlist":
-        playlist.description = f"Ze Spotify · {owner}" if owner else "Ze Spotify"
+    playlist.description = f"{origin} · {owner}" if owner else origin
     if cover and _save_resized(cover, artwork_path(playlist.id)):
         playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id)]
     session.add(playlist)
@@ -144,6 +152,6 @@ async def import_spotify_link(session: Session, user_id: str, text: str) -> Spot
     return SpotifyLinkResult(
         report=report,
         kind=kind,
-        truncated=kind == "playlist" and len(rows) >= EMBED_LIMIT,
+        truncated=prefix == _SOURCE_PREFIX and kind == "playlist" and len(rows) >= EMBED_LIMIT,
         owner=owner,
     )
