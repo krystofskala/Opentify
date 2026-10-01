@@ -14,10 +14,10 @@
       "tintColor": "6B3FD6",
       "versions": [
         {
-          "version": "0.1.11",
-          "date": "2026-10-01T12:02:03Z",
-          "size": 13452679,
-          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-build-11/Opentify.ipa",
+          "version": "0.1.12",
+          "date": "2026-10-01T12:35:16Z",
+          "size": 13463508,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-lb-10011431/Opentify.ipa",
           "minOSVersion": "15.0"
         }
       ],
@@ -31,5 +31,6 @@
       }
     }
   ],
-  "news": []
+  "news": [],
+  "opentifyCommit": "dfb50a3744983ce813431cf65a296a35964b0b8b"
 }
