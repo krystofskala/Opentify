@@ -10,7 +10,7 @@ name: iOS build
 on:
   workflow_dispatch:
   push:
-    tags: ['ios-*']
+    tags: ['ios-*', 'app-*']
 
 permissions:
   contents: write

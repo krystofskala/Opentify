@@ -1,0 +1,56 @@
+# Windows appka: ZIP se složkou Opentify (Opentify.exe + knihovny),
+# rozbalit a spustit. Spuštění tagem `windows-*` / `app-*` nebo ručně.
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['windows-*', 'app-*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Závislosti
+        working-directory: client
+        run: flutter pub get
+
+      - name: Build
+        working-directory: client
+        run: >
+          flutter build windows --release
+          --dart-define=API_BASE_URL=https://desktop-2lissjt.tail343940.ts.net/api/v1
+          --dart-define=WS_BASE_URL=wss://desktop-2lissjt.tail343940.ts.net/ws
+
+      - name: Zabalit
+        working-directory: client
+        shell: pwsh
+        run: |
+          Rename-Item build/windows/x64/runner/Release Opentify
+          Compress-Archive -Path build/windows/x64/runner/Opentify -DestinationPath Opentify-Windows.zip
+          Get-Item Opentify-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Opentify-windows
+          path: client/Opentify-Windows.zip
+          retention-days: 30
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: client/Opentify-Windows.zip
+          prerelease: true
