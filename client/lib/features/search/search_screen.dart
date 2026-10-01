@@ -319,6 +319,7 @@ class _SearchHistoryView extends ConsumerWidget {
     final history = ref.watch(searchHistoryControllerProvider);
     // Prázdný dotaz: naposledy hledané + "Procházet" (nálady a žánry).
     return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
       children: [
         if (history.isNotEmpty) ...[
@@ -388,6 +389,7 @@ class _AllResults extends ConsumerWidget {
     }
 
     return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
       children: [
         _Section(
@@ -503,6 +505,7 @@ class _Rail extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
         height: height,
         child: ListView.builder(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
           itemCount: children.length,
@@ -581,6 +584,7 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.tracks:
             final List<RecordingModel> recordings = items.map((i) => i.toRecordingModel()).toList();
             return ListView.builder(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(
                   AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
               itemCount: recordings.length,

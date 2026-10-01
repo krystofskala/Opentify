@@ -24,6 +24,8 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_import_report.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import 'profiles_section.dart';
+import '../../core/device_token.dart' show clearDeviceToken;
+import '../../core/page_location.dart' show reloadPage;
 import '../../core/share_image.dart' show shareFile;
 import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
@@ -198,6 +200,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             const SizedBox(height: 12),
             // Profily (jen admin; ostatní sekci nevidí).
             const ProfilesSection(),
+            const SizedBox(height: 12),
+            const _LogoutButton(),
                 ],
               ),
             ),
@@ -860,5 +864,32 @@ class _ListenBrainzRow extends ConsumerWidget {
     } catch (_) {
       messenger.showSnackBar(const SnackBar(content: Text('Odpojení se nepodařilo.')));
     }
+  }
+}
+
+/// Odhlásit tohle zařízení (jen v režimu přihlašování jménem a heslem).
+class _LogoutButton extends ConsumerWidget {
+  const _LogoutButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider).valueOrNull;
+    if (auth?.mode != 'login' || auth?.user == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GlassButton(
+        label: 'Odhlásit se (${auth!.user!.name})',
+        icon: Symbols.logout_rounded,
+        compact: true,
+        onPressed: () async {
+          try {
+            await ref.read(apiClientProvider).postJson('/auth/logout');
+          } catch (_) {}
+          await clearDeviceToken();
+          ref.invalidate(authProvider);
+          reloadPage();
+        },
+      ),
+    );
   }
 }

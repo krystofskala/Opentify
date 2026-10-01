@@ -19,11 +19,13 @@ from app.auth import (
     auth_mode,
     aware,
     ensure_admin,
+    hash_password,
     hash_secret,
     new_secret,
     require_admin,
     resolve_user,
     token_from_request,
+    verify_password,
 )
 from app.db import engine
 from app.models import AppUser, AuthToken, InviteCode
@@ -45,6 +47,8 @@ def _user_out(u: AppUser | None) -> dict | None:
         "name": u.name,
         "role": u.role,
         "tailscaleLogin": u.tailscale_login,
+        "username": u.username,
+        "hasPassword": u.password_hash is not None,
         "listenbrainzUser": u.listenbrainz_user
         or (os.environ.get("LISTENBRAINZ_USERNAME") if u.id == ADMIN_ID and os.environ.get("LISTENBRAINZ_TOKEN") else None),
     }
@@ -161,6 +165,21 @@ def users(_admin=Depends(require_admin)):
 
 class NewUserIn(BaseModel):
     name: str
+    username: str | None = None
+
+
+def _clean_username(value: str | None) -> str | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    if len(value) < 3 or len(value) > 32 or any(ch.isspace() for ch in value):
+        raise HTTPException(status_code=400, detail="Přihlašovací jméno: 3–32 znaků, bez mezer.")
+    return value
+
+
+def _username_taken(session: Session, username: str, except_id: str | None = None) -> bool:
+    rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
+    return any(u.username.lower() == username.lower() and u.id != except_id for u in rows)
 
 
 @auth_router.post("/users")
@@ -168,8 +187,11 @@ def create_user(body: NewUserIn, _admin=Depends(require_admin)):
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profil potřebuje jméno.")
+    username = _clean_username(body.username) or _clean_username(name.replace(" ", ""))
     with Session(engine) as session:
-        user = AppUser(name=name, role="user")
+        if username and _username_taken(session, username):
+            raise HTTPException(status_code=409, detail="Tohle přihlašovací jméno už někdo má.")
+        user = AppUser(name=name, role="user", username=username)
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -281,3 +303,95 @@ def disconnect_listenbrainz(request: Request):
         session.add(user)
         session.commit()
     return {"listenbrainzUser": None}
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str = ""
+    # První přihlášení / po vynulování: nové heslo (klient ho chce 2×).
+    new_password: str | None = None
+
+
+_MIN_PASSWORD = 6
+
+
+@auth_router.post("/login")
+async def login(body: LoginIn, request: Request, response: Response):
+    """Jméno + heslo -> klíč zařízení (appka si ho pamatuje, web v cookie).
+    Profil bez hesla (nový nebo vynulovaný adminem) si ho tady vytvoří:
+    bez `new_password` vrátí `needsPassword`, klient se zeptá na nové."""
+    username = body.username.strip()
+    with Session(engine) as session:
+        rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
+        user = next((u for u in rows if u.username.lower() == username.lower()), None)
+        if user is None or (user.password_hash is not None and not verify_password(body.password, user.password_hash)):
+            await asyncio.sleep(1.0)  # zpomalit hádání
+            raise HTTPException(status_code=401, detail="Špatné jméno nebo heslo.")
+        if user.password_hash is None:
+            if body.new_password is None:
+                return {"needsPassword": True, "name": user.name}
+            if len(body.new_password) < _MIN_PASSWORD:
+                raise HTTPException(status_code=400, detail=f"Heslo aspoň {_MIN_PASSWORD} znaků.")
+            user.password_hash = hash_password(body.new_password)
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        token = _issue_token(session, user.id, request.headers.get("user-agent", "")[:120])
+        out = _user_out(user)
+    _set_cookie(response, TOKEN_COOKIE, token)
+    response.delete_cookie(ACT_AS_COOKIE, path="/")
+    return {"user": out, "acting": out, "token": token}
+
+
+@auth_router.post("/logout")
+def logout(request: Request, response: Response):
+    """Odhlásit TOHLE zařízení (smaže jeho klíč)."""
+    token = token_from_request(request)
+    if token:
+        with Session(engine) as session:
+            for row in session.exec(select(AuthToken).where(AuthToken.token_hash == hash_secret(token))).all():
+                session.delete(row)
+            session.commit()
+    response.delete_cookie(TOKEN_COOKIE, path="/")
+    response.delete_cookie(ACT_AS_COOKIE, path="/")
+    return {"loggedOut": True}
+
+
+class UserPatchIn(BaseModel):
+    name: str | None = None
+    username: str | None = None
+
+
+@auth_router.patch("/users/{user_id}")
+def update_user(user_id: str, body: UserPatchIn, _admin=Depends(require_admin)):
+    with Session(engine) as session:
+        user = session.get(AppUser, user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="Profil neexistuje.")
+        if body.name is not None and body.name.strip():
+            user.name = body.name.strip()
+        if body.username is not None:
+            username = _clean_username(body.username)
+            if username and _username_taken(session, username, except_id=user.id):
+                raise HTTPException(status_code=409, detail="Tohle přihlašovací jméno už někdo má.")
+            user.username = username
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return _user_out(user)
+
+
+@auth_router.post("/users/{user_id}/reset-password")
+def reset_password(user_id: str, _admin=Depends(require_admin)):
+    """Zapomenuté heslo: vynulovat (při dalším přihlášení si vytvoří nové)
+    a odhlásit všechna jeho zařízení."""
+    with Session(engine) as session:
+        user = session.get(AppUser, user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="Profil neexistuje.")
+        user.password_hash = None
+        session.add(user)
+        for row in session.exec(select(AuthToken).where(AuthToken.user_id == user_id)).all():
+            session.delete(row)
+        session.commit()
+    return {"userId": user_id, "reset": True}

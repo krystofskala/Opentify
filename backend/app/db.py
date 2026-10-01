@@ -43,6 +43,8 @@ def _ensure_columns() -> None:
             ("tailscale_login", "VARCHAR"),
             ("listenbrainz_token", "VARCHAR"),
             ("listenbrainz_user", "VARCHAR"),
+            ("username", "VARCHAR"),
+            ("password_hash", "VARCHAR"),
         ],
         "playlist": [
             ("description", "VARCHAR"),

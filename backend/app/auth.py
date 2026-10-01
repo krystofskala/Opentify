@@ -10,6 +10,10 @@
 - `AUTH_MODE=open` (přechod): zařízení bez klíče je admin a klíč si potichu
   vezme samo (`GET /auth/me`). Až má admin klíč na všech svých zařízeních,
   `AUTH_MODE=strict` -- bez platného klíče pak nic (401).
+- `AUTH_MODE=login`: jméno + heslo (`POST /auth/login`), klíč zařízení si
+  appka pamatuje. Tailscale účet ani otevřený režim nikoho nepřihlásí --
+  přes sdílený Tailscale stroj by jinak cizí lidé byli rozlišení jen podle
+  účtu, ne podle profilu.
 """
 
 from __future__ import annotations
@@ -104,16 +108,32 @@ def bind_admin_tailscale() -> None:
             session.commit()
 
 
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str | None) -> bool:
+    if not stored or not stored.startswith("scrypt$"):
+        return False
+    _, salt_hex, digest_hex = stored.split("$", 2)
+    digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1, dklen=32)
+    return secrets.compare_digest(digest.hex(), digest_hex)
+
+
 def resolve_user(request: Request) -> tuple[AppUser | None, AppUser | None]:
     """(přihlášený, za koho jedná) -- admin se může přepnout na jiný profil."""
     with Session(engine) as session:
         user = _user_for_token(session, token_from_request(request))
         login = (request.headers.get("tailscale-user-login") or "").strip()
+        if auth_mode() == "login":
+            login = ""  # jen přihlášení jménem a heslem (klíč zařízení)
         if user is None and login:
             user = _user_for_tailscale(session, login)
             if user is None:
                 return None, None  # cizí Tailscale účet bez pozvánky -- nikdy admin
-        if user is None and auth_mode() == "open":
+        if user is None and auth_mode() == "open" and not login:
             user = ensure_admin(session)
         if user is None:
             return None, None

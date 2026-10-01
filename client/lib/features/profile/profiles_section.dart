@@ -11,32 +11,39 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 
-/// Profil › Profily -- jen pro admina. Založit profil (pozvánkový odkaz),
-/// přepnout se na něj (třeba nahrát mu Spotify data), zpět na sebe.
-/// Běžnému používání se nepřekáží: ostatní tuhle sekci nevidí vůbec.
+/// Profil › Profily -- jen pro admina. Založit profil (jméno + přihlašovací
+/// jméno; heslo si dotyčný vytvoří sám při prvním přihlášení), vynulovat
+/// zapomenuté heslo, přepnout se na profil (třeba nahrát mu Spotify data).
+/// Ostatní tuhle sekci nevidí vůbec.
+/// Adresa pro ostatní: samostatný Tailscale stroj jen s Opentify
+/// (docker-compose `tailscale`), ne celé PC.
+const _sharedOrigin = String.fromEnvironment('SHARED_ORIGIN', defaultValue: 'https://opentify.tail343940.ts.net');
+
 class ProfilesSection extends ConsumerWidget {
   const ProfilesSection({super.key});
 
-  Future<void> _showInvite(BuildContext context, String name, String code, {bool signup = false}) async {
-    final link = inviteLink(code);
+  void _snack(BuildContext context, Object e) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.')),
+    );
+  }
+
+  /// Co poslat novému člověku: adresa, jméno, a že si heslo vytvoří sám.
+  Future<void> _showLoginInfo(BuildContext context, String name, String username) async {
+    final text = 'Opentify: $_sharedOrigin\n'
+        'Přihlašovací jméno: $username\n'
+        'Heslo si vytvoříš při prvním přihlášení.';
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(signup ? 'Odkaz pro nové profily' : 'Pozvánka pro $name'),
+        title: Text('Přihlášení pro $name'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              signup
-                  ? 'Jeden odkaz pro všechny: kdo ho otevře (přes Tailscale), založí si vlastní profil '
-                      'pojmenovaný podle Tailscale a jeho další zařízení se pak poznají sama. '
-                      'Nový odkaz zruší ten starý.'
-                  : 'Pošli odkaz a otevřete ho jednou na jeho zařízení (v Safari, pak Přidat na plochu). '
-                      'Platí 14 dní a jen jednou.',
-            ),
+            const Text('Pošli mu tohle. Heslo nikdo nezná – vytvoří si ho při prvním přihlášení.'),
             const SizedBox(height: AppSpacing.sm),
-            SelectableText(link, style: const TextStyle(fontWeight: FontWeight.w700)),
+            SelectableText(text, style: const TextStyle(fontWeight: FontWeight.w700)),
           ],
         ),
         actions: [
@@ -47,12 +54,12 @@ class ProfilesSection extends ConsumerWidget {
             onPressed: () => Navigator.of(context).pop(),
           ),
           GlassButton(
-            label: 'Kopírovat odkaz',
+            label: 'Kopírovat',
             icon: Symbols.content_copy_rounded,
             style: GlassButtonStyle.prominent,
             compact: true,
             onPressed: () {
-              Clipboard.setData(ClipboardData(text: link));
+              Clipboard.setData(ClipboardData(text: text));
               Navigator.of(context).pop();
             },
           ),
@@ -61,17 +68,31 @@ class ProfilesSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _create(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
+  /// Dialog se dvěma poli (jméno + přihlašovací jméno); null = zrušeno.
+  Future<(String, String)?> _askNames(BuildContext context,
+      {required String title, String name = '', String username = '', required String confirm}) {
+    final nameCtl = TextEditingController(text: name);
+    final userCtl = TextEditingController(text: username);
+    return showDialog<(String, String)>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Nový profil'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Jméno (třeba Táta)'),
-          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtl,
+              autofocus: name.isEmpty,
+              decoration: const InputDecoration(labelText: 'Jméno (třeba Táta)'),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            TextField(
+              controller: userCtl,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'Přihlašovací jméno', hintText: 'bez mezer'),
+            ),
+          ],
         ),
         actions: [
           GlassButton(
@@ -81,33 +102,74 @@ class ProfilesSection extends ConsumerWidget {
             onPressed: () => Navigator.of(context).pop(),
           ),
           GlassButton(
-            label: 'Vytvořit',
+            label: confirm,
             style: GlassButtonStyle.prominent,
             compact: true,
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            onPressed: () => Navigator.of(context).pop((nameCtl.text.trim(), userCtl.text.trim())),
           ),
         ],
       ),
     );
-    if (name == null || name.isEmpty || !context.mounted) return;
+  }
+
+  Future<void> _create(BuildContext context, WidgetRef ref) async {
+    final names = await _askNames(context, title: 'Nový profil', confirm: 'Vytvořit');
+    if (names == null || names.$1.isEmpty || !context.mounted) return;
     try {
-      final json = await ref.read(apiClientProvider).postJson('/auth/users', body: {'name': name});
+      final json = await ref
+          .read(apiClientProvider)
+          .postJson('/auth/users', body: {'name': names.$1, if (names.$2.isNotEmpty) 'username': names.$2});
       ref.invalidate(profilesProvider);
-      if (context.mounted) await _showInvite(context, name, json['invite'] as String);
+      final user = json['user'] as Map<String, dynamic>;
+      if (context.mounted) await _showLoginInfo(context, names.$1, user['username'] as String? ?? names.$2);
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.')),
-        );
-      }
+      if (context.mounted) _snack(context, e);
     }
   }
 
-  Future<void> _invite(BuildContext context, WidgetRef ref, ProfileRow p) async {
+  Future<void> _edit(BuildContext context, WidgetRef ref, ProfileRow p) async {
+    final names = await _askNames(context,
+        title: 'Upravit profil', name: p.name, username: p.username ?? '', confirm: 'Uložit');
+    if (names == null || !context.mounted) return;
     try {
-      final json = await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/invite');
-      if (context.mounted) await _showInvite(context, p.name, json['invite'] as String);
-    } catch (_) {}
+      await ref.read(apiClientProvider).patchJson('/auth/users/${p.id}', body: {'name': names.$1, 'username': names.$2});
+      ref.invalidate(profilesProvider);
+      ref.invalidate(authProvider);
+    } catch (e) {
+      if (context.mounted) _snack(context, e);
+    }
+  }
+
+  Future<void> _resetPassword(BuildContext context, WidgetRef ref, ProfileRow p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Vynulovat heslo – ${p.name}?'),
+        content: const Text('Odhlásí se na všech zařízeních a při dalším přihlášení si vytvoří nové heslo.'),
+        actions: [
+          GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(false),
+          ),
+          GlassButton(
+            label: 'Vynulovat',
+            style: GlassButtonStyle.prominent,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(true),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/reset-password');
+      ref.invalidate(profilesProvider);
+      if (context.mounted && p.username != null) await _showLoginInfo(context, p.name, p.username!);
+    } catch (e) {
+      if (context.mounted) _snack(context, e);
+    }
   }
 
   Future<void> _switch(WidgetRef ref, String? userId) async {
@@ -123,14 +185,16 @@ class ProfilesSection extends ConsumerWidget {
     final theme = Theme.of(context);
     final actingId = auth!.acting?.id ?? auth.user!.id;
     final profiles = ref.watch(profilesProvider).valueOrNull ?? const [];
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('Profily', style: theme.textTheme.titleMedium),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          'Jen pro tebe. Přepni se na profil, když mu chceš něco nastavit nebo nahrát jeho Spotify data.',
-          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          'Jen pro tebe. Nový profil dostane přihlašovací jméno, heslo si vytvoří sám. '
+          'Přepni se na profil, když mu chceš něco nastavit nebo nahrát jeho Spotify data.',
+          style: muted,
         ),
         const SizedBox(height: AppSpacing.sm),
         for (final p in profiles)
@@ -149,8 +213,12 @@ class ProfilesSection extends ConsumerWidget {
                     children: [
                       Text(p.role == 'admin' ? '${p.name} (ty)' : p.name, style: theme.textTheme.bodyLarge),
                       Text(
-                        p.devices == 0 ? 'Zatím žádné zařízení' : 'Zařízení: ${p.devices}',
-                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        [
+                          p.username == null ? 'bez přihlašovacího jména' : p.username!,
+                          p.hasPassword ? 'heslo nastavené' : 'čeká na první přihlášení',
+                          if (p.devices > 0) 'zařízení: ${p.devices}',
+                        ].join(' · '),
+                        style: muted,
                       ),
                     ],
                   ),
@@ -163,12 +231,22 @@ class ProfilesSection extends ConsumerWidget {
                     compact: true,
                     onPressed: () => _switch(ref, p.role == 'admin' ? null : p.id),
                   ),
-                if (p.role != 'admin')
-                  IconButton(
-                    tooltip: 'Nová pozvánka',
-                    icon: const Icon(Symbols.link_rounded),
-                    onPressed: () => _invite(context, ref, p),
-                  ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Symbols.more_vert_rounded),
+                  onSelected: (action) => switch (action) {
+                    'edit' => _edit(context, ref, p),
+                    'reset' => _resetPassword(context, ref, p),
+                    'info' => p.username == null ? null : _showLoginInfo(context, p.name, p.username!),
+                    _ => null,
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Upravit jméno')),
+                    if (p.username != null && p.role != 'admin')
+                      const PopupMenuItem(value: 'info', child: Text('Údaje k přihlášení')),
+                    if (p.hasPassword && p.role != 'admin')
+                      const PopupMenuItem(value: 'reset', child: Text('Vynulovat heslo')),
+                  ],
+                ),
               ],
             ),
           ),
@@ -180,21 +258,6 @@ class ProfilesSection extends ConsumerWidget {
             icon: Symbols.person_add_rounded,
             compact: true,
             onPressed: () => _create(context, ref),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: GlassButton(
-            label: 'Odkaz pro nové profily',
-            icon: Symbols.link_rounded,
-            compact: true,
-            onPressed: () async {
-              try {
-                final json = await ref.read(apiClientProvider).postJson('/auth/signup-link');
-                if (context.mounted) await _showInvite(context, '', json['invite'] as String, signup: true);
-              } catch (_) {}
-            },
           ),
         ),
       ],

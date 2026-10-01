@@ -232,6 +232,10 @@ class AppUser(SQLModel, table=True):
     # Poslechy profilu jdou JEN s tímhle tokenem -- nikdy s adminovým.
     listenbrainz_token: str | None = None
     listenbrainz_user: str | None = None
+    # Přihlašovací jméno (zakládá admin) a heslo (scrypt). Bez hesla = první
+    # přihlášení si ho vytvoří; admin ho při zapomenutí vynuluje.
+    username: str | None = Field(default=None, index=True)
+    password_hash: str | None = None
 
 
 class AuthToken(SQLModel, table=True):

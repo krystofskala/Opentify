@@ -43,7 +43,7 @@ final authProvider = FutureProvider<AuthInfo>((ref) async {
 });
 
 /// Admin: všechny profily.
-typedef ProfileRow = ({String id, String name, String role, int devices});
+typedef ProfileRow = ({String id, String name, String role, int devices, String? username, bool hasPassword});
 
 final profilesProvider = FutureProvider.autoDispose<List<ProfileRow>>((ref) async {
   final json = await ref.watch(apiClientProvider).getJson('/auth/users');
@@ -54,6 +54,8 @@ final profilesProvider = FutureProvider.autoDispose<List<ProfileRow>>((ref) asyn
         name: j['name'] as String? ?? '',
         role: j['role'] as String? ?? 'user',
         devices: j['devices'] as int? ?? 0,
+        username: j['username'] as String?,
+        hasPassword: j['hasPassword'] as bool? ?? false,
       ),
   ];
 });

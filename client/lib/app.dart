@@ -63,7 +63,10 @@ class OpentifyApp extends ConsumerWidget {
       // Zrnité pozadí pod úplně vším -- `Scaffold`y jsou průhledné
       // (`buildAppTheme`), takže prosvítá skrz. I přehrávač je teď průhledný
       // (pozadí appky pod hustě namrzlým sklem), takže se nikdy nezastavuje.
-      builder: (context, child) => _maybeSimulatedInsets(
+      // Klepnutí mimo textové pole zavře klávesnici (iOS to samo nedělá --
+      // živě: po chybě hledání nešla klávesnice zavřít vůbec).
+      builder: (context, child) => _DismissKeyboard(
+          child: _maybeSimulatedInsets(
           context,
           UserActivityListener(
               child: AppBackground(
@@ -105,7 +108,7 @@ class OpentifyApp extends ConsumerWidget {
                 ),
               ),
             ),
-          ))),
+          )))),
     );
   }
 }
@@ -120,4 +123,19 @@ Widget _maybeSimulatedInsets(BuildContext context, Widget child) {
   const insets = EdgeInsets.only(top: 47, bottom: 34);
   final mq = MediaQuery.of(context);
   return MediaQuery(data: mq.copyWith(padding: insets, viewPadding: insets), child: child);
+}
+
+/// Klepnutí kamkoli mimo textové pole zavře klávesnici. Tlačítka a pole
+/// samotná vyhrají gesto dřív (jsou hlouběji), sem dojde jen klepnutí do
+/// prázdna.
+class _DismissKeyboard extends StatelessWidget {
+  const _DismissKeyboard({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: child,
+      );
 }

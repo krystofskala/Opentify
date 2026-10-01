@@ -36,6 +36,19 @@ Future<void> saveDeviceToken(String token) async {
   await NativeNav.syncConfig();
 }
 
+/// Odhlášení: zapomenout klíč zařízení (a přepnutí na jiný profil).
+Future<void> clearDeviceToken() async {
+  deviceToken = null;
+  actAsProfile = null;
+  if (kIsWeb) return;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_tokenKey);
+    await prefs.remove(_actAsKey);
+  } catch (_) {}
+  await NativeNav.syncConfig();
+}
+
 Future<void> saveActAs(String? userId) async {
   if (kIsWeb) return;
   actAsProfile = userId;

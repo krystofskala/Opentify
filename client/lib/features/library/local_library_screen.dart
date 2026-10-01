@@ -281,6 +281,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
           final visible = _collection.apply(_items);
           final hasMore = !_collection.isModified && _items.length < _total;
           return CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
               SliverToBoxAdapter(
                 child: TrackCollectionToolbar(
@@ -412,6 +413,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localAlbumsProvider),
           child: CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
               SliverToBoxAdapter(
                 child: _GridViewBar(
@@ -520,6 +522,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localArtistsProvider),
           child: CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
               SliverToBoxAdapter(
                 child: _GridViewBar(
@@ -711,6 +714,7 @@ class _PlaylistsTab extends ConsumerWidget {
               ref.invalidate(likedSongsProvider);
             },
             child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
               children: [
                 liked,
