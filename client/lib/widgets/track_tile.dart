@@ -406,12 +406,15 @@ class _RowTileState extends State<_RowTile> {
                                 Flexible(
                                   child: HeardBuilder(
                                     recordingId: w.recording.id,
+                                    // Zabarvuje se jen délka, ne interpret.
                                     builder: (context, heard) => _LinkText(
                                       text: w.subtitle ?? w.recording.durationLabel,
                                       onTap: w.onArtistTap,
                                       style: theme.textTheme.bodySmall?.copyWith(
                                         color: onTinted?.withValues(alpha: 0.75) ??
-                                            (heard ? heardColor(theme) : theme.colorScheme.onSurfaceVariant),
+                                            (heard && w.subtitle == null
+                                                ? heardColor(theme)
+                                                : theme.colorScheme.onSurfaceVariant),
                                       ),
                                     ),
                                   ),
@@ -595,7 +598,7 @@ class _CardTile extends StatelessWidget {
                       text: subtitle ?? recording.durationLabel,
                       onTap: onArtistTap,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: heard ? heardColor(theme) : theme.colorScheme.onSurfaceVariant,
+                        color: heard && subtitle == null ? heardColor(theme) : theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -704,8 +707,8 @@ class _Thumbnail extends StatelessWidget {
   Widget _artwork(ThemeData theme) => ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded, iconSize: 18);
 }
 
-/// Nenápadná trvalá značka "poslechnuto celé": druhý řádek a délka
-/// skladby v barvě motivu místo šedé -- nic navíc, jen jiný odstín
+/// Nenápadná trvalá značka "poslechnuto celé": délka skladby v barvě
+/// motivu místo šedé -- nic navíc, jen jiný odstín
 /// (živě chtěné: tečka byla moc). Sleduje jen svou skladbu, ať se při
 /// novém poslechu nepřestavuje celý seznam.
 class HeardBuilder extends ConsumerWidget {
