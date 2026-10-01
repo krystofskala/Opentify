@@ -435,28 +435,43 @@ async def build_top_albums() -> int:
     return len(release_ids)
 
 
+def _listenbrainz_user(user_id: str) -> str | None:
+    from app.models import AppUser
+
+    with Session(engine) as session:
+        user = session.get(AppUser, user_id)
+        if user is not None and user.listenbrainz_user:
+            return user.listenbrainz_user
+    if user_id == HOME_USER_ID:
+        return os.environ.get("LISTENBRAINZ_USERNAME") or None
+    return None
+
+
 async def build_personal_mixes() -> int:
     """Discover / Moje top / Trendy / Komunita jako playlisty (karty na
     Domů), plus Daily Jams, který už playlist je."""
     from app.recommendations.listenbrainz import get_listenbrainz_client, get_listenbrainz_public_client
     from app.recommendations.service import RecommendationService
 
-    # ListenBrainz účet je adminův -- ostatní profily mají jen vlastní mixy.
-    if home_user() != HOME_USER_ID:
+    # Každý profil ze SVÉHO ListenBrainz účtu (Profil › ListenBrainz); bez
+    # připojeného účtu tyhle mixy nemá -- nikdy ne z cizího (adminova).
+    owner = home_user()
+    lb_user = _listenbrainz_user(owner)
+    if not lb_user:
         return 0
     built = 0
     with Session(engine) as session:
         service = RecommendationService(session, get_listenbrainz_client(), get_listenbrainz_public_client())
         try:
-            await service.daily_jams(HOME_USER_ID, LISTENBRAINZ_USERNAME)
+            await service.daily_jams(owner, lb_user)
             built += 1
         except Exception:  # noqa: BLE001
             logger.exception("home: daily jams selhal")
         mixes: list[tuple[str, str, str, Callable[[], Awaitable[list[Any]]]]] = [
-            ("home:mix:discover", "Objevuj", "Nová hudba podle tvého poslechu", lambda: service.discover(LISTENBRAINZ_USERNAME, 40)),
-            ("home:mix:my-top", "Moje nejposlouchanější", "Tvoje top skladby za měsíc", lambda: service.my_top_tracks(LISTENBRAINZ_USERNAME, 40)),
+            ("home:mix:discover", "Objevuj", "Nová hudba podle tvého poslechu", lambda: service.discover(lb_user, 40)),
+            ("home:mix:my-top", "Moje nejposlouchanější", "Tvoje top skladby za měsíc", lambda: service.my_top_tracks(lb_user, 40)),
             ("home:mix:trending", "Trendy na ListenBrainz", "Co se tento týden nejvíc poslouchá", lambda: service.trending(40)),
-            ("home:mix:community", "Komunitní objevy", "Tipy od komunity ListenBrainz", lambda: service.community_picks(LISTENBRAINZ_USERNAME, 40)),
+            ("home:mix:community", "Komunitní objevy", "Tipy od komunity ListenBrainz", lambda: service.community_picks(lb_user, 40)),
         ]
         for source, title, description, fetch in mixes:
             try:
@@ -468,7 +483,7 @@ async def build_personal_mixes() -> int:
             if not ids:
                 continue
             _save_playlist(
-                owner=HOME_USER_ID,
+                owner=owner,
                 source=source,
                 title=title,
                 description=description,

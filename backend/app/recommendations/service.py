@@ -330,7 +330,7 @@ class RecommendationService:
             items=[self._to_recording_out(r) for r in recordings],
         )
 
-    async def daily_jams(self, user_id: str, user_name: str) -> PlaylistDetailOut:
+    async def daily_jams(self, user_id: str, user_name: str | None) -> PlaylistDetailOut:
         """Denní mix -- přednostně z uživatelovy vlastní knihovny (Liked Songs
         naimportované ze Spotify, viz app.library.spotify_import), protože na
         rozdíl od ListenBrainz JSPF "daily-jams" patche (vyžaduje reálný účet
@@ -344,6 +344,8 @@ class RecommendationService:
             sample = self._daily_sample(liked, PERSONAL_DAILY_JAMS_LIMIT)
             return self._build_daily_jams_snapshot(user_id, PERSONAL_DAILY_JAMS_SOURCE, sample)
 
+        if not user_name:  # profil bez ListenBrainz účtu -- nikdy cizí
+            return self._build_daily_jams_snapshot(user_id, PERSONAL_DAILY_JAMS_SOURCE, [])
         tracks = await self._fetch_patch_tracks(user_name, "daily-jams")
         recordings = [r for r in (self._resolve_jspf_track(t) for t in tracks) if r is not None]
         return self._build_daily_jams_snapshot(user_id, "listenbrainz:daily-jams", recordings)

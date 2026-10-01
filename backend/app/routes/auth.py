@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import secrets
 from datetime import timedelta
@@ -247,7 +249,24 @@ async def connect_listenbrainz(body: ListenBrainzIn, request: Request):
     from app.listens import _wakeup
 
     _wakeup.set()  # čekající poslechy profilu odeslat hned
+    # Osobní mixy z ListenBrainz (Daily Jams, Objevuj...) hned, ne až zítra.
+    asyncio.create_task(_build_listenbrainz_mixes(acting.id))
     return {"listenbrainzUser": data.get("user_name")}
+
+
+async def _build_listenbrainz_mixes(user_id: str) -> None:
+    from app.home import generators as g
+    from app.home.service import invalidate_home_cache
+
+    token = g.set_home_user(user_id)
+    try:
+        count = await g.build_personal_mixes()
+        g._save_snapshot("gen:personal:mixes", {"count": count})
+    except Exception:  # noqa: BLE001 -- best effort, zítra to zkusí plánovač
+        logging.getLogger(__name__).exception("ListenBrainz mixy pro %s selhaly", user_id)
+    finally:
+        g.reset_home_user(token)
+    await invalidate_home_cache()
 
 
 @auth_router.delete("/me/listenbrainz")

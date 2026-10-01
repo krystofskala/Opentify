@@ -6,8 +6,6 @@ Tenká vrstva stejně jako routes/catalog.py: veškerá logika žije v
 
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -24,10 +22,14 @@ from app.recommendations.service import RecommendationService
 
 recommendations_router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
-# Osobní/single-user systém (viz docs/ARCHITECTURE.md, otevřená otázka #3):
-# ListenBrainz uživatelské jméno je serverová konfigurace celé instalace, ne
-# odvozené z device JWT identity -- jeden ListenBrainz účet pro server.
-LISTENBRAINZ_USERNAME = os.environ.get("LISTENBRAINZ_USERNAME", "demo-user")
+
+
+def _lb_user(current: tuple[str, str]) -> str | None:
+    """ListenBrainz účet TOHO profilu (Profil › ListenBrainz; admin i z .env).
+    Dřív tu byl napevno adminův účet -- jiný profil by dostal jeho doporučení."""
+    from app.home.generators import _listenbrainz_user
+
+    return _listenbrainz_user(current[0])
 
 
 def get_recommendation_service(
@@ -42,9 +44,10 @@ def get_recommendation_service(
 async def discover(
     limit: int = Query(default=20, ge=1, le=100),
     service: RecommendationService = Depends(get_recommendation_service),
-    _current=Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
-    recordings = await service.discover(LISTENBRAINZ_USERNAME, limit)
+    lb_user = _lb_user(current)
+    recordings = await service.discover(lb_user, limit) if lb_user else []
     return [r.model_dump(by_alias=True) for r in recordings]
 
 
@@ -54,7 +57,7 @@ async def daily_jams(
     current: tuple[str, str] = Depends(get_current_user),
 ):
     user_id, _device_id = current
-    playlist = await service.daily_jams(user_id, LISTENBRAINZ_USERNAME)
+    playlist = await service.daily_jams(user_id, _lb_user(current))
     return playlist.model_dump(by_alias=True)
 
 
@@ -74,9 +77,10 @@ async def my_top(
     range: str = Query(default="month", pattern="^(week|month|year|all_time)$"),
     limit: int = Query(default=20, ge=1, le=50),
     service: RecommendationService = Depends(get_recommendation_service),
-    _current=Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
-    recordings = await service.my_top_tracks(LISTENBRAINZ_USERNAME, limit, range)
+    lb_user = _lb_user(current)
+    recordings = await service.my_top_tracks(lb_user, limit, range) if lb_user else []
     return [r.model_dump(by_alias=True) for r in recordings]
 
 
@@ -84,9 +88,12 @@ async def my_top(
 async def year_in_review(
     limit: int = Query(default=10, ge=1, le=50),
     service: RecommendationService = Depends(get_recommendation_service),
-    _current=Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
-    result = await service.year_in_review(LISTENBRAINZ_USERNAME, limit)
+    lb_user = _lb_user(current)
+    if not lb_user:
+        raise HTTPException(status_code=404, detail="Připoj si ListenBrainz účet v Profilu.")
+    result = await service.year_in_review(lb_user, limit)
     return result.model_dump(by_alias=True)
 
 
@@ -94,9 +101,10 @@ async def year_in_review(
 async def community(
     limit: int = Query(default=20, ge=1, le=50),
     service: RecommendationService = Depends(get_recommendation_service),
-    _current=Depends(get_current_user),
+    current: tuple[str, str] = Depends(get_current_user),
 ):
-    recordings = await service.community_picks(LISTENBRAINZ_USERNAME, limit)
+    lb_user = _lb_user(current)
+    recordings = await service.community_picks(lb_user, limit) if lb_user else []
     return [r.model_dump(by_alias=True) for r in recordings]
 
 
