@@ -133,10 +133,17 @@ def _read_tags(path: Path) -> _TrackTags:
     if info is not None and getattr(info, "length", None):
         duration_ms = int(info.length * 1000)
 
+    # Štítky zapsané v cp1250 a přečtené jako latin1 ("Pelí\x9aky", "Zemì")
+    # -- stejná oprava jako při přestavbě vlastní hudby.
+    from app.tools.rebuild_own_library import fix_text
+
+    def tag(*keys: str) -> str | None:
+        return fix_text(_first(audio, *keys), str(path))
+
     return _TrackTags(
-        title=_first(audio, "title", "Title"),
-        artist=_first(audio, "artist", "Author", "WM/AlbumArtist"),
-        album=_first(audio, "album", "WM/AlbumTitle"),
+        title=tag("title", "Title"),
+        artist=tag("artist", "Author", "WM/AlbumArtist"),
+        album=tag("album", "WM/AlbumTitle"),
         track_number=track_number,
         duration_ms=duration_ms,
     )
