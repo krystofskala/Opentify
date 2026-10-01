@@ -39,7 +39,7 @@ def _token() -> str | None:
 
 async def _lb_top(artist_mbid: str) -> list[dict[str, Any]]:
     token = _token()
-    if not token:
+    if not token or artist_mbid.startswith("own:"):  # vlastní interpret
         return []
     try:
         resp = await _http.get(
@@ -75,6 +75,23 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     dz = get_deezer_client()
+
+    if (mbid or "").startswith("own:"):
+        # Vlastní interpret: nejposlouchanější z poslechů v appce, nic online.
+        from sqlalchemy import func
+
+        from app.models import Listen
+
+        with Session(engine) as session:
+            rows = session.exec(
+                select(Recording.id, func.count(Listen.id))
+                .join(Listen, Listen.recording_id == Recording.id, isouter=True)
+                .where(Recording.artist_id == artist_id)
+                .group_by(Recording.id)
+                .order_by(func.count(Listen.id).desc())
+                .limit(LIMIT)
+            ).all()
+        return [{"id": rid, "listens": count or None} for rid, count in rows]
 
     if mbid:
         for entry in (await _lb_top(mbid))[: LIMIT * 2]:

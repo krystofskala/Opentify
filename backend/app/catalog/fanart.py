@@ -47,7 +47,7 @@ def pick_banner_and_thumb(data: dict[str, Any] | None) -> tuple[str | None, str 
 
 async def fetch_artist_art(mbid: str) -> dict[str, Any] | None:
     key = fanart_api_key()
-    if not key:
+    if not key or mbid.startswith("own:"):  # vlastní interpret -- nikde není
         return None
 
     async def fetch() -> dict[str, Any]:

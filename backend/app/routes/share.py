@@ -23,6 +23,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
+from app.catalog.identity import is_own_id
 from app.catalog.artwork import _normalize, clean_album_title, primary_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.db import get_session
@@ -86,6 +87,10 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
     if recording is None:
         raise HTTPException(status_code=404, detail="skladba nenalezena")
     artist_name = _artist_name(session, recording.artist_id)
+    if is_own_id(recording.deezer_id):
+        # Vlastní nahrávka (tátův Kontrast) -- venku neexistuje, žádné hledání
+        # podle jména (našlo by cizí kapelu).
+        return {"url": None, "title": recording.title, "artistName": artist_name or None, "spotifySearchUrl": None}
     artist = primary_artist_name(artist_name)
     release = session.get(Release, recording.release_id) if recording.release_id else None
     refs = dict(recording.external_refs or {})
@@ -145,6 +150,8 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
     if release is None:
         raise HTTPException(status_code=404, detail="album nenalezeno")
     artist_name = _artist_name(session, release.artist_id)
+    if is_own_id(release.deezer_id):
+        return {"url": None, "title": release.title, "artistName": artist_name or None, "spotifySearchUrl": None}
     artist = primary_artist_name(artist_name)
     refs = dict(release.external_refs or {})
     url: str | None = None

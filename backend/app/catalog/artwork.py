@@ -68,6 +68,8 @@ def _names_match(a: str, b: str) -> bool:
 
 
 async def _caa_front(kind: str, mbid: str) -> str | None:
+    if mbid.startswith("own:"):  # vlastní album -- na Cover Art Archive není
+        return None
     url = f"{CAA_BASE}/{kind}/{mbid}/front-500"
     try:
         resp = await _http.head(url, follow_redirects=False)
@@ -233,9 +235,10 @@ async def fill_release(release_id: str, *, force: bool = False) -> bool:
 
     # Album z vlastních souborů (bez id): obal vložený v souborech má
     # přednost; online jen podle interpreta i názvu alba zároveň.
-    own = not mbid and not deezer_id
+    own = (not mbid and not deezer_id) or (mbid or "").startswith("own:")
     cover = await asyncio.to_thread(extract_release_art, release_id) if own else None
-    if cover is None:
+    if cover is None and not (mbid or "").startswith("own:"):
+        # Vlastní album (own:) online nehledat -- našlo by stejnojmenné cizí.
         cover = await resolve_release_cover(mbid, artist_name, title, deezer_id)
     if cover is None:
         # Poslední záchrana jen pro alba z knihovny: obal vložený v lokálních
@@ -264,8 +267,10 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
             return False
         name, mbid = artist.name, artist.mbid
 
-    from app.catalog.identity import local_only_artist
+    from app.catalog.identity import is_own_id, local_only_artist
 
+    if is_own_id(mbid):
+        return False  # vlastní interpret (tátův Kontrast): fotku nikdy podle jména
     if not mbid and await asyncio.to_thread(local_only_artist, name) is not None:
         return False  # vlastní hudba: fotku ne podle jména (kapel stejného jména je víc)
     picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force)

@@ -55,6 +55,8 @@ class MusicBrainzClient:
         # match_release_by_tracklist` apod.) bere jako "match se nenašel" --
         # jedna náhodná 503 uprostřed skenu tak dokázala rozbít album-level
         # match na per-track fallback pro celou složku (živě ověřeno).
+        if "own:" in path:  # vlastní interpret/album (app/catalog/identity.py)
+            raise MusicBrainzError("vlastní záznam -- na MusicBrainz není")
         last_exc: MusicBrainzError | None = None
         for attempt in range(3):
             if attempt > 0:

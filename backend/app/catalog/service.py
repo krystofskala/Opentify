@@ -485,6 +485,14 @@ class CatalogService:
         artist = self._get_artist_row(artist_id)
         if artist is None:
             return None
+        if (artist.mbid or "").startswith("own:"):
+            # Vlastní interpret (tátův Kontrast): jen jeho alba z vlastních
+            # souborů, nikde online se nehledá (app/catalog/identity.py).
+            releases = list(self._session.exec(select(Release).where(Release.artist_id == artist.id)).all())
+            if release_type:
+                releases = [r for r in releases if _effective_type(r) == release_type]
+            releases.sort(key=lambda r: r.release_date or "9999")
+            return DiscographyOut(artist=self._to_artist_out(artist), releases=[self._to_release_out(r) for r in releases])
         if artist.mbid is None:
             # Interpret jen z Deezeru (hledání/žebříček) -- diskografie odtud.
             releases = await self._deezer_discography(artist)

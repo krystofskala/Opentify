@@ -31,7 +31,13 @@ def upsert_artist(
             if artist is not None:
                 artist.mbid = mbid
         else:
-            artist = next((a for a in same_name if a.mbid), None) or (same_name[0] if same_name else None)
+            # Bez MBID (soubory z PC): vlastní interpret toho jména má přednost
+            # (tátův Kontrast), jinak ten s MBID.
+            artist = (
+                next((a for a in same_name if (a.mbid or "").startswith("own:")), None)
+                or next((a for a in same_name if a.mbid), None)
+                or (same_name[0] if same_name else None)
+            )
     if artist is None:
         artist = Artist(mbid=mbid, name=name, sort_name=sort_name or name, country=country)
         session.add(artist)

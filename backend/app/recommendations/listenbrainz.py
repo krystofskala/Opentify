@@ -46,6 +46,8 @@ class ListenBrainzClient:
         )
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if "own:" in path:  # vlastní interpret (app/catalog/identity.py)
+            raise ListenBrainzError("vlastní záznam -- na ListenBrainz není")
         await _rate_limiter.wait()
         try:
             resp = await self._client.get(path, params=params or {})
@@ -140,6 +142,8 @@ class ListenBrainzPublicClient:
         )
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if "own:" in path:  # vlastní interpret (app/catalog/identity.py)
+            raise ListenBrainzError("vlastní záznam -- na ListenBrainz není")
         await _public_rate_limiter.wait()
         try:
             resp = await self._client.get(path, params=params or {})

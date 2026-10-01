@@ -16,6 +16,17 @@ from app.models import Artist, MediaAsset, Recording, Release
 
 _OWN_PROVIDERS = ("local", "musicbrainz-local")
 
+# "Vlastní" interpret/album/skladba (tátova kapela...): místo skutečných id
+# z MusicBrainz/Deezeru trvalá zástupná `own:<id>`. Kód páruje podle jména
+# jen řádky BEZ id a id porovnává přesně -- takový řádek se tak s nikým
+# nespojí a stejnojmenná cizí kapela vznikne jako samostatný interpret.
+# Klienti MusicBrainz/Deezer/ListenBrainz/fanart/CAA s ním nikam nevolají.
+OWN_PREFIX = "own:"
+
+
+def is_own_id(value: str | None) -> bool:
+    return isinstance(value, str) and value.startswith(OWN_PREFIX)
+
 
 def _norm(text: str | None) -> str:
     return unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower().strip()

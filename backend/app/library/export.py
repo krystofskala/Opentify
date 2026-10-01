@@ -89,11 +89,12 @@ class _Lookup:
             "title": rec.title,
             "artist": self.artist(rec.artist_id),
             "album": self.album(rec.release_id),
-            "isrc": rec.isrc or "",
-            "spotifyId": (rec.external_refs or {}).get("spotifyId") or "",
-            "deezerId": rec.deezer_id or "",
-            "appleId": (rec.external_refs or {}).get("appleMusicId") or "",
-            "mbid": rec.mbid or "",
+            # Zástupná `own:` id (vlastní hudba) do exportu nepatří.
+            "isrc": _real(rec.isrc),
+            "spotifyId": _real((rec.external_refs or {}).get("spotifyId")),
+            "deezerId": _real(rec.deezer_id),
+            "appleId": _real((rec.external_refs or {}).get("appleMusicId")),
+            "mbid": _real(rec.mbid),
             "recordingId": rec.id,
         }
 
@@ -208,3 +209,7 @@ def build_export(session: Session, user_id: str, profile_name: str) -> bytes:
             "opentify.json            -- uplna zaloha vseho\n",
         )
     return out.getvalue()
+
+
+def _real(value: str | None) -> str:
+    return "" if not value or value.startswith("own:") else value

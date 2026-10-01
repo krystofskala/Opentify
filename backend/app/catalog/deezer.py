@@ -43,6 +43,8 @@ class DeezerClient:
         self._client = http_client or httpx.AsyncClient(base_url=DEEZER_BASE_URL, timeout=10.0)
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if "own:" in path:  # vlastní interpret/album (app/catalog/identity.py)
+            return None
         await _rate_limiter.wait()
         try:
             resp = await self._client.get(path, params=params or {})
