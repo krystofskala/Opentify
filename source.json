@@ -14,12 +14,12 @@
       "tintColor": "6B3FD6",
       "versions": [
         {
-          "version": "0.1.22",
-          "buildVersion": "22",
-          "localizedDescription": "Noční build Opentify 0.1.22.",
-          "date": "2026-10-01T21:46:36Z",
-          "size": 13628684,
-          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-tuner-10020000/Opentify.ipa",
+          "version": "0.1.23",
+          "buildVersion": "23",
+          "localizedDescription": "Noční build Opentify 0.1.23.",
+          "date": "2026-10-01T21:57:47Z",
+          "size": 13631141,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-mic-10020010/Opentify.ipa",
           "minOSVersion": "15.0"
         }
       ],
@@ -34,5 +34,5 @@
     }
   ],
   "news": [],
-  "opentifyCommit": "accf9a968938be0f51e0ca9c35f8919137c3c120"
+  "opentifyCommit": "f308780b91f24e532a5015cb62d2977ed50213a4"
 }
