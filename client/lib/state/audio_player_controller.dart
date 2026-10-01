@@ -492,6 +492,24 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         album: s.queueSourceLabel,
         artworkUrl: info.artworkUrl,
       );
+      // Skladby z fronty obal často nenesou (přehrávač si ho dohledává přes
+      // recordingArtworkProvider) -- na zamčené obrazovce pak u další
+      // skladby obrázek chyběl (živě nahlášeno). Dohledat stejně a poslat.
+      if (info.artworkUrl == null && (info.releaseId != null || info.artistId != null)) {
+        final requested = key;
+        final provider = recordingArtworkProvider((releaseId: info.releaseId, artistId: info.artistId));
+        // Poslech drží autoDispose provider naživu, dokud se obal nenačte.
+        final keepAlive = _ref.listen<AsyncValue<String?>>(provider, (_, __) {});
+        unawaited(_ref.read(provider.future).then((url) {
+          if (url == null || _mediaSessionKey != requested) return;
+          _mediaSession.setMetadata(
+            title: info.title,
+            artist: info.artistName,
+            album: s.queueSourceLabel,
+            artworkUrl: url,
+          );
+        }).catchError((Object _) {}).whenComplete(keepAlive.close));
+      }
     }
     if (s.isPlaying != _mediaSessionPlaying || s.duration != _mediaSessionDuration) {
       _mediaSessionPlaying = s.isPlaying;
