@@ -81,6 +81,85 @@ async def _lyrics_ovh(artist_name: str | None, track_name: str) -> dict[str, Any
     return {"plain": text, "synced": None, "instrumental": False, "source": "lyrics.ovh"} if text else None
 
 
+_netease: httpx.AsyncClient | None = None
+# Řádky s autory/produkcí na začátku NetEase textů ("作词 : ...", "Composer: ...").
+_NE_CREDIT = re.compile(
+    r"^\[[0-9:.]+\]\s*(?:[^\x00-\x7f]{1,6}\s*[:：]|(?:lyrics?|composer|producer|arranger|written by)\b)",
+    re.I,
+)
+# Hlavička "Interpret - Název" na začátku.
+_NE_HEADER = re.compile(r"^\[00:0[0-2][.:]\d+\]\s*[^\[]* - [^\[]*$")
+
+
+def _netease_client() -> httpx.AsyncClient | None:
+    """NetEase Cloud Music (neoficiální API) -- jen přes Mullvad, domácí IP
+    nevidí. Bez proxy se nevolá."""
+    global _netease
+    from app.apple_http import apple_proxy
+
+    proxy = apple_proxy()
+    if proxy is None:
+        return None
+    if _netease is None:
+        _netease = httpx.AsyncClient(
+            base_url="https://music.163.com/api",
+            proxy=proxy,
+            timeout=15.0,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/"},
+        )
+    return _netease
+
+
+def _ne_norm(text: str) -> str:
+    return re.sub(r"[^\w]+", " ", (text or "").lower()).strip()
+
+
+async def _lyrics_netease(artist_name: str | None, track_name: str, duration_s: float | None) -> dict[str, Any] | None:
+    """Časovaný text z NetEase -- hodně i méně známých skladeb. Bere se jen
+    přesná shoda interpreta a názvu (a délky, když ji známe)."""
+    client = _netease_client()
+    if client is None or not artist_name:
+        return None
+    title = clean_title(track_name)
+    try:
+        resp = await client.get("/search/get", params={"s": f"{artist_name} {title}", "type": 1, "limit": 10})
+        songs = ((resp.json().get("result") or {}).get("songs") or []) if resp.status_code == 200 else []
+    except (httpx.HTTPError, ValueError):
+        return None
+    want_artist, want_title = _ne_norm(artist_name), _ne_norm(title)
+    candidates = [
+        song
+        for song in songs
+        if _ne_norm(song.get("name", "")) == want_title
+        and any(_ne_norm(a.get("name", "")) == want_artist for a in song.get("artists") or [])
+        and (
+            duration_s is None
+            or not song.get("duration")
+            or abs(song["duration"] / 1000 - duration_s) <= _SYNC_TOLERANCE_S
+        )
+    ]
+    for song in candidates[:2]:
+        try:
+            data = (await client.get("/song/lyric", params={"id": song["id"], "lv": 1, "tv": -1})).json()
+        except (httpx.HTTPError, ValueError):
+            continue
+        lrc = ((data.get("lrc") or {}).get("lyric") or "").strip()
+        if not lrc or "纯音乐" in lrc:  # "čistě instrumentální"
+            continue
+        lines = [
+            line
+            for line in lrc.splitlines()
+            if re.search(r"\w", re.sub(r"^(\[[0-9:.]+\])+", "", line))  # ne prázdné / jen "."
+            and not _NE_CREDIT.match(line)
+            and not _NE_HEADER.match(line)
+        ]
+        synced = "\n".join(lines).strip()
+        plain = "\n".join(re.sub(r"^(\[[0-9:.]+\])+", "", line).strip() for line in lines).strip()
+        if plain:
+            return {"plain": plain, "synced": synced or None, "instrumental": False, "source": "netease"}
+    return None
+
+
 def _pick(results: list[dict[str, Any]], duration_s: float | None) -> dict[str, Any] | None:
     synced = [r for r in results if r.get("syncedLyrics")]
     if duration_s is None:
@@ -110,7 +189,7 @@ async def fetch_lyrics(
     duration_s: float | None = None,
 ) -> dict[str, Any] | None:
     duration_key = "" if duration_s is None else str(round(duration_s))
-    cache_key = f"lyrics:v3:{artist_name or ''}:{track_name}:{duration_key}"
+    cache_key = f"lyrics:v4:{artist_name or ''}:{track_name}:{duration_key}"
 
     async def fetch() -> dict[str, Any]:
         params: dict[str, Any] = {"track_name": track_name}
@@ -130,6 +209,10 @@ async def fetch_lyrics(
             seen = {r.get("id") for r in results}
             merged = results + [r for r in more if r.get("id") not in seen]
             picked = _pick(merged, duration_s) or picked
+        if picked is None or picked.get("synced") is None:
+            # NetEase: časovaný text, když ho LRCLIB nemá (prostý z LRCLIB je
+            # horší než časovaný odjinud).
+            picked = await _lyrics_netease(artist_name, track_name, duration_s) or picked
         if picked is None:
             picked = await _lyrics_ovh(artist_name, track_name)
         return picked or _NOT_FOUND
