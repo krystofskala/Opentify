@@ -45,6 +45,11 @@ def _spotify_search(kind: str, title: str, artist: str) -> str:
     return f"https://open.spotify.com/search/{quote(f'{title} {artist}'.strip(), safe='')}/{kind}"
 
 
+def _apple_search(title: str, artist: str) -> str:
+    """Záloha bez Apple id: hledání v Apple Music (appka/web)."""
+    return f"https://music.apple.com/cz/search?term={quote(f'{title} {artist}'.strip(), safe='')}"
+
+
 def _same(a: str | None, b: str | None) -> bool:
     na, nb = _normalize(a or ""), _normalize(b or "")
     return bool(na) and bool(nb) and (na == nb or na.startswith(nb) or nb.startswith(na))
@@ -96,18 +101,19 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
     refs = dict(recording.external_refs or {})
     url: str | None = None
 
+    # Spotify i Apple Music VŽDY (dvě nejpoužívanější) -- přímý odkaz, když
+    # id najdeme, jinak hledání v jejich appce/webu.
     spotify_id = refs.get("spotifyId") or await _spotify_track_id(artist, release.title if release else None, recording.title)
+    apple_id = refs.get("appleMusicId")
+    if not apple_id:
+        hit = await _itunes("song", artist, recording.title)
+        apple_id = str(hit["trackId"]) if hit and hit.get("trackId") else None
     if spotify_id:
         refs["spotifyId"] = spotify_id
         url = f"https://song.link/s/{spotify_id}"
-    else:
-        apple_id = refs.get("appleMusicId")
-        if not apple_id:
-            hit = await _itunes("song", artist, recording.title)
-            apple_id = str(hit["trackId"]) if hit and hit.get("trackId") else None
-        if apple_id:
-            refs["appleMusicId"] = apple_id
-            url = f"https://song.link/i/{apple_id}"
+    if apple_id:
+        refs["appleMusicId"] = apple_id
+        url = url or f"https://song.link/i/{apple_id}"
 
     if url is None:
         deezer_id = recording.deezer_id or refs.get("shareDeezerId")
@@ -141,6 +147,10 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         "artistName": artist_name or None,
         # song.link začínající jinde než u Spotify ho často nedohledá.
         "spotifySearchUrl": None if spotify_id else _spotify_search("tracks", recording.title, artist),
+        "spotifyUrl": f"https://open.spotify.com/track/{spotify_id}"
+        if spotify_id
+        else _spotify_search("tracks", recording.title, artist),
+        "appleUrl": f"https://music.apple.com/cz/song/{apple_id}" if apple_id else _apple_search(recording.title, artist),
     }
 
 
@@ -198,4 +208,8 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
         "title": release.title,
         "artistName": artist_name or None,
         "spotifySearchUrl": _spotify_search("albums", clean_album_title(release.title), artist),
+        "spotifyUrl": _spotify_search("albums", clean_album_title(release.title), artist),
+        "appleUrl": f"https://music.apple.com/cz/album/{apple_id}"
+        if apple_id
+        else _apple_search(clean_album_title(release.title), artist),
     }

@@ -11,24 +11,41 @@ import 'share_link_stub.dart'
 /// Univerzální odkaz na skladbu/album (song.link / album.link) -- kamarád
 /// ho otevře v jakékoliv hudební appce. Viz backend app/routes/share.py.
 class ShareLink {
-  const ShareLink({required this.url, required this.title, this.artistName, this.spotifySearchUrl});
+  const ShareLink({
+    required this.url,
+    required this.title,
+    this.artistName,
+    this.spotifySearchUrl,
+    this.spotifyUrl,
+    this.appleUrl,
+  });
 
-  /// `null` u vlastní hudby (tátův Kontrast) -- venku neexistuje.
+  /// Univerzální odkaz (song.link / album.link); `null` u vlastní hudby
+  /// (tátův Kontrast) -- venku neexistuje.
   final String? url;
   final String title;
   final String? artistName;
 
-  /// Když Spotify ID nemáme, song.link Spotify často nenabídne -- tak aspoň
-  /// vyhledání "název interpret" přímo ve Spotify.
+  /// Starší pole -- hledání ve Spotify, když ID nemáme.
   final String? spotifySearchUrl;
+
+  /// Spotify a Apple Music vždy (dvě nejpoužívanější): přímý odkaz, nebo
+  /// hledání v jejich appce/webu, když skladbu přesně nenajdeme.
+  final String? spotifyUrl;
+  final String? appleUrl;
 
   String get _name => artistName == null ? title : '$title – $artistName';
 
-  /// Text ke sdílení (odkaz jde zvlášť jako url).
-  String get text => spotifySearchUrl == null ? _name : '$_name\nSpotify: $spotifySearchUrl';
+  String get _services => [
+        if ((spotifyUrl ?? spotifySearchUrl) != null) 'Spotify: ${spotifyUrl ?? spotifySearchUrl}',
+        if (appleUrl != null) 'Apple Music: $appleUrl',
+      ].join('\n');
 
-  /// Do schránky (na PC): univerzální odkaz + případně řádek pro Spotify.
-  String get clipboardText => spotifySearchUrl == null ? (url ?? '') : '${url ?? ''}\nSpotify: $spotifySearchUrl';
+  /// Text ke sdílení (univerzální odkaz jde zvlášť jako url).
+  String get text => _services.isEmpty ? _name : '$_name\n$_services';
+
+  /// Do schránky (na PC): univerzální odkaz + Spotify + Apple Music.
+  String get clipboardText => [if (url != null) url!, if (_services.isNotEmpty) _services].join('\n');
 }
 
 typedef ShareTarget = ({String kind, String id}); // kind: recordings | releases
@@ -42,6 +59,8 @@ final shareLinkProvider = FutureProvider.autoDispose.family<ShareLink, ShareTarg
     title: json['title'] as String,
     artistName: json['artistName'] as String?,
     spotifySearchUrl: json['spotifySearchUrl'] as String?,
+    spotifyUrl: json['spotifyUrl'] as String?,
+    appleUrl: json['appleUrl'] as String?,
   );
 });
 

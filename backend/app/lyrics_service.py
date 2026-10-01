@@ -47,14 +47,38 @@ def clean_title(title: str) -> str:
     return cleaned or title
 
 
+class _SourceDown(Exception):
+    """LRCLIB neodpověděl -- výsledek se NEUKLÁDÁ (dřív se výpadek uložil
+    jako "text neexistuje" na týden; živě: Hot Milk – Wide Awake)."""
+
+
 async def _search(params: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         resp = await _client.get("/search", params=params)
         resp.raise_for_status()
         results = resp.json()
-    except (httpx.TransportError, httpx.HTTPStatusError, ValueError):
-        return []
+    except (httpx.TransportError, httpx.HTTPStatusError, ValueError) as exc:
+        raise _SourceDown from exc
     return results if isinstance(results, list) else []
+
+
+_ovh = httpx.AsyncClient(base_url="https://api.lyrics.ovh/v1", timeout=10.0)
+
+
+async def _lyrics_ovh(artist_name: str | None, track_name: str) -> dict[str, Any] | None:
+    """Záložní zdroj (lyrics.ovh): jen prostý text bez časování."""
+    if not artist_name:
+        return None
+    from urllib.parse import quote
+
+    try:
+        resp = await _ovh.get(f"/{quote(artist_name, safe='')}/{quote(clean_title(track_name), safe='')}")
+        text = (resp.json().get("lyrics") or "").strip() if resp.status_code == 200 else ""
+    except (httpx.HTTPError, ValueError):
+        return None
+    # lyrics.ovh občas začíná řádkem "Paroles de la chanson ..." -- pryč.
+    text = re.sub(r"^Paroles de la chanson[^\n]*\n", "", text).strip()
+    return {"plain": text, "synced": None, "instrumental": False, "source": "lyrics.ovh"} if text else None
 
 
 def _pick(results: list[dict[str, Any]], duration_s: float | None) -> dict[str, Any] | None:
@@ -86,7 +110,7 @@ async def fetch_lyrics(
     duration_s: float | None = None,
 ) -> dict[str, Any] | None:
     duration_key = "" if duration_s is None else str(round(duration_s))
-    cache_key = f"lyrics:v2:{artist_name or ''}:{track_name}:{duration_key}"
+    cache_key = f"lyrics:v3:{artist_name or ''}:{track_name}:{duration_key}"
 
     async def fetch() -> dict[str, Any]:
         params: dict[str, Any] = {"track_name": track_name}
@@ -106,9 +130,17 @@ async def fetch_lyrics(
             seen = {r.get("id") for r in results}
             merged = results + [r for r in more if r.get("id") not in seen]
             picked = _pick(merged, duration_s) or picked
+        if picked is None:
+            picked = await _lyrics_ovh(artist_name, track_name)
         return picked or _NOT_FOUND
 
-    result = await cached_json(cache_key, LYRICS_TTL_SECONDS, fetch)
+    try:
+        # "Nenalezeno" jen na krátko (EMPTY_TTL) -- texty do LRCLIB přibývají.
+        result = await cached_json(
+            cache_key, LYRICS_TTL_SECONDS, fetch, is_empty=lambda v: bool(v and v.get("not_found"))
+        )
+    except _SourceDown:
+        return None
     if result is None or result.get("not_found"):
         return None
     return result
