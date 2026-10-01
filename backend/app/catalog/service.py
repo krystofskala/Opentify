@@ -101,6 +101,11 @@ _RETAILERS = (
     "recordstoreday", "7digital", "qobuz", "beatport", "junodownload", "emp.",
 )
 
+def _effective_type(release: Release) -> str:
+    """Typ podle skutečného počtu skladeb (viz `_fix_release_type`), jinak podle zdroje."""
+    return (release.external_refs or {}).get("typeByTracks") or release.release_type
+
+
 class CatalogService:
     def __init__(
         self,
@@ -206,7 +211,7 @@ class CatalogService:
             artist_id=release.artist_id,
             title=release.title,
             release_date=release.release_date,
-            release_type=release.release_type,
+            release_type=_effective_type(release),
             images=release.images,
         )
 
@@ -484,7 +489,7 @@ class CatalogService:
             # Interpret jen z Deezeru (hledání/žebříček) -- diskografie odtud.
             releases = await self._deezer_discography(artist)
             if release_type:
-                releases = [r for r in releases if r.release_type == release_type]
+                releases = [r for r in releases if _effective_type(r) == release_type]
             releases.sort(key=lambda r: r.release_date or "9999")
             return DiscographyOut(artist=self._to_artist_out(artist), releases=[self._to_release_out(r) for r in releases])
 
@@ -523,7 +528,7 @@ class CatalogService:
             deezer_releases = []
         known_titles = {norm(r.title) for r in releases}
         for extra in deezer_releases:
-            if release_type and extra.release_type != release_type:
+            if release_type and _effective_type(extra) != release_type:
                 continue
             if norm(extra.title) in known_titles or extra.id in {r.id for r in releases}:
                 continue
@@ -532,6 +537,8 @@ class CatalogService:
 
         not_mine = set((artist.external_refs or {}).get("notMine") or [])
         releases = [r for r in releases if r.id not in not_mine and (r.deezer_id or "") not in not_mine]
+        if release_type:
+            releases = [r for r in releases if _effective_type(r) == release_type]
         releases.sort(key=lambda r: r.release_date or "9999")
         return DiscographyOut(
             artist=self._to_artist_out(artist),
@@ -781,7 +788,26 @@ class CatalogService:
 
         await self._enrich_recording_previews(recordings)
         recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
+        self._fix_release_type(release, recordings)
         return [self._to_recording_out(r) for r in recordings]
+
+    def _fix_release_type(self, release: Release, recordings: list[Recording]) -> None:
+        """"Album" o 1-2 skladbách patří mezi singly/EP (živě nahlášeno:
+        na stránce interpreta mezi alby). Pravidlo jako u streamovacích
+        služeb: do 3 skladeb a 30 min singl, 4-6 skladeb do 30 min EP.
+        Opraví se při načtení tracklistu a uloží (diskografie se pak řadí
+        správně)."""
+        if release.release_type != "album" or not recordings or (release.external_refs or {}).get("typeByTracks"):
+            return
+        n = len({(r.track_number, r.title) for r in recordings})
+        total_ms = sum(r.duration_ms or 0 for r in recordings)
+        short = total_ms and total_ms < 30 * 60 * 1000
+        new_type = "single" if n <= 2 or (n <= 3 and short) else ("ep" if n <= 6 and short else None)
+        if new_type:
+            # Zvlášť od `release_type`: ten MB/Deezer při obnově diskografie přepíše.
+            release.external_refs = {**(release.external_refs or {}), "typeByTracks": new_type}
+            self._session.add(release)
+            self._session.commit()
 
     async def _deezer_release_tracks(self, release: Release) -> list[RecordingOut]:
         """Tracklist alba z Deezeru -- pro alba bez MBID (z Deezer hledání/
@@ -823,6 +849,7 @@ class CatalogService:
                 recordings.append(recording)
         self._session.commit()
         recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
+        self._fix_release_type(release, recordings)
         return [self._to_recording_out(r) for r in recordings]
 
     async def match_recording_by_text(self, query: str) -> Recording | None:
