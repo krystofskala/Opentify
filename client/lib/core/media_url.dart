@@ -1,4 +1,5 @@
 import 'config.dart';
+import 'device_token.dart';
 
 /// Obrázky z vlastního backendu (vložené obaly z lokálních souborů) chodí
 /// jako relativní `/api/v1/...` cesta -- backend neví, jestli klient přišel
@@ -8,7 +9,7 @@ import 'config.dart';
 String? resolveMediaUrl(String? url) {
   if (url == null || url.isEmpty || !url.startsWith('/')) return url;
   final api = Uri.parse(AppConfig.apiBaseUrl);
-  return api.replace(path: url, query: null, fragment: null).toString();
+  return withDeviceToken(api.replace(path: url, query: null, fragment: null).toString());
 }
 
 List<String> resolveMediaUrls(List<String> urls) => urls.map((u) => resolveMediaUrl(u)!).toList();

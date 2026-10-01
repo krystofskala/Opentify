@@ -1,5 +1,7 @@
 import 'media_session.dart';
 
+Future<void> initMediaSession() async {}
+
 MediaSessionBridge createMediaSessionBridge() => _NoopMediaSession();
 
 class _NoopMediaSession implements MediaSessionBridge {

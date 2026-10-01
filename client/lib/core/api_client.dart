@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'device_token.dart';
+
 /// Vyhozeno pro každou non-2xx odpověď — nese status kód a syrové tělo, aby
 /// ho volající mohl zobrazit nebo se podle kódu rozhodnout (404 -> "nenalezeno"
 /// stav v UI, ne obecná chybová hláška).
@@ -55,6 +57,7 @@ class ApiClient {
         'Content-Type': 'application/json',
         'X-User-Id': userId,
         'X-Device-Id': deviceId,
+        ...authHeaders(),
         ...extraHeaders,
       };
 

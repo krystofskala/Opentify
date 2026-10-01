@@ -1,0 +1,65 @@
+# Nativní appka pro iPhone bez Macu: macOS runner postaví NEPODEPSANÝ .ipa,
+# podepíše ho až SideStore v telefonu (bezplatné Apple ID, 7 dní, obnova
+# automaticky). Viz docs/IOS_NATIVE_PLAN.md.
+#
+# Spuštění: tag `ios-*` (git tag ios-2026-10-01 && git push --tags) nebo
+# ručně v Actions. Výsledek: artefakt buildu + u tagu GitHub Release
+# s Opentify.ipa (odkaz se dá otevřít rovnou v SideStore).
+name: iOS build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['ios-*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Závislosti
+        working-directory: client
+        run: flutter pub get
+
+      - name: Build (bez podpisu)
+        working-directory: client
+        run: >
+          flutter build ios --release --no-codesign
+          --dart-define=API_BASE_URL=https://desktop-2lissjt.tail343940.ts.net/api/v1
+          --dart-define=WS_BASE_URL=wss://desktop-2lissjt.tail343940.ts.net/ws
+
+      - name: Zabalit .ipa
+        working-directory: client
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry Opentify.ipa Payload
+          ls -lh Opentify.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Opentify-ipa
+          path: client/Opentify.ipa
+          retention-days: 30
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: client/Opentify.ipa
+          prerelease: true
+          body: |
+            Nepodepsaná appka pro iPhone. Instalace: SideStore → + → vybrat Opentify.ipa
+            (nebo otevřít odkaz na soubor v SideStore). Podpis tvým Apple ID na 7 dní,
+            SideStore ho obnovuje sám.

@@ -1,4 +1,9 @@
-import 'media_session_stub.dart' if (dart.library.js_interop) 'media_session_web.dart' as impl;
+import 'media_session_stub.dart'
+    if (dart.library.js_interop) 'media_session_web.dart'
+    if (dart.library.io) 'media_session_io.dart' as impl;
+
+/// Nativní appka: zaregistrovat ovládání zamčené obrazovky (web: nic).
+Future<void> initMediaSession() => impl.initMediaSession();
 
 /// Zamčená obrazovka / Ovládací centrum / notifikace -- přes Media Session
 /// API prohlížeče (iOS Safari 15+, Chrome). Bez něj iPhone ukazuje jen

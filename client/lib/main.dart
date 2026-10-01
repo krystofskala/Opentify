@@ -1,6 +1,9 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+
+import 'core/device_token.dart';
+import 'core/media_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
@@ -11,7 +14,16 @@ import 'core/safe_area_insets.dart';
 /// testování proti lokálnímu backendu (viz README.md v tomhle adresáři pro
 /// `--dart-define` proměnné base URL) -- `ProviderScope` je jediné, co main
 /// potřebuje, veškerá závislost na backendu žije v `state/providers.dart`.
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Nativní appka: uložený klíč zařízení dřív, než odejde první požadavek.
+  await loadDeviceToken();
+  // Nativní appka: ovládání na zamčené obrazovce (audio_service).
+  try {
+    await initMediaSession();
+  } catch (e) {
+    debugPrint('initMediaSession: $e');
+  }
   // Chyby Dartu do "černé skříňky" (diagnostika zamrzání, viz index.html).
   var reports = 0;
   String short(Object error, StackTrace? stack) =>

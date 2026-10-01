@@ -4,6 +4,8 @@ import 'package:web/web.dart' as web;
 
 import 'media_session.dart';
 
+Future<void> initMediaSession() async {}
+
 MediaSessionBridge createMediaSessionBridge() => _WebMediaSession();
 
 class _WebMediaSession implements MediaSessionBridge {

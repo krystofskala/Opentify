@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/device_token.dart';
 import '../core/page_location.dart';
 import 'providers.dart';
 
@@ -21,12 +22,15 @@ final authProvider = FutureProvider<AuthInfo>((ref) async {
   final code = joinCodeFromUrl();
   if (code != null) {
     try {
-      await api.postJson('/auth/join', body: {'code': code});
+      final joined = await api.postJson('/auth/join', body: {'code': code});
+      if (joined['token'] case final String token) await saveDeviceToken(token);
     } finally {
       clearJoinFromUrl();
     }
   }
   final json = await api.getJson('/auth/me');
+  // Nativní appka: klíč vydaný serverem si uložit (web má cookie).
+  if (json['token'] case final String token) await saveDeviceToken(token);
   return (
     user: _profile(json['user']),
     acting: _profile(json['acting']),
