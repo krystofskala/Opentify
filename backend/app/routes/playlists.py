@@ -148,7 +148,13 @@ def list_playlists(
             generated_at=p.generated_at,
             item_count=len(items),
         ).model_dump(by_alias=True)
-        results.append({**out, "coverUrls": covers, "artistNames": artist_names, "description": p.description})
+        results.append({
+            **out,
+            "coverUrls": covers,
+            "artistNames": artist_names,
+            "description": p.description,
+            "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
+        })
     return results
 
 

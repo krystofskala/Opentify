@@ -250,10 +250,15 @@ def local_albums(
             Release.artist_id,
             Artist.name,
             func.count(func.distinct(Recording.id)),
+            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.updated_at)),
         )
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Release.artist_id)
+        .outerjoin(
+            LibraryEntry,
+            (LibraryEntry.recording_id == Recording.id) & (LibraryEntry.user_id == current[0]),  # type: ignore[arg-type]
+        )
         .where(_in_library(current[0]))
         .group_by(Release.id)
         .order_by(Artist.name, Release.title)
@@ -267,9 +272,17 @@ def local_albums(
             "artistId": artist_id,
             "artistName": artist_name,
             "trackCount": track_count,
+            # Kdy přibyla do knihovny (nejnovější skladba) -- řazení "Přidáno".
+            "addedAt": _iso(added_at),
         }
-        for release_id, title, images, artist_id, artist_name, track_count in rows
+        for release_id, title, images, artist_id, artist_name, track_count, added_at in rows
     ]
+
+
+def _iso(value) -> str | None:  # noqa: ANN001 -- SQLite vrací str nebo datetime
+    if value is None:
+        return None
+    return value if isinstance(value, str) else value.isoformat()
 
 
 @library_router.get("/local-artists")
@@ -280,9 +293,19 @@ def local_artists(
     """Interpreti seskupení z lokální knihovny -- viz `local_albums`, stejný
     princip (jeden GROUP BY dotaz, ne N+1 z klienta)."""
     rows = session.exec(
-        select(Artist.id, Artist.name, Artist.images, func.count(func.distinct(Recording.id)))
+        select(
+            Artist.id,
+            Artist.name,
+            Artist.images,
+            func.count(func.distinct(Recording.id)),
+            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.updated_at)),
+        )
         .join(Recording, Recording.artist_id == Artist.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .outerjoin(
+            LibraryEntry,
+            (LibraryEntry.recording_id == Recording.id) & (LibraryEntry.user_id == current[0]),  # type: ignore[arg-type]
+        )
         .where(_in_library(current[0]))
         .group_by(Artist.id)
         .order_by(Artist.name)
@@ -294,8 +317,9 @@ def local_artists(
             "name": name,
             "imageUrl": images[0] if images else None,
             "trackCount": track_count,
+            "addedAt": _iso(added_at),
         }
-        for artist_id, name, images, track_count in rows
+        for artist_id, name, images, track_count, added_at in rows
     ]
 
 

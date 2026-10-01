@@ -28,6 +28,7 @@ class LocalAlbum {
     required this.artistId,
     required this.artistName,
     required this.trackCount,
+    this.addedAt,
   });
 
   final String id;
@@ -37,6 +38,9 @@ class LocalAlbum {
   final String artistName;
   final int trackCount;
 
+  /// Kdy album přibylo do knihovny (ISO) -- řazení „Přidáno".
+  final String? addedAt;
+
   factory LocalAlbum.fromJson(Map<String, dynamic> json) => LocalAlbum(
         id: json['id'] as String,
         title: json['title'] as String,
@@ -44,23 +48,26 @@ class LocalAlbum {
         artistId: json['artistId'] as String,
         artistName: json['artistName'] as String,
         trackCount: json['trackCount'] as int,
+        addedAt: json['addedAt'] as String?,
       );
 }
 
 /// Interpret seskupený z lokální knihovny (`GET /library/local-artists`).
 class LocalArtist {
-  const LocalArtist({required this.id, required this.name, this.imageUrl, required this.trackCount});
+  const LocalArtist({required this.id, required this.name, this.imageUrl, required this.trackCount, this.addedAt});
 
   final String id;
   final String name;
   final String? imageUrl;
   final int trackCount;
+  final String? addedAt;
 
   factory LocalArtist.fromJson(Map<String, dynamic> json) => LocalArtist(
         id: json['id'] as String,
         name: json['name'] as String,
         imageUrl: resolveMediaUrl(json['imageUrl'] as String?),
         trackCount: json['trackCount'] as int,
+        addedAt: json['addedAt'] as String?,
       );
 }
 

@@ -16,7 +16,11 @@ class PlaylistSummaryModel {
     this.coverUrls = const [],
     this.artistNames = const [],
     this.description,
+    this.updatedAt,
   });
+
+  /// Naposledy změněno (ISO) -- řazení „Přidáno / upraveno".
+  final String? updatedAt;
 
   /// U sdílených ze Spotify "Ze Spotify · autor".
   final String? description;
@@ -49,6 +53,7 @@ class PlaylistSummaryModel {
         coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
         artistNames: (json['artistNames'] as List<dynamic>? ?? const []).cast<String>(),
         description: json['description'] as String?,
+        updatedAt: json['updatedAt'] as String?,
       );
 }
 

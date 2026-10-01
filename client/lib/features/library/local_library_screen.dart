@@ -371,18 +371,72 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
 /// Přepínač mřížka/seznam nad alby/interprety. Vlastní filtr tu není --
 /// hledá se horním polem "Hledat v knihovně".
 class _GridViewBar extends StatelessWidget {
-  const _GridViewBar({required this.viewMode, required this.onViewMode});
+  const _GridViewBar({required this.viewMode, required this.onViewMode, this.sort});
 
   final ViewMode viewMode;
   final ValueChanged<ViewMode> onViewMode;
+
+  /// Řazení vlevo (jako u Skladeb).
+  final Widget? sort;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: ViewModeToggle(mode: viewMode, onChanged: onViewMode),
+      child: Row(
+        children: [
+          if (sort != null) sort!,
+          const Spacer(),
+          ViewModeToggle(mode: viewMode, onChanged: onViewMode),
+        ],
+      ),
+    );
+  }
+}
+
+/// Řazení alb, interpretů a playlistů (Skladby mají vlastní v toolbaru).
+enum LibrarySort { added, name, artist, count }
+
+const _librarySortLabels = {
+  LibrarySort.added: 'Přidáno',
+  LibrarySort.name: 'Název',
+  LibrarySort.artist: 'Interpret',
+  LibrarySort.count: 'Počet skladeb',
+};
+
+final _librarySortProvider = StateProvider.family<LibrarySort, String>((ref, tab) => LibrarySort.added);
+
+/// Novější první; bez data na konec.
+int _byAddedDesc(String? a, String? b) => (b ?? '').compareTo(a ?? '');
+
+int _byName(String a, String b) => a.toLowerCase().compareTo(b.toLowerCase());
+
+class _SortButton extends ConsumerWidget {
+  const _SortButton({required this.tab, required this.options});
+
+  final String tab;
+  final List<LibrarySort> options;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(_librarySortProvider(tab));
+    return PopupMenuButton<LibrarySort>(
+      tooltip: 'Řadit',
+      initialValue: current,
+      onSelected: (value) => ref.read(_librarySortProvider(tab).notifier).state = value,
+      itemBuilder: (context) => [
+        for (final option in options) PopupMenuItem(value: option, child: Text(_librarySortLabels[option]!)),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Symbols.sort_rounded, size: 20),
+            const SizedBox(width: 6),
+            Text(_librarySortLabels[current]!, style: Theme.of(context).textTheme.labelLarge),
+          ],
+        ),
       ),
     );
   }
@@ -405,8 +459,17 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
   Widget build(BuildContext context) {
     super.build(context);
     final albums = ref.watch(_localAlbumsProvider);
+    final sort = ref.watch(_librarySortProvider('albums'));
     return albums.when(
-      data: (items) {
+      data: (loaded) {
+        final items = [...loaded]..sort((a, b) => switch (sort) {
+              LibrarySort.added => _byAddedDesc(a.addedAt, b.addedAt),
+              LibrarySort.name => _byName(a.title, b.title),
+              LibrarySort.artist => _byName(a.artistName, b.artistName) != 0
+                  ? _byName(a.artistName, b.artistName)
+                  : _byName(a.title, b.title),
+              LibrarySort.count => b.trackCount.compareTo(a.trackCount),
+            });
         if (items.isEmpty) {
           return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba – spusť sken v Profilu.');
         }
@@ -419,6 +482,10 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                 child: _GridViewBar(
                   viewMode: _viewMode,
                   onViewMode: (mode) => setState(() => _viewMode = mode),
+                  sort: const _SortButton(
+                    tab: 'albums',
+                    options: [LibrarySort.added, LibrarySort.name, LibrarySort.artist, LibrarySort.count],
+                  ),
                 ),
               ),
               if (items.isEmpty)
@@ -513,8 +580,14 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
   Widget build(BuildContext context) {
     super.build(context);
     final artists = ref.watch(_localArtistsProvider);
+    final sort = ref.watch(_librarySortProvider('artists'));
     return artists.when(
-      data: (items) {
+      data: (loaded) {
+        final items = [...loaded]..sort((a, b) => switch (sort) {
+              LibrarySort.added => _byAddedDesc(a.addedAt, b.addedAt),
+              LibrarySort.count => b.trackCount.compareTo(a.trackCount),
+              _ => _byName(a.name, b.name),
+            });
         if (items.isEmpty) {
           return const EmptyState(
               icon: Symbols.person_rounded, message: 'Zatím žádní interpreti – spusť sken v Profilu.');
@@ -528,6 +601,10 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                 child: _GridViewBar(
                   viewMode: _viewMode,
                   onViewMode: (mode) => setState(() => _viewMode = mode),
+                  sort: const _SortButton(
+                    tab: 'artists',
+                    options: [LibrarySort.added, LibrarySort.name, LibrarySort.count],
+                  ),
                 ),
               ),
               if (items.isEmpty)
@@ -704,10 +781,15 @@ class _PlaylistsTab extends ConsumerWidget {
     return Scaffold(
       body: playlists.when(
         data: (all) {
+          final sort = ref.watch(_librarySortProvider('playlists'));
           final own = [
             for (final p in all)
               if (!p.isShared) p
-          ];
+          ]..sort((a, b) => switch (sort) {
+              LibrarySort.added => _byAddedDesc(a.updatedAt, b.updatedAt),
+              LibrarySort.count => b.itemCount.compareTo(a.itemCount),
+              _ => _byName(a.title, b.title),
+            });
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(myPlaylistsProvider);
@@ -724,6 +806,11 @@ class _PlaylistsTab extends ConsumerWidget {
                   child: Row(
                     children: [
                       Expanded(child: Text('Moje playlisty', style: Theme.of(context).textTheme.titleMedium)),
+                      const _SortButton(
+                        tab: 'playlists',
+                        options: [LibrarySort.added, LibrarySort.name, LibrarySort.count],
+                      ),
+                      const SizedBox(width: 4),
                       IconButton(
                         tooltip: grid ? 'Zobrazit jako seznam' : 'Zobrazit jako mřížku',
                         icon: Icon(grid ? Symbols.view_list_rounded : Symbols.grid_view_rounded),
