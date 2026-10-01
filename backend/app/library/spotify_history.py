@@ -50,7 +50,10 @@ def _year_source(year: int) -> str:
 def read_zip(raw: bytes) -> list[dict[str, Any]]:
     """Minimální záznamy `{ts, ms, track, artist, album, spotify_id}`."""
     plays: list[dict[str, Any]] = []
+    from app.uploads import check_zip
+
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        check_zip(zf)
         for info in zf.infolist():
             name = info.filename.rsplit("/", 1)[-1]
             if not (name.startswith("Streaming_History_Audio") and name.endswith(".json")):

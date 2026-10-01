@@ -30,6 +30,7 @@ import '../../core/page_location.dart' show reloadPage;
 import '../../core/share_image.dart' show shareFile;
 import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import '../../widgets/toast.dart';
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -74,7 +75,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _export(BuildContext context) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(const SnackBar(content: Text('Připravuju export…')));
+    showToast(messenger, 'Připravuju export…');
     try {
       final bytes = await ref.read(apiClientProvider).getBytes('/library/export');
       final stamp = DateTime.now().toIso8601String().substring(0, 10);
@@ -82,7 +83,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       await shareFile(bytes, fileName: 'opentify-export-$stamp.zip', mimeType: 'application/zip');
     } catch (_) {
       messenger?.hideCurrentSnackBar();
-      messenger?.showSnackBar(const SnackBar(content: Text('Export se nepodařil.')));
+      showToast(messenger, 'Export se nepodařil.');
     }
   }
 
@@ -245,7 +246,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(const SnackBar(content: Text('Importuji…')));
+    showToast(messenger, 'Importuji…');
     try {
       final imported = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
       ref.invalidate(likedSongsProvider);
@@ -254,21 +255,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       messenger.hideCurrentSnackBar();
       if (!context.mounted) return;
       if (imported.historyListens != null) {
-        messenger.showSnackBar(SnackBar(
-          content: Text('Historie poslechů nahraná (${imported.historyListens} poslechů) – Wrapped a mixy '
-              'se podle ní přepočítají.'),
-        ));
+        showToast(messenger, 'Historie poslechů nahraná (${imported.historyListens} poslechů) – Wrapped a mixy '
+              'se podle ní přepočítají.');
         return;
       }
       final result = imported.result!;
       if (result.playlists.isEmpty) {
-        messenger.showSnackBar(const SnackBar(content: Text('V souboru nebyly žádné playlisty ani skladby.')));
+        showToast(messenger, 'V souboru nebyly žádné playlisty ani skladby.');
         return;
       }
       await showSpotifyImportReport(context, result);
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
-      messenger.showSnackBar(SnackBar(content: Text(detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify.')));
+      showToast(messenger, detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify.');
     }
   }
 
@@ -279,7 +278,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ref.invalidate(scanStatusProvider);
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
-      messenger.showSnackBar(SnackBar(content: Text(detail ?? 'Sken se nepodařilo spustit.')));
+      showToast(messenger, detail ?? 'Sken se nepodařilo spustit.');
     }
   }
 }
@@ -869,10 +868,10 @@ class _ListenBrainzRow extends ConsumerWidget {
     try {
       final json = await ref.read(apiClientProvider).putJson('/auth/me/listenbrainz', body: {'token': token});
       ref.invalidate(authProvider);
-      messenger.showSnackBar(SnackBar(content: Text('Připojeno jako ${json['listenbrainzUser']}.')));
+      showToast(messenger, 'Připojeno jako ${json['listenbrainzUser']}.');
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
-      messenger.showSnackBar(SnackBar(content: Text(detail ?? 'Připojení se nepodařilo.')));
+      showToast(messenger, detail ?? 'Připojení se nepodařilo.');
     }
   }
 
@@ -881,9 +880,9 @@ class _ListenBrainzRow extends ConsumerWidget {
     try {
       await ref.read(apiClientProvider).deleteJson('/auth/me/listenbrainz');
       ref.invalidate(authProvider);
-      messenger.showSnackBar(const SnackBar(content: Text('ListenBrainz odpojen, poslechy se tam už neposílají.')));
+      showToast(messenger, 'ListenBrainz odpojen, poslechy se tam už neposílají.');
     } catch (_) {
-      messenger.showSnackBar(const SnackBar(content: Text('Odpojení se nepodařilo.')));
+      showToast(messenger, 'Odpojení se nepodařilo.');
     }
   }
 }

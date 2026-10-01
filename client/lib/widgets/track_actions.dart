@@ -23,6 +23,7 @@ import '../state/auth_controller.dart';
 import '../state/providers.dart' show apiClientProvider;
 import 'verify_track_sheet.dart';
 import 'share_sheet.dart';
+import 'toast.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -79,7 +80,7 @@ Future<void> shareWithToast(
   Future<ShareLink> Function() load,
 ) async {
   void toast(String text) =>
-      messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+      showToast(messenger, text);
   try {
     final link = ready ?? await load();
     if (link.url == null && link.youtubeUrl == null) {
@@ -133,7 +134,7 @@ class _TrackActionsSheet extends ConsumerWidget {
     }
 
     void toast(String text) =>
-        messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+        showToast(messenger, text);
     // Odkaz ke sdílení načíst hned (Safari sdílí jen přímo po klepnutí).
     final ShareTarget shareTarget = (kind: 'recordings', id: recording.id);
     final shareLinkAsync = ref.watch(shareLinkProvider(shareTarget));

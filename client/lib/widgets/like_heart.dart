@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../state/liked_songs_controller.dart';
+import 'toast.dart';
 
 /// Srdíčko skladby všude v appce:
 ///   - klepnutí = do/z Oblíbených (u zlomeného srdce ho spraví a dá do
@@ -42,7 +43,7 @@ class LikeHeart extends ConsumerWidget {
           if (disliked) ref.read(dislikedProvider.notifier).forget(recordingId);
           final ok = await ref.read(likedSongsControllerProvider.notifier).setLiked(recordingId, disliked || !liked);
           if (!ok && disliked) ref.read(dislikedProvider.notifier).restore(recordingId);
-          if (!ok) messenger?.showSnackBar(const SnackBar(content: Text('Oblíbené se nepodařilo uložit.')));
+          if (!ok) showToast(messenger, 'Oblíbené se nepodařilo uložit.');
         },
         onLongPress: () async {
           HapticFeedback.mediumImpact();
@@ -51,7 +52,7 @@ class LikeHeart extends ConsumerWidget {
           final notifier = ref.read(dislikedProvider.notifier);
           final ok = await notifier.toggle(recordingId);
           if (!ok) {
-            messenger?.showSnackBar(const SnackBar(content: Text('Nepodařilo se uložit.')));
+            showToast(messenger, 'Nepodařilo se uložit.');
             return;
           }
           // Dlouhý stisk se dá udělat omylem (na iOS čte jako "menu") -- vždy

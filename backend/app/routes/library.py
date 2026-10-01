@@ -701,8 +701,10 @@ async def import_spotify(
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
 ):
+    from app.uploads import read_limited
+
     user_id, _device_id = current
-    raw = await file.read()
+    raw = await read_limited(file, 300 * 1024 * 1024, "Export")
     # ZIP s historií poslechů (Extended streaming history) -> poslechy
     # profilu, za který se jedná (Wrapped, mixy); jinak playlisty/knihovna.
     try:

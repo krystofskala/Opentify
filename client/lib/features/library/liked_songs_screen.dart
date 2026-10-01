@@ -16,6 +16,7 @@ import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../core/cz_plural.dart';
 import 'pinned_tile.dart';
+import '../../widgets/toast.dart';
 
 const _title = 'Oblíbené skladby';
 
@@ -81,11 +82,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
       await liked.toggle(r.id);
     }
     if (mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-            content:
-                Text(tracks.length == 1 ? 'Odebráno z oblíbených' : 'Z oblíbených odebráno: ${songsCount(tracks.length)}')),
-      );
+      showToast(ScaffoldMessenger.maybeOf(context), tracks.length == 1 ? 'Odebráno z oblíbených' : 'Z oblíbených odebráno: ${songsCount(tracks.length)}');
     }
   }
 

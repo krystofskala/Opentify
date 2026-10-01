@@ -7,6 +7,7 @@ import '../models/recording_model.dart';
 import '../state/providers.dart';
 import '../theme/design_tokens.dart';
 import 'glass/glass.dart';
+import 'toast.dart';
 
 String _mmss(int? ms) {
   if (ms == null) return '?';
@@ -18,7 +19,7 @@ String _mmss(int? ms) {
 /// Mullvad) a porovná ho se skladbou. Nic se nemění bez klepnutí.
 Future<void> checkTrackWithShazam(BuildContext context, WidgetRef ref, RecordingModel recording) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
-  messenger?.showSnackBar(const SnackBar(content: Text('Shazam poslouchá…'), duration: Duration(seconds: 3)));
+  showToast(messenger, 'Shazam poslouchá…');
   Map<String, dynamic> result;
   try {
     // Střih + Shazam přes VPN trvá i desítky sekund.
@@ -26,8 +27,7 @@ Future<void> checkTrackWithShazam(BuildContext context, WidgetRef ref, Recording
         .read(apiClientProvider)
         .postJson('/library/verify/${recording.id}', timeout: const Duration(seconds: 90));
   } catch (e) {
-    messenger?.showSnackBar(
-        SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Kontrola se nepovedla') : 'Kontrola se nepovedla')));
+    showToast(messenger, e is ApiException ? (e.detail ?? 'Kontrola se nepovedla') : 'Kontrola se nepovedla');
     return;
   }
   if (!context.mounted) return;

@@ -24,6 +24,8 @@ tu, se kterou se to psalo (slskd ~0.20.x).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import glob
 import logging
 import os
 import re
@@ -242,6 +244,9 @@ class SlskdProvider:
 
     INTERACTIVE = _SlskdProfile(search_cap_s=8.0, settle_s=1.0, start_timeout_s=8.0, stall_timeout_s=10.0, max_peers=3)
     BACKGROUND = _SlskdProfile(search_cap_s=15.0, settle_s=3.0, start_timeout_s=45.0, stall_timeout_s=30.0, max_peers=3)
+    # Složka celého alba od jednoho člověka: posílá skladbu po skladbě, ostatní
+    # čekají v jeho frontě -- trpělivě (živě: 45 s limit poslal 11/16 jinam).
+    ALBUM = _SlskdProfile(search_cap_s=15.0, settle_s=3.0, start_timeout_s=600.0, stall_timeout_s=60.0, max_peers=1)
 
     # Peer, co nedávno odmítl/zaseknul přenos, se chvíli vůbec nezkouší.
     _BLOCKLIST_S = 30 * 60
@@ -320,7 +325,7 @@ class SlskdProvider:
             return ProviderCandidate(
                 source_provider="slskd",
                 source_ref=f"{peer['username']}/{peer['filename']}",
-                extra={**peer, "alternates": [], "interactive": interactive},
+                extra={**peer, "alternates": [], "interactive": interactive, "preferred": True},
             )
         query = track.soulseek_query
         if not query:
@@ -486,7 +491,8 @@ class SlskdProvider:
         on_file_located: OnFileLocated,
     ) -> FetchResult:
         interactive = bool(candidate.extra.get("interactive"))
-        profile = self.INTERACTIVE if interactive else self.BACKGROUND
+        preferred = bool(candidate.extra.get("preferred"))
+        profile = self.INTERACTIVE if interactive else (self.ALBUM if preferred else self.BACKGROUND)
         peers = [candidate.extra, *candidate.extra.get("alternates", [])]
         located = False
 
@@ -501,12 +507,19 @@ class SlskdProvider:
                 return await self._fetch_from_peer(peer, profile, dest_stem, on_progress, located_once)
             except _PeerFailed as exc:
                 last_error = exc
-                self._block(peer["username"])
+                if not preferred:  # složku alba zkusí i další skladby
+                    self._block(peer["username"])
                 logger.info("slskd peer %s nevyšel: %s", peer["username"], exc)
                 if located:
                     # Klient už přehrává rostoucí soubor OD TOHOHLE peeru --
                     # jiný peer = jiný soubor, plynule na něj navázat nejde.
                     break
+        if preferred and not located:
+            # Složka alba nevyšla -- normální hledání na Soulseeku, ne hned YouTube.
+            plain = dataclasses.replace(track, preferred_source=None)
+            fallback = await self.resolve(plain, interactive=interactive)
+            if fallback is not None:
+                return await self.fetch(plain, fallback, dest_stem, on_progress, on_file_located)
         raise RuntimeError(f"slskd: žádný peer soubor nedodal ({last_error})")
 
     async def _fetch_from_peer(
@@ -538,9 +551,10 @@ class SlskdProvider:
             try:
                 while True:
                     now = loop.time()
-                    if now - started > self.download_timeout_s:
+                    limit = max(self.download_timeout_s, profile.start_timeout_s + 600)
+                    if now - started > limit:
                         await self._cancel(client, username, transfer)
-                        raise _PeerFailed(f"nedokončeno do {self.download_timeout_s:.0f} s")
+                        raise _PeerFailed(f"nedokončeno do {limit:.0f} s")
 
                     transfers_resp = await client.get(f"/api/v0/transfers/downloads/{username}")
                     transfers_resp.raise_for_status()
@@ -616,7 +630,8 @@ class SlskdProvider:
     def _locate_downloaded_file(self, basename: str) -> Path | None:
         """Nejnovější soubor s tímhle jménem kdekoliv pod `downloads_dir` --
         `rglob` místo pevné cesty, slskd strukturu zplošťuje po svém."""
-        candidates = list(self.downloads_dir.rglob(basename))
+        # Jméno souboru od cizího člověka -- "[", "*", "?" by glob bral jako vzor.
+        candidates = list(self.downloads_dir.rglob(glob.escape(basename)))
         if not candidates:
             return None
         return max(candidates, key=lambda p: p.stat().st_mtime)

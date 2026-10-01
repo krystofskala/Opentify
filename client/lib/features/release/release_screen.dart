@@ -19,6 +19,7 @@ import '../../widgets/collection_actions.dart' show CollectionKind, showCollecti
 import '../../widgets/remove_from_library.dart' show confirmRemoveFromLibrary, libraryRevisionProvider;
 import '../../state/library_scope.dart' show libraryIdsProvider;
 import '../../widgets/track_tile.dart';
+import '../../widgets/toast.dart';
 
 final releaseProvider = FutureProvider.autoDispose.family<ReleaseModel, String>((ref, releaseId) {
   return ref.watch(catalogRepositoryProvider).getRelease(releaseId);
@@ -160,10 +161,10 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     try {
       await ref.read(apiClientProvider).deleteJson('/library/imported-releases/${release.id}');
       ref.read(libraryRevisionProvider.notifier).state++;
-      messenger?.showSnackBar(SnackBar(content: Text('„${release.title}“ smazáno')));
+      showToast(messenger, '„${release.title}“ smazáno');
       if (context.mounted) context.pop();
     } catch (e) {
-      messenger?.showSnackBar(SnackBar(content: Text('Smazat se nepodařilo: $e')));
+      showToast(messenger, 'Smazat se nepodařilo: $e');
     }
   }
 
@@ -178,9 +179,9 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     try {
       await ref.read(apiClientProvider).postJson('/library/albums/${release.id}');
       ref.read(libraryRevisionProvider.notifier).state++;
-      messenger?.showSnackBar(SnackBar(content: Text('„${release.title}“ je v knihovně')));
+      showToast(messenger, '„${release.title}“ je v knihovně');
     } catch (_) {
-      messenger?.showSnackBar(const SnackBar(content: Text('Album se nepodařilo přidat')));
+      showToast(messenger, 'Album se nepodařilo přidat');
     }
   }
 

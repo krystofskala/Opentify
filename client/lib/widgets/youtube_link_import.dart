@@ -8,6 +8,7 @@ import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
 import 'glass/glass.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
+import 'toast.dart';
 
 bool isYoutubeLink(String text) => RegExp(r'(youtube\.com|youtu\.be)/', caseSensitive: false).hasMatch(text);
 
@@ -19,13 +20,13 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
   final api = ref.read(apiClientProvider);
-  messenger?.showSnackBar(const SnackBar(content: Text('Načítám odkaz z YouTube…'), duration: Duration(minutes: 2)));
+  showToast(messenger, 'Načítám odkaz z YouTube…', duration: const Duration(minutes: 2));
   Map<String, dynamic> info;
   try {
     info = await api.postJson('/library/import/youtube-inspect', body: {'url': url.trim()});
   } catch (e) {
     messenger?.hideCurrentSnackBar();
-    messenger?.showSnackBar(SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.')));
+    showToast(messenger, e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.');
     return;
   }
   messenger?.hideCurrentSnackBar();
@@ -44,7 +45,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
     ),
   );
   if (choice == null) return;
-  messenger?.showSnackBar(const SnackBar(content: Text('Přidávám…'), duration: Duration(minutes: 2)));
+  showToast(messenger, 'Přidávám…', duration: const Duration(minutes: 2));
   try {
     final result = await api.postJson('/library/import/youtube', body: {
       'url': url.trim(),
@@ -66,18 +67,16 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
         ref.invalidate(myPlaylistsProvider);
         router.push('/playlists/${result['playlistId']}');
       default:
-        messenger?.showSnackBar(SnackBar(
-          content: Text(switch (choice.kind) {
+        showToast(messenger, switch (choice.kind) {
             'live' => 'Koncert je u interpreta ${choice.artist}.',
             'soundtrack' => 'Soundtrack „${choice.title}“ je přidaný jako album.',
             _ => 'Album je v diskografii interpreta ${choice.artist}.',
-          }),
-        ));
+          });
         router.push('/releases/${result['releaseId']}');
     }
   } catch (e) {
     messenger?.hideCurrentSnackBar();
-    messenger?.showSnackBar(SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.')));
+    showToast(messenger, e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.');
   }
 }
 

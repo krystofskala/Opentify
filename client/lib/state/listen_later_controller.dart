@@ -6,6 +6,7 @@ import '../data/listen_later_repository.dart';
 import 'audio_player_controller.dart';
 import 'providers.dart';
 import '../widgets/glass/glass.dart';
+import '../widgets/toast.dart';
 
 final listenLaterRepositoryProvider = Provider<ListenLaterRepository>(
   (ref) => ListenLaterRepository(ref.watch(apiClientProvider)),
@@ -80,7 +81,7 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
     try {
       if (existing != null) {
         await remove(existing.id);
-        messenger?.showSnackBar(const SnackBar(content: Text('Odebráno z „Na později“')));
+        showToast(messenger, 'Odebráno z „Na později“');
         return;
       }
       final item = await add(kind, targetId);
@@ -99,7 +100,7 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
         ),
       );
     } catch (_) {
-      messenger?.showSnackBar(const SnackBar(content: Text('Nepodařilo se uložit, zkus to znovu')));
+      showToast(messenger, 'Nepodařilo se uložit, zkus to znovu');
     }
   }
 }

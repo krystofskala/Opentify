@@ -8,6 +8,7 @@ import '../state/provisioning_controller.dart';
 import '../state/providers.dart';
 import '../theme/design_tokens.dart';
 import 'glass/glass.dart';
+import 'toast.dart';
 
 /// Zvyšuje se po každém odebrání z knihovny -- obrazovky Knihovny ho
 /// sledují a přenačtou se (seznam skladeb drží vlastní stránkovaný stav).
@@ -31,11 +32,11 @@ Future<bool> confirmRemoveFromLibrary(BuildContext context, List<RecordingModel>
   try {
     preview = await repo.removeTracks(ids, dryRun: true);
   } catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text('Nepodařilo se připravit odebrání: $e')));
+    showToast(messenger, 'Nepodařilo se připravit odebrání: $e');
     return false;
   }
   if (preview.removed == 0) {
-    messenger?.showSnackBar(const SnackBar(content: Text('Nic z toho není v knihovně.')));
+    showToast(messenger, 'Nic z toho není v knihovně.');
     return false;
   }
   if (!context.mounted) return false;
@@ -52,9 +53,9 @@ Future<bool> confirmRemoveFromLibrary(BuildContext context, List<RecordingModel>
       '${result.removed == 1 ? 'Skladba' : '${result.removed} ${_plural(result.removed, 'skladba', 'skladby', 'skladeb')}'} ${_plural(result.removed, 'odebrána', 'odebrány', 'odebráno')} z knihovny',
       if (result.freedBytes > 0) 'uvolněno ${formatMegabytes(result.freedBytes)}',
     ];
-    messenger?.showSnackBar(SnackBar(content: Text(parts.join(' · '))));
+    showToast(messenger, parts.join(' · '));
   } catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text('Odebrání selhalo: $e')));
+    showToast(messenger, 'Odebrání selhalo: $e');
     return false;
   }
 

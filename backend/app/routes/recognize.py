@@ -50,7 +50,9 @@ def _save(user_id: str, match: Match, cover: bytes | None) -> tuple[dict | None,
 
 @recognize_router.post("/recognize")
 async def recognize_song(file: UploadFile, current: tuple[str, str] = Depends(get_current_user)):
-    raw = await file.read()
+    from app.uploads import read_limited
+
+    raw = await read_limited(file, 10 * 1024 * 1024, "Nahrávka")
     try:
         match = await recognize(raw)
     except RecognizeError as exc:

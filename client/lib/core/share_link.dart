@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
 import 'config.dart';
+import '../widgets/toast.dart';
 import 'share_link_stub.dart'
     if (dart.library.js_interop) 'share_link_web.dart'
     if (dart.library.io) 'share_link_io.dart' as impl;
@@ -109,6 +110,6 @@ Future<void> shareInOpentifyWithToast(
 }) async {
   final outcome = await shareInOpentify(path: path, title: title, artistName: artistName);
   if (outcome == ShareOutcome.copied) {
-    messenger?.showSnackBar(const SnackBar(content: Text('Odkaz do Opentify zkopírován'), duration: Duration(seconds: 2)));
+    showToast(messenger, 'Odkaz do Opentify zkopírován');
   }
 }

@@ -8,6 +8,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/state_views.dart' show SectionHeader;
+import '../../widgets/toast.dart';
 
 /// Odkazy "jak interpreta podpořit" (backend `/catalog/artists/{id}/support`
 /// z MusicBrainz, s vyhledáváním tam, kde MusicBrainz odkaz nemá).
@@ -146,7 +147,7 @@ Future<void> showCharitySheet(BuildContext context, String artistName) {
                     final opened = openExternal(c.url);
                     try {
                       await Clipboard.setData(ClipboardData(text: dedication));
-                      messenger?.showSnackBar(SnackBar(content: Text('Zkopírováno: $dedication')));
+                      showToast(messenger, 'Zkopírováno: $dedication');
                     } catch (_) {}
                     await opened;
                   },

@@ -11,6 +11,7 @@ import '../../state/auth_controller.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/toast.dart';
 
 /// Profil › Profily -- jen pro admina. Založit profil (jméno + přihlašovací
 /// jméno; heslo si dotyčný vytvoří sám při prvním přihlášení), vynulovat
@@ -24,9 +25,7 @@ class ProfilesSection extends ConsumerWidget {
   const ProfilesSection({super.key});
 
   void _snack(BuildContext context, Object e) {
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.')),
-    );
+    showToast(ScaffoldMessenger.maybeOf(context), e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.');
   }
 
   /// Co poslat novému člověku: adresa, jméno, a že si heslo vytvoří sám.

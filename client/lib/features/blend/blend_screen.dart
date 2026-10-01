@@ -8,6 +8,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
+import '../../widgets/toast.dart';
 
 typedef BlendRow = ({
   String id,
@@ -54,11 +55,9 @@ class BlendScreen extends ConsumerWidget {
       await action();
       ref.invalidate(blendsProvider);
       ref.invalidate(homeProvider);
-      messenger?.showSnackBar(SnackBar(content: Text(done)));
+      showToast(messenger, done);
     } catch (e) {
-      messenger?.showSnackBar(
-        SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepovedlo se.') : 'Nepovedlo se.')),
-      );
+      showToast(messenger, e is ApiException ? (e.detail ?? 'Nepovedlo se.') : 'Nepovedlo se.');
     }
   }
 

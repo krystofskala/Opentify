@@ -18,6 +18,7 @@ import 'widgets/auth_gate.dart';
 import 'state/offline_controller.dart';
 import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
+import 'widgets/toast.dart';
 
 const _defaultSeed = Colors.deepPurple;
 
@@ -42,7 +43,7 @@ class OpentifyApp extends ConsumerWidget {
     ref.watch(appearanceSyncProvider);
     ref.listen<String?>(playerNoticeProvider, (_, message) {
       if (message == null) return;
-      appMessengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
+      showToast(appMessengerKey.currentState, message);
       ref.read(playerNoticeProvider.notifier).state = null;
     });
 

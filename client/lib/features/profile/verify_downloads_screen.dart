@@ -14,6 +14,7 @@ import '../../widgets/net_image.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
+import '../../widgets/toast.dart';
 
 /// Jedna podezřelá skladba z kontroly Shazamem.
 class VerifyItem {
@@ -81,7 +82,7 @@ class _VerifyDownloadsScreenState extends ConsumerState<VerifyDownloadsScreen> {
       });
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
-      messenger?.showSnackBar(SnackBar(content: Text(detail ?? 'Nepodařilo se.')));
+      showToast(messenger, detail ?? 'Nepodařilo se.');
     }
   }
 

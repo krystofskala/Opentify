@@ -35,6 +35,7 @@ import '../../state/auth_controller.dart';
 import '../../state/library_scope.dart';
 import 'offline_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../widgets/toast.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -719,7 +720,7 @@ class _PlaylistsTab extends ConsumerWidget {
     );
     if (title == null || title.isEmpty) {
       if (title != null && context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Playlist potřebuje název.')));
+        showToast(ScaffoldMessenger.maybeOf(context), 'Playlist potřebuje název.');
       }
       return;
     }
@@ -729,7 +730,7 @@ class _PlaylistsTab extends ConsumerWidget {
       if (context.mounted) context.push('/playlists/${created.id}');
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Playlist se nepodařilo vytvořit.')));
+        showToast(ScaffoldMessenger.maybeOf(context), 'Playlist se nepodařilo vytvořit.');
       }
     }
   }

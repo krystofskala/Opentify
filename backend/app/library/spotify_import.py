@@ -261,7 +261,10 @@ def _zip_entry_name(info: zipfile.ZipInfo) -> str:
 
 def _import_zip(session: Session, user_id: str, raw: bytes) -> ImportResult:
     result = ImportResult()
+    from app.uploads import check_zip
+
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        check_zip(zf)
         for info in zf.infolist():
             if info.is_dir():
                 continue

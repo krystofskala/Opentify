@@ -24,6 +24,7 @@ import '../state/provisioning_controller.dart';
 import '../state/auth_controller.dart';
 import '../state/listen_later_controller.dart' show listenLaterProvider;
 import '../data/listen_later_repository.dart' show LaterKind;
+import 'toast.dart';
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -147,7 +148,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
     };
 
     void toast(String text) =>
-        messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+        showToast(messenger, text);
 
     // Sheet zavřít hned, skladby dotáhnout potom (album z MusicBrainz může
     // chvíli trvat) -- chyba jen jako toast.
@@ -451,7 +452,7 @@ Future<void> showPlayOptions(BuildContext context, {required String title, requi
   final messenger = ScaffoldMessenger.maybeOf(context);
   String songs(int n) => songsCount(n);
   void toast(String text) =>
-      messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+      showToast(messenger, text);
   return showGlassSheet<void>(
     context,
     builder: (sheetContext) {

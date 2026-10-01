@@ -13,6 +13,7 @@ import 'track_actions.dart' show nowPlayingInfoFor;
 import 'glass/glass.dart';
 import 'youtube_link_import.dart';
 import '../core/cz_plural.dart';
+import 'toast.dart';
 
 /// Import z odkazu na Spotify: průběh, pak otevře nový playlist a řekne,
 /// kolik skladeb se našlo (a jestli Spotify dal jen prvních 100).
@@ -21,9 +22,7 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
   if (isYoutubeLink(url)) return importYoutubeLink(context, ref, url);
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
-  messenger?.showSnackBar(
-    const SnackBar(content: Text('Načítám odkaz…'), duration: Duration(minutes: 3)),
-  );
+  showToast(messenger, 'Načítám odkaz…', duration: const Duration(minutes: 3));
   try {
     final result = await ref.read(playlistsRepositoryProvider).importSpotifyLink(url.trim());
     messenger?.hideCurrentSnackBar();
@@ -46,12 +45,8 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
     ref.invalidate(myPlaylistsProvider);
     final count =
         result.matched == result.total ? songsCount(result.total) : '${result.matched} z ${result.total} skladeb';
-    messenger?.showSnackBar(SnackBar(
-      content: Text(
-        '„${result.title}“ je v Knihovně › Sdílené ($count).'
-        '${result.truncated ? ' Spotify veřejně ukazuje jen prvních 100.' : ''}',
-      ),
-    ));
+    showToast(messenger, '„${result.title}“ je v Knihovně › Sdílené ($count).'
+        '${result.truncated ? ' Spotify veřejně ukazuje jen prvních 100.' : ''}',);
     router.push('/playlists/${result.id}');
   } catch (e) {
     messenger?.hideCurrentSnackBar();
@@ -60,7 +55,7 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
       TimeoutException() => 'Import trvá moc dlouho, zkus to za chvíli znovu.',
       _ => 'Odkaz se nepodařilo načíst.',
     };
-    messenger?.showSnackBar(SnackBar(content: Text(detail)));
+    showToast(messenger, detail);
   }
 }
 

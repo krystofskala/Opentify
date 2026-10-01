@@ -20,6 +20,7 @@ import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/glass/glass.dart';
 import '../../core/cz_plural.dart';
+import '../../widgets/toast.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -258,10 +259,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       for (final id in ids) {
         await repo.removeItem(widget.playlistId, id);
       }
-      messenger?.showSnackBar(
-          SnackBar(content: Text(ids.length == 1 ? 'Skladba odebrána' : 'Odebráno: ${songsCount(ids.length)}')));
+      showToast(messenger, ids.length == 1 ? 'Skladba odebrána' : 'Odebráno: ${songsCount(ids.length)}');
     } catch (e) {
-      messenger?.showSnackBar(SnackBar(content: Text('Odebrání selhalo: $e')));
+      showToast(messenger, 'Odebrání selhalo: $e');
     } finally {
       ref.invalidate(myPlaylistsProvider);
       // Počkat na čerstvá data, než se zrcadlo znovu synchronizuje -- jinak
@@ -353,7 +353,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         ),
       );
     } catch (e) {
-      messenger?.showSnackBar(SnackBar(content: Text('Přidání selhalo: $e')));
+      showToast(messenger, 'Přidání selhalo: $e');
     }
   }
 

@@ -7,6 +7,7 @@ import 'glass/glass.dart';
 import 'state_views.dart';
 import 'glass/expressive_shapes.dart';
 import '../core/cz_plural.dart';
+import 'toast.dart';
 
 /// Bottom sheet "Přidat do playlistu" -- seznam vlastních playlistů + řádek
 /// na založení nového rovnou z místa. Jedna skladba (`recordingId`, přehrávač/
@@ -75,7 +76,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
   void _confirm(ScaffoldMessengerState? messenger, String playlistTitle) {
     final count = widget.recordingIds.length;
     final what = count == 1 ? 'Skladba přidána' : 'Přidáno: ${songsCount(count)}';
-    messenger?.showSnackBar(SnackBar(content: Text('$what do „$playlistTitle“')));
+    showToast(messenger, '$what do „$playlistTitle“');
   }
 
   @override
