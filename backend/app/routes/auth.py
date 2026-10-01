@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 from datetime import timedelta
 
@@ -37,7 +38,14 @@ def _set_cookie(response: Response, name: str, value: str) -> None:
 
 
 def _user_out(u: AppUser | None) -> dict | None:
-    return None if u is None else {"id": u.id, "name": u.name, "role": u.role, "tailscaleLogin": u.tailscale_login}
+    return None if u is None else {
+        "id": u.id,
+        "name": u.name,
+        "role": u.role,
+        "tailscaleLogin": u.tailscale_login,
+        "listenbrainzUser": u.listenbrainz_user
+        or (os.environ.get("LISTENBRAINZ_USERNAME") if u.id == ADMIN_ID and os.environ.get("LISTENBRAINZ_TOKEN") else None),
+    }
 
 
 def _issue_token(session: Session, user_id: str, label: str | None) -> str:
@@ -203,3 +211,54 @@ def act_as(body: ActAsIn, response: Response, _admin=Depends(require_admin)):
     else:
         response.delete_cookie(ACT_AS_COOKIE, path="/")
     return {"actingAs": body.user_id or ADMIN_ID}
+
+
+class ListenBrainzIn(BaseModel):
+    token: str
+
+
+@auth_router.put("/me/listenbrainz")
+async def connect_listenbrainz(body: ListenBrainzIn, request: Request):
+    """Vlastní ListenBrainz účet profilu, za který se právě jedná: poslechy,
+    "právě hraje" a lajky toho profilu pak jdou do JEHO účtu (nikdy do
+    adminova). Token se ověří u ListenBrainz a nikdy se nevrací ani neloguje."""
+    import httpx
+
+    from app.listens import LB_API
+
+    _user, acting = resolve_user(request)
+    if acting is None:
+        raise HTTPException(status_code=401, detail="Nepřihlášené zařízení.")
+    token = body.token.strip()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{LB_API}/1/validate-token", headers={"Authorization": f"Token {token}"})
+        data = r.json() if r.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status_code=502, detail="ListenBrainz teď neodpovídá, zkus to za chvíli.")
+    if not data.get("valid"):
+        raise HTTPException(status_code=400, detail="Tenhle token ListenBrainz nezná. Zkopíruj ho z listenbrainz.org/settings.")
+    with Session(engine) as session:
+        user = session.get(AppUser, acting.id)
+        user.listenbrainz_token = token
+        user.listenbrainz_user = data.get("user_name")
+        session.add(user)
+        session.commit()
+    from app.listens import _wakeup
+
+    _wakeup.set()  # čekající poslechy profilu odeslat hned
+    return {"listenbrainzUser": data.get("user_name")}
+
+
+@auth_router.delete("/me/listenbrainz")
+def disconnect_listenbrainz(request: Request):
+    _user, acting = resolve_user(request)
+    if acting is None:
+        raise HTTPException(status_code=401, detail="Nepřihlášené zařízení.")
+    with Session(engine) as session:
+        user = session.get(AppUser, acting.id)
+        user.listenbrainz_token = None
+        user.listenbrainz_user = None
+        session.add(user)
+        session.commit()
+    return {"listenbrainzUser": None}

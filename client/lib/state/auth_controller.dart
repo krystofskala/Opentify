@@ -13,7 +13,10 @@ Profile? _profile(Object? j) {
 
 /// Kdo je na tomhle zařízení přihlášený (`user`) a za koho appka právě
 /// jedná (`acting` -- admin se může přepnout na jiný profil).
-typedef AuthInfo = ({Profile? user, Profile? acting, String mode});
+///
+/// `listenbrainzUser`: ListenBrainz účet profilu `acting` (null = nepřipojený;
+/// jeho poslechy pak nikam nejdou -- nikdy ne do cizího účtu).
+typedef AuthInfo = ({Profile? user, Profile? acting, String mode, String? listenbrainzUser});
 
 /// Přihlášení: pozvánka v adrese (`/?join=KÓD`) se jednou vymění za klíč
 /// zařízení (cookie), pak už jen `GET /auth/me`. Nic se nezadává.
@@ -35,6 +38,7 @@ final authProvider = FutureProvider<AuthInfo>((ref) async {
     user: _profile(json['user']),
     acting: _profile(json['acting']),
     mode: json['mode'] as String? ?? 'open',
+    listenbrainzUser: (json['acting'] as Map<String, dynamic>?)?['listenbrainzUser'] as String?,
   );
 });
 

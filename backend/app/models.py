@@ -228,6 +228,10 @@ class AppUser(SQLModel, table=True):
     # Tailscale účet (`Tailscale-User-Login` z `tailscale serve`) -- zařízení
     # bez klíče se podle něj přiřadí k profilu (viz app/auth.py).
     tailscale_login: str | None = Field(default=None, index=True)
+    # Vlastní ListenBrainz účet profilu (token z listenbrainz.org/settings).
+    # Poslechy profilu jdou JEN s tímhle tokenem -- nikdy s adminovým.
+    listenbrainz_token: str | None = None
+    listenbrainz_user: str | None = None
 
 
 class AuthToken(SQLModel, table=True):

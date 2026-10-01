@@ -33,8 +33,20 @@ _http = httpx.AsyncClient(timeout=15.0)
 _wakeup = asyncio.Event()
 
 
-def _token() -> str | None:
-    return os.environ.get("LISTENBRAINZ_TOKEN") or None
+def token_for(user_id: str) -> str | None:
+    """ListenBrainz token profilu: jeho vlastní, u admina případně ten
+    z `.env`. Jiný profil adminův token NIKDY nedostane -- bez vlastního
+    tokenu se jeho poslechy prostě neposílají (zůstanou čekat, a jakmile si
+    účet připojí, odejdou do JEHO účtu)."""
+    from app.models import AppUser
+
+    with Session(engine) as session:
+        user = session.get(AppUser, user_id)
+        if user is not None and user.listenbrainz_token:
+            return user.listenbrainz_token
+    if user_id == ADMIN_ID:
+        return os.environ.get("LISTENBRAINZ_TOKEN") or None
+    return None
 
 
 def record_listen(
@@ -102,17 +114,18 @@ def _epoch(value: datetime) -> int:
     return int((value if value.tzinfo else value.replace(tzinfo=timezone.utc)).timestamp())
 
 
-async def _post(payload: dict[str, Any]) -> httpx.Response:
+async def _post(payload: dict[str, Any], token: str) -> httpx.Response:
     return await _http.post(
         f"{LB_API}/1/submit-listens",
         json=payload,
-        headers={"Authorization": f"Token {_token()}"},
+        headers={"Authorization": f"Token {token}"},
     )
 
 
-async def submit_playing_now(recording_id: str) -> None:
-    """"Právě hraje" -- best-effort, nic se neukládá ani neopakuje."""
-    if not _token():
+async def submit_playing_now(recording_id: str, user_id: str) -> None:
+    """"Právě hraje" -- best-effort, jen s tokenem TOHO profilu."""
+    token = token_for(user_id)
+    if not token:
         return
     with Session(engine) as session:
         recording = session.get(Recording, recording_id)
@@ -120,22 +133,35 @@ async def submit_playing_now(recording_id: str) -> None:
     if meta is None:
         return
     try:
-        await _post({"listen_type": "playing_now", "payload": [{"track_metadata": meta}]})
+        await _post({"listen_type": "playing_now", "payload": [{"track_metadata": meta}]}, token)
     except httpx.HTTPError:
         pass
 
 
 async def submit_pending() -> int:
-    """Odešle neodeslané poslechy (nejstarší první). Vrátí počet odeslaných."""
-    if not _token():
-        return 0
+    """Odešle neodeslané poslechy (nejstarší první), každý profil se SVÝM
+    tokenem. Import ze Spotify má `lb_submitted_at` vyplněné, takže se
+    neposílá nikdy. Vrátí počet odeslaných."""
+    with Session(engine) as session:
+        users = session.exec(
+            select(Listen.user_id)
+            .where(Listen.lb_submitted_at.is_(None), Listen.lb_attempts < _MAX_ATTEMPTS)  # type: ignore[union-attr]
+            .distinct()
+        ).all()
+    sent = 0
+    for user_id in users:
+        token = token_for(user_id)
+        if token:
+            sent += await _submit_for(user_id, token)
+    return sent
+
+
+async def _submit_for(user_id: str, token: str) -> int:
     with Session(engine) as session:
         pending = session.exec(
             select(Listen)
             .where(Listen.lb_submitted_at.is_(None), Listen.lb_attempts < _MAX_ATTEMPTS)  # type: ignore[union-attr]
-            # ListenBrainz účet je adminův -- poslechy ostatních profilů tam
-            # nepatří.
-            .where(Listen.user_id == ADMIN_ID)
+            .where(Listen.user_id == user_id)
             .order_by(Listen.played_at)
             .limit(_BATCH)
         ).all()
@@ -155,7 +181,7 @@ async def submit_pending() -> int:
 
     payload = {"listen_type": "single" if len(entries) == 1 else "import", "payload": [e for _, e in entries]}
     try:
-        resp = await _post(payload)
+        resp = await _post(payload, token)
         ok, error = resp.status_code == 200, None if resp.status_code == 200 else f"HTTP {resp.status_code}: {resp.text[:200]}"
     except httpx.HTTPError as exc:
         ok, error = False, f"síť: {type(exc).__name__}"

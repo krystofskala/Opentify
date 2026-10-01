@@ -6,7 +6,7 @@ podržení ho zruší. Zlomené srdce:
   - vyřadí ji ze všech generovaných výběrů (mixy na Domů, rádia, denní
     doporučení) -- `without_disliked` volají ukládací funkce snapshotů,
   - pošle na ListenBrainz zpětnou vazbu "hate" (score -1; zrušení = 0),
-    stejně jako tam jdou poslechy (`LISTENBRAINZ_TOKEN`), jen pro skladby
+    stejně jako tam jdou poslechy (token profilu, viz `app.listens.token_for`), jen pro skladby
     s MusicBrainz ID. Best effort -- výpadek LB nic nerozbije.
 """
 
@@ -41,8 +41,10 @@ def without_disliked(user_id: str | None, recording_ids: list[str]) -> list[str]
     return [rid for rid in recording_ids if rid not in bad] if bad else recording_ids
 
 
-async def send_feedback(recording_id: str, score: int) -> None:
-    token = os.environ.get("LISTENBRAINZ_TOKEN")
+async def send_feedback(recording_id: str, score: int, user_id: str) -> None:
+    from app.listens import token_for
+
+    token = token_for(user_id)  # jen token TOHO profilu, nikdy cizí
     if not token:
         return
     with Session(engine) as session:
@@ -87,21 +89,23 @@ def purge_from_snapshots(session: Session, recording_id: str) -> int:
 _last_feedback: dict[str, asyncio.Task] = {}
 
 
-async def _send_after(previous: asyncio.Task | None, recording_id: str, score: int) -> None:
+async def _send_after(previous: asyncio.Task | None, recording_id: str, score: int, user_id: str) -> None:
     if previous is not None:
         try:
             await previous
         except Exception:  # noqa: BLE001 -- best effort
             pass
-    await send_feedback(recording_id, score)
+    await send_feedback(recording_id, score, user_id)
 
 
-def send_feedback_later(recording_id: str, score: int) -> None:
+def send_feedback_later(recording_id: str, score: int, user_id: str) -> None:
+    """Na ListenBrainz profilu `user_id` (jeho token; bez tokenu nic)."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    previous = _last_feedback.get(recording_id)
-    task = loop.create_task(_send_after(previous, recording_id, score))
-    _last_feedback[recording_id] = task
-    task.add_done_callback(lambda t: _last_feedback.get(recording_id) is t and _last_feedback.pop(recording_id, None))
+    key = f"{user_id}:{recording_id}"
+    previous = _last_feedback.get(key)
+    task = loop.create_task(_send_after(previous, recording_id, score, user_id))
+    _last_feedback[key] = task
+    task.add_done_callback(lambda t: _last_feedback.get(key) is t and _last_feedback.pop(key, None))

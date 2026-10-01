@@ -861,8 +861,7 @@ async def like_song(
         for row in dislikes:
             session.delete(row)
         session.commit()
-        if user_id == ADMIN_ID:
-            send_feedback_later(recording_id, 0)
+        send_feedback_later(recording_id, 0, user_id)
     return {"recordingId": recording_id, "liked": True}
 
 
@@ -890,8 +889,8 @@ async def dislike_song(
     purge_from_snapshots(session, recording_id)
     session.commit()
     unlike_song(recording_id, session=session, current=current)
-    if user_id == ADMIN_ID:  # ListenBrainz účet je adminův
-        send_feedback_later(recording_id, -1)
+    # ListenBrainz účet TOHO profilu (jeho token, viz app/listens.token_for).
+    send_feedback_later(recording_id, -1, user_id)
     return {"recordingId": recording_id, "disliked": True}
 
 
@@ -907,8 +906,7 @@ async def undislike_song(
     ).all():
         session.delete(row)
     session.commit()
-    if user_id == ADMIN_ID:
-        send_feedback_later(recording_id, 0)
+    send_feedback_later(recording_id, 0, user_id)
     return {"recordingId": recording_id, "disliked": False}
 
 

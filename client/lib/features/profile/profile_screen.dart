@@ -141,7 +141,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               title: 'Moje hudba',
               summary: isAdmin
                   ? 'Import ze Spotify, export, kontrola stažených, lokální knihovna'
-                  : 'Import ze Spotify, export dat',
+                  : 'Import ze Spotify, export dat, ListenBrainz',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -165,6 +165,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     buttonLabel: 'Exportovat',
                     onPressed: () => _export(context),
                   ),
+                  const _ListenBrainzRow(),
                   if (isAdmin) ...[
                     _ActionRow(
                       icon: Symbols.fact_check_rounded,
@@ -781,5 +782,83 @@ class _AppVersion extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// Vlastní ListenBrainz účet profilu: poslechy, "právě hraje" a srdíčka
+/// tohohle profilu jdou do JEHO účtu (export dat, doporučení LB podle toho,
+/// co poslouchá). Bez připojení se nikam neposílají.
+class _ListenBrainzRow extends ConsumerWidget {
+  const _ListenBrainzRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider).valueOrNull;
+    if (auth?.acting == null) return const SizedBox.shrink();
+    final lbUser = auth!.listenbrainzUser;
+    return _ActionRow(
+      icon: Symbols.podcasts_rounded,
+      title: lbUser == null ? 'ListenBrainz' : 'ListenBrainz · $lbUser',
+      description: lbUser == null
+          ? 'Připoj svůj účet a poslechy se ti budou ukládat na ListenBrainz – i ty, '
+              'co už tu máš. Token najdeš na listenbrainz.org › Settings.'
+          : 'Poslechy a srdíčka tohohle profilu jdou do tvého účtu $lbUser.',
+      buttonLabel: lbUser == null ? 'Připojit…' : 'Odpojit',
+      onPressed: () => lbUser == null ? _connect(context, ref) : _disconnect(context, ref),
+    );
+  }
+
+  Future<void> _connect(BuildContext context, WidgetRef ref) async {
+    final controller = TextEditingController();
+    final token = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Připojit ListenBrainz'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: const InputDecoration(hintText: 'User token z listenbrainz.org/settings'),
+          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+        ),
+        actions: [
+          GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          GlassButton(
+            label: 'Připojit',
+            style: GlassButtonStyle.prominent,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (token == null || token.isEmpty || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final json = await ref.read(apiClientProvider).putJson('/auth/me/listenbrainz', body: {'token': token});
+      ref.invalidate(authProvider);
+      messenger.showSnackBar(SnackBar(content: Text('Připojeno jako ${json['listenbrainzUser']}.')));
+    } catch (e) {
+      final detail = e is ApiException ? e.detail : null;
+      messenger.showSnackBar(SnackBar(content: Text(detail ?? 'Připojení se nepodařilo.')));
+    }
+  }
+
+  Future<void> _disconnect(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(apiClientProvider).deleteJson('/auth/me/listenbrainz');
+      ref.invalidate(authProvider);
+      messenger.showSnackBar(const SnackBar(content: Text('ListenBrainz odpojen, poslechy se tam už neposílají.')));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('Odpojení se nepodařilo.')));
+    }
   }
 }

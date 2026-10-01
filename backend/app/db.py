@@ -39,7 +39,11 @@ def _ensure_columns() -> None:
         "recording": [("deezer_id", "VARCHAR")],
         "listen": [("context", "VARCHAR")],
         "listenlater": [("source", "VARCHAR")],
-        "appuser": [("tailscale_login", "VARCHAR")],
+        "appuser": [
+            ("tailscale_login", "VARCHAR"),
+            ("listenbrainz_token", "VARCHAR"),
+            ("listenbrainz_user", "VARCHAR"),
+        ],
         "playlist": [
             ("description", "VARCHAR"),
             ("cover_urls", "JSON"),
