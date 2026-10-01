@@ -96,7 +96,7 @@ jobs:
           git config user.email "opentify-ci@users.noreply.github.com"
           git fetch origin altstore || true
           if git rev-parse --verify origin/altstore >/dev/null 2>&1; then
-            git checkout -B altstore origin/altstore
+            git checkout -f -B altstore origin/altstore
           else
             git checkout --orphan altstore
             git rm -rf . >/dev/null 2>&1 || true
