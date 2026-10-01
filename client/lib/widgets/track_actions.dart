@@ -20,6 +20,7 @@ import 'radio_station.dart';
 import '../state/library_scope.dart';
 import '../state/offline_controller.dart';
 import '../state/auth_controller.dart';
+import '../state/providers.dart' show apiClientProvider;
 import 'verify_track_sheet.dart';
 import 'share_sheet.dart';
 
@@ -299,6 +300,25 @@ class _TrackActionsSheet extends ConsumerWidget {
                   if (ok) toast(isDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi');
                 }),
               ),
+              // Stáhla se jiná verze (live, cover, úplně jiná píseň): zdroj se
+              // zapamatuje jako špatný a stáhne se jiný.
+              if (inLibrary)
+                _Item(
+                  icon: Symbols.sync_problem_rounded,
+                  label: 'Špatná verze – stáhnout jinou',
+                  onTap: () => run(() async {
+                    try {
+                      await ref.read(apiClientProvider).postJson('/library/tracks/${recording.id}/wrong-version');
+                      ref.invalidate(libraryIdsProvider);
+                      toast('Stahuju jinou verzi „${recording.title}“');
+                      if (ref.read(audioPlayerControllerProvider).nowPlaying?.recordingId == recording.id) {
+                        await controller.retryCurrent();
+                      }
+                    } catch (e) {
+                      toast('Nepodařilo se: $e');
+                    }
+                  }),
+                ),
               if (inLibrary)
                 _Item(
                   icon: Symbols.delete_rounded,

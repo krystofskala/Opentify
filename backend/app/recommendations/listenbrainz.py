@@ -141,12 +141,12 @@ class ListenBrainzPublicClient:
             base_url=LISTENBRAINZ_PUBLIC_API_BASE_URL, timeout=10.0
         )
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _get(self, path: str, params: dict[str, Any] | None = None, timeout: float | None = None) -> dict[str, Any]:
         if "own:" in path:  # vlastní interpret (app/catalog/identity.py)
             raise ListenBrainzError("vlastní záznam -- na ListenBrainz není")
         await _public_rate_limiter.wait()
         try:
-            resp = await self._client.get(path, params=params or {})
+            resp = await self._client.get(path, params=params or {}, timeout=timeout or self._client.timeout)
         except httpx.TransportError as exc:
             raise ListenBrainzError(f"listenbrainz.org nedostupný: {exc}") from exc
         if resp.status_code == 404:
@@ -167,6 +167,7 @@ class ListenBrainzPublicClient:
             data = await self._get(
                 "/1/lb-radio/tags",
                 {"tag": tag, "operator": "or", "pop_begin": 0, "pop_end": 100, "count": count},
+                timeout=45,  # velké tagy (rock, pop) LB počítá přes 10 s
             )
             return data if isinstance(data, list) else []
 

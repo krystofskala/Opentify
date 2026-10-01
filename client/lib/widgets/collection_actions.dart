@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +20,7 @@ import 'track_actions.dart' show nowPlayingInfoFor;
 import '../core/cz_plural.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
 import '../state/offline_controller.dart';
+import '../state/provisioning_controller.dart';
 import '../state/auth_controller.dart';
 import '../state/listen_later_controller.dart' show listenLaterProvider;
 import '../data/listen_later_repository.dart' show LaterKind;
@@ -240,6 +243,19 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   onSaveCopy!();
                 },
               ),
+            // Celé album/playlist stáhnout na server najednou (Přehrát
+            // stahuje jen hranou a další skladbu).
+            _Row(
+              icon: Symbols.cloud_download_rounded,
+              label: kind == CollectionKind.album ? 'Stáhnout celé album' : 'Stáhnout všechny skladby',
+              onTap: () => run((infos) async {
+                final provisioning = container.read(provisioningControllerProvider.notifier);
+                for (final info in infos) {
+                  unawaited(provisioning.provision(info.recordingId));
+                }
+                toast('Stahuje se: ${songs(infos.length)}');
+              }),
+            ),
             _Row(
               icon: Symbols.download_for_offline_rounded,
               label: 'Stáhnout do zařízení',

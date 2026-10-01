@@ -72,6 +72,9 @@ def _title_tokens(title: str) -> set[str]:
     return {t for t in _normalize(core).split() if len(t) >= 2}
 
 
+_VERSION_MARKERS = ("live", "acoustic", "cover", "remix", "karaoke", "instrumental", "piano", "ukulele", "reaction", "sped", "slowed", "nightcore", "concert")
+
+
 @dataclass
 class TrackMetadata:
     """To, co worker o skladbě ví z DB (`app/worker.py:_start_job`) a co
@@ -89,6 +92,9 @@ class TrackMetadata:
     # Přesné YouTube video (skladba z odkazu na YouTube / album jen na
     # YouTube) -- stáhne se přímo ono, žádné hledání ani Soulseek.
     youtube_id: str | None = None
+    # Zdroje, které uživatel označil jako špatnou verzi ("Špatná verze --
+    # stáhnout jinou"): `slskd:{user}|{soubor}`, `youtube:{id}`.
+    rejected_sources: tuple[str, ...] = ()
 
     @property
     def search_query(self) -> str:
@@ -131,6 +137,8 @@ class FetchResult:
     bitrate_kbps: int | None = None
     # Odkaz na zdroj (YouTube video) -- ukáže se u skladby a ve sdílení.
     source_url: str | None = None
+    # Přesný zdroj souboru (viz `TrackMetadata.rejected_sources`).
+    source_key: str | None = None
 
 
 class MediaProvider(Protocol):
@@ -370,6 +378,15 @@ class SlskdProvider:
                 if (username, filename) in seen:
                     continue
                 seen.add((username, filename))
+                if f"slskd:{username}|{filename}" in track.rejected_sources:
+                    continue  # uživatel ho označil jako špatnou verzi
+                # Délka úplně jiná = jiná nahrávka, i když název sedí (živě:
+                # "Holding on to You" byla ukulele verze jiné písně, 2:38).
+                length = f.get("length")
+                if length and track.duration_ms:
+                    target = track.duration_ms / 1000
+                    if abs(float(length) - target) > max(20.0, target * 0.15):
+                        continue
                 if wanted:
                     have = set(_normalize(filename.rsplit("\\", 1)[-1]).split())
                     if len(wanted & have) < max(1, round(len(wanted) * 0.8)):
@@ -525,6 +542,7 @@ class SlskdProvider:
             format=dest_path.suffix.lstrip("."),
             source_provider="slskd",
             bitrate_kbps=peer.get("bitrate_kbps"),
+            source_key=f"slskd:{username}|{filename}",
         )
 
     @staticmethod
@@ -709,7 +727,11 @@ class YoutubeProvider:
             search_opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 15}
             with yt_dlp.YoutubeDL({**search_opts, **_ytdlp_proxy_opts()}) as ydl:
                 info = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            entries = [e for e in (info or {}).get("entries") or [] if e and e.get("id")]
+            entries = [
+                e
+                for e in (info or {}).get("entries") or []
+                if e and e.get("id") and f"youtube:{e['id']}" not in track.rejected_sources
+            ]
             if not entries:
                 raise RuntimeError(f"YouTube nic nenašel pro '{query}'")
             target = track.duration_ms / 1000 if track.duration_ms else None
@@ -730,8 +752,16 @@ class YoutubeProvider:
             def title_hit(e: dict) -> bool:
                 return bool(wanted) and wanted <= _title_tokens(e.get("title") or "")
 
+            # Jiná verze (live, cover, remix...) jen když ji skladba sama nese
+            # v názvu (živě: "Guns for Hands" se stáhla živá verze).
+            asked = _normalize(track.title)
+
+            def other_version(e: dict) -> bool:
+                title = _normalize(e.get("title") or "")
+                return any(m in title.split() and m not in asked.split() for m in _VERSION_MARKERS)
+
             ok = [e for e in entries if acceptable(e)]
-            ok.sort(key=lambda e: 0 if title_hit(e) else 1)
+            ok.sort(key=lambda e: (0 if title_hit(e) else 1, 1 if other_version(e) else 0))
             if track.skip_candidates and ok:
                 ok = ok[track.skip_candidates % len(ok):] + ok[: track.skip_candidates % len(ok)]
             chosen = ok[0] if ok else None
@@ -792,6 +822,7 @@ class YoutubeProvider:
             source_provider="youtube",
             bitrate_kbps=bitrate,
             source_url=chosen_url[0] if chosen_url else None,
+            source_key=f"youtube:{chosen_url[0].rsplit('=', 1)[-1]}" if chosen_url else None,
         )
 
 

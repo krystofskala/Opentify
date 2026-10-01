@@ -1084,6 +1084,49 @@ async def verify_redownload(
     return {"recordingId": recording_id, "review": "redownload"}
 
 
+@library_router.post("/tracks/{recording_id}/wrong-version")
+async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    """"Špatná verze -- stáhnout jinou": zapamatuje si přesný zdroj staženého
+    souboru (Soulseek soubor / YouTube video) jako odmítnutý, soubor smaže a
+    stáhne skladbu znovu z jiného zdroje. Vlastní hudba (mimo MEDIA_ROOT) a
+    vlastní alba (Kontrast) se nemění."""
+    from app.catalog.identity import is_own_id
+    from app.provisioning_service import enqueue, get_or_create_job
+
+    user_id, device_id = current
+    with Session(engine) as session:
+        rec = session.get(Recording, recording_id)
+        asset = session.get(MediaAsset, recording_id)
+        if rec is None or asset is None or not asset.storage_path:
+            raise HTTPException(status_code=404, detail="Skladba není stažená.")
+        artist = session.get(Artist, rec.artist_id) if rec.artist_id else None
+        if is_own_id(rec.mbid) or (artist is not None and is_own_id(artist.mbid)):
+            raise HTTPException(status_code=400, detail="Vlastní hudba se znovu nestahuje.")
+        if not Path(asset.storage_path).resolve().is_relative_to(MEDIA_ROOT.resolve()):
+            raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby -- ten appka nemaže.")
+        refs = dict(rec.external_refs or {})
+        key = refs.get("sourceKey")
+        if not key and asset.source_provider == "youtube" and refs.get("youtubeUrl"):
+            key = f"youtube:{str(refs['youtubeUrl']).rsplit('=', 1)[-1]}"
+        rejected = list(refs.get("rejectedSources") or [])
+        if key and key not in rejected:
+            rejected.append(key)
+        refs["rejectedSources"] = rejected
+        # Starší stažení bez uloženého zdroje: aspoň přeskočit dřívější výběr.
+        if not key:
+            refs["youtubeSkip"] = int(refs.get("youtubeSkip", 0)) + 1
+        refs.pop("sourceKey", None)
+        refs.pop("youtubeUrl", None)
+        rec.external_refs = refs
+        session.add(rec)
+        session.commit()
+        _remove_from_library(session, recording_id)
+        _asset, job, created = get_or_create_job(session, recording_id, user_id, device_id)
+    if job is not None and created:
+        await enqueue(job)
+    return {"recordingId": recording_id, "rejected": key, "jobId": job.id if job else None}
+
+
 @library_router.post("/verify-report/{recording_id}/relabel")
 async def verify_relabel(recording_id: str, _current: tuple[str, str] = Depends(require_admin)):
     """"Shazam má pravdu" u VLASTNÍ hudby: soubor je v pořádku, jen ho sken

@@ -362,15 +362,12 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
             seen.add(key)
             combined.append(rid)
 
-        # Každá třetí skladba z tagů -- objevy rozprostřené, ne na konci.
-        bi = ei = 0
-        while (bi < len(base) or ei < len(extra)) and len(combined) < RAIL_SIZE:
-            if ei < len(extra) and (bi >= len(base) or len(combined) % 3 == 2):
-                take(extra[ei])
-                ei += 1
-            else:
-                take(base[bi])
-                bi += 1
+        # Napřed Deezer (žebříček / výběr), ListenBrainz jen doplní, co Deezer
+        # neměl (přání: Deezer výsledky první).
+        for rid in [*base, *extra]:
+            if len(combined) >= RAIL_SIZE:
+                break
+            take(rid)
     if not combined:
         return snap.payload.get("playlistId") if snap is not None else None
     playlist_id = g._save_playlist(

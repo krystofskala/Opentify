@@ -167,6 +167,7 @@ def _start_job(job_id: str) -> dict | None:
             "artist_name": artist.name if artist else None,
             # "Stáhnout znovu" z kontroly Shazamem: přeskočit dřívější výběr.
             "skip_candidates": int((recording.external_refs or {}).get("youtubeSkip", 0)) if recording else 0,
+            "rejected_sources": list((recording.external_refs or {}).get("rejectedSources") or []) if recording else [],
             "youtube_id": (recording.external_refs or {}).get("youtubeId") if recording else None,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
@@ -566,6 +567,17 @@ def _remember_source_url(recording_id: str, url: str) -> None:
         session.commit()
 
 
+def _remember_source_key(recording_id: str, key: str) -> None:
+    """Přesný zdroj souboru -- pro "Špatná verze -- stáhnout jinou"."""
+    with Session(engine) as session:
+        recording = session.get(Recording, recording_id)
+        if recording is None:
+            return
+        recording.external_refs = {**(recording.external_refs or {}), "sourceKey": key}
+        session.add(recording)
+        session.commit()
+
+
 async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
     ctx = await asyncio.to_thread(_start_job, job_id)
     if ctx is None:
@@ -587,6 +599,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         duration_ms=ctx.get("recording_duration_ms"),
         skip_candidates=ctx.get("skip_candidates", 0),
         youtube_id=ctx.get("youtube_id"),
+        rejected_sources=tuple(ctx.get("rejected_sources") or ()),
     )
 
     async def on_progress(pct: int) -> None:
@@ -618,6 +631,8 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
             return
         if result.source_url:
             await asyncio.to_thread(_remember_source_url, ctx["recording_id"], result.source_url)
+        if result.source_key:
+            await asyncio.to_thread(_remember_source_key, ctx["recording_id"], result.source_key)
         await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.SUCCEEDED.value, pct=100)
         await publish_track_available(ctx["user_id"], ctx["recording_id"], stream_url)
         # Až PO `track.available` a fire-and-forget -- analýza nesmí zdržet
