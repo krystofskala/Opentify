@@ -686,8 +686,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   Widget _grabber() => Padding(
         padding: const EdgeInsets.only(top: 6, bottom: 2),
         child: Container(
-          width: 38,
-          height: 5,
+          // Rozměr jako všechny sheety (GlassTokens); sytost vyšší kvůli
+          // barevnému pozadí přehrávače.
+          width: GlassTokens.grabberSize.width,
+          height: GlassTokens.grabberSize.height,
           decoration:
               BoxDecoration(color: playerFg(context).withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
         ),
@@ -1001,7 +1003,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 IconButton(
                   tooltip: 'Náhodné přehrávání',
                   style: IconButton.styleFrom(
-                    foregroundColor: playback.shuffleEnabled ? accent : playerFg(context).withValues(alpha: 0.55),
+                    foregroundColor: playback.shuffleEnabled ? accent : playerFg(context).withValues(alpha: 0.72),
                     fixedSize: const Size.square(44),
                   ),
                   icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
@@ -1013,7 +1015,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   tooltip: 'Opakování',
                   style: IconButton.styleFrom(
                     foregroundColor:
-                        playback.repeatMode == RepeatMode.off ? playerFg(context).withValues(alpha: 0.55) : accent,
+                        playback.repeatMode == RepeatMode.off ? playerFg(context).withValues(alpha: 0.72) : accent,
                     fixedSize: const Size.square(44),
                   ),
                   icon: Icon(
@@ -1064,7 +1066,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // `fg` z kontextu UVNITŘ skla panelu (ne z `this.context`).
   Widget _likeButton(AudioPlayerState playback, Color fg) {
     final id = playback.nowPlaying!.recordingId;
-    return LikeHeart(recordingId: id, size: 22, color: fg.withValues(alpha: 0.55));
+    return LikeHeart(recordingId: id, size: 22, color: fg.withValues(alpha: 0.72));
   }
 
   Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback, Color fg) {
@@ -1074,7 +1076,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     return IconButton(
       tooltip: label,
       style: IconButton.styleFrom(
-        foregroundColor: active ? accent : fg.withValues(alpha: 0.55),
+        foregroundColor: active ? accent : fg.withValues(alpha: 0.72),
         fixedSize: const Size.square(44),
       ),
       icon: Icon(icon, size: 22, fill: active ? 1 : 0, semanticLabel: label),
