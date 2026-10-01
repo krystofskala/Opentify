@@ -402,14 +402,17 @@ class _RowTileState extends State<_RowTile> {
                             ),
                             Row(
                               children: [
-                                HeardDot(recordingId: w.recording.id),
                                 if (w.badge case final badge?) ...[badge, const SizedBox(width: 6)],
                                 Flexible(
-                                  child: _LinkText(
-                                    text: w.subtitle ?? w.recording.durationLabel,
-                                    onTap: w.onArtistTap,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: onTinted?.withValues(alpha: 0.75) ?? theme.colorScheme.onSurfaceVariant,
+                                  child: HeardBuilder(
+                                    recordingId: w.recording.id,
+                                    builder: (context, heard) => _LinkText(
+                                      text: w.subtitle ?? w.recording.durationLabel,
+                                      onTap: w.onArtistTap,
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: onTinted?.withValues(alpha: 0.75) ??
+                                            (heard ? heardColor(theme) : theme.colorScheme.onSurfaceVariant),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -424,12 +427,16 @@ class _RowTileState extends State<_RowTile> {
                         if (wide)
                           SizedBox(
                             width: 52,
-                            child: Text(
-                              // Neznámá délka = prázdné místo, ne sloupec "--:--".
-                              w.recording.durationMs != null ? w.recording.durationLabel : '',
-                              textAlign: TextAlign.right,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontFeatures: const [FontFeature.tabularFigures()],
+                            child: HeardBuilder(
+                              recordingId: w.recording.id,
+                              builder: (context, heard) => Text(
+                                // Neznámá délka = prázdné místo, ne sloupec "--:--".
+                                w.recording.durationMs != null ? w.recording.durationLabel : '',
+                                textAlign: TextAlign.right,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                  color: heard && onTinted == null ? heardColor(theme) : null,
+                                ),
                               ),
                             ),
                           ),
@@ -582,17 +589,15 @@ class _CardTile extends StatelessWidget {
                       fontWeight: isPlaying ? FontWeight.w700 : null,
                     ),
                   ),
-                  Row(
-                    children: [
-                      HeardDot(recordingId: recording.id),
-                      Flexible(
-                        child: _LinkText(
-                          text: subtitle ?? recording.durationLabel,
-                          onTap: onArtistTap,
-                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                        ),
+                  HeardBuilder(
+                    recordingId: recording.id,
+                    builder: (context, heard) => _LinkText(
+                      text: subtitle ?? recording.durationLabel,
+                      onTap: onArtistTap,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: heard ? heardColor(theme) : theme.colorScheme.onSurfaceVariant,
                       ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -699,30 +704,19 @@ class _Thumbnail extends StatelessWidget {
   Widget _artwork(ThemeData theme) => ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded, iconSize: 18);
 }
 
-/// Nenápadná trvalá značka: skladbu jsi aspoň jednou poslechl celou
-/// (drobná tečka v barvě motivu před druhým řádkem). Sleduje jen svou
-/// skladbu, ať se při novém poslechu nepřestavuje celý seznam.
-class HeardDot extends ConsumerWidget {
-  const HeardDot({super.key, required this.recordingId});
+/// Nenápadná trvalá značka "poslechnuto celé": druhý řádek a délka
+/// skladby v barvě motivu místo šedé -- nic navíc, jen jiný odstín
+/// (živě chtěné: tečka byla moc). Sleduje jen svou skladbu, ať se při
+/// novém poslechu nepřestavuje celý seznam.
+class HeardBuilder extends ConsumerWidget {
+  const HeardBuilder({super.key, required this.recordingId, required this.builder});
 
   final String recordingId;
+  final Widget Function(BuildContext context, bool heard) builder;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final heard = ref.watch(heardProvider.select((s) => s.contains(recordingId)));
-    if (!heard) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: Semantics(
-        label: 'Poslechnuto celé',
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
-          ),
-          child: const SizedBox.square(dimension: 5),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context, WidgetRef ref) =>
+      builder(context, ref.watch(heardProvider.select((s) => s.contains(recordingId))));
 }
+
+Color heardColor(ThemeData theme) => theme.colorScheme.primary.withValues(alpha: 0.85);
