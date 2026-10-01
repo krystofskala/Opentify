@@ -74,5 +74,20 @@
 	<string>Mikrofon slouží jen pro Open Shazam a ladičku. Zvuk se nikam neukládá.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>FlutterDeepLinkingEnabled</key>
+	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.opentify</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>opentify</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

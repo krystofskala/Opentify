@@ -20,6 +20,7 @@ import '../models/playback_model.dart' show RepeatMode;
 import '../routing/app_router.dart';
 import '../theme/accent_color.dart';
 import 'artwork_provider.dart';
+import '../core/now_playing_activity.dart';
 import 'provisioning_controller.dart';
 import 'collection_progress.dart';
 import 'offline_controller.dart';
@@ -331,7 +332,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _ref.listen<AbRepeat?>(abRepeatProvider, _onAbChanged);
     // Po návratu do appky dopočítat barvu skladby, pokud se na pozadí
     // nespočítala (viz `_refreshAccentIfMissing`).
-    _lifecycle = AppLifecycleListener(onResume: _refreshAccentIfMissing, onShow: _refreshAccentIfMissing);
+    // Odchod z appky (zamčení, přepnutí, ukončení): uložit přesnou pozici
+    // hned -- jinak mohla být až 5 s stará (nebo před posledním přetočením).
+    _lifecycle = AppLifecycleListener(
+      onResume: _refreshAccentIfMissing,
+      onShow: _refreshAccentIfMissing,
+      onHide: () => _maybePersistSession(state, force: true),
+      onPause: () => _maybePersistSession(state, force: true),
+    );
   }
 
   final MediaSessionBridge _mediaSession = MediaSessionBridge();
@@ -402,13 +410,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   /// Uloží stav: hned při změně skladby/fronty, pozici nejvýš jednou za 5 s.
-  void _maybePersistSession(AudioPlayerState s) {
+  void _maybePersistSession(AudioPlayerState s, {bool force = false}) {
     final np = s.nowPlaying;
     if (np == null || _restoredIdle) return;
     _recordCollectionProgress(s);
     final key = '${np.recordingId}|${s.queueIndex}|${s.queue.length}|${s.shuffleEnabled}|${s.repeatMode.name}';
     final now = DateTime.now();
-    if (key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
+    if (!force && key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
     _lastPersistKey = key;
     _lastPersist = now;
     final data = jsonEncode({
@@ -481,11 +489,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (info == null) {
       if (_mediaSessionKey != null) _mediaSession.clear();
       _mediaSessionKey = null;
+      _syncLiveActivity(s);
       return;
     }
     final key = '${info.recordingId}|${info.artworkUrl}|${info.artistName}';
     if (key != _mediaSessionKey) {
       _mediaSessionKey = key;
+      _activityArt = info.artworkUrl;
       _mediaSession.setMetadata(
         title: info.title,
         artist: info.artistName,
@@ -502,6 +512,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         final keepAlive = _ref.listen<AsyncValue<String?>>(provider, (_, __) {});
         unawaited(_ref.read(provider.future).then((url) {
           if (url == null || _mediaSessionKey != requested) return;
+          _activityArt = url;
+          _syncLiveActivity(state);
           _mediaSession.setMetadata(
             title: info.title,
             artist: info.artistName,
@@ -517,6 +529,32 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _mediaSession.setPlaying(s.isPlaying);
       _mediaSession.setPosition(position: s.position, duration: s.duration, speed: s.speed);
     }
+    _syncLiveActivity(s);
+  }
+
+  String? _activityArt;
+  String? _activityKey;
+
+  /// Live Activity (iOS): stejný stav jako zamčená obrazovka + barva skladby;
+  /// posílá se jen při změně (skladba, obal, play/pauza, barva).
+  void _syncLiveActivity(AudioPlayerState s) {
+    final info = s.nowPlaying;
+    if (info == null) {
+      if (_activityKey != null) unawaited(NowPlayingActivity.end());
+      _activityKey = null;
+      return;
+    }
+    final key = '${info.recordingId}|$_activityArt|${s.isPlaying}|${s.accentColor?.toARGB32()}';
+    if (key == _activityKey) return;
+    _activityKey = key;
+    unawaited(NowPlayingActivity.update(
+      recordingId: info.recordingId,
+      title: info.title,
+      artist: info.artistName ?? '',
+      artworkUrl: _activityArt,
+      color: s.accentColor ?? const Color(0xFF6B3FD6),
+      playing: s.isPlaying,
+    ));
   }
 
   Future<void> _setPlaying(bool playing) async {
@@ -1898,6 +1936,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (_player.playing) {
       await _player.pause();
       _realtime.playbackPause();
+      _maybePersistSession(state, force: true);
     } else if (_radioActive && !_appVisible) {
       // Zamčená obrazovka / appka na pozadí: iOS webové appce NEdovolí
       // spustit nový zdroj zvuku -- jen pokračovat ve stávajícím streamu
@@ -1926,6 +1965,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
     await _player.seek(position);
     _realtime.playbackSeek(position.inMilliseconds);
+    _maybePersistSession(state.copyWith(position: position), force: true);
     _mediaSession.setPosition(position: position, duration: state.duration, speed: state.speed);
   }
 

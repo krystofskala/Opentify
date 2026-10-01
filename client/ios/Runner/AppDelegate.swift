@@ -12,5 +12,9 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    // Live Activity "Právě hraje" (viz NowPlayingActivity.swift).
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NowPlayingActivity") {
+      NowPlayingActivityBridge.register(with: registrar.messenger())
+    }
   }
 }

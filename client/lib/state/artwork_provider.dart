@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/diagnostics.dart';
+
 import 'providers.dart';
 
 /// Klíč pro `recordingArtworkProvider`: `releaseId`/`artistId` z jedné
@@ -22,8 +24,11 @@ final recordingArtworkProvider = FutureProvider.autoDispose.family<String?, Artw
     try {
       final release = await repo.getRelease(key.releaseId!);
       if (release.coverImageUrl != null) return release.coverImageUrl;
-    } catch (_) {
-      // Album se nedohledalo -- zkusíme ještě interpreta níž.
+    } catch (e, st) {
+      // Album se nedohledalo -- zkusíme ještě interpreta níž. Nahlásit:
+      // na iPhonu tak naskočila fotka interpreta místo obalu (živě).
+      final trace = st.toString().split('\n').take(6).join('\n');
+      diagReport('artwork-release', '${key.releaseId}: $e\n$trace');
     }
   }
 

@@ -30,7 +30,7 @@ from sqlmodel import Session, select
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient
-from app.catalog.deezer_ingest import ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
+from app.catalog.deezer_ingest import deezer_image, ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
 from app.catalog.fanart import fill_artist_banner
 from app.recommendations.anti_ai_filter import AntiAIFilter
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError
@@ -833,8 +833,8 @@ class CatalogService:
             if match is None:
                 return []
             release.deezer_id = str(match["id"])
-            if not release.images and (match.get("cover_xl") or match.get("cover_big")):
-                release.images = [match.get("cover_xl") or match.get("cover_big")]
+            if not release.images and deezer_image(match.get("cover_xl") or match.get("cover_big")):
+                release.images = [deezer_image(match.get("cover_xl") or match.get("cover_big"))]
             self._session.add(release)
             self._session.commit()
         tracks = await self._dz.album_tracks(release.deezer_id)

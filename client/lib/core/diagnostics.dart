@@ -1,4 +1,6 @@
-import 'diagnostics_stub.dart' if (dart.library.js_interop) 'diagnostics_web.dart' as impl;
+import 'diagnostics_stub.dart'
+    if (dart.library.js_interop) 'diagnostics_web.dart'
+    if (dart.library.io) 'diagnostics_io.dart' as impl;
 
 /// Zápis do "černé skříňky" (web/index.html): posledních ~30 kroků (obrazovky,
 /// chyby) se přiloží k hlášení o zamrznutí appky.

@@ -53,8 +53,6 @@ dependencies:
   share_plus: ^10.0.0
   just_audio_media_kit: ^2.0.6
   media_kit_libs_windows_audio: ^1.0.9
-  live_activities: ^2.6.0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

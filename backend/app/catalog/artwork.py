@@ -37,6 +37,7 @@ from app.catalog.musicbrainz import get_musicbrainz_client
 from app.catalog.wikimedia import WIKIMEDIA_USER_AGENT
 from app.db import engine
 from app.models import Artist, MediaAsset, MediaAssetStatus, Recording, Release
+from app.catalog.deezer_ingest import deezer_image
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ async def resolve_release_cover(
         # Deezer id už známe (tracklist ho dohledal) -- obal rovnou.
         album = await client.album(deezer_id)
         if album and (album.get("cover_xl") or album.get("cover_big")):
-            return album.get("cover_xl") or album.get("cover_big")
+            return deezer_image(album.get("cover_xl") or album.get("cover_big"))
     artist = primary_artist_name(artist_name)
     queries = [title]
     if clean_album_title(title) != title:
@@ -135,7 +136,7 @@ async def resolve_release_cover(
             if _titles_match(album.get("title", ""), title) and _names_match(
                 (album.get("artist") or {}).get("name", ""), artist
             ):
-                return album.get("cover_xl") or album.get("cover_big")
+                return deezer_image(album.get("cover_xl") or album.get("cover_big"))
     # Poslední pokus: volné hledání a tolerantní shoda názvu (překlepy, "s").
     try:
         loose = await client.search_typed("album", f"{artist} {clean_album_title(title)}", 5) or []
@@ -145,7 +146,7 @@ async def resolve_release_cover(
         if _titles_close(album.get("title", ""), title) and _names_match(
             (album.get("artist") or {}).get("name", ""), artist
         ):
-            return album.get("cover_xl") or album.get("cover_big")
+            return deezer_image(album.get("cover_xl") or album.get("cover_big"))
     return None
 
 
@@ -196,7 +197,7 @@ async def resolve_artist_image(name: str, artist_mbid: str | None, *, allow_musi
     except Exception:  # noqa: BLE001
         artists = []
     for candidate in artists:
-        picture = candidate.get("picture_xl") or candidate.get("picture_big")
+        picture = deezer_image(candidate.get("picture_xl") or candidate.get("picture_big"))
         if _names_match(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture):
             return picture
     # Wikidata fallback potřebuje MusicBrainz (1 req/s sdílený s hledáním) --

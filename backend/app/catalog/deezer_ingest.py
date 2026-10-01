@@ -27,6 +27,17 @@ from sqlmodel import Session, select
 from app.models import Artist, Recording, Release
 from app.utils import utcnow
 
+
+# Výchozí šedá silueta Deezeru (interpret/album bez obrázku): prázdný hash
+# v adrese, nebo md5 prázdného souboru -- nebrat jako skutečný obrázek.
+_DZ_EMPTY = "d41d8cd98f00b204e9800998ecf8427e"
+
+
+def deezer_image(url: str | None) -> str | None:
+    if not url or _DZ_EMPTY in url or re.search(r"/images/(artist|cover)//", url):
+        return None
+    return url
+
 _PARENS_RE = re.compile(r"\(.*?\)|\[.*?\]")
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
@@ -62,7 +73,7 @@ def ingest_artist(session: Session, dz: dict[str, Any]) -> Artist | None:
     else:
         artist.deezer_id = artist.deezer_id or dzid
         artist.updated_at = utcnow()
-    picture = dz.get("picture_xl") or dz.get("picture_big")
+    picture = deezer_image(dz.get("picture_xl") or dz.get("picture_big"))
     has_photo = bool(artist.images) and not is_placeholder_picture(artist.images[0])
     if not has_photo and not is_placeholder_picture(picture):
         artist.images = [picture]
@@ -86,7 +97,7 @@ def ingest_album(session: Session, dz: dict[str, Any], artist: Artist) -> Releas
             ),
             None,
         )
-    cover = dz.get("cover_xl") or dz.get("cover_big")
+    cover = deezer_image(dz.get("cover_xl") or dz.get("cover_big"))
     if release is None:
         release = Release(
             artist_id=artist.id,

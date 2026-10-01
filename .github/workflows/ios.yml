@@ -32,6 +32,12 @@ jobs:
         working-directory: client
         run: flutter pub get
 
+      - name: Rozšíření (Live Activity, Ovládací centrum)
+        working-directory: client
+        run: |
+          sudo gem install xcodeproj --no-document
+          ruby ios/tool/add_widget_extension.rb
+
       - name: Build (bez podpisu)
         working-directory: client
         run: >
@@ -42,8 +48,17 @@ jobs:
       - name: Zabalit .ipa
         working-directory: client
         run: |
+          APP=build/ios/iphoneos/Runner.app
+          ls "$APP/PlugIns" || true
+          # Ad-hoc podpis s oprávněními (App Group) -- SideStore z nich pozná,
+          # jakou skupinu má appce a rozšíření při podpisu přidělit.
+          if [ -d "$APP/PlugIns/OpentifyWidgets.appex" ]; then
+            codesign --force --sign - --entitlements ios/OpentifyWidgets/OpentifyWidgets.entitlements "$APP/PlugIns/OpentifyWidgets.appex"
+          fi
+          codesign --force --sign - --entitlements ios/Runner/Runner.entitlements "$APP"
+          codesign -d --entitlements :- "$APP" | head -20
           mkdir -p Payload
-          cp -R build/ios/iphoneos/Runner.app Payload/
+          cp -R "$APP" Payload/
           zip -qry Opentify.ipa Payload
           ls -lh Opentify.ipa
 
