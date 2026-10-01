@@ -36,6 +36,8 @@ from typing import Awaitable, Callable, Protocol, Sequence
 
 import httpx
 
+from app.catalog.rate_limit import AsyncRateLimiter
+
 logger = logging.getLogger("vault.providers")
 
 ProgressCallback = Callable[[int], Awaitable[None]]
@@ -201,6 +203,10 @@ class _SlskdProfile:
     max_peers: int
 
 
+# Rozestup hledání na Soulseeku napříč všemi workery (Redis, viz rate_limit).
+_slskd_search_limiter = AsyncRateLimiter(min_interval_seconds=1.2, key="slskd-search")
+
+
 class SlskdProvider:
     """Konektor na slskd (https://github.com/slskd/slskd) REST API.
 
@@ -263,12 +269,20 @@ class SlskdProvider:
             return None
         profile = self.INTERACTIVE if interactive else self.BACKGROUND
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
-            created = await client.post(
-                "/api/v0/searches",
-                # slskd ať hledá jen tak dlouho, jak my čekáme -- jinak by
-                # zbytečně držel otevřené hledání dalších ~15 s.
-                json={"searchText": query, "searchTimeout": int(profile.search_cap_s * 1000)},
-            )
+            # Hledání přes společnou frontu všech workerů s rozestupem -- rádio
+            # s 50 skladbami jich dřív spustilo desítky naráz a slskd vracel
+            # 429 Too Many Requests (živě: skladby "Ve frontě" donekonečna).
+            for attempt in range(4):
+                await _slskd_search_limiter.wait()
+                created = await client.post(
+                    "/api/v0/searches",
+                    # slskd ať hledá jen tak dlouho, jak my čekáme -- jinak by
+                    # zbytečně držel otevřené hledání dalších ~15 s.
+                    json={"searchText": query, "searchTimeout": int(profile.search_cap_s * 1000)},
+                )
+                if created.status_code != 429:
+                    break
+                await asyncio.sleep(2.0 * (attempt + 1))
             created.raise_for_status()
             search_id = created.json()["id"]
 
@@ -736,8 +750,18 @@ class YoutubeProvider:
             url = f"https://www.youtube.com/watch?v={track.youtube_id}" if track.youtube_id else pick_video()
             chosen_url[:] = [url]
             try:
-                with yt_dlp.YoutubeDL(m4a_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
+                try:
+                    with yt_dlp.YoutubeDL(m4a_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                except yt_dlp.utils.DownloadError as exc:
+                    # YouTube občas zablokuje stažení (403) -- hned jinými
+                    # klienty, ne až v dalším kole fronty (živě: skladba
+                    # zůstala "Ve frontě"). Natvrdo jen jako záloha, viz _base_opts.
+                    if "403" not in str(exc):
+                        raise
+                    retry_opts = {**m4a_opts, "extractor_args": {"youtube": {"player_client": ["tv", "web_safari", "mweb"]}}}
+                    with yt_dlp.YoutubeDL(retry_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
                 path = dest_stem.with_suffix(".m4a")
                 if path.exists():
                     abr = (info or {}).get("abr")
