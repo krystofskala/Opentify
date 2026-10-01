@@ -32,7 +32,7 @@ typedef AuthInfo = ({
 /// Kdo je přihlášený (`GET /auth/me`). Režim `login`: jméno + heslo, klíč si
 /// zařízení pamatuje. Starší režimy: pozvánka v adrese se jednou vymění za
 /// klíč zařízení (`/auth/join`).
-final authProvider = FutureProvider<AuthInfo>((ref) async {
+final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) async {
   final api = ref.watch(apiClientProvider);
   final code = joinCodeFromUrl();
   var json = await api.getJson('/auth/me');

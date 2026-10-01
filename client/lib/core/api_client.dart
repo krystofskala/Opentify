@@ -142,7 +142,18 @@ class ApiClient {
     return _decode(response) as Map<String, dynamic>;
   }
 
+  /// Server přestal zařízení znát (odhlášené, vynulované heslo, zapnuté
+  /// přihlašování) -- appka se má přeptat `/auth/me` a ukázat přihlášení.
+  void Function()? onUnauthorized;
+  DateTime _lastUnauthorized = DateTime(2000);
+
   dynamic _decode(http.Response response) {
+    if (response.statusCode == 401 &&
+        !response.request!.url.path.contains('/auth/') &&
+        DateTime.now().difference(_lastUnauthorized) > const Duration(seconds: 10)) {
+      _lastUnauthorized = DateTime.now();
+      onUnauthorized?.call();
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiException(statusCode: response.statusCode, body: response.body);
     }

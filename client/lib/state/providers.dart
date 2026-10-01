@@ -1,6 +1,8 @@
 import '../core/diagnostics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'auth_controller.dart' show authProvider;
+
 import '../core/api_client.dart';
 import '../core/config.dart';
 import '../core/realtime_event.dart';
@@ -20,12 +22,14 @@ import 'audio_player_controller.dart';
 
 /// Sdílený `ApiClient` -- jedna instance pro celou appku (connection reuse),
 /// zavřená při dispose containeru (hot-restart v devu, ne v produkci).
-final apiClientProvider = Provider<ApiClient>((ref) {
+final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
     baseUrl: AppConfig.apiBaseUrl,
     userId: AppConfig.userId,
     deviceId: AppConfig.deviceId,
   );
+  // 401 mimo přihlašování -> znovu `/auth/me` (AuthGate ukáže přihlášení).
+  client.onUnauthorized = () => Future.microtask(() => ref.invalidate(authProvider));
   ref.onDispose(client.close);
   return client;
 });
