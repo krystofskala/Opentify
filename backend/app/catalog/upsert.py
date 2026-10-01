@@ -25,7 +25,11 @@ def upsert_artist(
         # Deezeru, Spotify importu) je tentýž -- převezme MBID. Bez tohohle
         # každé volání bez MBID zakládalo nový řádek ("RM, Youjeen" 19x).
         # Interpreti s JINÝM MBID se nepřebírají (různé kapely "Nirvana").
-        same_name = session.exec(select(Artist).where(func.lower(Artist.name) == name.strip().lower())).all()
+        same_name = [
+            a
+            for a in session.exec(select(Artist).where(func.lower(Artist.name) == name.strip().lower())).all()
+            if not (a.external_refs or {}).get("mergedInto")  # aliasy sloučených duplicit
+        ]
         if mbid:
             artist = next((a for a in same_name if a.mbid is None), None)
             if artist is not None:

@@ -257,6 +257,7 @@ class CatalogService:
         # Upsert až po všech `await`ech a bez dalších -- viz deezer_ingest
         # (souběžná hledání se tu nemůžou proložit a zdvojit řádky).
         results: list[dict[str, Any]] = []
+        seen_artists: set[str] = {r["id"] for r in own if r.get("entityType") == "artist"}
         for t, data in zip(types_to_query, fetched):
             if t == "artist" and data:
                 # Deezer řadí interprety zvláštně (živě: "nirvana" -> nejdřív
@@ -270,7 +271,9 @@ class CatalogService:
             for item in data or []:
                 if t == "artist":
                     artist = ingest_artist(self._session, item)
-                    if artist is not None:
+                    # Víc Deezer profilů téhož interpreta -> jeden výsledek.
+                    if artist is not None and artist.id not in seen_artists:
+                        seen_artists.add(artist.id)
                         results.append({"entityType": "artist", **self._to_artist_out(artist).model_dump(by_alias=True)})
                 elif t == "release":
                     artist = ingest_artist(self._session, item.get("artist") or {})
@@ -452,6 +455,8 @@ class CatalogService:
         return artist
 
     def _merge_artist_into(self, duplicate: Artist, canonical: Artist) -> Artist:
+        if duplicate.id == canonical.id:
+            return canonical
         for model in (Release, Recording):
             for row in self._session.exec(select(model).where(model.artist_id == duplicate.id)).all():
                 row.artist_id = canonical.id
@@ -460,7 +465,9 @@ class CatalogService:
             canonical.deezer_id = duplicate.deezer_id
         if not canonical.images and duplicate.images:
             canonical.images = duplicate.images
-        duplicate.deezer_id = None
+        # Deezer id si duplikát NECHÁ -- je to alias: další hledání ho najde
+        # a přes `mergedInto` skončí u hlavního řádku. Dřív se mazalo a příští
+        # hledání založilo nový řádek (živě: Lana Del Rey 3×).
         duplicate.external_refs = {**(duplicate.external_refs or {}), self._MERGED_INTO_KEY: canonical.id}
         self._session.add(duplicate)
         self._session.add(canonical)

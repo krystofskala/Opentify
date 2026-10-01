@@ -61,23 +61,45 @@ def ingest_artist(session: Session, dz: dict[str, Any]) -> Artist | None:
     if not dz.get("id") or not name:
         return None
     dzid = str(dz["id"])
-    artist = session.exec(select(Artist).where(Artist.deezer_id == dzid)).first()
+    picture = deezer_image(dz.get("picture_xl") or dz.get("picture_big"))
+    artist = _canonical(session, session.exec(select(Artist).where(Artist.deezer_id == dzid)).first())
     if artist is None:
-        candidates = session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).all()
+        candidates = [
+            c
+            for c in session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).all()
+            if not (c.external_refs or {}).get("mergedInto")
+        ]
         # Přednost interpretovi s MBID (knihovna/MusicBrainz), ať se hledání
         # napojí na existující diskografii a přehratelné skladby.
         candidates.sort(key=lambda a: a.mbid is None)
         artist = next((a for a in candidates if a.deezer_id in (None, dzid)), None)
+        if artist is None and picture and not is_placeholder_picture(picture):
+            # Deezer má jednoho interpreta občas víckrát (živě: Lana Del Rey
+            # 3×, různá id, STEJNÁ fotka). Stejné jméno + stejná fotka = tentýž:
+            # tohle id si zapamatovat jako alias, ať se příště nezaloží nový.
+            same = next((a for a in candidates if a.images and a.images[0] == picture), None)
+            if same is not None:
+                session.add(Artist(name=name, sort_name=name, deezer_id=dzid, external_refs={"mergedInto": same.id}))
+                return same
     if artist is None:
         artist = Artist(name=name, sort_name=name, deezer_id=dzid)
     else:
         artist.deezer_id = artist.deezer_id or dzid
         artist.updated_at = utcnow()
-    picture = deezer_image(dz.get("picture_xl") or dz.get("picture_big"))
     has_photo = bool(artist.images) and not is_placeholder_picture(artist.images[0])
     if not has_photo and not is_placeholder_picture(picture):
         artist.images = [picture]
     session.add(artist)
+    return artist
+
+
+def _canonical(session: Session, artist: Artist | None) -> Artist | None:
+    """Sloučený duplikát (`mergedInto`) -> hlavní řádek interpreta."""
+    for _ in range(4):
+        target = (artist.external_refs or {}).get("mergedInto") if artist else None
+        if not target or target == artist.id:
+            break
+        artist = session.get(Artist, target) or artist
     return artist
 
 
