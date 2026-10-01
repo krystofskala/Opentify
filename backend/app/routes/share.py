@@ -50,6 +50,14 @@ def _apple_search(title: str, artist: str) -> str:
     return f"https://music.apple.com/cz/search?term={quote(f'{title} {artist}'.strip(), safe='')}"
 
 
+def _youtube_url(refs: dict | None) -> str | None:
+    """Zdrojové YouTube video skladby (stažená z YouTube / import odkazu)."""
+    refs = refs or {}
+    if refs.get("youtubeUrl"):
+        return refs["youtubeUrl"]
+    return f"https://www.youtube.com/watch?v={refs['youtubeId']}" if refs.get("youtubeId") else None
+
+
 def _same(a: str | None, b: str | None) -> bool:
     na, nb = _normalize(a or ""), _normalize(b or "")
     return bool(na) and bool(nb) and (na == nb or na.startswith(nb) or nb.startswith(na))
@@ -96,6 +104,16 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         # Vlastní nahrávka (tátův Kontrast) -- venku neexistuje, žádné hledání
         # podle jména (našlo by cizí kapelu).
         return {"url": None, "title": recording.title, "artistName": artist_name or None, "spotifySearchUrl": None}
+    release_row = session.get(Release, recording.release_id) if recording.release_id else None
+    if release_row is not None and (release_row.external_refs or {}).get("source") == "youtube":
+        # Album jen na YouTube -- Spotify/Apple ho nemají, jen zdrojové video.
+        return {
+            "url": None,
+            "title": recording.title,
+            "artistName": artist_name or None,
+            "spotifySearchUrl": None,
+            "youtubeUrl": _youtube_url(recording.external_refs),
+        }
     artist = primary_artist_name(artist_name)
     release = session.get(Release, recording.release_id) if recording.release_id else None
     refs = dict(recording.external_refs or {})
@@ -151,6 +169,7 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         if spotify_id
         else _spotify_search("tracks", recording.title, artist),
         "appleUrl": f"https://music.apple.com/cz/song/{apple_id}" if apple_id else _apple_search(recording.title, artist),
+        "youtubeUrl": _youtube_url(recording.external_refs),
     }
 
 

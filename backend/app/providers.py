@@ -84,6 +84,9 @@ class TrackMetadata:
     # Kolik nejlepších kandidátů přeskočit (opakované stažení po špatném
     # výsledku -- jinak by se stáhlo totéž video znovu).
     skip_candidates: int = 0
+    # Přesné YouTube video (skladba z odkazu na YouTube / album jen na
+    # YouTube) -- stáhne se přímo ono, žádné hledání ani Soulseek.
+    youtube_id: str | None = None
 
     @property
     def search_query(self) -> str:
@@ -124,6 +127,8 @@ class FetchResult:
     format: str
     source_provider: str
     bitrate_kbps: int | None = None
+    # Odkaz na zdroj (YouTube video) -- ukáže se u skladby a ve sdílení.
+    source_url: str | None = None
 
 
 class MediaProvider(Protocol):
@@ -725,8 +730,11 @@ class YoutubeProvider:
                 chosen = sane[0]
             return f"https://www.youtube.com/watch?v={chosen['id']}"
 
+        chosen_url: list[str] = []
+
         def run_download() -> tuple[Path, int | None]:
-            url = pick_video()
+            url = f"https://www.youtube.com/watch?v={track.youtube_id}" if track.youtube_id else pick_video()
+            chosen_url[:] = [url]
             try:
                 with yt_dlp.YoutubeDL(m4a_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
@@ -759,6 +767,7 @@ class YoutubeProvider:
             format=dest_path.suffix.lstrip("."),
             source_provider="youtube",
             bitrate_kbps=bitrate,
+            source_url=chosen_url[0] if chosen_url else None,
         )
 
 

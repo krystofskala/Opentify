@@ -11,11 +11,14 @@ import '../state/audio_player_controller.dart';
 import '../state/providers.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
 import 'glass/glass.dart';
+import 'youtube_link_import.dart';
 import '../core/cz_plural.dart';
 
 /// Import z odkazu na Spotify: průběh, pak otevře nový playlist a řekne,
 /// kolik skladeb se našlo (a jestli Spotify dal jen prvních 100).
 Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) async {
+  // YouTube: nejdřív otázka, co to je (skladba / playlist / album / koncert).
+  if (isYoutubeLink(url)) return importYoutubeLink(context, ref, url);
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
   messenger?.showSnackBar(
@@ -80,7 +83,7 @@ Future<void> showSpotifyLinkDialog(BuildContext context, WidgetRef ref) async {
       content: TextField(
         controller: controller,
         autofocus: controller.text.isEmpty,
-        decoration: const InputDecoration(hintText: 'Odkaz ze Spotify nebo Apple Music'),
+        decoration: const InputDecoration(hintText: 'Odkaz ze Spotify, Apple Music nebo YouTube'),
         onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
       ),
       actions: [

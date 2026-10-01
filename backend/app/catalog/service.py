@@ -559,6 +559,14 @@ class CatalogService:
         self._session.add(artist)
         self._session.commit()
 
+    def _youtube_releases(self, artist: Artist) -> list[Release]:
+        """Vydání naimportovaná z YouTube odkazu (neoficiální alba, koncerty)."""
+        return [
+            r
+            for r in self._session.exec(select(Release).where(Release.artist_id == artist.id)).all()
+            if (r.external_refs or {}).get("source") == "youtube"
+        ]
+
     async def _deezer_discography(self, artist: Artist) -> list[Release]:
         await self._resolve_deezer_id_lazily(artist)
         albums = await self._dz.artist_albums(artist.deezer_id) if artist.deezer_id else None
@@ -586,7 +594,7 @@ class CatalogService:
             return DiscographyOut(artist=self._to_artist_out(artist), releases=[self._to_release_out(r) for r in releases])
         if artist.mbid is None:
             # Interpret jen z Deezeru (hledání/žebříček) -- diskografie odtud.
-            releases = await self._deezer_discography(artist)
+            releases = await self._deezer_discography(artist) + self._youtube_releases(artist)
             if release_type:
                 releases = [r for r in releases if _effective_type(r) == release_type]
             releases.sort(key=lambda r: r.release_date or "9999")
@@ -633,6 +641,10 @@ class CatalogService:
                 continue
             known_titles.add(norm(extra.title))
             releases.append(extra)
+
+        # Alba jen z YouTube (import odkazu jako album/koncert interpreta).
+        known_ids = {r.id for r in releases}
+        releases += [r for r in self._youtube_releases(artist) if r.id not in known_ids]
 
         not_mine = set((artist.external_refs or {}).get("notMine") or [])
         releases = [r for r in releases if r.id not in not_mine and (r.deezer_id or "") not in not_mine]

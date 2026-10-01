@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../core/share_link.dart';
+import '../features/artist/artist_support.dart' show openExternal;
 import '../data/listen_later_repository.dart' show LaterKind;
 import '../state/listen_later_controller.dart';
 import '../models/recording_model.dart';
@@ -79,7 +80,7 @@ Future<void> shareWithToast(
       messenger?.showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
   try {
     final link = ready ?? await load();
-    if (link.url == null) {
+    if (link.url == null && link.youtubeUrl == null) {
       toast('Tahle skladba je jen v Opentify – pošli ji přes „Poslat v Opentify“');
       return;
     }
@@ -218,6 +219,12 @@ class _TrackActionsSheet extends ConsumerWidget {
                   run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
                 },
               ),
+              if (shareLinkAsync.valueOrNull?.youtubeUrl case final yt?)
+                _Item(
+                  icon: Symbols.smart_display_rounded,
+                  label: 'Zdrojové video na YouTube',
+                  onTap: () => run(() => openExternal(yt)),
+                ),
               _Item(
                 icon: Symbols.send_rounded,
                 label: 'Poslat v Opentify',

@@ -18,7 +18,11 @@ class ShareLink {
     this.spotifySearchUrl,
     this.spotifyUrl,
     this.appleUrl,
+    this.youtubeUrl,
   });
+
+  /// Zdrojové YouTube video (stažená z YouTube / album jen na YouTube).
+  final String? youtubeUrl;
 
   /// Univerzální odkaz (song.link / album.link); `null` u vlastní hudby
   /// (tátův Kontrast) -- venku neexistuje.
@@ -39,6 +43,7 @@ class ShareLink {
   String get _services => [
         if ((spotifyUrl ?? spotifySearchUrl) != null) 'Spotify: ${spotifyUrl ?? spotifySearchUrl}',
         if (appleUrl != null) 'Apple Music: $appleUrl',
+        if (youtubeUrl != null) 'YouTube: $youtubeUrl',
       ].join('\n');
 
   /// Text ke sdílení (univerzální odkaz jde zvlášť jako url).
@@ -61,6 +66,7 @@ final shareLinkProvider = FutureProvider.autoDispose.family<ShareLink, ShareTarg
     spotifySearchUrl: json['spotifySearchUrl'] as String?,
     spotifyUrl: json['spotifyUrl'] as String?,
     appleUrl: json['appleUrl'] as String?,
+    youtubeUrl: json['youtubeUrl'] as String?,
   );
 });
 
@@ -69,7 +75,7 @@ enum ShareOutcome { shared, copied, failed }
 /// Telefon: systémová nabídka sdílení (Zprávy, WhatsApp...). Počítač (nebo
 /// když sdílení není k dispozici): zkopírovat odkaz do schránky.
 Future<ShareOutcome> shareLink(ShareLink link) async {
-  final url = link.url;
+  final url = link.url ?? link.youtubeUrl;
   if (url == null) return ShareOutcome.failed;
   if (await impl.nativeShare(link.text, url)) return ShareOutcome.shared;
   try {

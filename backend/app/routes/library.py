@@ -1253,3 +1253,49 @@ async def soulseek_overview(_admin=Depends(require_admin)):
         "users": len({i["user"] for i in items if i["done"]}),
         "items": items[:200],
     }
+
+
+class YoutubeLinkIn(BaseModel):
+    url: str
+    kind: str | None = None  # track | playlist | album | live
+    artist_name: str | None = None
+    title: str | None = None
+
+
+@library_router.post("/import/youtube-inspect")
+async def youtube_inspect(body: YoutubeLinkIn, _current: tuple[str, str] = Depends(get_current_user)):
+    """Co je za YouTube odkazem (název, kanál, videa) -- appka se pak zeptá,
+    jestli je to skladba, playlist, album interpreta nebo koncert."""
+    from app.library.youtube_link import YoutubeLinkError, inspect_youtube_link
+
+    try:
+        return await inspect_youtube_link(body.url)
+    except YoutubeLinkError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@library_router.post("/import/youtube")
+async def youtube_import(
+    body: YoutubeLinkIn,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    from app.library.youtube_link import YoutubeLinkError, import_youtube_link
+
+    try:
+        result = await import_youtube_link(
+            session, current[0], body.url, kind=body.kind or "track", artist_name=body.artist_name, title=body.title
+        )
+    except YoutubeLinkError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result["kind"] == "track":
+        recording = session.get(Recording, result["recordingId"])
+        result["recording"] = _local_recording_out(session, recording).model_dump(by_alias=True) if recording else None
+    if result["kind"] in ("album", "live"):
+        from app.catalog.cache import CACHE_PREFIX
+        from app.redis_bus import get_redis
+
+        r = get_redis()
+        async for key in r.scan_iter(match=f"{CACHE_PREFIX}swr:discography:v1:{result['artistId']}:*"):
+            await r.delete(key)
+    return result

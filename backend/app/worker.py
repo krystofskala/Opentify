@@ -167,6 +167,7 @@ def _start_job(job_id: str) -> dict | None:
             "artist_name": artist.name if artist else None,
             # "Stáhnout znovu" z kontroly Shazamem: přeskočit dřívější výběr.
             "skip_candidates": int((recording.external_refs or {}).get("youtubeSkip", 0)) if recording else 0,
+            "youtube_id": (recording.external_refs or {}).get("youtubeId") if recording else None,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
         }
@@ -398,6 +399,10 @@ async def _acquire(
     přijde eskalace (uživatel zmáčkl Přehrát na prefetchované skladbě),
     YouTube se přidá hned."""
     dest_stem = MEDIA_ROOT / track.recording_id
+    if track.youtube_id and _youtube is not None:
+        # Přesné YouTube video (odkaz / album jen na YouTube) -- rovnou ono.
+        candidate = await _youtube.resolve(track)
+        return await _youtube.fetch(track, candidate, dest_stem, on_progress, on_file_located)
     if _slskd is None or _youtube is None:
         candidate = await provider.resolve(track, interactive=interactive)
         if candidate is None:
@@ -550,6 +555,17 @@ async def process_message(r, stream: str, message_id: str, fields: dict) -> None
         await r.xack(stream, PROVISIONING_GROUP, message_id)
 
 
+def _remember_source_url(recording_id: str, url: str) -> None:
+    """Odkaz na zdrojové YouTube video u skladby (detail, sdílení)."""
+    with Session(engine) as session:
+        recording = session.get(Recording, recording_id)
+        if recording is None:
+            return
+        recording.external_refs = {**(recording.external_refs or {}), "youtubeUrl": url}
+        session.add(recording)
+        session.commit()
+
+
 async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
     ctx = await asyncio.to_thread(_start_job, job_id)
     if ctx is None:
@@ -570,6 +586,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         mbid=ctx.get("recording_mbid"),
         duration_ms=ctx.get("recording_duration_ms"),
         skip_candidates=ctx.get("skip_candidates", 0),
+        youtube_id=ctx.get("youtube_id"),
     )
 
     async def on_progress(pct: int) -> None:
@@ -599,6 +616,8 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         if stream_url is None:
             logger.warning("job %s doběhl, ale byl už uzavřený jinde (duplicita) -- nic nepublikuji", job_id)
             return
+        if result.source_url:
+            await asyncio.to_thread(_remember_source_url, ctx["recording_id"], result.source_url)
         await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.SUCCEEDED.value, pct=100)
         await publish_track_available(ctx["user_id"], ctx["recording_id"], stream_url)
         # Až PO `track.available` a fire-and-forget -- analýza nesmí zdržet
