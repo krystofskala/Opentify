@@ -35,9 +35,16 @@ def find_or_create_artist(session: Session, name: str) -> Artist:
     # Nejdřív přesná shoda: SQLite `lower()` mění jen ASCII -- "Mňága a Žďorp"
     # se přes něj nikdy nenašel a každá skladba dostala nového interpreta
     # (a s ním vlastní album).
-    artist = session.exec(select(Artist).where(Artist.name == name)).first()
+    def best(rows: list[Artist]) -> Artist | None:
+        # Sloučené duplicity (`mergedInto`) a stejnojmenné cizí kapely
+        # (`homonymOf`, "Nepatří k tomuto interpretovi") nebrat; přednost má
+        # interpret s MBID / Deezer id.
+        live = [a for a in rows if not {"mergedInto", "homonymOf"} & set((a.external_refs or {}).keys())]
+        return max(live, key=lambda a: (a.mbid is not None, a.deezer_id is not None), default=None)
+
+    artist = best(session.exec(select(Artist).where(Artist.name == name)).all())
     if artist is None:
-        artist = session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).first()
+        artist = best(session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).all())
     if artist is None:
         artist = Artist(name=name, sort_name=name)
         session.add(artist)
