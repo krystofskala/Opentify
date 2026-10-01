@@ -301,6 +301,26 @@ class GlassSettings extends InheritedWidget {
 
   static GlassSettings? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<GlassSettings>();
 
+  /// Stejné nastavení, jen jiný tón skla pro podstrom.
+  static Widget withTone(BuildContext context, GlassToneMode tone, Widget child) {
+    final s = maybeOf(context);
+    if (s == null || s.tone == tone) return child;
+    return GlassSettings(
+      frost: s.frost,
+      tint: s.tint,
+      tintColor: s.tintColor,
+      darkness: s.darkness,
+      colorfulness: s.colorfulness,
+      tone: tone,
+      grain: s.grain,
+      fineGrain: s.fineGrain,
+      glassButtons: s.glassButtons,
+      liquid: s.liquid,
+      solid: s.solid,
+      child: child,
+    );
+  }
+
 
   @override
   bool updateShouldNotify(GlassSettings old) =>

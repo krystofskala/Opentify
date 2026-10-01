@@ -891,7 +891,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final abBadge = _abBadge(playback, accent);
     // Stejné sklo jako mini přehrávač a tab bar (tón, rozmazání, lem)
     // i s lomem -- láme pozadí přehrávače pod sebou.
-    return LiquidCaptureScope(
+    // Tón skla podle motivu (ne Profil › Tón skla): ve světlém režimu světlé
+    // sklo s tmavými ikonami jako zbytek obsahu -- tmavé sklo s bílými
+    // ikonami působilo ve světlém přehrávači cize (živě nahlášeno).
+    return GlassSettings.withTone(context, GlassToneMode.auto, LiquidCaptureScope(
       capture: backgroundLiquidCapture,
       child: GlassContainer(
         rim: true,
@@ -1017,7 +1020,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           ],
         )),
       ),
-    );
+    ));
   }
 
   /// Štítek běžícího A-B opakování (nastavuje se v menu "⋮"); klepnutí vypne.
