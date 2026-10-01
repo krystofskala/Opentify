@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:record/record.dart';
 
 import 'recorder_bridge.dart';
@@ -49,6 +50,10 @@ Future<void> stopRecording() async {
       await recorder.stop();
     } catch (_) {}
     await recorder.dispose();
+    // iOS: zpátky na přehrávání hudby (reproduktor), ne nahrávací režim.
+    try {
+      await (await AudioSession.instance).configure(const AudioSessionConfiguration.music());
+    } catch (_) {}
   }
 }
 

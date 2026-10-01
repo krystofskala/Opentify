@@ -12,21 +12,40 @@ Future<Directory> _dir() async {
   return dir;
 }
 
-Future<File> _file(String id) async => File('${(await _dir()).path}/$id.audio');
+// iOS přehrávač (AVPlayer) pozná formát podle přípony -- dřív ".audio"
+// a lokální kopie by nešla přehrát.
+const _exts = ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav', 'audio'];
+
+String _extFor(String mimeType) => switch (mimeType) {
+      'audio/mpeg' => 'mp3',
+      'audio/mp4' || 'audio/aac' || 'audio/x-m4a' => 'm4a',
+      'audio/flac' || 'audio/x-flac' => 'flac',
+      'audio/ogg' => 'ogg',
+      'audio/opus' => 'opus',
+      'audio/wav' || 'audio/x-wav' => 'wav',
+      _ => 'm4a',
+    };
+
+Future<File?> _existing(String id) async {
+  final dir = await _dir();
+  for (final ext in _exts) {
+    final f = File('${dir.path}/$id.$ext');
+    if (f.existsSync()) return f;
+  }
+  return null;
+}
 
 Future<void> put(String id, Uint8List bytes, String mimeType) async {
-  final file = await _file(id);
+  await remove(id);
+  final file = File('${(await _dir()).path}/$id.${_extFor(mimeType)}');
   await file.writeAsBytes(bytes, flush: true);
 }
 
-Future<String?> localUrl(String id) async {
-  final file = await _file(id);
-  return file.existsSync() ? file.uri.toString() : null;
-}
+Future<String?> localUrl(String id) async => (await _existing(id))?.uri.toString();
 
 Future<void> remove(String id) async {
-  final file = await _file(id);
-  if (file.existsSync()) await file.delete();
+  final file = await _existing(id);
+  if (file != null) await file.delete();
 }
 
 Future<void> clear() async {

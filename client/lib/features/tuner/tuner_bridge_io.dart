@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:just_audio/just_audio.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:record/record.dart';
 
 import 'tuner_bridge.dart';
@@ -74,6 +75,10 @@ Future<void> stopTuner() async {
       await recorder.stop();
     } catch (_) {}
     await recorder.dispose();
+    // iOS: zpátky na přehrávání hudby (reproduktor), ne nahrávací režim.
+    try {
+      await (await AudioSession.instance).configure(const AudioSessionConfiguration.music());
+    } catch (_) {}
     _onState?.call('closed');
   }
   _onState = null;
