@@ -284,12 +284,16 @@ async def connect_listenbrainz(body: ListenBrainzIn, request: Request):
     _user, acting = resolve_user(request)
     if acting is None:
         raise HTTPException(status_code=401, detail="Nepřihlášené zařízení.")
-    token = body.token.strip()
+    # Z mobilu se token kopíruje i s mezerami/zalomením -- pryč (token je hex).
+    token = "".join(body.token.split())
+    if not token.isascii():
+        raise HTTPException(status_code=400, detail="Tohle nevypadá jako token -- zkopíruj jen „User token“.")
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=40) as client:
             r = await client.get(f"{LB_API}/1/validate-token", headers={"Authorization": f"Token {token}"})
         data = r.json() if r.status_code == 200 else {}
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError) as exc:
+        logging.getLogger(__name__).warning("ListenBrainz validate-token selhal: %s: %s", type(exc).__name__, exc)
         raise HTTPException(status_code=502, detail="ListenBrainz teď neodpovídá, zkus to za chvíli.")
     if not data.get("valid"):
         raise HTTPException(status_code=400, detail="Tenhle token ListenBrainz nezná. Zkopíruj ho z listenbrainz.org/settings.")

@@ -351,6 +351,22 @@ class _ClaimFormState extends ConsumerState<_ClaimForm> {
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
+                // Použitá pozvánka (účet už existuje) -- normální přihlášení.
+                if (_invalid) ...[
+                  const SizedBox(height: 20),
+                  GlassButton(
+                    label: 'Přihlásit se jménem a heslem',
+                    style: GlassButtonStyle.prominent,
+                    onPressed: () {
+                      clearJoinFromUrl();
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      } else {
+                        ref.invalidate(authProvider);
+                      }
+                    },
+                  ),
+                ],
                 if (!_invalid) ...[
                   const SizedBox(height: 20),
                   TextField(
