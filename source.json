@@ -1,0 +1,35 @@
+{
+  "name": "Opentify",
+  "identifier": "app.opentify.source",
+  "sourceURL": "https://raw.githubusercontent.com/krystofskala/Opentify/altstore/source.json",
+  "website": "https://github.com/krystofskala/Opentify",
+  "apps": [
+    {
+      "name": "Opentify",
+      "bundleIdentifier": "app.opentify",
+      "developerName": "Kryštof",
+      "subtitle": "Tvoje hudba z domácího serveru",
+      "localizedDescription": "Opentify -- přehrávač pro vlastní hudební server (přes Tailscale).",
+      "iconURL": "https://raw.githubusercontent.com/krystofskala/Opentify/main/client/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+      "tintColor": "6B3FD6",
+      "versions": [
+        {
+          "version": "0.1.8",
+          "date": "2026-10-01T10:15:00Z",
+          "size": 13430654,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-build-8/Opentify.ipa",
+          "minOSVersion": "15.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "com.apple.security.application-groups"
+        ],
+        "privacy": {
+          "NSMicrophoneUsageDescription": "Mikrofon slouží jen pro Open Shazam a ladičku. Zvuk se nikam neukládá."
+        }
+      }
+    }
+  ],
+  "news": []
+}
