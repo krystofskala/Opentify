@@ -17,9 +17,9 @@ class _WebMediaSession implements MediaSessionBridge {
     }
   }
 
-  void _action(String name, void Function(web.MediaSessionActionDetails details) handler) {
+  void _action(String name, void Function(_ActionDetails details) handler) {
     try {
-      _session?.setActionHandler(name, ((web.MediaSessionActionDetails details) => handler(details)).toJS);
+      _session?.setActionHandler(name, ((_ActionDetails details) => handler(details)).toJS);
     } catch (_) {
       // Prohlížeč akci nepodporuje (např. `seekto` na starším iOS) -- ne chyba.
     }
@@ -39,6 +39,7 @@ class _WebMediaSession implements MediaSessionBridge {
     _action('previoustrack', (_) => onPrevious());
     _action('seekto', (d) {
       final seconds = d.seekTime;
+      if (seconds == null) return;
       onSeek(Duration(milliseconds: (seconds * 1000).round()));
     });
     // U živého streamu (rádio, HLS) nabízel iOS na zamykací obrazovce ±10 s
@@ -96,4 +97,10 @@ class _WebMediaSession implements MediaSessionBridge {
       _session?.playbackState = 'none';
     } catch (_) {}
   }
+}
+
+/// Detail akce Media Session (`seekto` nese čas) -- balíček `web` 1.x tenhle
+/// typ už nemá.
+extension type _ActionDetails._(JSObject _) implements JSObject {
+  external double? get seekTime;
 }

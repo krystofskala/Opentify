@@ -30,12 +30,12 @@ dependencies:
   # IO i web platformě.
   just_audio: ^0.9.44
   palette_generator: ^0.3.3+7
-  web_socket_channel: ^2.4.5
+  web_socket_channel: ^3.0.3
 
   # Perzistence per-zařízení (historie hledání) -- žádná z toho nepatří na
   # server, je to čistě UI pohodlí konkrétního prohlížeče/zařízení.
   shared_preferences: ^2.3.2
-  web: ^0.5.1
+  web: ^1.1.0
 
   # Vizuální jazyk PixelPlayeru (github.com/brendmung/PixelPlayer) přenesený
   # do Flutteru přes reálné, udržované balíčky místo dalších ručně psaných
@@ -49,7 +49,7 @@ dependencies:
   url_launcher: ^6.3.2
   path_provider: ^2.1.6
   audio_service: ^0.18.19
-  record: ^6.0.0
+  record: ^7.1.1
   share_plus: ^10.0.0
   just_audio_media_kit: ^2.0.6
   media_kit_libs_windows_audio: ^1.0.9

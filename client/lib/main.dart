@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
+import 'core/desktop_audio.dart';
 import 'core/device_token.dart';
 import 'core/media_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,10 +18,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Nativní appka: uložený klíč zařízení dřív, než odejde první požadavek.
   await loadDeviceToken();
-  // Windows: just_audio nemá vlastní přehrávač -- přes media_kit (libmpv).
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-    JustAudioMediaKit.ensureInitialized(windows: true, linux: false, android: false, iOS: false, macOS: false);
-  }
+  // Windows: just_audio přes media_kit (libmpv).
+  initDesktopAudio();
   // Nativní appka: ovládání na zamčené obrazovce (audio_service).
   try {
     await initMediaSession();
