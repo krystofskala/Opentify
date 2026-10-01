@@ -50,26 +50,26 @@ class _QueuePanel extends ConsumerWidget {
             tint: accentColor,
             liquid: true,
             fit: StackFit.expand,
-            child: Column(
+            child: Builder(builder: (context) => Column(
               children: [
                 const SizedBox(height: 10),
                 Container(
                   width: 40,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(color: _fg(context).withValues(alpha: 0.24), borderRadius: BorderRadius.circular(2)),
                 ),
                 const SizedBox(height: 14),
                 Text(
                   playback.queueSourceLabel != null
                       ? 'PŘEHRÁVÁNO Z ${playback.queueSourceLabel!.toUpperCase()}'
                       : 'FRONTA',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.5),
+                  style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: 12, letterSpacing: 1.5),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Expanded(
                   child: playback.queue.isEmpty
-                      ? const Center(child: Text('Fronta je prázdná.', style: TextStyle(color: Colors.white70)))
+                      ? Center(child: Text('Fronta je prázdná.', style: TextStyle(color: _fg(context).withValues(alpha: 0.7))))
                       : _QueueList(
                           scrollController: scrollController,
                           queue: playback.queue,
@@ -77,7 +77,7 @@ class _QueuePanel extends ConsumerWidget {
                         ),
                 ),
               ],
-            ),
+            )),
           ),
         ),
       ),
@@ -93,7 +93,7 @@ class QueueView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final playback = ref.watch(audioPlayerControllerProvider.select((s) => (queue: s.queue, queueIndex: s.queueIndex)));
     if (playback.queue.isEmpty) {
-      return const Center(child: Text('Fronta je prázdná.', style: TextStyle(color: Colors.white70)));
+      return Center(child: Text('Fronta je prázdná.', style: TextStyle(color: _fg(context).withValues(alpha: 0.7))));
     }
     return _QueueList(queue: playback.queue, currentIndex: playback.queueIndex);
   }
@@ -135,9 +135,9 @@ class _QueueListState extends ConsumerState<_QueueList> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Symbols.remove_circle_rounded, color: Colors.white, size: 20),
+              Icon(Symbols.remove_circle_rounded, color: _fg(context), size: 20),
               const SizedBox(width: 6),
-              Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              Text(label, style: TextStyle(color: _fg(context), fontWeight: FontWeight.w600)),
             ],
           ),
         ),
@@ -267,7 +267,7 @@ class _GroupHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final songs = songsCount(count);
     return Material(
-      color: Colors.white.withValues(alpha: 0.06),
+      color: _fg(context).withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(AppRadii.md),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -295,19 +295,19 @@ class _GroupHeader extends StatelessWidget {
                       label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                      style: TextStyle(color: _fg(context), fontWeight: FontWeight.w700),
                     ),
                     Text(
                       '$songs · ${expanded ? 'klepnutím sbalíš' : 'klepnutím rozbalíš'}',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
+                      style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: 12),
                     ),
                   ],
                 ),
               ),
-              Icon(expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded, color: Colors.white70),
+              Icon(expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded, color: _fg(context).withValues(alpha: 0.7)),
               IconButton(
                 tooltip: 'Odebrat celý blok z fronty',
-                icon: const Icon(Symbols.playlist_remove_rounded, color: Colors.white),
+                icon: Icon(Symbols.playlist_remove_rounded, color: _fg(context)),
                 onPressed: onRemove,
               ),
             ],
@@ -323,8 +323,8 @@ class _StackIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        color: Colors.white.withValues(alpha: 0.15),
-        child: const Icon(Symbols.library_music_rounded, color: Colors.white, size: 20),
+        color: _fg(context).withValues(alpha: 0.15),
+        child: Icon(Symbols.library_music_rounded, color: _fg(context), size: 20),
       );
 }
 
@@ -337,7 +337,7 @@ class _SectionLabel extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xxs),
         child: Text(
           text,
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w700),
+          style: TextStyle(color: _fg(context).withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w700),
         ),
       );
 }
@@ -366,11 +366,11 @@ class _QueueRow extends ConsumerWidget {
     final artUrl = info.artworkUrl ??
         ref.watch(recordingArtworkProvider((releaseId: info.releaseId, artistId: info.artistId))).valueOrNull;
     final placeholder = Container(
-      color: Colors.white.withValues(alpha: 0.15),
-      child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 18),
+      color: _fg(context).withValues(alpha: 0.15),
+      child: Icon(Symbols.music_note_rounded, color: _fg(context), size: 18),
     );
     return Material(
-      color: isCurrent ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
+      color: isCurrent ? _fg(context).withValues(alpha: 0.12) : Colors.transparent,
       borderRadius: BorderRadius.circular(AppRadii.md),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -404,27 +404,27 @@ class _QueueRow extends ConsumerWidget {
                       info.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.white, fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500),
+                      style: TextStyle(color: _fg(context), fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500),
                     ),
                     if (info.artistName != null)
                       Text(
                         info.artistName!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
+                        style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: 12),
                       ),
                   ],
                 ),
               ),
               if (isCurrent)
-                const Icon(Symbols.graphic_eq_rounded, color: Colors.white, size: 18)
+                Icon(Symbols.graphic_eq_rounded, color: _fg(context), size: 18)
               else if (dragIndex != null)
                 ReorderableDragStartListener(
                   index: dragIndex!,
                   // 48×48 -- holá ikona 24 px byla pro prst na iPhonu malá.
-                  child: const SizedBox.square(
+                  child: SizedBox.square(
                     dimension: 48,
-                    child: Center(child: Icon(Symbols.drag_handle_rounded, color: Colors.white54)),
+                    child: Center(child: Icon(Symbols.drag_handle_rounded, color: _fg(context).withValues(alpha: 0.54))),
                   ),
                 ),
             ],
@@ -434,3 +434,7 @@ class _QueueRow extends ConsumerWidget {
     );
   }
 }
+
+/// Popředí fronty z motivu (uvnitř skla ho GlassContainer přepne podle tónu
+/// skla) -- dřív natvrdo bílé, ve světlém režimu a "Bez skla" neviditelné.
+Color _fg(BuildContext context) => Theme.of(context).colorScheme.onSurface;

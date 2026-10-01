@@ -130,162 +130,160 @@ class _TrackActionsSheet extends ConsumerWidget {
     final ShareTarget shareTarget = (kind: 'recordings', id: recording.id);
     final shareLinkAsync = ref.watch(shareLinkProvider(shareTarget));
 
-    return SafeArea(
-      child: GlassSheet(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                  child: Row(
-                    children: [
-                      ClipPath(
-                        clipper: ShapeBorderClipper(shape: AppShapes.sm),
-                        child: SizedBox(
-                          width: 52,
-                          height: 52,
-                          child: ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded, iconSize: 22),
-                        ),
+    return GlassSheet(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                child: Row(
+                  children: [
+                    ClipPath(
+                      clipper: ShapeBorderClipper(shape: AppShapes.sm),
+                      child: SizedBox(
+                        width: 52,
+                        height: 52,
+                        child: ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded, iconSize: 22),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(recording.title,
-                                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
-                            if (artistName != null)
-                              Text(artistName,
-                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
-                          ],
-                        ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(recording.title,
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+                          if (artistName != null)
+                            Text(artistName,
+                                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                const Divider(height: 1),
-                _Item(
-                  icon: Symbols.play_arrow_rounded,
-                  label: 'Přehrát',
-                  onTap: () => run(() => controller.playTrack(info)),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              const Divider(height: 1),
+              _Item(
+                icon: Symbols.play_arrow_rounded,
+                label: 'Přehrát',
+                onTap: () => run(() => controller.playTrack(info)),
+              ),
+              _Item(
+                icon: Symbols.playlist_play_rounded,
+                label: 'Přehrát jako další',
+                onTap: () => run(() {
+                  controller.playNext(info);
+                  toast('Zařazeno jako další');
+                }),
+              ),
+              _Item(
+                icon: Symbols.queue_music_rounded,
+                label: 'Přidat do fronty',
+                onTap: () => run(() {
+                  controller.addToQueue(info);
+                  toast('Přidáno do fronty');
+                }),
+              ),
+              _Item(
+                icon: isLiked ? Symbols.heart_minus_rounded : Symbols.favorite_rounded,
+                label: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
+                onTap: () => run(() => ref.read(likedSongsControllerProvider.notifier).toggle(recording.id)),
+              ),
+              _Item(
+                icon: Symbols.playlist_add_rounded,
+                label: 'Přidat do playlistu',
+                onTap: () => run(() => showAddToPlaylistSheet(hostContext, recordingId: recording.id)),
+              ),
+              _Item(
+                icon: isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
+                label: isLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',
+                onTap: () => run(
+                  () => ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id),
                 ),
+              ),
+              _Item(
+                icon: Symbols.ios_share_rounded,
+                label: 'Sdílet',
+                onTap: () {
+                  final link = shareLinkAsync.valueOrNull;
+                  run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
+                },
+              ),
+              _Item(
+                icon: Symbols.radio_rounded,
+                label: 'Přejít na rádio',
+                onTap: () => run(() => goToRadio(hostContext, RadioSeed.track, recording.id)),
+              ),
+              if (recording.releaseId != null)
                 _Item(
-                  icon: Symbols.playlist_play_rounded,
-                  label: 'Přehrát jako další',
-                  onTap: () => run(() {
-                    controller.playNext(info);
-                    toast('Zařazeno jako další');
-                  }),
+                  icon: Symbols.album_rounded,
+                  label: 'Přejít na album',
+                  onTap: () => run(() => hostContext.push('/releases/${recording.releaseId}?track=${recording.id}')),
                 ),
+              if (recording.artistId != null)
                 _Item(
-                  icon: Symbols.queue_music_rounded,
-                  label: 'Přidat do fronty',
-                  onTap: () => run(() {
-                    controller.addToQueue(info);
-                    toast('Přidáno do fronty');
-                  }),
+                  icon: Symbols.person_rounded,
+                  label: 'Přejít na interpreta',
+                  onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
                 ),
+              _Item(
+                icon: isOffline
+                    ? Symbols.mobile_off_rounded
+                    : (offlinePending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded),
+                label: isOffline
+                    ? 'Smazat ze zařízení'
+                    : (offlinePending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení'),
+                onTap: () => run(() {
+                  final offline = ref.read(offlineControllerProvider.notifier);
+                  if (isOffline) {
+                    offline.remove(recording.id);
+                    toast('Smazáno ze zařízení');
+                  } else if (!offlinePending) {
+                    offline.add([info]);
+                    toast('Stahuje se do zařízení');
+                  }
+                }),
+              ),
+              if (!inLibrary)
                 _Item(
-                  icon: isLiked ? Symbols.heart_minus_rounded : Symbols.favorite_rounded,
-                  label: isLiked ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
-                  onTap: () => run(() => ref.read(likedSongsControllerProvider.notifier).toggle(recording.id)),
-                ),
-                _Item(
-                  icon: Symbols.playlist_add_rounded,
-                  label: 'Přidat do playlistu',
-                  onTap: () => run(() => showAddToPlaylistSheet(hostContext, recordingId: recording.id)),
-                ),
-                _Item(
-                  icon: isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
-                  label: isLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',
-                  onTap: () => run(
-                    () => ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id),
-                  ),
-                ),
-                _Item(
-                  icon: Symbols.ios_share_rounded,
-                  label: 'Sdílet',
-                  onTap: () {
-                    final link = shareLinkAsync.valueOrNull;
-                    run(() => shareWithToast(link, messenger, () => ref.read(shareLinkProvider(shareTarget).future)));
-                  },
-                ),
-                _Item(
-                  icon: Symbols.radio_rounded,
-                  label: 'Přejít na rádio',
-                  onTap: () => run(() => goToRadio(hostContext, RadioSeed.track, recording.id)),
-                ),
-                if (recording.releaseId != null)
-                  _Item(
-                    icon: Symbols.album_rounded,
-                    label: 'Přejít na album',
-                    onTap: () => run(() => hostContext.push('/releases/${recording.releaseId}?track=${recording.id}')),
-                  ),
-                if (recording.artistId != null)
-                  _Item(
-                    icon: Symbols.person_rounded,
-                    label: 'Přejít na interpreta',
-                    onTap: () => run(() => hostContext.push('/artists/${recording.artistId}')),
-                  ),
-                _Item(
-                  icon: isOffline
-                      ? Symbols.mobile_off_rounded
-                      : (offlinePending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded),
-                  label: isOffline
-                      ? 'Smazat ze zařízení'
-                      : (offlinePending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení'),
-                  onTap: () => run(() {
-                    final offline = ref.read(offlineControllerProvider.notifier);
-                    if (isOffline) {
-                      offline.remove(recording.id);
-                      toast('Smazáno ze zařízení');
-                    } else if (!offlinePending) {
-                      offline.add([info]);
-                      toast('Stahuje se do zařízení');
+                  icon: Symbols.library_add_rounded,
+                  label: 'Přidat do knihovny',
+                  onTap: () => run(() async {
+                    try {
+                      await addTrackToLibrary(ref, recording.id);
+                      toast('Přidáno do knihovny');
+                    } catch (_) {
+                      toast('Nepodařilo se přidat do knihovny');
                     }
                   }),
                 ),
-                if (!inLibrary)
-                  _Item(
-                    icon: Symbols.library_add_rounded,
-                    label: 'Přidat do knihovny',
-                    onTap: () => run(() async {
-                      try {
-                        await addTrackToLibrary(ref, recording.id);
-                        toast('Přidáno do knihovny');
-                      } catch (_) {
-                        toast('Nepodařilo se přidat do knihovny');
-                      }
-                    }),
-                  ),
-                if (inLibrary)
-                  _Item(
-                    icon: Symbols.delete_rounded,
-                    label: 'Odebrat z knihovny',
-                    destructive: true,
-                    onTap: () => run(() => confirmRemoveFromLibrary(hostContext, [recording])),
-                  ),
-                // Admin: špatně stažená skladba? Shazam ji poslechne na serveru.
-                if (ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
-                  _Item(
-                    icon: Symbols.graphic_eq_rounded,
-                    label: 'Něco nesedí? Zkontrolovat Shazamem',
-                    onTap: () => run(() => checkTrackWithShazam(hostContext, ref, recording)),
-                  ),
-                for (final action in extraActions)
-                  _Item(
-                    icon: action.icon,
-                    label: action.label,
-                    destructive: action.destructive,
-                    onTap: () => run(action.onSelected),
-                  ),
-              ],
-            ),
+              if (inLibrary)
+                _Item(
+                  icon: Symbols.delete_rounded,
+                  label: 'Odebrat z knihovny',
+                  destructive: true,
+                  onTap: () => run(() => confirmRemoveFromLibrary(hostContext, [recording])),
+                ),
+              // Admin: špatně stažená skladba? Shazam ji poslechne na serveru.
+              if (ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
+                _Item(
+                  icon: Symbols.graphic_eq_rounded,
+                  label: 'Něco nesedí? Zkontrolovat Shazamem',
+                  onTap: () => run(() => checkTrackWithShazam(hostContext, ref, recording)),
+                ),
+              for (final action in extraActions)
+                _Item(
+                  icon: action.icon,
+                  label: action.label,
+                  destructive: action.destructive,
+                  onTap: () => run(action.onSelected),
+                ),
+            ],
           ),
         ),
       ),

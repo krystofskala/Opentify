@@ -25,6 +25,7 @@ import '../../state/providers.dart' show catalogRepositoryProvider;
 import '../../widgets/glass/glass.dart';
 import '../../widgets/glass/liquid_glass.dart';
 import '../../widgets/lyrics_panel.dart';
+import '../../widgets/media_card.dart' show ArtworkPlaceholder;
 import '../../widgets/net_image.dart';
 import '../../widgets/now_playing_sheet.dart';
 import '../../widgets/state_views.dart';
@@ -643,7 +644,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         ),
                         // Srdíčko je dole v ovládání -- tady přepínač
                         // sledování textu (u téhle skladby).
-                        LyricsFollowButton(recordingId: nowPlaying.recordingId, activeColor: accent),
+                        LyricsFollowButton(
+                            recordingId: nowPlaying.recordingId, activeColor: accent, color: playerFg(context)),
                       ],
                     ),
                   ),
@@ -859,6 +861,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               child: Text(
                 nowPlaying.artistName ?? 'Zobrazit interpreta',
                 textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: playerFg(context).withValues(alpha: 0.78),
                   fontSize: 16,
@@ -926,9 +930,15 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(_formatDuration(position), style: TextStyle(color: playerFg(context).withValues(alpha: 0.7))),
+                        Text(_formatDuration(position),
+                            style: TextStyle(
+                                color: playerFg(context).withValues(alpha: 0.7),
+                                fontFeatures: const [FontFeature.tabularFigures()])),
                         abBadge,
-                        Text(_formatDuration(duration), style: TextStyle(color: playerFg(context).withValues(alpha: 0.7))),
+                        Text(_formatDuration(duration),
+                            style: TextStyle(
+                                color: playerFg(context).withValues(alpha: 0.7),
+                                fontFeatures: const [FontFeature.tabularFigures()])),
                       ],
                     ),
                   ),
@@ -1148,6 +1158,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               right: 8,
                               child: LyricsFollowButton(
                                 recordingId: recordingId,
+                                color: playerFg(context),
                                 activeColor: ref.read(audioPlayerControllerProvider).accentColor,
                               )),
                         ],
@@ -1206,10 +1217,7 @@ class _Artwork extends StatelessWidget {
         clipper: ShapeBorderClipper(shape: AppShapes.of(24)),
         child: (url ?? info.artworkUrl) != null
             ? NetImage(url: (url ?? info.artworkUrl)!)
-            : Container(
-                color: Colors.white.withValues(alpha: 0.15),
-                child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 96),
-              ),
+            : const ArtworkPlaceholder(icon: Symbols.music_note_rounded, iconSize: 96),
       ),
     );
   }
@@ -1277,10 +1285,7 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
   Widget build(BuildContext context) {
     final image = widget.info.artworkUrl != null
         ? NetImage(url: widget.info.artworkUrl!)
-        : Container(
-            color: Colors.white.withValues(alpha: 0.15),
-            child: const Icon(Symbols.music_note_rounded, color: Colors.white, size: 32),
-          );
+        : const ArtworkPlaceholder(icon: Symbols.music_note_rounded);
     return RepaintBoundary(
       child: AnimatedBuilder(
         animation: Listenable.merge([_clock, _live]),

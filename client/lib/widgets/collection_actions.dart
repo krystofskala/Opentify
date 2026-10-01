@@ -74,6 +74,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
   final String? subtitle;
   final String? imageUrl;
   final Widget? artwork;
+
   /// Album otevřené ze stránky interpreta: admin ho může vyřadit jako
   /// album stejnojmenné cizí kapely (Deezer je občas slučuje).
   final String? fromArtistId;
@@ -121,134 +122,132 @@ class _CollectionActionsSheet extends ConsumerWidget {
 
     String songs(int n) => songsCount(n);
 
-    return SafeArea(
-      child: GlassSheet(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                child: Row(
-                  children: [
-                    ClipPath(
-                      clipper: ShapeBorderClipper(shape: AppShapes.sm),
-                      child: SizedBox(
-                        width: 52,
-                        height: 52,
-                        child: artwork ??
-                            ArtworkImage(
-                              url: imageUrl,
-                              icon: kind == CollectionKind.album ? Symbols.album_rounded : Symbols.queue_music_rounded,
-                              iconSize: 22,
-                            ),
-                      ),
+    return GlassSheet(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: Row(
+                children: [
+                  ClipPath(
+                    clipper: ShapeBorderClipper(shape: AppShapes.sm),
+                    child: SizedBox(
+                      width: 52,
+                      height: 52,
+                      child: artwork ??
+                          ArtworkImage(
+                            url: imageUrl,
+                            icon: kind == CollectionKind.album ? Symbols.album_rounded : Symbols.queue_music_rounded,
+                            iconSize: 22,
+                          ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
-                          if (subtitle != null)
-                            Text(subtitle!,
-                                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
-                        ],
-                      ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+                        if (subtitle != null)
+                          Text(subtitle!,
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(height: AppSpacing.xs),
-              const Divider(height: 1),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            const Divider(height: 1),
+            _Row(
+              icon: Symbols.play_arrow_rounded,
+              label: 'Přehrát',
+              onTap: () => run((infos) => controller.playQueue(infos, 0, sourceLabel: title)),
+            ),
+            _Row(
+              icon: Symbols.playlist_play_rounded,
+              label: 'Přehrát jako další',
+              onTap: () => run((infos) async {
+                await controller.playNextAll(infos, sourceLabel: title);
+                toast('Jako další: ${songs(infos.length)} z „$title“');
+              }),
+            ),
+            _Row(
+              icon: Symbols.queue_music_rounded,
+              label: 'Přidat do fronty',
+              onTap: () => run((infos) async {
+                await controller.addAllToQueue(infos, sourceLabel: title);
+                toast('Do fronty: ${songs(infos.length)} z „$title“');
+              }),
+            ),
+            _Row(
+              icon: Symbols.download_for_offline_rounded,
+              label: 'Stáhnout do zařízení',
+              onTap: () => run((infos) async {
+                container.read(offlineControllerProvider.notifier).add(infos);
+                toast('Stahuje se do zařízení: ${songs(infos.length)}');
+              }),
+            ),
+            if (kind == CollectionKind.album)
               _Row(
-                icon: Symbols.play_arrow_rounded,
-                label: 'Přehrát',
-                onTap: () => run((infos) => controller.playQueue(infos, 0, sourceLabel: title)),
-              ),
-              _Row(
-                icon: Symbols.playlist_play_rounded,
-                label: 'Přehrát jako další',
+                icon: Symbols.library_add_rounded,
+                label: 'Přidat do knihovny',
+                // `run` nejdřív načte tracklist (skladby se tím zapíšou do
+                // katalogu), pak se album přidá a stáhne.
                 onTap: () => run((infos) async {
-                  await controller.playNextAll(infos, sourceLabel: title);
-                  toast('Jako další: ${songs(infos.length)} z „$title“');
+                  try {
+                    await container.read(apiClientProvider).postJson('/library/albums/$id');
+                    container.read(libraryRevisionProvider.notifier).state++;
+                    toast('„$title“ je v knihovně (${songs(infos.length)})');
+                  } catch (_) {
+                    toast('Album se nepodařilo přidat');
+                  }
                 }),
               ),
+            _Row(
+              icon: Symbols.radio_rounded,
+              label: 'Přejít na rádio',
+              onTap: () async {
+                Navigator.of(context).pop();
+                // Oblíbené mají v "Pokračovat" jen id "liked" -- skutečné
+                // id playlistu až z knihovny.
+                final seedId = kind == CollectionKind.liked
+                    ? (await container.read(libraryRepositoryProvider).likedSongs()).id
+                    : id;
+                if (!hostContext.mounted) return;
+                goToRadio(hostContext, kind == CollectionKind.album ? RadioSeed.album : RadioSeed.playlist, seedId);
+              },
+            ),
+            if (kind == CollectionKind.album &&
+                fromArtistId != null &&
+                ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
               _Row(
-                icon: Symbols.queue_music_rounded,
-                label: 'Přidat do fronty',
-                onTap: () => run((infos) async {
-                  await controller.addAllToQueue(infos, sourceLabel: title);
-                  toast('Do fronty: ${songs(infos.length)} z „$title“');
-                }),
-              ),
-              _Row(
-                icon: Symbols.download_for_offline_rounded,
-                label: 'Stáhnout do zařízení',
-                onTap: () => run((infos) async {
-                  container.read(offlineControllerProvider.notifier).add(infos);
-                  toast('Stahuje se do zařízení: ${songs(infos.length)}');
-                }),
-              ),
-              if (kind == CollectionKind.album)
-                _Row(
-                  icon: Symbols.library_add_rounded,
-                  label: 'Přidat do knihovny',
-                  // `run` nejdřív načte tracklist (skladby se tím zapíšou do
-                  // katalogu), pak se album přidá a stáhne.
-                  onTap: () => run((infos) async {
-                    try {
-                      await container.read(apiClientProvider).postJson('/library/albums/$id');
-                      container.read(libraryRevisionProvider.notifier).state++;
-                      toast('„$title“ je v knihovně (${songs(infos.length)})');
-                    } catch (_) {
-                      toast('Album se nepodařilo přidat');
-                    }
-                  }),
-                ),
-              _Row(
-                icon: Symbols.radio_rounded,
-                label: 'Přejít na rádio',
+                icon: Symbols.person_off_rounded,
+                label: 'Nepatří k tomuto interpretovi',
                 onTap: () async {
                   Navigator.of(context).pop();
-                  // Oblíbené mají v "Pokračovat" jen id "liked" -- skutečné
-                  // id playlistu až z knihovny.
-                  final seedId = kind == CollectionKind.liked
-                      ? (await container.read(libraryRepositoryProvider).likedSongs()).id
-                      : id;
-                  if (!hostContext.mounted) return;
-                  goToRadio(hostContext, kind == CollectionKind.album ? RadioSeed.album : RadioSeed.playlist, seedId);
+                  try {
+                    await container
+                        .read(apiClientProvider)
+                        .postJson('/catalog/artists/$fromArtistId/releases/$id/not-artist');
+                    onNotArtist?.call();
+                    toast('„$title“ vyřazeno z interpreta');
+                  } catch (_) {
+                    toast('Nepodařilo se vyřadit');
+                  }
                 },
               ),
-              if (kind == CollectionKind.album &&
-                  fromArtistId != null &&
-                  ref.watch(authProvider).valueOrNull?.user?.role == 'admin')
-                _Row(
-                  icon: Symbols.person_off_rounded,
-                  label: 'Nepatří k tomuto interpretovi',
-                  onTap: () async {
-                    Navigator.of(context).pop();
-                    try {
-                      await container
-                          .read(apiClientProvider)
-                          .postJson('/catalog/artists/$fromArtistId/releases/$id/not-artist');
-                      onNotArtist?.call();
-                      toast('„$title“ vyřazeno z interpreta');
-                    } catch (_) {
-                      toast('Nepodařilo se vyřadit');
-                    }
-                  },
-                ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
-                child: Text(
-                  '„Jako další“ a „do fronty“ nepřeruší, co zrovna hraje ($what zůstane celé).',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+              child: Text(
+                '„Jako další“ a „do fronty“ nepřeruší, co zrovna hraje ($what zůstane celé).',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -294,52 +293,50 @@ Future<void> showPlayOptions(BuildContext context, {required String title, requi
         action();
       }
 
-      return SafeArea(
-        child: GlassSheet(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                  child: Text('$title · ${songs(infos.length)}',
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                const Divider(height: 1),
-                _Row(
-                  icon: Symbols.play_arrow_rounded,
-                  label: 'Přehrát',
-                  onTap: () => run(() => controller.playQueue(infos, 0, sourceLabel: title)),
-                ),
-                _Row(
-                  icon: Symbols.playlist_play_rounded,
-                  label: 'Přehrát jako další',
-                  onTap: () => run(() async {
-                    await controller.playNextAll(infos, sourceLabel: title);
-                    toast('Jako další: ${songs(infos.length)} z „$title“');
-                  }),
-                ),
-                _Row(
-                  icon: Symbols.queue_music_rounded,
-                  label: 'Přidat do fronty',
-                  onTap: () => run(() async {
-                    await controller.addAllToQueue(infos, sourceLabel: title);
-                    toast('Do fronty: ${songs(infos.length)} z „$title“');
-                  }),
-                ),
-                _Row(
-                  icon: Symbols.shuffle_rounded,
-                  label: 'Zamíchat a přidat do fronty',
-                  onTap: () => run(() async {
-                    await controller.addAllToQueue([...infos]..shuffle(), sourceLabel: title);
-                    toast('Do fronty zamíchaně: ${songs(infos.length)}');
-                  }),
-                ),
-              ],
-            ),
+      return GlassSheet(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.sm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: Text('$title · ${songs(infos.length)}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              const Divider(height: 1),
+              _Row(
+                icon: Symbols.play_arrow_rounded,
+                label: 'Přehrát',
+                onTap: () => run(() => controller.playQueue(infos, 0, sourceLabel: title)),
+              ),
+              _Row(
+                icon: Symbols.playlist_play_rounded,
+                label: 'Přehrát jako další',
+                onTap: () => run(() async {
+                  await controller.playNextAll(infos, sourceLabel: title);
+                  toast('Jako další: ${songs(infos.length)} z „$title“');
+                }),
+              ),
+              _Row(
+                icon: Symbols.queue_music_rounded,
+                label: 'Přidat do fronty',
+                onTap: () => run(() async {
+                  await controller.addAllToQueue(infos, sourceLabel: title);
+                  toast('Do fronty: ${songs(infos.length)} z „$title“');
+                }),
+              ),
+              _Row(
+                icon: Symbols.shuffle_rounded,
+                label: 'Zamíchat a přidat do fronty',
+                onTap: () => run(() async {
+                  await controller.addAllToQueue([...infos]..shuffle(), sourceLabel: title);
+                  toast('Do fronty zamíchaně: ${songs(infos.length)}');
+                }),
+              ),
+            ],
           ),
         ),
       );

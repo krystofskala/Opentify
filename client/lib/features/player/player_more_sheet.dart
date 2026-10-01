@@ -17,7 +17,6 @@ import 'queue_panel.dart';
 import '../../theme/glass_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProvider;
-import '../../theme/app_theme.dart';
 import '../../widgets/radio_station.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
@@ -76,11 +75,11 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
         tint: accent,
         liquid: true,
         shadow: false,
-        // Obsah vždy světlý na barevném skle (jako přehrávač), nezávisle na
-        // světlém/tmavém režimu systému.
-        child: Theme(
-          data: buildAppTheme(seed: accent, brightness: Brightness.dark),
-          child: SafeArea(
+        // Barvy obsahu podle skla (GlassContainer motiv sám přepne, když je
+        // sklo opačného jasu) -- dřív vynuceně tmavý motiv = bílý text na
+        // světlém skle / plné ploše "Bez skla".
+        child: Builder(
+          builder: (context) => SafeArea(
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),

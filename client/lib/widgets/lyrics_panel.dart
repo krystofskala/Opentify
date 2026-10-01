@@ -59,7 +59,9 @@ class _LyricsPanel extends ConsumerWidget {
               Container(
                 width: 40,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2)),
               ),
               const SizedBox(height: 6),
               Expanded(child: LyricsView(recordingId: recordingId, scrollController: sheetController)),
@@ -249,10 +251,10 @@ final lyricsFollowOffProvider =
 /// Ikona "sledovat text" přímo v přehrávači (mobil: místo srdíčka v řádku
 /// nad textem, PC: roh sloupce s textem). Jen u textu s časy.
 class LyricsFollowButton extends ConsumerWidget {
-  const LyricsFollowButton({super.key, required this.recordingId, this.color = Colors.white, this.activeColor});
+  const LyricsFollowButton({super.key, required this.recordingId, this.color, this.activeColor});
 
   final String recordingId;
-  final Color color;
+  final Color? color;
 
   /// Barva zapnutého stavu (barva skladby), jinak `color`.
   final Color? activeColor;
@@ -262,11 +264,12 @@ class LyricsFollowButton extends ConsumerWidget {
     final synced = ref.watch(_lyricsProvider(recordingId)).valueOrNull?.hasSynced ?? false;
     if (!synced) return const SizedBox.shrink();
     final follow = !ref.watch(lyricsFollowOffProvider).contains(recordingId);
+    final fg = color ?? Theme.of(context).colorScheme.onSurface;
     return IconButton(
       tooltip: follow ? 'Vypnout sledování textu' : 'Zapnout sledování textu',
       // Stejně jako přepínače v ovládání přehrávače (Text, Náhodně...).
       style: IconButton.styleFrom(
-        foregroundColor: follow ? (activeColor ?? color) : color.withValues(alpha: 0.55),
+        foregroundColor: follow ? (activeColor ?? fg) : fg.withValues(alpha: 0.55),
         fixedSize: const Size.square(44),
       ),
       icon: Icon(

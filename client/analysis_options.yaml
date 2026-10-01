@@ -3,6 +3,8 @@ analyzer:
     - build/**
     - web/**
     - ios/**
+    - android/**
+    - windows/**
 include: package:flutter_lints/flutter.yaml
 
 linter:

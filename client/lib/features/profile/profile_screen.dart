@@ -711,7 +711,10 @@ class _QuickButton extends StatelessWidget {
       shape: shape,
       minSize: Size.zero,
       semanticLabel: label,
-      child: DecoratedBox(
+      // Plná šířka -- GlassPressable dítě centruje a zúžilo by ho na ikonu.
+      child: SizedBox(
+        width: double.infinity,
+        child: DecoratedBox(
         decoration: ShapeDecoration(shape: shape, color: scheme.secondaryContainer),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
@@ -724,6 +727,7 @@ class _QuickButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

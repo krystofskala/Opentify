@@ -29,7 +29,8 @@ class HomeScreen extends ConsumerWidget {
 
   String _greeting() {
     final hour = DateTime.now().hour;
-    if (hour < 5) return 'Dobrou noc';
+    // "Dobrou noc" se v češtině říká na rozloučenou, ne na pozdrav.
+    if (hour < 5) return 'Dobrý večer';
     if (hour < 10) return 'Dobré ráno';
     if (hour < 18) return 'Dobrý den';
     return 'Dobrý večer';
@@ -507,7 +508,8 @@ class _HomeSkeleton extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
           for (var i = 0; i < 3; i++) ...[
-            const SkeletonBox(width: 140, height: 20),
+            // Align: v ListView by se box roztáhl přes celou šířku.
+            const Align(alignment: Alignment.centerLeft, child: SkeletonBox(width: 140, height: 20)),
             const SizedBox(height: AppSpacing.sm),
             const SkeletonCardRail(height: 190, cardWidth: 150),
             const SizedBox(height: AppSpacing.md),

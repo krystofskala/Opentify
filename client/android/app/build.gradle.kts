@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "app.opentify.opentify_client"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

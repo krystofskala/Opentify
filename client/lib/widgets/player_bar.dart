@@ -288,7 +288,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                                         : ExpressiveLoadingIndicator(size: 24, color: fg),
                                   )
                                 : hasError
-                                    ? const Icon(Symbols.refresh_rounded, color: Colors.redAccent, size: 32)
+                                    ? Icon(Symbols.refresh_rounded, color: Theme.of(context).colorScheme.error, size: 32)
                                     : Icon(
                                         playback.isPlaying ? Symbols.pause_circle_rounded : Symbols.play_circle_rounded,
                                         color: fg,
@@ -364,8 +364,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
               String? status;
               Color? statusColor;
               if (hasError) {
-                status = 'Nepodařilo se přehrát – klepni pro nový pokus';
-                statusColor = Colors.redAccent;
+                status = 'Nepodařilo se přehrát · zkus znovu ↻';
+                statusColor = Theme.of(context).colorScheme.error;
               } else if (isProvisioning) {
                 status = provisioningState!.statusLabel;
               }

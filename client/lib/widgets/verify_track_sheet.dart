@@ -53,8 +53,8 @@ class _VerifyResultSheetState extends ConsumerState<_VerifyResultSheet> {
       setState(() => _done = action);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se') : 'Nepodařilo se')));
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se') : 'Nepodařilo se')));
     }
   }
 
@@ -77,66 +77,64 @@ class _VerifyResultSheetState extends ConsumerState<_VerifyResultSheet> {
       _ => (Symbols.help_rounded, 'Shazam skladbu nepoznal'),
     };
 
-    return SafeArea(
-      child: GlassSheet(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.md),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return GlassSheet(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: verdict == 'ok' ? theme.colorScheme.primary : theme.colorScheme.tertiary),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(child: Text(headline, style: theme.textTheme.titleMedium)),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text('Má být: ${widget.recording.title} – ${widget.recording.artistName ?? '?'}',
+                style: theme.textTheme.bodyMedium),
+            if (gotTitle != null)
+              Text('Shazam slyší: $gotTitle – ${gotArtist ?? '?'}', style: theme.textTheme.bodyMedium),
+            Text(
+              'Délka souboru ${_mmss(r['actualMs'] as int?)}, v katalogu ${_mmss(r['expectedMs'] as int?)}'
+              '${durationOff ? ' – nesedí' : ''}',
+              style: theme.textTheme.bodySmall?.copyWith(color: durationOff ? theme.colorScheme.tertiary : muted),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            if (_done != null)
+              Text(
+                switch (_done) {
+                  'redownload' => 'Stahuje se znovu z jiného výsledku.',
+                  'relabel' => 'Soubor přeřazen ke skladbě, kterou slyší Shazam.',
+                  _ => 'Označeno jako v pořádku.',
+                },
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+              )
+            else if (verdict != 'ok' && verdict != 'protected')
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
                 children: [
-                  Icon(icon, color: verdict == 'ok' ? theme.colorScheme.primary : theme.colorScheme.tertiary),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(child: Text(headline, style: theme.textTheme.titleMedium)),
+                  GlassButton(
+                      label: 'Je to dobře', icon: Symbols.check_rounded, compact: true, onPressed: () => _act('ok')),
+                  if (!ownFile)
+                    GlassButton(
+                      label: 'Stáhnout znovu',
+                      icon: Symbols.refresh_rounded,
+                      compact: true,
+                      onPressed: () => _act('redownload'),
+                    )
+                  else if (gotTitle != null)
+                    GlassButton(
+                      label: 'Shazam má pravdu',
+                      icon: Symbols.graphic_eq_rounded,
+                      compact: true,
+                      onPressed: () => _act('relabel'),
+                    ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Text('Má být: ${widget.recording.title} – ${widget.recording.artistName ?? '?'}',
-                  style: theme.textTheme.bodyMedium),
-              if (gotTitle != null)
-                Text('Shazam slyší: $gotTitle – ${gotArtist ?? '?'}', style: theme.textTheme.bodyMedium),
-              Text(
-                'Délka souboru ${_mmss(r['actualMs'] as int?)}, v katalogu ${_mmss(r['expectedMs'] as int?)}'
-                '${durationOff ? ' – nesedí' : ''}',
-                style: theme.textTheme.bodySmall?.copyWith(color: durationOff ? theme.colorScheme.tertiary : muted),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              if (_done != null)
-                Text(
-                  switch (_done) {
-                    'redownload' => 'Stahuje se znovu z jiného výsledku.',
-                    'relabel' => 'Soubor přeřazen ke skladbě, kterou slyší Shazam.',
-                    _ => 'Označeno jako v pořádku.',
-                  },
-                  style: theme.textTheme.bodyMedium?.copyWith(color: muted),
-                )
-              else if (verdict != 'ok' && verdict != 'protected')
-                Wrap(
-                  spacing: AppSpacing.xs,
-                  runSpacing: AppSpacing.xs,
-                  children: [
-                    GlassButton(
-                        label: 'Je to dobře', icon: Symbols.check_rounded, compact: true, onPressed: () => _act('ok')),
-                    if (!ownFile)
-                      GlassButton(
-                        label: 'Stáhnout znovu',
-                        icon: Symbols.refresh_rounded,
-                        compact: true,
-                        onPressed: () => _act('redownload'),
-                      )
-                    else if (gotTitle != null)
-                      GlassButton(
-                        label: 'Shazam má pravdu',
-                        icon: Symbols.graphic_eq_rounded,
-                        compact: true,
-                        onPressed: () => _act('relabel'),
-                      ),
-                  ],
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );
