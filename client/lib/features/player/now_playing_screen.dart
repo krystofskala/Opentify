@@ -427,12 +427,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // tónované vůbec") -- čisté živé pozadí, vrstvu ukazuje jen hrana.
           // Výjimka: světlý režim -- přehrávač má bílé popředí a na světlém
           // pastelovém pozadí by bez ztmavení nebylo čitelné.
-          if (Theme.of(context).brightness == Brightness.light)
-            // Přes celou plochu (dřív bez Positioned.fill -> nulová velikost,
-            // ztmavení se vůbec nekreslilo a bílý text zanikal).
-            const Positioned.fill(
-              child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: Color(0x59000000)))),
-            ),
           if (!GlassSettings.solidOf(context))
           Positioned.fill(
             child: IgnorePointer(
@@ -590,7 +584,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         colors: [Color(0x00000000), Color(0xFF000000), Color(0xFF000000), Color(0x00000000)],
                         stops: [0, 0.06, 0.86, 1],
                       ).createShader(rect),
-                      child: LyricsView(recordingId: nowPlaying.recordingId, immersive: true, color: Colors.white),
+                      child: LyricsView(recordingId: nowPlaying.recordingId, immersive: true, color: playerFg(context)),
                     ),
                   ),
                 ),
@@ -636,13 +630,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                 nowPlaying.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                                style: TextStyle(color: playerFg(context), fontSize: 17, fontWeight: FontWeight.w700),
                               ),
                               Text(
                                 nowPlaying.artistName ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 15),
+                                style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: 15),
                               ),
                             ],
                           ),
@@ -693,7 +687,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           width: 38,
           height: 5,
           decoration:
-              BoxDecoration(color: Colors.white.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
+              BoxDecoration(color: playerFg(context).withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
         ),
       );
 
@@ -710,7 +704,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           child: Align(
             alignment: Alignment.centerLeft,
             child: IconButton(
-              icon: const Icon(Symbols.keyboard_arrow_down_rounded, color: Colors.white, size: 32),
+              icon: Icon(Symbols.keyboard_arrow_down_rounded, color: playerFg(context), size: 32),
               tooltip: 'Zasunout',
               onPressed: () => _sheet?.close(),
             ),
@@ -719,12 +713,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         Expanded(
           child: Column(
             children: [
-              const Text(
+              Text(
                 'PŘEHRÁVÁ SE',
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 softWrap: false,
-                style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 2),
+                style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: 11, letterSpacing: 2),
               ),
               if (sourceLabel != null)
                 Builder(builder: (context) {
@@ -736,11 +730,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Colors.white,
+                      color: playerFg(context),
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       decoration: route == null ? null : TextDecoration.underline,
-                      decorationColor: Colors.white.withValues(alpha: 0.5),
+                      decorationColor: playerFg(context).withValues(alpha: 0.5),
                     ),
                   );
                   if (route == null) return label;
@@ -764,7 +758,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               // Mobil: srdíčko je v řádku pod ovládáním -- lišta by jinak
               // titulek "Přehrává se" zmáčkla do dvou řádků (živě nahlášeno).
               IconButton(
-                icon: const Icon(Symbols.more_vert_rounded, color: Colors.white, size: 24),
+                icon: Icon(Symbols.more_vert_rounded, color: playerFg(context), size: 24),
                 tooltip: 'Další možnosti',
                 onPressed: () => showPlayerMoreSheet(context),
               ),
@@ -855,7 +849,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800),
+              style: TextStyle(color: playerFg(context), fontSize: 26, fontWeight: FontWeight.w800),
             ),
           ),
           if (nowPlaying.artistName != null || nowPlaying.artistId != null) ...[
@@ -866,7 +860,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 nowPlaying.artistName ?? 'Zobrazit interpreta',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.78),
+                  color: playerFg(context).withValues(alpha: 0.78),
                   fontSize: 16,
                 ),
               ),
@@ -877,7 +871,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             Text(
               provisioningState!.statusLabel,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
+              style: TextStyle(color: playerFg(context).withValues(alpha: 0.6), fontSize: 13),
             ),
           ],
         ],
@@ -904,7 +898,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         liquid: true,
         borderRadius: BorderRadius.circular(Expressive.cornerExtraLarge),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-        child: Column(
+        // Builder: barvy popředí z motivu UVNITŘ skla (tmavé sklo ve světlém
+        // režimu dostane tmavý motiv, viz GlassContainer).
+        child: Builder(builder: (context) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Consumer(builder: (context, positionRef, _) {
@@ -914,6 +910,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   WavySeekBar(
+                    activeColor: playerFg(context),
+                    thumbColor: playerFg(context),
+                    inactiveColor: playerFg(context).withValues(alpha: 0.3),
                     progress: ms == 0 ? 0 : position.inMilliseconds.clamp(0, ms) / ms,
                     isPlaying: playback.isPlaying,
                     onChangeEnd:
@@ -924,9 +923,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(_formatDuration(position), style: const TextStyle(color: Colors.white70)),
+                        Text(_formatDuration(position), style: TextStyle(color: playerFg(context).withValues(alpha: 0.7))),
                         abBadge,
-                        Text(_formatDuration(duration), style: const TextStyle(color: Colors.white70)),
+                        Text(_formatDuration(duration), style: TextStyle(color: playerFg(context).withValues(alpha: 0.7))),
                       ],
                     ),
                   ),
@@ -940,7 +939,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 IconButton(
-                  icon: const Icon(Symbols.skip_previous_rounded, color: Colors.white, size: 34),
+                  icon: Icon(Symbols.skip_previous_rounded, color: playerFg(context), size: 34),
                   // Bez předchozí skladby `previous()` přetočí na začátek.
                   onPressed: () => _skip(forward: false),
                 ),
@@ -952,7 +951,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
                   child: ExpressiveMorph(
                     size: 76,
-                    color: Colors.white,
+                    // Barva alba (živě chtěné místo bílé plochy).
+                    color: accent,
                     shape: playback.isPlaying
                         ? const ExpressiveShape.squircle()
                         : const ExpressiveShape.cookie(lobes: 9, depth: 0.09),
@@ -961,18 +961,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             ? SizedBox.square(
                                 dimension: 40,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 3, color: accent, value: provisioningPct / 100),
+                                    strokeWidth: 3, color: _onAccent(accent), value: provisioningPct / 100),
                               )
-                            : ExpressiveLoadingIndicator(size: 40, color: accent))
+                            : ExpressiveLoadingIndicator(size: 40, color: _onAccent(accent)))
                         : Icon(
                             playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
                             size: 44,
-                            color: accent,
+                            color: _onAccent(accent),
+                            fill: 1,
                           ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Symbols.skip_next_rounded, color: Colors.white, size: 34),
+                  icon: Icon(Symbols.skip_next_rounded, color: playerFg(context), size: 34),
                   onPressed: playback.hasNext ? () => _skip(forward: true) : null,
                 ),
               ],
@@ -987,19 +988,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 IconButton(
                   tooltip: 'Náhodné přehrávání',
                   style: IconButton.styleFrom(
-                    foregroundColor: playback.shuffleEnabled ? accent : Colors.white.withValues(alpha: 0.55),
+                    foregroundColor: playback.shuffleEnabled ? accent : playerFg(context).withValues(alpha: 0.55),
                     fixedSize: const Size.square(44),
                   ),
                   icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
                   onPressed: controller.toggleShuffle,
                 ),
-                _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback),
-                _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback),
+                _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, playerFg(context)),
+                _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, playerFg(context)),
                 IconButton(
                   tooltip: 'Opakování',
                   style: IconButton.styleFrom(
                     foregroundColor:
-                        playback.repeatMode == RepeatMode.off ? Colors.white.withValues(alpha: 0.55) : accent,
+                        playback.repeatMode == RepeatMode.off ? playerFg(context).withValues(alpha: 0.55) : accent,
                     fixedSize: const Size.square(44),
                   ),
                   icon: Icon(
@@ -1010,11 +1011,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   onPressed: controller.cycleRepeatMode,
                 ),
                 // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
-                _likeButton(playback),
+                _likeButton(playback, playerFg(context)),
               ],
             ),
           ],
-        ),
+        )),
       ),
     );
   }
@@ -1030,7 +1031,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.16),
+          color: playerFg(context).withValues(alpha: 0.16),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
@@ -1038,28 +1039,29 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           children: [
             Icon(Symbols.repeat_rounded, size: 14, color: accent),
             const SizedBox(width: 4),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(label, style: TextStyle(color: playerFg(context), fontSize: 12, fontWeight: FontWeight.w600)),
             const SizedBox(width: 4),
-            const Icon(Symbols.close_rounded, size: 14, color: Colors.white70),
+            Icon(Symbols.close_rounded, size: 14, color: playerFg(context).withValues(alpha: 0.7)),
           ],
         ),
       ),
     );
   }
 
-  Widget _likeButton(AudioPlayerState playback) {
+  // `fg` z kontextu UVNITŘ skla panelu (ne z `this.context`).
+  Widget _likeButton(AudioPlayerState playback, Color fg) {
     final id = playback.nowPlaying!.recordingId;
-    return LikeHeart(recordingId: id, size: 22, color: Colors.white.withValues(alpha: 0.55));
+    return LikeHeart(recordingId: id, size: 22, color: fg.withValues(alpha: 0.55));
   }
 
-  Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback) {
+  Widget _sideButton(_SidePanel panel, IconData icon, String label, Color accent, AudioPlayerState playback, Color fg) {
     final wideSide = MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
     final active = wideSide ? _side == panel : (panel == _SidePanel.lyrics && _lyricsMode);
     // Jen ikona (jako Apple Music); zapnuté = barva skladby, bez podkladu.
     return IconButton(
       tooltip: label,
       style: IconButton.styleFrom(
-        foregroundColor: active ? accent : Colors.white.withValues(alpha: 0.55),
+        foregroundColor: active ? accent : fg.withValues(alpha: 0.55),
         fixedSize: const Size.square(44),
       ),
       icon: Icon(icon, size: 22, fill: active ? 1 : 0, semanticLabel: label),
@@ -1121,17 +1123,17 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 duration: Motion.state.duration,
                 switchInCurve: Motion.state,
                 child: _lastSide == _SidePanel.queue
-                    ? const Column(
-                        key: ValueKey('queue'),
+                    ? Column(
+                        key: const ValueKey('queue'),
                         children: [
                           SizedBox(
                             height: 40,
                             child: Center(
                               child: Text('FRONTA',
-                                  style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2)),
+                                  style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: 12, letterSpacing: 2)),
                             ),
                           ),
-                          Expanded(child: QueueView()),
+                          const Expanded(child: QueueView()),
                         ],
                       )
                     : Stack(
@@ -1343,3 +1345,12 @@ final _releaseOfRecording = FutureProvider.family<String?, String>((ref, recordi
     return null;
   }
 });
+
+/// Popředí přehrávače (text, ikony, vlnovka): bílé v tmavém režimu, tmavé ve
+/// světlém -- stejně jako zbytek appky (dřív vždy bílé, na světlém skle
+/// zanikalo).
+Color playerFg(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).colorScheme.onSurface;
+
+/// Ikona na tlačítku v barvě alba: bílá nebo černá podle jasu.
+Color _onAccent(Color accent) => accent.computeLuminance() > 0.45 ? Colors.black87 : Colors.white;
