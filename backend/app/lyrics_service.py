@@ -146,13 +146,20 @@ async def _lyrics_netease(artist_name: str | None, track_name: str, duration_s: 
         lrc = ((data.get("lrc") or {}).get("lyric") or "").strip()
         if not lrc or "纯音乐" in lrc:  # "čistě instrumentální"
             continue
-        lines = [
-            line
-            for line in lrc.splitlines()
-            if re.search(r"\w", re.sub(r"^(\[[0-9:.]+\])+", "", line))  # ne prázdné / jen "."
-            and not _NE_CREDIT.match(line)
-            and not _NE_HEADER.match(line)
-        ]
+        # Celé řádky pryč (autoři, hlavička) -- každý řádek má vlastní čas, takže
+        # časování ostatních zůstane. Řádek jen s "." / prázdný = pauza (konec
+        # sloky) -> prázdný řádek se SVÝM časem, jinak by předchozí verš svítil
+        # přes celou mezihru.
+        lines: list[str] = []
+        for line in lrc.splitlines():
+            stamps = re.match(r"^((?:\[[0-9:.]+\])+)", line.strip())
+            if stamps is None or _NE_CREDIT.match(line) or _NE_HEADER.match(line):
+                continue
+            text = line.strip()[stamps.end():].strip()
+            lines.append(f"{stamps.group(1)}{text}" if re.search(r"\w", text) else stamps.group(1))
+        # Úvodní prázdné řádky nic nenesou.
+        while lines and not re.sub(r"^(\[[0-9:.]+\])+", "", lines[0]):
+            lines.pop(0)
         synced = "\n".join(lines).strip()
         plain = "\n".join(re.sub(r"^(\[[0-9:.]+\])+", "", line).strip() for line in lines).strip()
         if plain:
