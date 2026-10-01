@@ -1303,6 +1303,7 @@ class YoutubeLinkIn(BaseModel):
     kind: str | None = None  # track | playlist | album | live | soundtrack
     artist_name: str | None = None
     title: str | None = None
+    year: int | None = None  # rok vydání alba (neoficiální alba ho jinde nemají)
 
 
 @library_router.post("/import/youtube-inspect")
@@ -1327,7 +1328,8 @@ async def youtube_import(
 
     try:
         result = await import_youtube_link(
-            session, current[0], body.url, kind=body.kind or "track", artist_name=body.artist_name, title=body.title
+            session, current[0], body.url, kind=body.kind or "track", artist_name=body.artist_name, title=body.title,
+            year=body.year,
         )
     except YoutubeLinkError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

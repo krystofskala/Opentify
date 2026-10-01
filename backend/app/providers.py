@@ -95,6 +95,10 @@ class TrackMetadata:
     # Zdroje, které uživatel označil jako špatnou verzi ("Špatná verze --
     # stáhnout jinou"): `slskd:{user}|{soubor}`, `youtube:{id}`.
     rejected_sources: tuple[str, ...] = ()
+    # Album, ze kterého skladba je (konkrétní vydání) -- soubor ze složky toho
+    # alba / video s jeho názvem má přednost (správná verze, ne live/remaster
+    # z jiné desky).
+    album_title: str | None = None
 
     @property
     def search_query(self) -> str:
@@ -361,6 +365,7 @@ class SlskdProvider:
         takže "nejlepší" kandidát často visel v "Queued, Remotely" až do
         300s timeoutu, než se spadlo na YouTube."""
         wanted = _title_tokens(track.title)
+        album_words = _title_tokens(track.album_title or "")
         out: list[tuple[float, str, dict]] = []
         seen: set[tuple[str, str]] = set()
         for response in search_responses:
@@ -404,6 +409,12 @@ class SlskdProvider:
                     score = (1000 if free else 0) - est_s * 10 - queue * 50 + quality * 25
                 else:
                     score = (500 if free else 0) - queue * 20 + quality * 200 - est_s
+                # Soubor ze složky správného alba: výrazná přednost (ne ale
+                # víc než volný slot u interaktivního přehrání).
+                if album_words:
+                    folder = set(_normalize(filename.replace("\\", "/").rsplit("/", 1)[0]).split())
+                    if len(album_words & folder) >= max(1, round(len(album_words) * 0.8)):
+                        score += 300 if interactive else 400
                 f = {**f, "_free": free, "_speed": speed, "_est_s": est_s, "_quality": quality}
                 out.append((score, username, f))
         out.sort(key=lambda c: c[0], reverse=True)
@@ -761,7 +772,12 @@ class YoutubeProvider:
                 return any(m in title.split() and m not in asked.split() for m in _VERSION_MARKERS)
 
             ok = [e for e in entries if acceptable(e)]
-            ok.sort(key=lambda e: (0 if title_hit(e) else 1, 1 if other_version(e) else 0))
+            album_words = _title_tokens(track.album_title or "")
+
+            def album_hit(e: dict) -> bool:
+                return bool(album_words) and album_words <= _title_tokens(e.get("title") or "")
+
+            ok.sort(key=lambda e: (0 if title_hit(e) else 1, 1 if other_version(e) else 0, 0 if album_hit(e) else 1))
             if track.skip_candidates and ok:
                 ok = ok[track.skip_candidates % len(ok):] + ok[: track.skip_candidates % len(ok)]
             chosen = ok[0] if ok else None

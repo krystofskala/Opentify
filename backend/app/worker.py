@@ -165,6 +165,7 @@ def _start_job(job_id: str) -> dict | None:
             "recording_mbid": recording.mbid if recording else None,
             "recording_duration_ms": recording.duration_ms if recording else None,
             "artist_name": artist.name if artist else None,
+            "album_title": _album_title(session, recording),
             # "Stáhnout znovu" z kontroly Shazamem: přeskočit dřívější výběr.
             "skip_candidates": int((recording.external_refs or {}).get("youtubeSkip", 0)) if recording else 0,
             "rejected_sources": list((recording.external_refs or {}).get("rejectedSources") or []) if recording else [],
@@ -567,6 +568,21 @@ def _remember_source_url(recording_id: str, url: str) -> None:
         session.commit()
 
 
+def _album_title(session: Session, recording: Recording | None) -> str | None:
+    """Album skladby -- jen konkrétní vydání (album/EP), ne kompilace nebo
+    singl stejného jména; podle něj se při stahování pozná správná verze."""
+    if recording is None or not recording.release_id:
+        return None
+    from app.models import Release
+
+    release = session.get(Release, recording.release_id)
+    if release is None or (release.release_type or "album").lower() not in ("album", "ep"):
+        return None
+    if release.title.strip().lower() == (recording.title or "").strip().lower():
+        return None  # titulní skladba -- album v názvu nic neříká
+    return release.title
+
+
 def _remember_source_key(recording_id: str, key: str) -> None:
     """Přesný zdroj souboru -- pro "Špatná verze -- stáhnout jinou"."""
     with Session(engine) as session:
@@ -600,6 +616,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         skip_candidates=ctx.get("skip_candidates", 0),
         youtube_id=ctx.get("youtube_id"),
         rejected_sources=tuple(ctx.get("rejected_sources") or ()),
+        album_title=ctx.get("album_title"),
     )
 
     async def on_progress(pct: int) -> None:

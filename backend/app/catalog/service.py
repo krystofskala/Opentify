@@ -26,6 +26,7 @@ import unicodedata
 from typing import Any
 
 from sqlmodel import Session, func, select
+from app.catalog.identity import is_own_id
 
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.availability import compute_availability, resolve_artist_name
@@ -859,8 +860,12 @@ class CatalogService:
         release = self._session.get(Release, release_id)
         if release is None:
             return None
+        # Album jen na YouTube / vlastní (Kontrast): tracklist zná jen naše DB
+        # (živě: "No Phun Intended" z odkazu na YouTube ukazovalo 0 skladeb).
+        if (release.external_refs or {}).get("source") == "youtube" or is_own_id(release.mbid):
+            return self._local_release_tracks(release)
         if release.mbid is None:
-            return await self._deezer_release_tracks(release)
+            return await self._deezer_release_tracks(release) or self._local_release_tracks(release)
 
         try:
             data = await self._mb.get_release_group_tracks(release.mbid)
@@ -922,6 +927,11 @@ class CatalogService:
             release.external_refs = {**(release.external_refs or {}), "typeByTracks": new_type}
             self._session.add(release)
             self._session.commit()
+
+    def _local_release_tracks(self, release: Release) -> list[RecordingOut]:
+        recordings = list(self._session.exec(select(Recording).where(Recording.release_id == release.id)).all())
+        recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0, r.title))
+        return [self._to_recording_out(r) for r in recordings]
 
     async def _deezer_release_tracks(self, release: Release) -> list[RecordingOut]:
         """Tracklist alba z Deezeru -- pro alba bez MBID (z Deezer hledání/

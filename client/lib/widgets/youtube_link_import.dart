@@ -33,7 +33,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
 
   final isPlaylist = info['kind'] == 'playlist';
   final count = (info['videos'] as List<dynamic>? ?? const []).length;
-  final choice = await showDialog<({String kind, String artist, String title})>(
+  final choice = await showDialog<({String kind, String artist, String title, int? year})>(
     context: context,
     builder: (context) => _YoutubeKindDialog(
       isPlaylist: isPlaylist,
@@ -51,6 +51,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
       'kind': choice.kind,
       'artist_name': choice.artist,
       'title': choice.title,
+      if (choice.year != null) 'year': choice.year,
     }, timeout: const Duration(minutes: 2));
     messenger?.hideCurrentSnackBar();
     switch (result['kind']) {
@@ -103,11 +104,13 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
   late String _kind = widget.isPlaylist ? 'playlist' : 'track';
   late final _artist = TextEditingController(text: widget.artist);
   late final _title = TextEditingController(text: widget.title);
+  final _year = TextEditingController();
 
   @override
   void dispose() {
     _artist.dispose();
     _title.dispose();
+    _year.dispose();
     super.dispose();
   }
 
@@ -169,6 +172,13 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
                   },
                 ),
               ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _year,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                decoration: const InputDecoration(labelText: 'Rok vydání (nepovinné)', counterText: ''),
+              ),
             ],
           ],
         ),
@@ -185,7 +195,7 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
           style: GlassButtonStyle.prominent,
           compact: true,
           onPressed: () => Navigator.of(context).pop(
-            (kind: _kind, artist: _artist.text.trim(), title: _title.text.trim()),
+            (kind: _kind, artist: _artist.text.trim(), title: _title.text.trim(), year: int.tryParse(_year.text.trim())),
           ),
         ),
       ],

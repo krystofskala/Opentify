@@ -199,6 +199,7 @@ async def import_youtube_link(
     kind: str,
     artist_name: str | None = None,
     title: str | None = None,
+    year: int | None = None,
 ) -> dict[str, Any]:
     if kind not in ("track", "playlist", "album", "live", "soundtrack"):
         raise YoutubeLinkError("Neznámý druh importu.")
@@ -271,6 +272,8 @@ async def import_youtube_link(
             "soundtrack": "Soundtrack · z YouTube",
         }.get(kind, "Neoficiální vydání · jen na YouTube"),
     }
+    if year and 1900 <= year <= 2100:
+        release.release_date = str(year)  # neoficiální album: rok zadaný ručně
     for number, v in enumerate(videos, start=1):
         recording = session.exec(
             select(Recording).where(Recording.release_id == release.id, Recording.track_number == number)
