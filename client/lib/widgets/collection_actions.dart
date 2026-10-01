@@ -16,6 +16,8 @@ import '../core/cz_plural.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
 import '../state/offline_controller.dart';
 import '../state/auth_controller.dart';
+import '../state/listen_later_controller.dart' show listenLaterProvider;
+import '../data/listen_later_repository.dart' show LaterKind;
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -207,6 +209,20 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   }
                 }),
               ),
+            if (kind == CollectionKind.album)
+              Builder(builder: (context) {
+                final later = ref.watch(
+                  listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.album, id) != null),
+                );
+                return _Row(
+                  icon: later ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
+                  label: later ? 'Odebrat z „Na později“' : 'Uložit na později',
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    container.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.album, id);
+                  },
+                );
+              }),
             _Row(
               icon: Symbols.radio_rounded,
               label: 'Přejít na rádio',
