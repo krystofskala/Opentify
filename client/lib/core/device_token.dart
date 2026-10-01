@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'native_nav.dart';
+
 /// Klíč zařízení v NATIVNÍ appce. Web ho má v cookie (posílá ji prohlížeč
 /// sám); nativní HTTP cookies neukládá, takže si klíč z `/auth/me` nebo
 /// `/auth/join` uložíme a posíláme jako `Authorization: Bearer` -- u streamu,
@@ -21,6 +23,7 @@ Future<void> loadDeviceToken() async {
     deviceToken = prefs.getString(_tokenKey);
     actAsProfile = prefs.getString(_actAsKey);
   } catch (_) {}
+  await NativeNav.syncConfig();
 }
 
 Future<void> saveDeviceToken(String token) async {
@@ -30,6 +33,7 @@ Future<void> saveDeviceToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, token);
   } catch (_) {}
+  await NativeNav.syncConfig();
 }
 
 Future<void> saveActAs(String? userId) async {
@@ -39,6 +43,7 @@ Future<void> saveActAs(String? userId) async {
     final prefs = await SharedPreferences.getInstance();
     userId == null ? await prefs.remove(_actAsKey) : await prefs.setString(_actAsKey, userId);
   } catch (_) {}
+  await NativeNav.syncConfig();
 }
 
 /// Hlavičky přihlášení pro nativní appku (web: prázdné).

@@ -23,6 +23,7 @@ import '../features/tuner/tuner_screen.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
 import 'home_shell.dart';
+import '../core/native_nav.dart';
 import '../features/profile/verify_downloads_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -132,5 +133,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   router.routerDelegate.addListener(() {
     diagNote('route ${router.routerDelegate.currentConfiguration.uri}');
   });
+  // iOS: Ovládací centrum / upozornění Shazamu otevírají obrazovky přes nativní most.
+  NativeNav.attach(router);
   return router;
 });

@@ -33,10 +33,11 @@ widgets_group.new_reference('OpentifyWidgets.entitlements')
 shared_swift = shared_group.new_reference('NowPlayingAttributes.swift')
 intents_swift = shared_group.new_reference('ControlIntents.swift')
 bridge_swift = runner_group.new_reference('NowPlayingActivity.swift')
+shazam_swift = runner_group.new_reference('BackgroundShazam.swift')
 runner_group.new_reference('Runner.entitlements')
 
 ext.add_file_references([ext_swift, shared_swift, intents_swift])
-runner.add_file_references([shared_swift, intents_swift, bridge_swift])
+runner.add_file_references([shared_swift, intents_swift, bridge_swift, shazam_swift])
 
 %w[WidgetKit SwiftUI ActivityKit AppIntents].each { |fw| ext.add_system_framework(fw) }
 
@@ -61,6 +62,8 @@ end
 
 runner.build_configurations.each do |config|
   config.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
+  # ControlIntents.swift: nahrávání Shazamu jen v appce (ne v rozšíření).
+  config.build_settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) OPENTIFY_APP'
 end
 
 # Vložit .appex do appky (PlugIns). Fáze hned za Resources -- za skripty
