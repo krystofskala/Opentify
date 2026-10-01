@@ -192,7 +192,19 @@ async def _wikidata_image(artist_mbid: str) -> str | None:
     return str(img.url) if img.status_code == 200 else None
 
 
-async def resolve_artist_image(name: str, artist_mbid: str | None, *, allow_musicbrainz: bool = True) -> str | None:
+async def resolve_artist_image(
+    name: str, artist_mbid: str | None, *, allow_musicbrainz: bool = True, deezer_id: str | None = None
+) -> str | None:
+    # Známe-li Deezer id, fotka přesně toho interpreta -- hledání podle jména
+    # dalo Chrisi Thileovi fotku Meshell Ndegeocello.
+    if deezer_id:
+        try:
+            dz = await get_deezer_client().artist(deezer_id)
+        except Exception:  # noqa: BLE001
+            dz = None
+        picture = deezer_image((dz or {}).get("picture_xl") or (dz or {}).get("picture_big"))
+        if picture and not _is_deezer_placeholder(picture):
+            return picture
     wanted = primary_artist_name(name)
     try:
         artists = await get_deezer_client().search_artist(wanted, trust_name=False)
@@ -265,7 +277,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
         has_real_image = bool(artist.images) and not _is_deezer_placeholder(artist.images[0])
         if has_real_image or (not force and _recently_checked(artist.external_refs)):
             return False
-        name, mbid = artist.name, artist.mbid
+        name, mbid, deezer_id = artist.name, artist.mbid, artist.deezer_id
 
     from app.catalog.identity import is_own_id, local_only_artist
 
@@ -273,7 +285,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
         return False  # vlastní interpret (tátův Kontrast): fotku nikdy podle jména
     if not mbid and await asyncio.to_thread(local_only_artist, name) is not None:
         return False  # vlastní hudba: fotku ne podle jména (kapel stejného jména je víc)
-    picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force)
+    picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force, deezer_id=deezer_id)
 
     with Session(engine) as session:
         artist = session.get(Artist, artist_id)

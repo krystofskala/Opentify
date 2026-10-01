@@ -173,6 +173,20 @@ class DeezerClient:
         except (DeezerUnavailable, httpx.HTTPError):
             return None
 
+    async def artist(self, artist_id: str) -> dict[str, Any] | None:
+        """Jeden interpret podle Deezer id (fotka přesně jeho, ne podle jména)."""
+
+        async def fetch() -> dict[str, Any]:
+            result = await self._get(f"/artist/{artist_id}")
+            if result is None or result.get("error"):
+                raise DeezerUnavailable(artist_id)
+            return result
+
+        try:
+            return await cached_json(f"dz:artist:{artist_id}", LOOKUP_TTL_SECONDS, fetch)
+        except (DeezerUnavailable, httpx.HTTPError):
+            return None
+
     async def album(self, album_id: str) -> dict[str, Any] | None:
         """Jedno album (kvůli obalu `cover_xl`), když Deezer id už známe."""
 
