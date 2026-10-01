@@ -51,7 +51,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
 
   @override
   void dispose() {
-    for (final c in [_username, _password, _newPassword, _confirm]) {
+    for (final c in [_username, _password, _newPassword, _confirm, _invite]) {
       c.dispose();
     }
     super.dispose();
@@ -101,53 +101,82 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     }
   }
 
-  /// Appka pozvánkový odkaz otevřít neumí -- vložit ho sem.
-  Future<void> _pasteInvite(BuildContext context) async {
-    final controller = TextEditingController();
-    final text = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Pozvánka'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          autocorrect: false,
-          enableSuggestions: false,
-          decoration: const InputDecoration(hintText: 'Vlož odkaz z pozvánky'),
-          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
-        ),
-        actions: [
-          GlassButton(
-            label: 'Zrušit',
-            style: GlassButtonStyle.plain,
-            compact: true,
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          GlassButton(
-            label: 'Pokračovat',
-            style: GlassButtonStyle.prominent,
-            compact: true,
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (text == null || text.isEmpty || !context.mounted) return;
-    final code = Uri.tryParse(text)?.queryParameters['join'] ?? (text.contains('/') ? null : text);
+  /// Appka pozvánkový odkaz otevřít neumí -- vloží se tady. Přímo na téhle
+  /// obrazovce: leží nad navigací appky, dialog odsud otevřít nejde (živě:
+  /// tlačítko „Mám pozvánku" nic nedělalo).
+  bool _inviteMode = false;
+  String? _claimCode;
+  final _invite = TextEditingController();
+
+  void _useInvite() {
+    final text = _invite.text.trim();
+    final code = Uri.tryParse(text)?.queryParameters['join'] ?? (text.contains('/') || text.isEmpty ? null : text);
     if (code == null) {
       setState(() => _error = 'Tohle nevypadá jako pozvánkový odkaz.');
       return;
     }
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => Scaffold(backgroundColor: Colors.transparent, body: _ClaimForm(code: code)),
-    ));
+    setState(() {
+      _error = null;
+      _claimCode = code;
+    });
   }
+
+  Widget _invitePaste(ThemeData theme) => Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Icon(Symbols.mail_rounded, size: 56, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(height: 16),
+                Text('Pozvánka', textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 8),
+                Text(
+                  'Vlož odkaz z pozvánky, kterou ti poslal správce.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _invite,
+                  autofocus: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(labelText: 'Odkaz z pozvánky'),
+                  onSubmitted: (_) => _useInvite(),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+                ],
+                const SizedBox(height: 20),
+                GlassButton(label: 'Pokračovat', style: GlassButtonStyle.prominent, onPressed: _useInvite),
+                const SizedBox(height: 8),
+                GlassButton(
+                  label: 'Zpět na přihlášení',
+                  style: GlassButtonStyle.plain,
+                  onPressed: () => setState(() {
+                    _inviteMode = false;
+                    _error = null;
+                  }),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final creating = _createFor != null;
+    if (_claimCode != null) {
+      return _ClaimForm(code: _claimCode!, onBack: () => setState(() => _claimCode = null));
+    }
+    if (_inviteMode) return _invitePaste(theme);
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(32),
@@ -221,7 +250,10 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                   GlassButton(
                     label: 'Mám pozvánku od správce',
                     style: GlassButtonStyle.plain,
-                    onPressed: () => _pasteInvite(context),
+                    onPressed: () => setState(() {
+                      _inviteMode = true;
+                      _error = null;
+                    }),
                   ),
                 ],
               ],
@@ -235,8 +267,11 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
 
 /// Pozvánka od správce: člověk si sám vybere přihlašovací jméno a heslo.
 class _ClaimForm extends ConsumerStatefulWidget {
-  const _ClaimForm({required this.code});
+  const _ClaimForm({required this.code, this.onBack});
   final String code;
+
+  /// Vložená pozvánka (ne z adresy): zpět na přihlášení.
+  final VoidCallback? onBack;
 
   @override
   ConsumerState<_ClaimForm> createState() => _ClaimFormState();
@@ -312,7 +347,6 @@ class _ClaimFormState extends ConsumerState<_ClaimForm> {
       if (json['token'] case final String token) await saveDeviceToken(token);
       clearJoinFromUrl();
       ref.invalidate(authProvider);
-      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
         setState(() => _error = e is ApiException ? (e.detail ?? 'Nepovedlo se.') : 'Server není dostupný.');
@@ -359,8 +393,8 @@ class _ClaimFormState extends ConsumerState<_ClaimForm> {
                     style: GlassButtonStyle.prominent,
                     onPressed: () {
                       clearJoinFromUrl();
-                      if (Navigator.of(context).canPop()) {
-                        Navigator.of(context).pop();
+                      if (widget.onBack != null) {
+                        widget.onBack!();
                       } else {
                         ref.invalidate(authProvider);
                       }

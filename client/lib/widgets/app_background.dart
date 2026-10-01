@@ -30,6 +30,7 @@ class AppBackground extends StatefulWidget {
     required this.isPlaying,
     required this.hidden,
     this.fineGrain = false,
+    this.noGrain = false,
     required this.child,
   });
 
@@ -37,6 +38,9 @@ class AppBackground extends StatefulWidget {
 
   /// Profil › Vzhled › "Jemnější zrno" (slabší filmové zrno).
   final bool fineGrain;
+
+  /// Profil › Vzhled › Zrno vypnuté -- hladké pozadí.
+  final bool noGrain;
 
   /// Doplňkové tóny z obalu (`effectiveSupportTonesProvider`) -- odstíny
   /// vedlejších slotů monochromatické palety; prázdné = syntetický posun.
@@ -386,6 +390,7 @@ class _ShaderPainter extends CustomPainter {
       Paint()..filterQuality = FilterQuality.low,
     );
     final dark = state.widget.brightness == Brightness.dark;
+    if (state.widget.noGrain) return;
     final grain = _FallbackPainter.grainFor(size, state._pixelRatio, dark, state.widget.fineGrain);
     canvas.drawImageRect(
       grain,
@@ -514,6 +519,7 @@ class _FallbackPainter extends CustomPainter {
       canvas.drawRect(Offset.zero & size, Paint()..shader = _vignette);
     }
 
+    if (state.widget.noGrain) return;
     final grain = grainFor(size, state._pixelRatio, dark, state.widget.fineGrain);
     canvas.drawImageRect(
       grain,

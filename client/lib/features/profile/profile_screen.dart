@@ -364,10 +364,10 @@ class _AppearanceSettings extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         _SwitchRow(
-          title: 'Jemnější zrno',
-          subtitle: 'Slabší zrnitost pozadí, klidnější plochy.',
-          value: ref.watch(fineGrainProvider),
-          onChanged: ref.read(fineGrainProvider.notifier).set,
+          title: 'Zrno na pozadí',
+          subtitle: 'Jemná filmová zrnitost. Vypnuté = úplně hladké plochy.',
+          value: !ref.watch(noGrainProvider),
+          onChanged: (on) => ref.read(noGrainProvider.notifier).set(!on),
         ),
         // Jen iOS appka: karta s obalem ve "fun shape" na zámku a v Dynamic
         // Islandu. Výchozí vypnuto -- systémový přehrávač na zámku stačí.

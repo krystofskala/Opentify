@@ -77,6 +77,7 @@ class OpentifyApp extends ConsumerWidget {
             isPlaying: isPlaying,
             hidden: false,
             fineGrain: ref.watch(fineGrainProvider),
+            noGrain: ref.watch(noGrainProvider),
             // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
             // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
             // Tón skla v barvě skladby se přebarvuje spolu s pozadím

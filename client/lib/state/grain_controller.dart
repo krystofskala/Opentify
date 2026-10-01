@@ -1,14 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// "Jemnější zrno" (Profil › Vzhled): slabší filmové zrno pozadí -- návrh z
-/// design auditu (síla ~0.08 místo 0.14). Výchozí zůstává výrazné zrno.
-class FineGrainController extends StateNotifier<bool> {
-  FineGrainController() : super(false) {
+/// Zrno pozadí (Profil › Vzhled): výchozí JEMNÉ zrno, nebo žádné. Dřívější
+/// výrazné zrno už není (živě: jemné jako výchozí, místo plného „žádné").
+final fineGrainProvider = Provider<bool>((ref) => true);
+
+/// "Bez zrna": pozadí i sklo úplně hladké.
+class NoGrainController extends StateNotifier<bool> {
+  NoGrainController() : super(false) {
     _load();
   }
 
-  static const _prefKey = 'appearance.fine_grain';
+  static const _prefKey = 'appearance.no_grain';
 
   Future<void> _load() async {
     try {
@@ -27,4 +30,4 @@ class FineGrainController extends StateNotifier<bool> {
   }
 }
 
-final fineGrainProvider = StateNotifierProvider<FineGrainController, bool>((ref) => FineGrainController());
+final noGrainProvider = StateNotifierProvider<NoGrainController, bool>((ref) => NoGrainController());
