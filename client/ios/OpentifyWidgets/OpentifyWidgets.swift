@@ -157,12 +157,16 @@ struct NowPlayingLiveActivity: Widget {
         DynamicIslandExpandedRegion(.trailing) {
           Image(systemName: state.playing ? "waveform" : "pause.fill")
             .foregroundStyle(Color(hex: state.color))
+            .symbolEffect(.variableColor.iterative.dimInactiveLayers, isActive: state.playing)
         }
       } compactLeading: {
         ArtworkView(state: state, size: 22)
       } compactTrailing: {
+        // Jako systémový přehrávač: vlnovka "hraje" v barvě skladby.
         Image(systemName: state.playing ? "waveform" : "pause.fill")
           .foregroundStyle(Color(hex: state.color))
+          .symbolEffect(.variableColor.iterative.dimInactiveLayers, isActive: state.playing)
+          .contentTransition(.symbolEffect(.replace))
       } minimal: {
         ArtworkView(state: state, size: 22)
       }
@@ -178,7 +182,7 @@ struct NowPlayingLiveActivity: Widget {
 struct ShazamControl: ControlWidget {
   var body: some ControlWidgetConfiguration {
     StaticControlConfiguration(kind: "app.opentify.control.shazam") {
-      ControlWidgetButton(action: OpenURLIntent(URL(string: "opentify://app/shazam?start=1")!)) {
+      ControlWidgetButton(action: OpenOpentifyShazamIntent()) {
         Label("Open Shazam", systemImage: "shazam.logo")
       }
     }
@@ -191,7 +195,7 @@ struct ShazamControl: ControlWidget {
 struct TunerControl: ControlWidget {
   var body: some ControlWidgetConfiguration {
     StaticControlConfiguration(kind: "app.opentify.control.tuner") {
-      ControlWidgetButton(action: OpenURLIntent(URL(string: "opentify://app/tuner")!)) {
+      ControlWidgetButton(action: OpenOpentifyTunerIntent()) {
         Label("Ladička", systemImage: "tuningfork")
       }
     }

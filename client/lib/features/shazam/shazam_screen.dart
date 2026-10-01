@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -30,7 +31,11 @@ enum _Phase { idle, listening, found, notFound, error }
 /// "Poslechnout později" se značkou. Soukromí: viz backend app/recognize.py
 /// -- nahrávka jen na vlastní server, Shazamu jen otisk přes VPN.
 class ShazamScreen extends ConsumerStatefulWidget {
-  const ShazamScreen({super.key});
+  const ShazamScreen({super.key, this.autoStart = false});
+
+  /// Otevřeno z Ovládacího centra (`opentify://app/shazam?start=1`): hned
+  /// začít poslouchat (nativní appka; web potřebuje klepnutí).
+  final bool autoStart;
 
   @override
   ConsumerState<ShazamScreen> createState() => _ShazamScreenState();
@@ -48,6 +53,11 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.autoStart && !kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _listen();
+      });
+    }
   }
 
   @override

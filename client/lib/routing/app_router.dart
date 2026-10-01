@@ -98,7 +98,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/shazam',
-        builder: (context, state) => const ShazamScreen(),
+        builder: (context, state) => ShazamScreen(autoStart: state.uri.queryParameters['start'] == '1'),
       ),
       GoRoute(
         path: '/verify-downloads',

@@ -31,11 +31,12 @@ ext_swift = widgets_group.new_reference('OpentifyWidgets.swift')
 widgets_group.new_reference('Info.plist')
 widgets_group.new_reference('OpentifyWidgets.entitlements')
 shared_swift = shared_group.new_reference('NowPlayingAttributes.swift')
+intents_swift = shared_group.new_reference('ControlIntents.swift')
 bridge_swift = runner_group.new_reference('NowPlayingActivity.swift')
 runner_group.new_reference('Runner.entitlements')
 
-ext.add_file_references([ext_swift, shared_swift])
-runner.add_file_references([shared_swift, bridge_swift])
+ext.add_file_references([ext_swift, shared_swift, intents_swift])
+runner.add_file_references([shared_swift, intents_swift, bridge_swift])
 
 %w[WidgetKit SwiftUI ActivityKit AppIntents].each { |fw| ext.add_system_framework(fw) }
 
