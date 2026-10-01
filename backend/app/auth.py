@@ -81,20 +81,12 @@ def _user_for_token(session: Session, token: str | None) -> AppUser | None:
     return session.get(AppUser, row.user_id)
 
 
-def _user_for_tailscale(session: Session, login: str, display_name: str | None) -> AppUser:
+def _user_for_tailscale(session: Session, login: str) -> AppUser | None:
     """Profil podle Tailscale účtu. Hlavičky `Tailscale-User-*` přidává
     `tailscale serve` (klient je podvrhnout nemůže -- API poslouchá jen na
-    127.0.0.1, jediná cesta zvenku vede přes Tailscale). Neznámý účet
-    (někdo, komu admin nasdílel server) dostane rovnou vlastní běžný profil
-    pojmenovaný podle Tailscale -- žádná pozvánka ani přihlašování."""
-    user = session.exec(select(AppUser).where(AppUser.tailscale_login == login)).first()
-    if user is None:
-        name = (display_name or login.split("@")[0]).strip() or login
-        user = AppUser(name=name, role="user", tailscale_login=login)
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-    return user
+    127.0.0.1, jediná cesta zvenku vede přes Tailscale). Účet se k profilu
+    přiřadí otevřením pozvánky (`/auth/join`); neznámý účet nemá nic."""
+    return session.exec(select(AppUser).where(AppUser.tailscale_login == login)).first()
 
 
 def bind_admin_tailscale() -> None:
@@ -118,7 +110,9 @@ def resolve_user(request: Request) -> tuple[AppUser | None, AppUser | None]:
         user = _user_for_token(session, token_from_request(request))
         login = (request.headers.get("tailscale-user-login") or "").strip()
         if user is None and login:
-            user = _user_for_tailscale(session, login, request.headers.get("tailscale-user-name"))
+            user = _user_for_tailscale(session, login)
+            if user is None:
+                return None, None  # cizí Tailscale účet bez pozvánky -- nikdy admin
         if user is None and auth_mode() == "open":
             user = ensure_admin(session)
         if user is None:

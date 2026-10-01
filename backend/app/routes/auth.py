@@ -71,21 +71,66 @@ class JoinIn(BaseModel):
     code: str
 
 
+# Společný registrační odkaz: pozvánka s tímhle `user_id` jde použít
+# opakovaně a každý, kdo ji otevře, si založí vlastní profil.
+SIGNUP = "*signup*"
+
+
 @auth_router.post("/join")
 def join(body: JoinIn, request: Request, response: Response):
     """Pozvánka -> klíč tohoto zařízení (jednou na zařízení)."""
     with Session(engine) as session:
         invite = session.exec(select(InviteCode).where(InviteCode.code_hash == hash_secret(body.code.strip()))).first()
+        if invite is not None and invite.user_id == SIGNUP:
+            return _signup(session, request, response)
         if invite is None or invite.used_at is not None or aware(invite.expires_at) < utcnow():
             raise HTTPException(status_code=400, detail="Pozvánka neplatí (už použitá nebo prošlá).")
         invite.used_at = utcnow()
         session.add(invite)
+        # Pozvánka zároveň spáruje Tailscale účet s profilem -- jeho další
+        # zařízení se pak poznají sama, bez pozvánky.
+        login = (request.headers.get("tailscale-user-login") or "").strip()
+        invited = session.get(AppUser, invite.user_id)
+        if login and invited is not None and invited.tailscale_login is None:
+            invited.tailscale_login = login
+            session.add(invited)
         token = _issue_token(session, invite.user_id, request.headers.get("user-agent", "")[:120])
         user = session.get(AppUser, invite.user_id)
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
     response.delete_cookie(ACT_AS_COOKIE, path="/")
     return {"user": out, "acting": out, "token": token}
+
+
+def _signup(session: Session, request: Request, response: Response) -> dict:
+    """Registrační odkaz: Tailscale účet, který už profil má, dostane ten
+    svůj; nový si založí vlastní (jméno z Tailscale) a hned se s ním spáruje."""
+    login = (request.headers.get("tailscale-user-login") or "").strip()
+    user = session.exec(select(AppUser).where(AppUser.tailscale_login == login)).first() if login else None
+    if user is None:
+        name = (request.headers.get("tailscale-user-name") or login.split("@")[0] or "Nový profil").strip()
+        user = AppUser(name=name, role="user", tailscale_login=login or None)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    token = _issue_token(session, user.id, request.headers.get("user-agent", "")[:120])
+    out = _user_out(user)
+    _set_cookie(response, TOKEN_COOKIE, token)
+    response.delete_cookie(ACT_AS_COOKIE, path="/")
+    return {"user": out, "acting": out, "token": token}
+
+
+@auth_router.post("/signup-link")
+def signup_link(_admin=Depends(require_admin)):
+    """Nový společný registrační odkaz (starý tím přestane platit)."""
+    with Session(engine) as session:
+        for old in session.exec(select(InviteCode).where(InviteCode.user_id == SIGNUP)).all():
+            session.delete(old)
+        session.commit()
+        code = secrets.token_urlsafe(9)
+        session.add(InviteCode(code_hash=hash_secret(code), user_id=SIGNUP, expires_at=utcnow() + timedelta(days=3650)))
+        session.commit()
+    return {"invite": code}
 
 
 def _new_invite(session: Session, user_id: str) -> str:

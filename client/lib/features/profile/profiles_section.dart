@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import '../../core/device_token.dart';
 
 import '../../core/api_client.dart';
 import '../../core/page_location.dart';
@@ -16,19 +17,23 @@ import '../../widgets/glass/glass.dart';
 class ProfilesSection extends ConsumerWidget {
   const ProfilesSection({super.key});
 
-  Future<void> _showInvite(BuildContext context, String name, String code) async {
+  Future<void> _showInvite(BuildContext context, String name, String code, {bool signup = false}) async {
     final link = inviteLink(code);
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Pozvánka pro $name'),
+        title: Text(signup ? 'Odkaz pro nové profily' : 'Pozvánka pro $name'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Pošli odkaz a otevřete ho jednou na jeho zařízení (v Safari, pak Přidat na plochu). '
-              'Platí 14 dní a jen jednou.',
+            Text(
+              signup
+                  ? 'Jeden odkaz pro všechny: kdo ho otevře (přes Tailscale), založí si vlastní profil '
+                      'pojmenovaný podle Tailscale a jeho další zařízení se pak poznají sama. '
+                      'Nový odkaz zruší ten starý.'
+                  : 'Pošli odkaz a otevřete ho jednou na jeho zařízení (v Safari, pak Přidat na plochu). '
+                      'Platí 14 dní a jen jednou.',
             ),
             const SizedBox(height: AppSpacing.sm),
             SelectableText(link, style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -107,6 +112,7 @@ class ProfilesSection extends ConsumerWidget {
 
   Future<void> _switch(WidgetRef ref, String? userId) async {
     await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': userId});
+    await saveActAs(userId);
     reloadPage();
   }
 
@@ -176,6 +182,21 @@ class ProfilesSection extends ConsumerWidget {
             onPressed: () => _create(context, ref),
           ),
         ),
+        const SizedBox(height: AppSpacing.xs),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: GlassButton(
+            label: 'Odkaz pro nové profily',
+            icon: Symbols.link_rounded,
+            compact: true,
+            onPressed: () async {
+              try {
+                final json = await ref.read(apiClientProvider).postJson('/auth/signup-link');
+                if (context.mounted) await _showInvite(context, '', json['invite'] as String, signup: true);
+              } catch (_) {}
+            },
+          ),
+        ),
       ],
     );
   }
@@ -209,6 +230,7 @@ class ActingAsBanner extends ConsumerWidget {
                 compact: true,
                 onPressed: () async {
                   await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': null});
+                  await saveActAs(null);
                   reloadPage();
                 },
               ),
