@@ -163,7 +163,9 @@ services:
       # `network_mode: service:X` nesmí mít vlastní `ports:`, publikuje se
       # na tom, kdo síť vlastní. Jen pro lokální debugging přes web UI,
       # nikdy nevystavuj veřejně.
-      - "5030:5030"
+      # Jen tenhle počítač -- ne domácí Wi-Fi ani pracovní Radmin VPN
+      # (bezpečnostní audit: UI slskd bylo vidět v celé síti).
+      - "127.0.0.1:5030:5030"
     restart: unless-stopped
 
   # Soulseek daemon (https://github.com/slskd/slskd) -- primární zdroj pro
@@ -210,6 +212,18 @@ services:
       - redis-data:/data
     restart: unless-stopped
 
+  # Web Opentify (statický Flutter build). Jen 127.0.0.1 (tailscale serve na
+  # hostu) a Docker síť (kontejner `tailscale`) -- dřív dhttpd na 0.0.0.0.
+  web:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./client/build/web:/usr/share/nginx/html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:5000:80"
+    mem_limit: 64m
+    restart: unless-stopped
+
   # Opentify jako SAMOSTATNÉ zařízení v Tailscale (`opentify.…ts.net`):
   # kamarádům se sdílí jen tohle, ne celé PC (desktop-…ts.net). Vystavuje
   # jen web + API Opentify (tailscale/serve.json). Bez TS_AUTHKEY vypíše do
@@ -226,9 +240,7 @@ services:
     volumes:
       - tailscale-state:/var/lib/tailscale
       - ./tailscale/serve.json:/config/serve.json:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on: [api]
+    depends_on: [api, web]
     mem_limit: 128m
     restart: unless-stopped
 
