@@ -2,15 +2,21 @@
 # podepíše ho až SideStore v telefonu (bezplatné Apple ID, 7 dní, obnova
 # automaticky). Viz docs/IOS_NATIVE_PLAN.md.
 #
-# Spuštění: tag `ios-*` (git tag ios-2026-10-01 && git push --tags) nebo
-# ručně v Actions. Výsledek: artefakt buildu + u tagu GitHub Release
-# s Opentify.ipa (odkaz se dá otevřít rovnou v SideStore).
+# Spuštění: každý push do main se změnou appky (client/**), tag `ios-*`
+# / `app-*`, nebo ručně. Výsledek: GitHub Release s Opentify.ipa a nový
+# source.json ve větvi `altstore` -- SideStore ho sleduje a update nabídne sám.
 name: iOS build
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+    paths: ['client/**', '.github/workflows/ios.yml']
     tags: ['ios-*', 'app-*']
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -42,6 +48,7 @@ jobs:
         working-directory: client
         run: >
           flutter build ios --release --no-codesign
+          --build-name=0.1.${{ github.run_number }} --build-number=${{ github.run_number }}
           --dart-define=API_BASE_URL=https://desktop-2lissjt.tail343940.ts.net/api/v1
           --dart-define=WS_BASE_URL=wss://desktop-2lissjt.tail343940.ts.net/ws
 
@@ -69,12 +76,32 @@ jobs:
           retention-days: 30
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/')
+        id: release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('ios-build-{0}', github.run_number) }}
           files: client/Opentify.ipa
           prerelease: true
           body: |
-            Nepodepsaná appka pro iPhone. Instalace: SideStore → + → vybrat Opentify.ipa
-            (nebo otevřít odkaz na soubor v SideStore). Podpis tvým Apple ID na 7 dní,
-            SideStore ho obnovuje sám.
+            Nepodepsaná appka pro iPhone (verze 0.1.${{ github.run_number }}). Aktualizace chodí samy přes zdroj
+            v SideStore: https://raw.githubusercontent.com/${{ github.repository }}/altstore/source.json
+
+      - name: Zdroj pro SideStore (source.json)
+        run: |
+          TAG="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('ios-build-{0}', github.run_number) }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/$TAG/Opentify.ipa"
+          SIZE=$(stat -f%z client/Opentify.ipa)
+          python3 .github/scripts/altstore_source.py "0.1.${{ github.run_number }}" "$URL" "$SIZE" /tmp/source.json
+          git config user.name "opentify-ci"
+          git config user.email "opentify-ci@users.noreply.github.com"
+          git fetch origin altstore || true
+          if git rev-parse --verify origin/altstore >/dev/null 2>&1; then
+            git checkout -B altstore origin/altstore
+          else
+            git checkout --orphan altstore
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp /tmp/source.json source.json
+          git add source.json
+          git commit -m "Opentify 0.1.${{ github.run_number }}" || echo "beze změny"
+          git push origin altstore
