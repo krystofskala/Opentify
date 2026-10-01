@@ -1662,6 +1662,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   void _waitForAvailability(NowPlayingInfo info) {
+    _provisioningSub?.close();
     _provisioningSub = _ref.listen<Map<String, TrackProvisioningState>>(
       provisioningControllerProvider,
       (previous, next) {
@@ -1714,6 +1715,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // nastavíme PŘED spuštěním, ať první vteřina nehraje nahlas a pak se
     // neztlumí. Neznámá korekce -> 1.0, `_loadGainFor` ji případně doplní.
     // V rádiu ji aplikuje rovnou server.
+    if (isProgressive) _watchProgressive(info);
     _trackGainFactor = _radioActive
         ? 1.0
         : _factorForGainDb(_ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId));
@@ -1752,6 +1754,47 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       debugPrint('AudioPlayerController: setUrl() selhalo pro ${info.recordingId}: $e');
       _handleStreamFailure(info, e, isProgressive: isProgressive);
     }
+  }
+
+  /// Přehrávání z ještě se stahujícího souboru: když stažení spadne a server
+  /// ho zkusí znovu, starý stream je mrtvý a přehrávač jen visel v načítání
+  /// -- druhý, úspěšný pokus už nikdo neposlouchal (živě: Tavern Brawl,
+  /// La Havana). Po retry čekat na nový výsledek; po hotovém souboru navázat
+  /// od stejného místa, pokud zrovna nehraje.
+  void _watchProgressive(NowPlayingInfo info) {
+    _provisioningSub?.close();
+    _provisioningSub = _ref.listen<Map<String, TrackProvisioningState>>(
+      provisioningControllerProvider,
+      (previous, next) {
+        void done() {
+          _provisioningSub?.close();
+          _provisioningSub = null;
+        }
+
+        if (state.nowPlaying?.recordingId != info.recordingId) return done();
+        final result = next[info.recordingId];
+        if (result == null) return;
+        if (result.isAvailable && result.streamUrl != null) {
+          done();
+          if (!_player.playing || state.isBuffering) {
+            _resumeAt = state.position;
+            _resumeFor = info.recordingId;
+            unawaited(_startStream(
+              info,
+              _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+              isProgressive: false,
+            ));
+          }
+        } else if (result.status == 'PENDING' && previous?[info.recordingId]?.status != 'PENDING') {
+          _awaitingProvisioning = true;
+          state = state.copyWith(isBuffering: true);
+          _waitForAvailability(info);
+        } else if (result.isFailed) {
+          done();
+          state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
+        }
+      },
+    );
   }
 
   /// Selhání přehrání z ještě NEDOKONČENÉHO stažení (`isProgressive`) se

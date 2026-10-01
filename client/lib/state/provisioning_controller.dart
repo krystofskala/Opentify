@@ -202,8 +202,12 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
           // (viz `AudioPlayerController._handleStreamFailure`) zůstalo
           // navěky "zaseknuté" na STREAMING, i když job už dávno selhal.
           (s) {
-            final keepStreaming =
-                s.status == 'STREAMING' && (event.status == 'RUNNING' || event.status == 'PENDING');
+            // STREAMING -> PENDING = stažení spadlo a server ho zkouší znovu
+            // (worker retry): starý progresivní stream je mrtvý, zahodit ho.
+            if (s.status == 'STREAMING' && event.status == 'PENDING') {
+              return TrackProvisioningState(status: 'PENDING', jobId: s.jobId);
+            }
+            final keepStreaming = s.status == 'STREAMING' && event.status == 'RUNNING';
             return s.copyWith(status: keepStreaming ? null : event.status, pct: event.pct);
           },
         );
