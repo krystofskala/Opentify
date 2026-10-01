@@ -111,6 +111,70 @@ async def inspect_youtube_link(text: str) -> dict[str, Any]:
     }
 
 
+_NOISE = re.compile(
+    r"\b(soundtrack|ost|score|official|video|audio|lyrics?|hd|hq|4k|full|theme song|main theme|music|"
+    r"original motion picture|from the motion picture|movie)\b|[#№]\s*\d+|\b\d{1,2}\.\s|[\[\]\(\)\-–—|♫'\"]",
+    re.I,
+)
+
+
+_COVER_MARKERS = (
+    "cover", "version", "piano", "karaoke", "tribute", "from \"", "from “", "in the style of",
+    "remake", "orchestra", "film band", "lullaby", "8-bit", "instrumental",
+)
+
+
+def _words(text: str) -> set[str]:
+    from app.catalog.deezer_ingest import norm
+
+    return {w for w in (norm(t) for t in re.findall(r"\w+", text or "")) if len(w) > 1}
+
+
+async def _match_catalog(session: Session, video: dict, channel: str) -> Recording | None:
+    """Fanouškovská videa nesou místo interpreta jméno kanálu -- zkusit
+    oficiální skladbu v katalogu (Deezer). Uznat jen jistou shodu: název
+    skladby je v názvu videa A z videa je poznat i interpret nebo album
+    (živě: "#12 Time (Hans Zimmer)" na kanálu "Inception Soundtrack HD")."""
+    from app.catalog.deezer import get_deezer_client
+    from app.catalog.deezer_ingest import ingest_track_with_context
+
+    raw = f"{video['artist']} {video['title']}"
+    text_words = _words(f"{raw} {channel}")
+
+    def clean(text: str) -> str:
+        return re.sub(r"\s+", " ", _NOISE.sub(" ", text)).strip()
+
+    # Nejdřív jen název videa (jméno kanálu hledání kazí), pak s "interpretem".
+    hits: list[dict] = []
+    for query in dict.fromkeys(q for q in (clean(video["title"]), clean(raw)) if q):
+        hits += await get_deezer_client().search_typed("track", query, 5) or []
+    for hit in hits:
+        title_words = _words(re.sub(r"\(.*?\)|-.*$", "", hit.get("title") or ""))
+        if not title_words or not title_words <= text_words:
+            continue
+        artist_words = _words((hit.get("artist") or {}).get("name") or "")
+        album_words = _words(re.sub(r"\(.*?\)", "", (hit.get("album") or {}).get("title") or "")) - {"the", "and", "of"}
+        hit_text = f"{hit.get('title') or ''} {(hit.get('album') or {}).get('title') or ''} {(hit.get('artist') or {}).get('name') or ''}".lower()
+        video_text = raw.lower()
+        # Covery / klavírní verze / "(From X)" kompilace -- ne, pokud je
+        # nemá i samotné video (živě: Augustin C, The Film Band...).
+        if any(m in hit_text and m not in video_text for m in _COVER_MARKERS):
+            continue
+        artist_ok = bool(artist_words) and artist_words <= text_words
+        album_title = ((hit.get("album") or {}).get("title") or "").lower()
+        official_ost = any(m in album_title for m in ("soundtrack", "original", "motion picture", "score"))
+        album_ok = (
+            official_ost
+            and len(album_words) >= 1
+            and len(album_words & text_words) >= max(1, (len(album_words) + 1) // 2)
+        )
+        duration = video.get("duration")
+        length_ok = not duration or not hit.get("duration") or abs(hit["duration"] - duration) <= max(20, duration * 0.25)
+        if (artist_ok or album_ok) and length_ok:
+            return ingest_track_with_context(session, hit)
+    return None
+
+
 def _has_file(session: Session, recording_id: str) -> bool:
     asset = session.get(MediaAsset, recording_id)
     return asset is not None and asset.status == MediaAssetStatus.AVAILABLE
@@ -161,21 +225,28 @@ async def import_youtube_link(
         playlist.description = f"Z YouTube · {info['channel']}" if info["channel"] else "Z YouTube"
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
+        matched = 0
         for position, v in enumerate(videos):
-            artist = find_or_create_artist(session, v["artist"])
-            recording = find_or_create_recording(
-                session, artist, v["title"], duration_ms=int(v["duration"] * 1000) if v.get("duration") else None
-            )
-            if not _has_file(session, recording.id):
-                recording.external_refs = {**(recording.external_refs or {}), "youtubeId": v["id"]}
-                session.add(recording)
+            # Oficiální skladba z katalogu (správný interpret/album/obal),
+            # jinak to video s interpretem z názvu/kanálu.
+            recording = await _match_catalog(session, v, info["channel"])
+            if recording is not None:
+                matched += 1
+            else:
+                artist = find_or_create_artist(session, v["artist"])
+                recording = find_or_create_recording(
+                    session, artist, v["title"], duration_ms=int(v["duration"] * 1000) if v.get("duration") else None
+                )
+                if not _has_file(session, recording.id):
+                    recording.external_refs = {**(recording.external_refs or {}), "youtubeId": v["id"]}
+                    session.add(recording)
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording.id, position=position))
         cover = await _fetch_cover(info["thumbnail"])
         if cover and _save_resized(cover, artwork_path(playlist.id)):
             playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id)]
         session.add(playlist)
         session.commit()
-        return {"kind": "playlist", "playlistId": playlist.id, "count": len(videos)}
+        return {"kind": "playlist", "playlistId": playlist.id, "count": len(videos), "matched": matched}
 
     # album / live: vlastní vydání interpreta -- skladby VŽDY nové a navázané
     # na tohle vydání (stejný název jako studiová verze != stejná nahrávka).
