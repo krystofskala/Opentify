@@ -2,16 +2,17 @@
 # podepíše ho až SideStore v telefonu (bezplatné Apple ID, 7 dní, obnova
 # automaticky). Viz docs/IOS_NATIVE_PLAN.md.
 #
-# Spuštění: každý push do main se změnou appky (client/**), tag `ios-*`
-# / `app-*`, nebo ručně. Výsledek: GitHub Release s Opentify.ipa a nový
-# source.json ve větvi `altstore` -- SideStore ho sleduje a update nabídne sám.
+# Spuštění: jednou denně v noci (jen když se appka od poslední verze
+# změnila -- ne update po každé drobnosti), tag `ios-*` / `app-*` pro
+# okamžitou verzi, nebo ručně. Výsledek: GitHub Release s Opentify.ipa
+# a nový source.json ve větvi `altstore` -- SideStore update nabídne sám.
 name: iOS build
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '30 1 * * *'  # 3:30 SELČ
   push:
-    branches: [main]
-    paths: ['client/**', '.github/workflows/ios.yml']
     tags: ['ios-*', 'app-*']
 
 concurrency:
@@ -27,24 +28,42 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Změnilo se něco od poslední verze?
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "build=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          LAST=$(curl -sf "https://raw.githubusercontent.com/${{ github.repository }}/altstore/source.json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('opentifyCommit',''))" || true)
+          if [ -n "$LAST" ] && git cat-file -e "$LAST" 2>/dev/null && [ -z "$(git diff --name-only "$LAST" HEAD -- client .github/workflows/ios.yml)" ]; then
+            echo "Beze změn od $LAST -- noční build se přeskakuje."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: subosito/flutter-action@v2
+        if: steps.changes.outputs.build == 'true'
         with:
           flutter-version: '3.47.5'
           channel: stable
           cache: true
 
       - name: Závislosti
+        if: steps.changes.outputs.build == 'true'
         working-directory: client
         run: flutter pub get
 
       - name: Rozšíření (Live Activity, Ovládací centrum)
+        if: steps.changes.outputs.build == 'true'
         working-directory: client
         run: |
           sudo gem install xcodeproj --no-document
           ruby ios/tool/add_widget_extension.rb
 
       - name: Build (bez podpisu)
+        if: steps.changes.outputs.build == 'true'
         working-directory: client
         run: >
           flutter build ios --release --no-codesign
@@ -53,6 +72,7 @@ jobs:
           --dart-define=WS_BASE_URL=wss://desktop-2lissjt.tail343940.ts.net/ws
 
       - name: Zabalit .ipa
+        if: steps.changes.outputs.build == 'true'
         working-directory: client
         run: |
           APP=build/ios/iphoneos/Runner.app
@@ -70,12 +90,14 @@ jobs:
           ls -lh Opentify.ipa
 
       - uses: actions/upload-artifact@v4
+        if: steps.changes.outputs.build == 'true'
         with:
           name: Opentify-ipa
           path: client/Opentify.ipa
           retention-days: 30
 
       - name: Release
+        if: steps.changes.outputs.build == 'true'
         id: release
         uses: softprops/action-gh-release@v2
         with:
@@ -87,11 +109,12 @@ jobs:
             v SideStore: https://raw.githubusercontent.com/${{ github.repository }}/altstore/source.json
 
       - name: Zdroj pro SideStore (source.json)
+        if: steps.changes.outputs.build == 'true'
         run: |
           TAG="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('ios-build-{0}', github.run_number) }}"
           URL="https://github.com/${{ github.repository }}/releases/download/$TAG/Opentify.ipa"
           SIZE=$(stat -f%z client/Opentify.ipa)
-          python3 .github/scripts/altstore_source.py "0.1.${{ github.run_number }}" "$URL" "$SIZE" /tmp/source.json
+          python3 .github/scripts/altstore_source.py "0.1.${{ github.run_number }}" "$URL" "$SIZE" /tmp/source.json "${{ github.sha }}"
           git config user.name "opentify-ci"
           git config user.email "opentify-ci@users.noreply.github.com"
           git fetch origin altstore || true

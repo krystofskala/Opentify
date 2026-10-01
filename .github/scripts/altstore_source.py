@@ -10,6 +10,7 @@ import json
 import sys
 
 version, url, size, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+commit = sys.argv[5] if len(sys.argv) > 5 else ""
 repo = "krystofskala/Opentify"
 raw = f"https://raw.githubusercontent.com/{repo}"
 
@@ -45,6 +46,9 @@ source = {
         }
     ],
     "news": [],
+    # Z čeho je verze postavená -- noční build podle toho pozná, jestli je
+    # co vydávat (SideStore cizí klíče ignoruje).
+    "opentifyCommit": commit,
 }
 
 with open(out, "w", encoding="utf-8") as f:
