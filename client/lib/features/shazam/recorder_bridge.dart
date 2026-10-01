@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
-import 'recorder_bridge_stub.dart' if (dart.library.js_interop) 'recorder_bridge_web.dart' as impl;
+import 'recorder_bridge_stub.dart'
+    if (dart.library.js_interop) 'recorder_bridge_web.dart'
+    if (dart.library.io) 'recorder_bridge_io.dart' as impl;
 
 /// Nahrávání pro Open Shazam (web/shazam/recorder.js). Musí se spustit z
 /// klepnutí (iOS). Vrací MIME typ nahrávky ('audio/mp4' na iPhonu).

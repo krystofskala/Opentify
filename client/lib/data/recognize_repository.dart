@@ -31,7 +31,11 @@ class RecognizeRepository {
   final ApiClient _api;
 
   Future<RecognizeResult> recognize(List<int> bytes, String mimeType) async {
-    final ext = mimeType.contains('mp4') ? 'm4a' : (mimeType.contains('ogg') ? 'ogg' : 'webm');
+    final ext = mimeType.contains('mp4')
+        ? 'm4a'
+        : mimeType.contains('wav')
+            ? 'wav'
+            : (mimeType.contains('ogg') ? 'ogg' : 'webm');
     final json = await _api.postMultipart('/recognize', fieldName: 'file', bytes: bytes, filename: 'clip.$ext');
     return RecognizeResult.fromJson(json);
   }

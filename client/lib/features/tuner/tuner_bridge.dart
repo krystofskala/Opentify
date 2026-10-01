@@ -1,4 +1,6 @@
-import 'tuner_bridge_stub.dart' if (dart.library.js_interop) 'tuner_bridge_web.dart' as impl;
+import 'tuner_bridge_stub.dart'
+    if (dart.library.js_interop) 'tuner_bridge_web.dart'
+    if (dart.library.io) 'tuner_bridge_io.dart' as impl;
 
 /// Mikrofon ladičky (web/tuner/tuner.js + tuner-worklet.js). Zvuk se
 /// zpracovává jen v zařízení -- nic se neodesílá.

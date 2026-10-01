@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
-import 'share_image_stub.dart' if (dart.library.js_interop) 'share_image_web.dart' as impl;
+import 'share_image_stub.dart'
+    if (dart.library.js_interop) 'share_image_web.dart'
+    if (dart.library.io) 'share_image_io.dart' as impl;
 
 /// Sdílí PNG (Wrapped karta) systémovým sdílením -- na iPhonu rovnou do
 /// Instagram stories, WhatsAppu, Fotek... Kde to nejde (PC), stáhne soubor.

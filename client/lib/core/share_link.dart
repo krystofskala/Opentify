@@ -2,7 +2,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
-import 'share_link_stub.dart' if (dart.library.js_interop) 'share_link_web.dart' as impl;
+import 'share_link_stub.dart'
+    if (dart.library.js_interop) 'share_link_web.dart'
+    if (dart.library.io) 'share_link_io.dart' as impl;
 
 /// Univerzální odkaz na skladbu/album (song.link / album.link) -- kamarád
 /// ho otevře v jakékoliv hudební appce. Viz backend app/routes/share.py.

@@ -49,6 +49,8 @@ dependencies:
   url_launcher: ^6.3.2
   path_provider: ^2.1.6
   audio_service: ^0.18.19
+  record: ^6.0.0
+  share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:
