@@ -97,8 +97,11 @@ struct ArtworkView: View {
     Group {
       if let file = state.artFile,
          let url = OpentifyAppGroup.container?.appendingPathComponent(file),
-         let image = UIImage(contentsOfFile: url.path) {
-        Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+         let image = UIImage(contentsOfFile: url.path),
+         // Zmenšit na skutečnou velikost (3×) -- v Dynamic Islandu se
+         // větší obrázek nevykreslil a celá kapka zůstala šedá (živě).
+         let thumb = image.preparingThumbnail(of: CGSize(width: size * 3, height: size * 3)) {
+        Image(uiImage: thumb).resizable().aspectRatio(contentMode: .fill)
       } else {
         ZStack {
           Color(hex: state.color)
