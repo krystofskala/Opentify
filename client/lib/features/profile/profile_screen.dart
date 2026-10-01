@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../core/api_client.dart' show ApiException;
@@ -99,6 +100,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+            // Verze appky hned pod nadpisem -- ať je vidět, jestli update dorazil.
+            const _AppVersion(),
             // Admin jedná za jiný profil -- pruh se "Zpět na můj".
             const ActingAsBanner(),
             // Rychlý přístup nahoře (živě chtěné): Wrapped, Shazam, ladička.
@@ -750,6 +753,33 @@ class _QuickButton extends StatelessWidget {
         ),
       ),
       ),
+    );
+  }
+}
+
+/// "Opentify 0.1.11 · iOS" pod nadpisem Profilu.
+class _AppVersion extends StatelessWidget {
+  const _AppVersion();
+
+  static final Future<PackageInfo> _info = PackageInfo.fromPlatform();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<PackageInfo>(
+      future: _info,
+      builder: (context, snap) {
+        final info = snap.data;
+        if (info == null) return const SizedBox(height: 18);
+        final platform = kIsWeb ? 'web' : defaultTargetPlatform.name;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+          child: Text(
+            'Opentify ${info.version} · $platform',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        );
+      },
     );
   }
 }
