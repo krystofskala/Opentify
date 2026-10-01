@@ -41,7 +41,7 @@ void main() {
     expect(out.cents, closeTo(12, 0.5));
     expect(out.inTune, isFalse);
 
-    out = feed(f, cents(110, 1), 30, clock: clock);
+    out = feed(f, cents(110, 1), 50, clock: clock);
     expect(out.cents, closeTo(1, 0.5));
     expect(out.inTune, isTrue);
     expect(f.tuned, contains(1));
@@ -90,6 +90,25 @@ void main() {
     }
     expect(out.active, isTrue);
     expect(out.stringIndex, 3);
+  });
+
+  test('hluboká E chycená o oktávu výš zůstane E, ne D', () {
+    final clock = [Duration.zero];
+    final f = TunerFilter(tuning: tuningById('standard'));
+    final out = feed(f, cents(82.41 * 2, -6), 30, clock: clock); // E3 místo E2
+    expect(out.stringIndex, 0);
+    expect(out.midi, 40);
+    expect(out.cents, closeTo(-6, 0.6));
+  });
+
+  test('ruční struna a pak zpět automaticky', () {
+    final clock = [Duration.zero];
+    final f = TunerFilter(tuning: tuningById('standard'), targetString: 0);
+    expect(feed(f, 110, 20, clock: clock).stringIndex, 0);
+    f
+      ..targetString = null
+      ..reset();
+    expect(feed(f, 110, 20, clock: clock).stringIndex, 1);
   });
 
   test('kalibrace A4 posune cíl', () {

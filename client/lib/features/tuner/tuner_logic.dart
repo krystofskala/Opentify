@@ -86,10 +86,18 @@ class TunerFilter {
   static const minClarity = 0.86;
   static const attackSkip = Duration(milliseconds: 70);
   static const hold = Duration(milliseconds: 1200);
-  static const smoothing = 0.12; // s
-  static const inTuneEnter = 3.0; // centy
-  static const inTuneExit = 5.0;
+  // Vyhlazení: rychle při změně tónu, klidně u cíle (přesné ladění bez
+  // chvění ručičky o desetiny centu).
+  static const smoothingFast = 0.08; // s
+  static const smoothingFine = 0.2;
+  static const fineWindow = 0.05; // půltónu = 5 centů
+  static const inTuneEnter = 2.0; // centy
+  static const inTuneExit = 4.0;
   static const inTuneHold = Duration(milliseconds: 300);
+
+  /// Jiná struna se převezme, až když drží tak dlouho (ne podle jednoho
+  /// ujetého odhadu).
+  static const stringSwitch = Duration(milliseconds: 120);
 
   /// Struny, které už byly v téhle relaci naladěné.
   final Set<int> tuned = {};
@@ -102,6 +110,8 @@ class TunerFilter {
   final List<double> _history = [];
   double? _smooth;
   int? _string;
+  int? _pendingString;
+  Duration? _pendingSince;
   Duration? _nearSince;
   bool _inTune = false;
   TunerOutput _last = TunerOutput.idle;
@@ -110,6 +120,8 @@ class TunerFilter {
     _history.clear();
     _smooth = null;
     _string = null;
+    _pendingString = null;
+    _pendingSince = null;
     _nearSince = null;
     _inTune = false;
     _lastValidAt = null;
@@ -153,6 +165,22 @@ class TunerFilter {
       final target = tuning.midi[manual].toDouble();
       final k = ((m - target) / 12).round();
       if (k != 0 && (m - 12 * k - target).abs() < 0.8) m -= 12 * k;
+    } else if (!chromatic) {
+      // Automaticky: tón přesně o oktávu vedle struny (a daleko od všech
+      // strun) je skoro jistě harmonická -- hlavně u hluboké E, kde detektor
+      // chytá druhou harmonickou a ukazoval pak D. Přednost má právě
+      // laděná struna, jinak radši dolů.
+      if (_nearestDistance(m) > 1.0) {
+        final cur = _string;
+        final toCurrent = cur == null ? null : ((tuning.midi[cur] - m) / 12).round() * 12;
+        for (final k in [if (toCurrent != null) toCurrent, -12, 12, -24]) {
+          if (k == 0) continue;
+          if (_nearestDistance(m + k) < 0.5) {
+            m += k;
+            break;
+          }
+        }
+      }
     }
     if (_history.isNotEmpty) {
       final med = _median();
@@ -172,7 +200,8 @@ class TunerFilter {
     if (_history.length > 5) _history.removeAt(0);
     final med = _median();
     final s = _smooth;
-    _smooth = s == null ? med : s + (med - s) * (1 - math.exp(-dt / smoothing));
+    final tau = s != null && (med - s).abs() < fineWindow ? smoothingFine : smoothingFast;
+    _smooth = s == null ? med : s + (med - s) * (1 - math.exp(-dt / tau));
     _lastValidAt = t;
 
     final smooth = _smooth!;
@@ -190,6 +219,16 @@ class TunerFilter {
             cur < tuning.midi.length &&
             (smooth - tuning.midi[cur]).abs() < (smooth - tuning.midi[best]).abs() + 0.6) {
           best = cur; // hystereze: struna neblikne mezi sousedními
+        }
+        if (cur != null && best != cur) {
+          // Přepnout až když nová struna chvíli drží.
+          if (_pendingString != best) {
+            _pendingString = best;
+            _pendingSince = t;
+          }
+          if (t - _pendingSince! < stringSwitch) best = cur;
+        } else {
+          _pendingString = null;
         }
         string = (smooth - tuning.midi[best]).abs() <= 3.5 ? best : null;
       }
@@ -225,6 +264,9 @@ class TunerFilter {
       inTune: _inTune,
     );
   }
+
+  double _nearestDistance(double m) =>
+      tuning.midi.map((s) => (m - s).abs()).reduce(math.min);
 
   double _median() {
     final sorted = [..._history]..sort();

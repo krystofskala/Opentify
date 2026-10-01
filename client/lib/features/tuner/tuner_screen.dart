@@ -158,6 +158,14 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
     _out.value = TunerOutput.idle;
   }
 
+  void _autoString() {
+    setState(() {
+      _filter.targetString = null;
+      _filter.reset();
+    });
+    _out.value = TunerOutput.idle;
+  }
+
   void _playTone() {
     final out = _out.value;
     final string = _filter.targetString ?? out.stringIndex;
@@ -264,14 +272,21 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        _filter.chromatic
-                            ? 'Chromatický režim'
-                            : _filter.targetString == null
-                                ? 'Struna se pozná sama'
-                                : 'Ručně: ${6 - _filter.targetString!}. struna',
-                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                      ),
+                      if (_filter.chromatic || _filter.targetString == null)
+                        Text(
+                          _filter.chromatic ? 'Chromatický režim' : 'Struna se pozná sama',
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        )
+                      else
+                        // Ruční struna -> jedním klepnutím zpět na automatiku
+                        // (dřív jen opětovným klepnutím na tu samou strunu).
+                        GlassButton(
+                          label: 'Auto',
+                          icon: Symbols.autorenew_rounded,
+                          style: GlassButtonStyle.prominent,
+                          compact: true,
+                          onPressed: _autoString,
+                        ),
                       const SizedBox(width: AppSpacing.sm),
                       GlassButton(
                         label: 'Tón',
@@ -449,7 +464,7 @@ class _Readout extends StatelessWidget {
           height: 22,
           child: off || (active && out.inTune)
               ? Text(
-                  '${out.cents >= 0 ? '+' : '−'}${out.cents.abs().round()} centů · ${out.hz.toStringAsFixed(1)} Hz',
+                  '${out.cents >= 0 ? '+' : '−'}${out.cents.abs().toStringAsFixed(out.cents.abs() < 10 ? 1 : 0)} centů · ${out.hz.toStringAsFixed(2)} Hz',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: scheme.onSurfaceVariant,
                     fontFeatures: const [FontFeature.tabularFigures()],
@@ -487,7 +502,9 @@ class _Readout extends StatelessWidget {
   }
 }
 
-/// Stupnice −50…+50 centů: zelené pásmo uprostřed, kapsle jako ručička.
+/// Stupnice −50…+50 centů, uprostřed roztažená (logaritmicky): okolí
+/// nuly má dílek po 1 centu, ať jde ladit opravdu přesně; zelené pásmo
+/// ±2 centy, tenká ručička s hrotem.
 class _CentsMeter extends StatelessWidget {
   const _CentsMeter({required this.cents, required this.active, required this.inTune});
 
@@ -499,7 +516,7 @@ class _CentsMeter extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      height: 64,
+      height: 84,
       width: double.infinity,
       child: CustomPaint(
         painter: _MeterPainter(
@@ -532,40 +549,78 @@ class _MeterPainter extends CustomPainter {
   final Color needle;
   final Color zone;
 
+  /// 0..1 od středu k okraji; 1 cent u nuly ≈ 2,5 % poloviny stupnice.
+  static double _warp(double c) {
+    const k = 4.0;
+    final v = math.log(1 + c.abs() / k) / math.log(1 + 50 / k);
+    return c < 0 ? -v : v;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    const pad = 14.0;
-    final w = size.width - 2 * pad;
-    final mid = size.height / 2;
-    double x(double c) => pad + (c + 50) / 100 * w;
+    const pad = 16.0;
+    final half = (size.width - 2 * pad) / 2;
+    final cx = size.width / 2;
+    final mid = size.height / 2 - 6;
+    double x(double c) => cx + _warp(c.clamp(-50.0, 50.0)) * half;
 
-    // Pásmo "naladěno" (±3 centy).
+    // Pásmo "naladěno" (±2 centy).
     canvas.drawRRect(
-      RRect.fromLTRBR(x(-3), mid - 20, x(3), mid + 20, const Radius.circular(6)),
-      Paint()..color = zone.withValues(alpha: inTune ? 0.35 : 0.16),
+      RRect.fromLTRBR(x(-TunerFilter.inTuneEnter), mid - 22, x(TunerFilter.inTuneEnter), mid + 22,
+          const Radius.circular(4)),
+      Paint()..color = zone.withValues(alpha: inTune ? 0.38 : 0.18),
     );
+
     final paint = Paint()..strokeCap = StrokeCap.round;
-    for (var c = -50; c <= 50; c += 5) {
-      final major = c % 25 == 0;
-      final len = c == 0 ? 20.0 : (major ? 13.0 : 7.0);
+    final ticks = <int>[
+      for (var c = -10; c <= 10; c++) c,
+      for (final c in const [15, 20, 25, 30, 40, 50]) ...[c, -c],
+    ];
+    for (final c in ticks) {
+      final zero = c == 0;
+      final labelled = const {5, 10, 25, 50}.contains(c.abs());
+      final len = zero ? 22.0 : (labelled ? 14.0 : (c.abs() <= 10 ? 8.0 : 6.0));
       paint
-        ..color = tick.withValues(alpha: c == 0 ? 0.9 : (major ? 0.6 : 0.3))
-        ..strokeWidth = c == 0 ? 2.5 : 1.6;
+        ..color = tick.withValues(alpha: zero ? 0.95 : (labelled ? 0.65 : 0.32))
+        ..strokeWidth = zero ? 2.4 : (labelled ? 1.6 : 1.1);
       canvas.drawLine(Offset(x(c.toDouble()), mid - len), Offset(x(c.toDouble()), mid + len), paint);
     }
-    for (final c in const [-50, 50]) {
+    for (final c in const [-50, -25, -10, -5, 5, 10, 25, 50]) {
       final tp = TextPainter(
-        text: TextSpan(text: c > 0 ? '+50' : '−50', style: TextStyle(color: tick.withValues(alpha: 0.7), fontSize: 11)),
+        text: TextSpan(
+          text: c > 0 ? '+$c' : '−${c.abs()}',
+          style: TextStyle(
+            color: tick.withValues(alpha: 0.7),
+            fontSize: 10.5,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, Offset(x(c.toDouble()) - tp.width / 2, mid + 22));
+      tp.paint(canvas, Offset(x(c.toDouble()) - tp.width / 2, mid + 25));
     }
     if (!active) return;
-    // Ručička: svislá kapsle se stínem.
+    // Ručička: tenká linka (přesně čitelná proti dílkům) s hrotem nahoře.
     final nx = x(cents);
-    final rect = RRect.fromLTRBR(nx - 4, mid - 26, nx + 4, mid + 26, const Radius.circular(4));
-    canvas.drawRRect(rect.shift(const Offset(0, 2)), Paint()..color = Colors.black.withValues(alpha: 0.25));
-    canvas.drawRRect(rect, Paint()..color = needle);
+    final shadow = Paint()
+      ..color = Colors.black.withValues(alpha: 0.22)
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(Offset(nx, mid - 26 + 1.5), Offset(nx, mid + 22 + 1.5), shadow);
+    canvas.drawLine(
+      Offset(nx, mid - 26),
+      Offset(nx, mid + 22),
+      Paint()
+        ..color = needle
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round,
+    );
+    final head = Path()
+      ..moveTo(nx - 7, mid - 36)
+      ..lineTo(nx + 7, mid - 36)
+      ..lineTo(nx, mid - 26)
+      ..close();
+    canvas.drawPath(head, Paint()..color = needle);
   }
 
   @override
