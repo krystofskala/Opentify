@@ -31,6 +31,9 @@ source = {
             "versions": [
                 {
                     "version": version,
+                    # CFBundleVersion appky (= číslo běhu CI); SideStore podle
+                    # verze + buildu pozná, že je update.
+                    "buildVersion": version.rsplit(".", 1)[-1],
                     "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "size": size,
                     "downloadURL": url,
