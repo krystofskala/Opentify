@@ -68,6 +68,10 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:discover-weekly", timedelta(hours=1), pm.build_discover_weekly))
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
+    # Společné mixy dvojic (app/blends.py) -- denně.
+    from app.blends import TTL as BLEND_TTL, build_for_current_user
+
+    registry.append(("personal:blends", BLEND_TTL, build_for_current_user))
     from app.home import category_mixes as cm
 
     registry.append(("personal:category-mixes", timedelta(hours=1), cm.build_home_category_mixes))
@@ -166,6 +170,7 @@ async def home_refresh_loop(check_every_s: float = 15 * 60) -> None:
 
 _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
+    ("blends", "Společné mixy", "playlist_cards"),
     ("category_mixes", "Tvoje žánry", "playlist_cards"),
     ("years", "Tvoje roky", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),

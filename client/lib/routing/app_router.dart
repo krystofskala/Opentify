@@ -24,6 +24,7 @@ import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
 import 'home_shell.dart';
 import '../features/share/track_link_screen.dart';
+import '../features/blend/blend_screen.dart';
 import '../core/native_nav.dart';
 import '../features/profile/verify_downloads_screen.dart';
 
@@ -59,6 +60,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           initialType: state.uri.queryParameters['type'] ?? 'all',
         ),
       ),
+      GoRoute(path: '/blends', builder: (context, state) => const BlendScreen()),
       // „Poslat v Opentify" -- poslaná skladba (features/share).
       GoRoute(
         path: '/track/:recordingId',

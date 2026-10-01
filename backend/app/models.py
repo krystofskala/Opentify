@@ -313,3 +313,16 @@ class HomeSnapshot(SQLModel, table=True):
     key: str = Field(primary_key=True)
     payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
     generated_at: datetime = Field(default_factory=utcnow)
+
+
+class Blend(SQLModel, table=True):
+    """Společný mix dvou profilů (app/blends.py): `pending` -> `active`
+    až po souhlasu pozvaného."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_a: str = Field(index=True)
+    user_b: str = Field(index=True)
+    created_by: str
+    status: str = "pending"  # pending | active
+    created_at: datetime = Field(default_factory=utcnow)
+    built_at: datetime | None = None

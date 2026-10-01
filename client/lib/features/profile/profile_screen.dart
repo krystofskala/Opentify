@@ -123,6 +123,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   child: _QuickButton(
                       icon: Symbols.music_note_rounded, label: 'Ladička', onTap: () => context.push('/tuner')),
                 ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: _QuickButton(
+                      icon: Symbols.join_inner_rounded, label: 'Blend', onTap: () => context.push('/blends')),
+                ),
               ],
             ),
             const SizedBox(height: 12),

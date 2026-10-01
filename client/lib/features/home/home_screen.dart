@@ -20,6 +20,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/collection_actions.dart';
+import '../blend/blend_screen.dart' show BlendInviteBanner;
 
 /// Domů -- celá obrazovka z `GET /home` (žebříčky, mixy, nová a populární
 /// alba, žánry, nálady), sekce se vykreslují podle `type`. Prázdné sekce
@@ -63,6 +64,8 @@ class HomeScreen extends ConsumerWidget {
               // Úplně nahoře: na co navázat (poslední poslouchaná alba).
               if (recent.isNotEmpty) _ContinueListening(items: recent),
               // Něco, co v "Poslechnout později" leží přes 2 týdny.
+              // Pozvánka do společného mixu (Blend), čeká na mě.
+              const BlendInviteBanner(),
               const ListenLaterReminder(),
               for (final section in sections) _HomeSectionView(section: section),
             ],
