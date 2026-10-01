@@ -20,6 +20,7 @@ from app.auth import (
     auth_mode,
     aware,
     ensure_admin,
+    get_current_user,
     hash_password,
     hash_secret,
     new_secret,
@@ -328,6 +329,39 @@ async def _build_listenbrainz_mixes(user_id: str) -> None:
     finally:
         g.reset_home_user(token)
     await invalidate_home_cache()
+
+
+_APPEARANCE_KEYS = {
+    "appearance.glass_frost", "appearance.glass_tint", "appearance.glass_darkness",
+    "appearance.glass_colorfulness", "appearance.glass_tint_main", "appearance.glass_accent_tint",
+    "appearance.glass_tone", "appearance.glass_buttons", "appearance.glass_grain",
+    "appearance.liquid_glass_test", "appearance.glass_off", "appearance.no_grain", "appearance.theme_mode",
+}
+
+
+class AppearanceIn(BaseModel):
+    values: dict[str, bool | float | int | str]
+
+
+@auth_router.get("/me/appearance")
+def get_appearance(current: tuple[str, str] = Depends(get_current_user)):
+    """Vzhled profilu uložený na serveru (prázdné = zařízení ho ještě neposlalo)."""
+    with Session(engine) as session:
+        user = session.get(AppUser, current[0])
+        return {"values": (user.appearance if user else None) or {}}
+
+
+@auth_router.put("/me/appearance")
+def put_appearance(body: AppearanceIn, current: tuple[str, str] = Depends(get_current_user)):
+    values = {k: v for k, v in body.values.items() if k in _APPEARANCE_KEYS}
+    with Session(engine) as session:
+        user = session.get(AppUser, current[0])
+        if user is None:
+            raise HTTPException(status_code=404, detail="Profil neexistuje.")
+        user.appearance = {**(user.appearance or {}), **values}
+        session.add(user)
+        session.commit()
+        return {"values": user.appearance}
 
 
 @auth_router.delete("/me/listenbrainz")

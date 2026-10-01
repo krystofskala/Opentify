@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'routing/app_router.dart';
+import 'state/appearance_sync.dart';
 import 'state/audio_player_controller.dart';
 import 'state/glass_settings.dart';
 import 'state/grain_controller.dart';
@@ -37,6 +38,8 @@ class OpentifyApp extends ConsumerWidget {
     final isPlaying = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
     // Offline knihovna načtená hned (přehrávač se na ni ptá už u první skladby).
     ref.watch(offlineControllerProvider.select((s) => s.tracks.length));
+    // Vzhled profilu ze serveru / na server (stejný na všech zařízeních).
+    ref.watch(appearanceSyncProvider);
     ref.listen<String?>(playerNoticeProvider, (_, message) {
       if (message == null) return;
       appMessengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));

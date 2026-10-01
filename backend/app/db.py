@@ -45,6 +45,8 @@ def _ensure_columns() -> None:
             ("listenbrainz_user", "VARCHAR"),
             ("username", "VARCHAR"),
             ("password_hash", "VARCHAR"),
+            ("home_genres", "JSON"),
+            ("appearance", "JSON"),
         ],
         "playlist": [
             ("description", "VARCHAR"),

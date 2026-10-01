@@ -50,7 +50,7 @@ PICKS_KEY = "personal:category-picks"
 SECTION = "category_mixes"
 
 # Deezer žánry mimo naše kategorie, které k některé přesto patří.
-_DZ_EXTRA = {84: "folk", 153: "soul"}  # country -> folk, blues -> soul/funk
+_DZ_EXTRA: dict[int, str] = {}  # (country a blues mají od 2026-10 vlastní kategorie)
 _DZ_TO_CAT = {c.genre_id: c.id for c in CATEGORIES if c.genre_id} | _DZ_EXTRA
 
 # MusicBrainz žánry -> kategorie (podřetězec, jeden žánr může do víc kategorií).
@@ -67,6 +67,9 @@ _MB_KEYWORDS: dict[str, tuple[str, ...]] = {
     "jazz": ("jazz", "bossa", "swing", "bebop"),
     "classical": ("classical", "baroque", "opera", "orchestral", "chamber"),
     "metal": ("metal",),
+    "country": ("country", "americana", "bluegrass"),
+    "blues": ("blues",),
+    "reggae": ("reggae", "dub", "ska"),
 }
 
 # Nálada -> žánry, které k ní sedí. Tvých interpretů v redakčních playlistech

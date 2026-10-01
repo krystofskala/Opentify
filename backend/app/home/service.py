@@ -81,9 +81,10 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:wrapped", g.DAILY_TTL, wrapped.warm_all))
     registry.append(("lb:fresh-releases", g.DAILY_TTL, g.build_new_releases))
     registry.append(("apple:rss:albums", g.DAILY_TTL, g.build_top_albums))
-    for spec in g._genre_specs():
-        registry.append((spec.source, g.DAILY_TTL, lambda spec=spec: g.build_deezer_playlist(spec, g.DAILY_TTL)))
     registry.append(("deezer:editorial", g.DAILY_TTL, g.build_editorial))
+    from app import browse
+
+    registry.append(("home:genre-rails", timedelta(hours=1), browse.build_genre_rails))
     return registry
 
 
@@ -214,13 +215,14 @@ def _fallback_covers(session: Session, playlist_id: str) -> list[str]:
 
 
 def _accent_for(source: str | None) -> str | None:
-    prefix = "personal:category-mix:"
-    if not source or not source.startswith(prefix):
-        return None
+    """Barva dlaždice kategorie -- stejná na Domů i v Hledat."""
     from app.browse import get_category
 
-    category = get_category(source[len(prefix):])
-    return category.color if category else None
+    for prefix in ("personal:category-mix:", "browse:genre:"):
+        if source and source.startswith(prefix):
+            category = get_category(source[len(prefix):])
+            return category.color if category else None
+    return None
 
 
 def _art_style(source: str | None) -> str | None:
@@ -231,6 +233,8 @@ def _art_style(source: str | None) -> str | None:
         return "year"
     if source.startswith("personal:decade:"):
         return "decade"
+    if source.startswith("browse:genre:"):
+        return "genre"
     if source.startswith("personal:category-mix:"):
         from app.browse import get_category
 
@@ -311,8 +315,15 @@ def build_home(user_id: str) -> dict[str, Any]:
         years_section = by_section.get("years", [])
         years_section.sort(key=lambda p: p.source or "", reverse=True)
         years_section.sort(key=lambda p: not (p.source or "").startswith("personal:decade:"))  # stabilní
-        genre_order = [f"deezer:chart:genre:{gid}" for gid, _ in g.GENRES]
-        by_section.get("genres", []).sort(key=lambda p: genre_order.index(p.source) if p.source in genre_order else 99)
+        # Žánry = přesně ty z Hledat (app/browse.py), ve stejném pořadí; staré
+        # Deezer žebříčky se sekcí "genres" se už neukazují.
+        from app import browse as _browse
+
+        genre_order = [f"browse:genre:{c.id}" for c in _browse.CATEGORIES if c.group == "genre"]
+        by_section["genres"] = sorted(
+            (p for p in by_section.get("genres", []) if p.source in genre_order),
+            key=lambda p: genre_order.index(p.source),
+        )
 
         sections: list[dict[str, Any]] = []
         cards_by_section = {
@@ -329,6 +340,25 @@ def build_home(user_id: str) -> dict[str, Any]:
         quick = quick[:6]
         if quick:
             sections.append({"id": "quick_picks", "title": "Rychlý výběr", "type": "quick_picks", "items": [c.model_dump(mode="json", by_alias=True) for c in quick]})
+
+        # Žánry připnuté profilem (Profil › Žánry na Domů) -- tátův bluegrass.
+        from app import browse
+        from app.models import HomeSnapshot as _Snap
+
+        for c in browse.pinned_genres(user_id):
+            snap = session.get(_Snap, browse.rail_key(c.id))
+            playlist_id = (snap.payload or {}).get("playlistId") if snap else None
+            tracks = _playlist_tracks(session, playlist_id, 20) if playlist_id else []
+            if tracks:
+                sections.append(
+                    {
+                        "id": f"genre_{c.id}",
+                        "title": c.title,
+                        "type": "track_rail",
+                        "playlistId": playlist_id,
+                        "items": [t.model_dump(mode="json", by_alias=True) for t in tracks],
+                    }
+                )
 
         worldwide = next((p for p in by_section.get("charts", []) if p.source == "deezer:playlist:3155776842"), None)
         for key, title, kind in _SECTION_ORDER:

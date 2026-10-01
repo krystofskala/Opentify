@@ -236,6 +236,12 @@ class AppUser(SQLModel, table=True):
     # přihlášení si ho vytvoří; admin ho při zapomenutí vynuluje.
     username: str | None = Field(default=None, index=True)
     password_hash: str | None = None
+    # Žánry, které chce mít profil na Domů jako vlastní řady (id kategorií
+    # z app/browse.py), v pořadí výběru.
+    home_genres: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    # Vzhled profilu (sklo, zrno, motiv) -- klíče `appearance.*` z appky,
+    # ať má profil stejný vzhled na každém zařízení.
+    appearance: dict | None = Field(default=None, sa_column=Column(JSON))
 
 
 class AuthToken(SQLModel, table=True):

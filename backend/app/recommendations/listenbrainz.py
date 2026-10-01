@@ -158,6 +158,27 @@ class ListenBrainzPublicClient:
             return {}
         return resp.json()
 
+    async def tag_radio(self, tag: str, count: int = 150) -> list[dict[str, Any]]:
+        """Nahrávky s MusicBrainz tagem (LB Radio): recording_mbid, percent
+        (jak silně tag k nahrávce patří), source (recording / release-group /
+        artist)."""
+
+        async def fetch() -> list[dict[str, Any]]:
+            data = await self._get(
+                "/1/lb-radio/tags",
+                {"tag": tag, "operator": "or", "pop_begin": 0, "pop_end": 100, "count": count},
+            )
+            return data if isinstance(data, list) else []
+
+        return await cached_json(f"lb-public:tag-radio:{tag}:{count}", 24 * 60 * 60, fetch)
+
+    async def recording_metadata(self, mbids: list[str]) -> dict[str, Any]:
+        """Jméno, interpret a ISRC k nahrávkám (dávka MBID najednou)."""
+        if not mbids:
+            return {}
+        data = await self._get("/1/metadata/recording/", {"recording_mbids": ",".join(mbids), "inc": "artist"})
+        return data if isinstance(data, dict) else {}
+
     async def sitewide_top_recordings(self, range_: str, count: int) -> list[dict[str, Any]]:
         cache_key = f"lb-public:sitewide-recordings:{range_}:{count}"
 

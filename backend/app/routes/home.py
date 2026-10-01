@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
 from app.catalog.availability import resolve_artist_name
-from app.db import get_session
+from app.db import engine, get_session
 from app.home.generators import _covers_for
 from app.models import Artist, Listen, Playlist, PlaylistItem, Recording, Release
 from app.home.service import _accent_for, _art_style, get_home, run_generators
@@ -140,6 +141,49 @@ def _context_item(session: Session, context: str | None) -> dict | None:
             "imageUrl": artist.images[0] if artist.images else None,
         }
     return None
+
+
+class HomeGenresIn(BaseModel):
+    ids: list[str]
+
+
+@home_router.get("/genres")
+def home_genres(current: tuple[str, str] = Depends(get_current_user)):
+    """Žánry na výběr pro řady na Domů a ty, co má profil připnuté."""
+    from app import browse
+
+    return {
+        "available": [
+            {"id": c.id, "title": c.title, "color": c.color} for c in browse.CATEGORIES if c.group == "genre"
+        ],
+        "selected": [c.id for c in browse.pinned_genres(current[0])],
+    }
+
+
+@home_router.put("/genres")
+async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends(get_current_user)):
+    from app import browse
+    from app.home.service import invalidate_home_cache
+    from app.models import AppUser
+
+    ids = [i for i in dict.fromkeys(body.ids) if (c := browse.get_category(i)) is not None and c.group == "genre"]
+    with Session(engine) as session:
+        user = session.get(AppUser, current[0])
+        if user is not None:
+            user.home_genres = ids
+            session.add(user)
+            session.commit()
+
+    async def warm() -> None:
+        for i in ids:
+            c = browse.get_category(i)
+            if c is not None:
+                await browse.genre_rail(c)
+        await invalidate_home_cache()
+
+    asyncio.create_task(warm())
+    await invalidate_home_cache()
+    return {"selected": ids}
 
 
 @home_router.post("/refresh")
