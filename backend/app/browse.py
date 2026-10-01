@@ -17,6 +17,7 @@ ne dopředu -- šetří to Deezer i databázi.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -429,6 +430,17 @@ def new_key(category_id: str) -> str:
 
 
 NEW_WITHIN_DAYS = 365
+# Novinky jen od živých/aktivních -- u legend Deezer vede reedice s datem
+# digitálního vydání (živě: Tony Rice, Jimmy Martin jako "novinky").
+NEW_SKIP_ARTISTS = {
+    "Bill Monroe", "Flatt & Scruggs", "The Stanley Brothers", "Ralph Stanley", "Jimmy Martin",
+    "The Osborne Brothers", "Jim & Jesse", "Reno & Smiley", "Doc Watson", "Mac Wiseman",
+    "The Country Gentlemen", "J.D. Crowe & The New South", "Tony Rice", "Bluegrass Album Band",
+}
+_REISSUE = re.compile(
+    r"remaster|anniversary|deluxe|expanded|reissue|story|best of|greatest|collection|anthology|essential|hits|complete|years",
+    re.I,
+)
 
 
 async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
@@ -450,11 +462,15 @@ async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
     cutoff = date.today().toordinal() - NEW_WITHIN_DAYS
     albums: list[dict[str, Any]] = []
     for name in SEED_ARTISTS[c.id]:
+        if name in NEW_SKIP_ARTISTS:
+            continue
         found = await dz.search_artist(name, limit=5)
         artist = next((a for a in found if _normalize(a.get("name", "")) == _normalize(name)), None)
         if artist is None or not artist.get("id"):
             continue
         for album in await dz.artist_albums(str(artist["id"])) or []:
+            if album.get("record_type") == "compile" or _REISSUE.search(album.get("title") or ""):
+                continue
             try:
                 released = date.fromisoformat(album.get("release_date") or "")
             except ValueError:
