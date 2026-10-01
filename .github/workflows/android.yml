@@ -33,10 +33,25 @@ jobs:
         working-directory: client
         run: flutter pub get
 
+      - name: Podpisový klíč
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/opentify-release.jks"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/opentify-release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Bez ANDROID_KEYSTORE_BASE64 -- podpis ladicím klíčem, update přes starou verzi nepůjde."
+          fi
+
       - name: Build APK
         working-directory: client
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: >
           flutter build apk --release
+          --build-name=0.1.${{ github.run_number }}
+          --build-number=${{ github.run_number }}
           --dart-define=API_BASE_URL=https://desktop-2lissjt.tail343940.ts.net/api/v1
           --dart-define=WS_BASE_URL=wss://desktop-2lissjt.tail343940.ts.net/ws
 

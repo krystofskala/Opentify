@@ -29,11 +29,27 @@ android {
         versionName = flutter.versionName
     }
 
+    // Stálý podpisový klíč (CI: secrets ANDROID_KEYSTORE_*, viz
+    // android/tool/setup_signing.py). Bez něj podpis ladicím klíčem -- ten je
+    // v každém CI běhu jiný a telefon by update přes starou verzi odmítl.
+    val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    val hasReleaseKey = !keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && file(keystorePath).exists()
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = "opentify"
+                keyPassword = keystorePassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseKey) "release" else "debug")
         }
     }
 }
