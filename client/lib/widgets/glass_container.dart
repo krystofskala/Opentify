@@ -110,6 +110,7 @@ class GlassContainer extends StatelessWidget {
     // Profil › Vzhled: "Mléčnost skla" (rozmazání), "Tón skla" (výplň)
     // a "Tón v barvě skladby" (barva výplně místo šedé/bílé).
     final settings = GlassSettings.maybeOf(context);
+    if (settings?.solid ?? false) return _solid(context, shape);
     // Světlé/tmavé sklo nezávisle na motivu appky (Profil › Vzhled › Tón skla).
     final isDark = switch (settings?.tone ?? GlassToneMode.auto) {
       GlassToneMode.auto => themeDark,
@@ -223,6 +224,28 @@ class GlassContainer extends StatelessWidget {
               child: glass,
             )
           : glass,
+    );
+  }
+
+  /// "Bez skla": plná M3 plocha -- bez rozmazání, lomu, lemu i zrna,
+  /// s okrajem v `outlineVariant`, ať je hrana vidět i na podobném pozadí.
+  /// Obsah zůstává v motivu appky (plochy jsou z jeho palety), text
+  /// a ikony tak mají plný kontrast.
+  Widget _solid(BuildContext context, SmoothRectangleBorder shape) {
+    final scheme = Theme.of(context).colorScheme;
+    final Color? color = emphasis > 0
+        ? scheme.secondaryContainer
+        : (baseFill ? scheme.surfaceContainerHigh : null);
+    final child = padding == null ? this.child : Padding(padding: padding!, child: this.child);
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        shape: shape.copyWith(
+          side: baseFill || emphasis > 0 ? BorderSide(color: scheme.outlineVariant) : BorderSide.none,
+        ),
+        color: color,
+        shadows: shadow ? glassShadow : null,
+      ),
+      child: ClipPath(clipper: ShapeBorderClipper(shape: shape), child: NoLiquidScope(child: child)),
     );
   }
 

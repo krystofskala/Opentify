@@ -95,7 +95,8 @@ class OpentifyApp extends ConsumerWidget {
                 grain: ref.watch(glassGrainProvider),
                 fineGrain: ref.watch(fineGrainProvider),
                 glassButtons: ref.watch(glassButtonsProvider),
-                liquid: ref.watch(liquidGlassProvider),
+                liquid: ref.watch(liquidGlassProvider) && !ref.watch(glassOffProvider),
+                solid: ref.watch(glassOffProvider),
                 // Popisky při najetí myší rušily (živě nahlášeno) -- vypnuté
                 // všude; čtečka obrazovky je dostane dál.
                 child: TooltipVisibility(

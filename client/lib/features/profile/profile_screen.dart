@@ -9,9 +9,12 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../data/library_repository.dart';
 import '../../state/providers.dart';
 import '../../state/glass_settings.dart';
+import '../../state/auth_controller.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../state/grain_controller.dart';
 import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
+import '../../theme/glass_tokens.dart' show Motion;
 import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/section_app_bar.dart';
@@ -79,6 +82,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Widget build(BuildContext context) {
     final scanStatus = ref.watch(scanStatusProvider);
     scanStatus.whenData(_syncPolling);
+    final isAdmin = ref.watch(authProvider).valueOrNull?.user?.role == 'admin';
     return Scaffold(
       appBar: const SectionAppBar('Profil'),
       body: RefreshIndicator(
@@ -93,86 +97,115 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 children: [
             // Admin jedná za jiný profil -- pruh se "Zpět na můj".
             const ActingAsBanner(),
-            const _AppearanceCard(),
-            const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.cloud_upload_rounded,
-              title: 'Import ze Spotify',
-              description:
-                  'Nahraj export playlistů (ZIP s CSV, např. z Exportify) nebo '
-                  'YourLibrary.json z oficiálního Spotify exportu. Liked Songs se '
-                  'použijí pro tvůj denní mix, ostatní playlisty se naimportují '
-                  'pod svým jménem. ZIP s historií poslechů (Extended streaming history) '
-                  'nahraje poslechy pro Wrapped a mixy.',
-              buttonLabel: 'Vybrat soubor…',
-              onPressed: () => _importFromSpotify(context),
+            // Sbalitelné skupiny místo jednoho dlouhého seznamu karet (pro
+            // tátu: otevře jen to, co potřebuje; stav se pamatuje).
+            const _Section(
+              id: 'appearance',
+              icon: Symbols.contrast_rounded,
+              title: 'Vzhled',
+              summary: 'Motiv, sklo nebo plné plochy, zrno',
+              initiallyOpen: true,
+              child: _AppearanceSettings(),
             ),
             const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.equalizer_rounded,
-              title: 'Wrapped',
-              description: 'Tvoje roky v hudbě od 2016 – minuty, interpreti, skladby a žánry, '
-                  'každou obrazovku jde sdílet jako obrázek. Zůstávají napořád.',
-              buttonLabel: 'Otevřít',
-              onPressed: () => context.push('/wrapped'),
+            _Section(
+              id: 'music',
+              icon: Symbols.library_music_rounded,
+              title: 'Moje hudba',
+              summary: isAdmin
+                  ? 'Import ze Spotify, export, kontrola stažených, lokální knihovna'
+                  : 'Import ze Spotify, export dat',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ActionRow(
+                    icon: Symbols.cloud_upload_rounded,
+                    title: 'Import ze Spotify',
+                    description:
+                        'Nahraj export playlistů (ZIP s CSV, např. z Exportify) nebo '
+                        'YourLibrary.json z oficiálního Spotify exportu. Liked Songs se '
+                        'použijí pro tvůj denní mix, ostatní playlisty se naimportují '
+                        'pod svým jménem. ZIP s historií poslechů (Extended streaming history) '
+                        'nahraje poslechy pro Wrapped a mixy.',
+                    buttonLabel: 'Vybrat soubor…',
+                    onPressed: () => _importFromSpotify(context),
+                  ),
+                  _ActionRow(
+                    icon: Symbols.ios_share_rounded,
+                    title: 'Exportovat moje data',
+                    description: 'Oblíbené, playlisty, historie poslechů a Poslechnout později v jednom ZIPu. '
+                        'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',
+                    buttonLabel: 'Exportovat',
+                    onPressed: () => _export(context),
+                  ),
+                  if (isAdmin) ...[
+                    _ActionRow(
+                      icon: Symbols.fact_check_rounded,
+                      title: 'Kontrola stažených',
+                      description: 'Skladby, u kterých nesedí délka nebo Shazam slyší něco jiného. '
+                          'Pusť si je a rozhodni: je to dobře, nebo stáhnout znovu.',
+                      buttonLabel: 'Projít',
+                      onPressed: () => context.push('/verify-downloads'),
+                    ),
+                    _ActionRow(
+                      icon: Symbols.folder_rounded,
+                      title: 'Lokální knihovna',
+                      description:
+                          'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
+                          'v .env), spáruje je na MusicBrainz podle tagů a dotáhne obaly. '
+                          'Běží na pozadí, u větší knihovny to chvíli potrvá.',
+                      buttonLabel: scanStatus.valueOrNull?.isRunning == true ? 'Skenuji…' : 'Skenovat knihovnu',
+                      onPressed: scanStatus.valueOrNull?.isRunning == true ? null : () => _startScan(context),
+                    ),
+                    scanStatus.maybeWhen(
+                      data: (status) => status.status == 'idle'
+                          ? const SizedBox.shrink()
+                          : Padding(padding: const EdgeInsets.only(top: 12), child: _ScanStatusCard(status: status)),
+                      orElse: () => const SizedBox.shrink(),
+                    ),
+                  ],
+                ],
+              ),
             ),
             const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.graphic_eq_rounded,
-              title: 'Open Shazam',
-              description: 'Pozná skladbu, která zrovna hraje kolem, a uloží ji do Poslechnout později '
-                  'se značkou. Anonymně: Shazamu jde přes VPN jen otisk zvuku.',
-              buttonLabel: 'Poznat skladbu',
-              onPressed: () => context.push('/shazam'),
-            ),
-            const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.music_note_rounded,
-              title: 'Ladička',
-              description: 'Ladička na kytaru – standardní i alternativní ladění, struna se pozná '
-                  'sama. Zvuk z mikrofonu zůstává v zařízení, nic se neodesílá.',
-              buttonLabel: 'Ladit',
-              onPressed: () => context.push('/tuner'),
-            ),
-            const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.ios_share_rounded,
-              title: 'Exportovat moje data',
-              description: 'Oblíbené, playlisty, historie poslechů a Poslechnout později v jednom ZIPu. '
-                  'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',
-              buttonLabel: 'Exportovat',
-              onPressed: () => _export(context),
+            _Section(
+              id: 'tools',
+              icon: Symbols.apps_rounded,
+              title: 'Nástroje',
+              summary: 'Wrapped, Open Shazam, ladička',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ActionRow(
+                    icon: Symbols.equalizer_rounded,
+                    title: 'Wrapped',
+                    description: 'Tvoje roky v hudbě od 2016 – minuty, interpreti, skladby a žánry, '
+                        'každou obrazovku jde sdílet jako obrázek.',
+                    buttonLabel: 'Otevřít',
+                    onPressed: () => context.push('/wrapped'),
+                  ),
+                  _ActionRow(
+                    icon: Symbols.graphic_eq_rounded,
+                    title: 'Open Shazam',
+                    description: 'Pozná skladbu, která zrovna hraje kolem, a uloží ji do Poslechnout později. '
+                        'Anonymně: Shazamu jde přes VPN jen otisk zvuku.',
+                    buttonLabel: 'Poznat skladbu',
+                    onPressed: () => context.push('/shazam'),
+                  ),
+                  _ActionRow(
+                    icon: Symbols.music_note_rounded,
+                    title: 'Ladička',
+                    description: 'Ladička na kytaru – standardní i alternativní ladění, struna se pozná '
+                        'sama. Zvuk z mikrofonu zůstává v zařízení.',
+                    buttonLabel: 'Ladit',
+                    onPressed: () => context.push('/tuner'),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             // Profily (jen admin; ostatní sekci nevidí).
             const ProfilesSection(),
-            const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.fact_check_rounded,
-              title: 'Kontrola stažených',
-              description: 'Skladby, u kterých Shazam slyší něco jiného, než by měly být. '
-                  'Pusť si je a rozhodni: je to dobře, nebo má Shazam pravdu.',
-              buttonLabel: 'Projít',
-              onPressed: () => context.push('/verify-downloads'),
-            ),
-            const SizedBox(height: 12),
-            _ActionCard(
-              icon: Symbols.folder_rounded,
-              title: 'Lokální knihovna',
-              description:
-                  'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
-                  'v .env), spáruje je na MusicBrainz podle tagů (ne podle jména '
-                  'souboru/složky) a dotáhne obaly. Běží na pozadí – MusicBrainz '
-                  'dovolí jen 1 dotaz za sekundu, u větší knihovny to chvíli potrvá.',
-              buttonLabel: scanStatus.valueOrNull?.isRunning == true ? 'Skenuji…' : 'Skenovat knihovnu',
-              onPressed: scanStatus.valueOrNull?.isRunning == true ? null : () => _startScan(context),
-            ),
-            scanStatus.maybeWhen(
-              data: (status) => status.status == 'idle'
-                  ? const SizedBox.shrink()
-                  : Padding(padding: const EdgeInsets.only(top: 12), child: _ScanStatusCard(status: status)),
-              orElse: () => const SizedBox.shrink(),
-            ),
                 ],
               ),
             ),
@@ -290,212 +323,301 @@ class _ScanStatusCard extends StatelessWidget {
   }
 }
 
-/// "Vzhled": Systém / Světlý / Tmavý (`themeModeProvider`, uložené per
-/// zařízení, výchozí tmavý). Přepne okamžitě, téma i pozadí přejdou plynule.
-class _AppearanceCard extends ConsumerWidget {
-  const _AppearanceCard();
+/// Profil › Vzhled: motiv (Systém / Světlý / Tmavý), styl ploch (Liquid
+/// Glass / Bez skla) a zrno. Jemné ladění skla je ve vnořené sbalené
+/// skupině -- v režimu "Bez skla" se vůbec neukazuje.
+class _AppearanceSettings extends ConsumerWidget {
+  const _AppearanceSettings();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    return SurfaceCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Icon(Symbols.contrast_rounded),
-              const SizedBox(width: 10),
-              Text('Vzhled', style: theme.textTheme.titleMedium),
-            ],
+    final glassOff = ref.watch(glassOffProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Motiv', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 6),
+        GlassSegmentedControl<ThemeMode>(
+          selected: ref.watch(themeModeProvider),
+          onChanged: ref.read(themeModeProvider.notifier).set,
+          segments: const [
+            GlassSegment(value: ThemeMode.system, label: 'Systém', icon: Symbols.brightness_auto_rounded),
+            GlassSegment(value: ThemeMode.light, label: 'Světlý', icon: Symbols.light_mode_rounded),
+            GlassSegment(value: ThemeMode.dark, label: 'Tmavý', icon: Symbols.dark_mode_rounded),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text('Styl', style: theme.textTheme.titleSmall),
+        Text(
+          glassOff
+              ? 'Plné plochy bez průhlednosti – vyšší kontrast a lehčí pro starší telefony.'
+              : 'Průhledné sklo s rozmazáním a lomem, jako v iOS.',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 6),
+        GlassSegmentedControl<bool>(
+          selected: glassOff,
+          onChanged: ref.read(glassOffProvider.notifier).set,
+          segments: const [
+            GlassSegment(value: false, label: 'Liquid Glass', icon: Symbols.blur_on_rounded),
+            GlassSegment(value: true, label: 'Bez skla', icon: Symbols.crop_square_rounded),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _SwitchRow(
+          title: 'Jemnější zrno',
+          subtitle: 'Slabší zrnitost pozadí, klidnější plochy.',
+          value: ref.watch(fineGrainProvider),
+          onChanged: ref.read(fineGrainProvider.notifier).set,
+        ),
+        if (!glassOff) ...[
+          const SizedBox(height: 8),
+          const _Section(
+            id: 'glass',
+            icon: Symbols.tune_rounded,
+            title: 'Nastavení skla',
+            summary: 'Tón, mléčnost, lom, skleněná tlačítka',
+            nested: true,
+            child: _GlassTuning(),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _GlassTuning extends ConsumerWidget {
+  const _GlassTuning();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SwitchRow(
+          title: 'Skleněná tlačítka',
+          subtitle: 'Šipka zpět a tlačítka v hlavičce jako sklo místo tmavých kroužků.',
+          value: ref.watch(glassButtonsProvider),
+          onChanged: ref.read(glassButtonsProvider.notifier).set,
+        ),
+        const SizedBox(height: 12),
+        _SwitchRow(
+          title: 'Lom skla',
+          subtitle: 'Mini přehrávač a lišta lámou obsah pod sebou. Vypni, kdyby trhaly nebo zčernaly obaly.',
+          value: ref.watch(liquidGlassProvider),
+          onChanged: ref.read(liquidGlassProvider.notifier).set,
+        ),
+        const SizedBox(height: 12),
+        _SwitchRow(
+          title: 'Zrno na skle',
+          subtitle: 'Jemná textura na lištách a panelech, stejná jako na pozadí.',
+          value: ref.watch(glassGrainProvider),
+          onChanged: ref.read(glassGrainProvider.notifier).set,
+        ),
+        const SizedBox(height: 12),
+        Text('Tón skla', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 6),
+        GlassSegmentedControl<GlassToneMode>(
+          selected: ref.watch(glassToneProvider),
+          onChanged: ref.read(glassToneProvider.notifier).set,
+          segments: const [
+            GlassSegment(value: GlassToneMode.auto, label: 'Podle motivu', icon: Symbols.brightness_auto_rounded),
+            GlassSegment(value: GlassToneMode.light, label: 'Světlé', icon: Symbols.light_mode_rounded),
+            GlassSegment(value: GlassToneMode.dark, label: 'Tmavé', icon: Symbols.dark_mode_rounded),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _GlassSlider(
+          title: 'Mléčnost skla',
+          subtitle: 'Jak moc sklo rozmazává obsah pod sebou.',
+          left: 'Čiré',
+          right: 'Mléčné',
+          provider: glassFrostProvider,
+        ),
+        const SizedBox(height: 8),
+        _GlassSlider(
+          title: 'Síla tónu',
+          subtitle: 'Jak moc je sklo zabarvené – silnější tón líp odliší lišty od pozadí.',
+          left: 'Slabý',
+          right: 'Silný',
+          provider: glassTintProvider,
+        ),
+        const SizedBox(height: 8),
+        _GlassSlider(
+          title: 'Tmavost tónu',
+          subtitle: 'Jak tmavé je sklo.',
+          left: 'Světlejší',
+          right: 'Tmavší',
+          provider: glassDarknessProvider,
+        ),
+        const SizedBox(height: 8),
+        _GlassSlider(
+          title: 'Barevnost tónu',
+          subtitle: 'Kolik barvy skladby sklo nese – vlevo skoro šedé, vpravo barevné.',
+          left: 'Šedé',
+          right: 'Barevné',
+          provider: glassColorfulnessProvider,
+        ),
+        const SizedBox(height: 8),
+        _SwitchRow(
+          title: 'Tón v barvě skladby',
+          subtitle: 'Sklo se zabarví barvou hrající skladby místo šedé (bílé ve světlém režimu).',
+          value: ref.watch(glassAccentTintProvider),
+          onChanged: ref.read(glassAccentTintProvider.notifier).set,
+        ),
+        if (ref.watch(glassAccentTintProvider)) ...[
+          const SizedBox(height: 12),
+          Text('Barva tónu', style: theme.textTheme.titleSmall),
+          Text(
+            'Hlavní ladí s pozadím, kontrastní je výrazná barva z obalu.',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
-          GlassSegmentedControl<ThemeMode>(
-            selected: ref.watch(themeModeProvider),
-            onChanged: ref.read(themeModeProvider.notifier).set,
+          GlassSegmentedControl<bool>(
             segments: const [
-              GlassSegment(value: ThemeMode.system, label: 'Systém', icon: Symbols.brightness_auto_rounded),
-              GlassSegment(value: ThemeMode.light, label: 'Světlý', icon: Symbols.light_mode_rounded),
-              GlassSegment(value: ThemeMode.dark, label: 'Tmavý', icon: Symbols.dark_mode_rounded),
+              GlassSegment(value: true, label: 'Hlavní'),
+              GlassSegment(value: false, label: 'Kontrastní'),
             ],
+            selected: ref.watch(glassTintMainProvider),
+            onChanged: ref.read(glassTintMainProvider.notifier).set,
           ),
-          const SizedBox(height: 12),
-          Row(
+        ],
+      ],
+    );
+  }
+}
+
+class _SwitchRow extends StatelessWidget {
+  const _SwitchRow({required this.title, required this.subtitle, required this.value, required this.onChanged});
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Jemnější zrno', style: theme.textTheme.titleSmall),
-                    Text(
-                      'Slabší zrnitost pozadí, klidnější plochy.',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              GlassSwitch(
-                value: ref.watch(fineGrainProvider),
-                semanticLabel: 'Jemnější zrno',
-                onChanged: ref.read(fineGrainProvider.notifier).set,
-              ),
+              Text(title, style: theme.textTheme.titleSmall),
+              Text(subtitle, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Skleněná tlačítka', style: theme.textTheme.titleSmall),
-                    Text(
-                      'Šipka zpět a tlačítka v hlavičce jako sklo místo tmavých kroužků.',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
+        ),
+        const SizedBox(width: 8),
+        GlassSwitch(value: value, semanticLabel: title, onChanged: onChanged),
+      ],
+    );
+  }
+}
+
+/// Otevřené skupiny Profilu (pamatuje se v zařízení); `null` = ještě
+/// neuloženo, platí výchozí stav skupin.
+class _OpenSections extends StateNotifier<Set<String>?> {
+  _OpenSections() : super(null) {
+    _load();
+  }
+
+  static const _prefKey = 'profile.open_sections';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList(_prefKey);
+      if (saved != null && mounted) state = saved.toSet();
+    } catch (_) {}
+  }
+
+  Future<void> toggle(String id, Set<String> defaults) async {
+    final current = {...(state ?? defaults)};
+    if (!current.remove(id)) current.add(id);
+    state = current;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_prefKey, current.toList());
+    } catch (_) {}
+  }
+}
+
+final _openSectionsProvider = StateNotifierProvider<_OpenSections, Set<String>?>((ref) => _OpenSections());
+
+/// Skupiny otevřené, dokud si uživatel nic nepřepnul.
+const _defaultOpen = {'appearance'};
+
+/// Sbalitelná skupina: hlavička (ikona, název, co v ní je) a obsah.
+class _Section extends ConsumerWidget {
+  const _Section({
+    required this.id,
+    required this.icon,
+    required this.title,
+    required this.summary,
+    required this.child,
+    // ignore: unused_element_parameter
+    this.initiallyOpen = false,
+    this.nested = false,
+  });
+
+  final String id;
+  final IconData icon;
+  final String title;
+  final String summary;
+  final Widget child;
+  final bool initiallyOpen;
+  final bool nested;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final open = (ref.watch(_openSectionsProvider) ?? _defaultOpen).contains(id);
+    final header = InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      onTap: () => ref.read(_openSectionsProvider.notifier).toggle(id, _defaultOpen),
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: nested ? 8 : 4),
+        child: Row(
+          children: [
+            Icon(icon, size: nested ? 20 : 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: nested ? theme.textTheme.titleSmall : theme.textTheme.titleMedium),
+                  if (!open)
+                    Text(summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                ],
               ),
-              GlassSwitch(
-                value: ref.watch(glassButtonsProvider),
-                semanticLabel: 'Skleněná tlačítka',
-                onChanged: ref.read(glassButtonsProvider.notifier).set,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Lom skla (test)', style: theme.textTheme.titleSmall),
-                    Text(
-                      'Mini přehrávač a lišta lámou obsah pod sebou jako Liquid Glass. Vypni, kdyby trhaly nebo zčernaly obaly.',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              GlassSwitch(
-                value: ref.watch(liquidGlassProvider),
-                semanticLabel: 'Lom skla (test)',
-                onChanged: ref.read(liquidGlassProvider.notifier).set,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Zrno na skle', style: theme.textTheme.titleSmall),
-                    Text(
-                      'Jemná textura na lištách a panelech, stejná jako na pozadí.',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              GlassSwitch(
-                value: ref.watch(glassGrainProvider),
-                semanticLabel: 'Zrno na skle',
-                onChanged: ref.read(glassGrainProvider.notifier).set,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text('Tón skla', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 6),
-          GlassSegmentedControl<GlassToneMode>(
-            selected: ref.watch(glassToneProvider),
-            onChanged: ref.read(glassToneProvider.notifier).set,
-            segments: const [
-              GlassSegment(value: GlassToneMode.auto, label: 'Podle motivu', icon: Symbols.brightness_auto_rounded),
-              GlassSegment(value: GlassToneMode.light, label: 'Světlé', icon: Symbols.light_mode_rounded),
-              GlassSegment(value: GlassToneMode.dark, label: 'Tmavé', icon: Symbols.dark_mode_rounded),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _GlassSlider(
-            title: 'Mléčnost skla',
-            subtitle: 'Jak moc sklo rozmazává obsah pod sebou.',
-            left: 'Čiré',
-            right: 'Mléčné',
-            provider: glassFrostProvider,
-          ),
-          const SizedBox(height: 8),
-          _GlassSlider(
-            title: 'Síla tónu',
-            subtitle: 'Jak moc je sklo zabarvené – silnější tón líp odliší lišty od pozadí.',
-            left: 'Slabý',
-            right: 'Silný',
-            provider: glassTintProvider,
-          ),
-          const SizedBox(height: 8),
-          _GlassSlider(
-            title: 'Tmavost tónu',
-            subtitle: 'Jak tmavé je sklo.',
-            left: 'Světlejší',
-            right: 'Tmavší',
-            provider: glassDarknessProvider,
-          ),
-          const SizedBox(height: 8),
-          _GlassSlider(
-            title: 'Barevnost tónu',
-            subtitle: 'Kolik barvy skladby sklo nese – vlevo skoro šedé, vpravo barevné.',
-            left: 'Šedé',
-            right: 'Barevné',
-            provider: glassColorfulnessProvider,
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Tón v barvě skladby', style: theme.textTheme.titleSmall),
-                    Text(
-                      'Sklo se zabarví barvou hrající skladby místo šedé (bílé ve světlém režimu).',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              GlassSwitch(
-                value: ref.watch(glassAccentTintProvider),
-                semanticLabel: 'Tón v barvě skladby',
-                onChanged: ref.read(glassAccentTintProvider.notifier).set,
-              ),
-            ],
-          ),
-          if (ref.watch(glassAccentTintProvider)) ...[
-            const SizedBox(height: 12),
-            Text('Barva tónu', style: Theme.of(context).textTheme.titleSmall),
-            Text(
-              'Hlavní ladí s pozadím, kontrastní je výrazná barva z obalu.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
-            const SizedBox(height: 8),
-            GlassSegmentedControl<bool>(
-              segments: const [
-                GlassSegment(value: true, label: 'Hlavní'),
-                GlassSegment(value: false, label: 'Kontrastní'),
-              ],
-              selected: ref.watch(glassTintMainProvider),
-              onChanged: ref.read(glassTintMainProvider.notifier).set,
+            AnimatedRotation(
+              turns: open ? 0.5 : 0,
+              duration: Motion.state.duration,
+              curve: Motion.state,
+              child: const Icon(Symbols.expand_more_rounded),
             ),
           ],
-        ],
+        ),
       ),
     );
+    final body = AnimatedSize(
+      duration: Motion.state.duration,
+      curve: Motion.state,
+      alignment: Alignment.topCenter,
+      child: open
+          ? Padding(padding: EdgeInsets.only(top: nested ? 8 : 12), child: child)
+          : const SizedBox(width: double.infinity),
+    );
+    final column = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [header, body]);
+    return nested ? column : SurfaceCard(child: column);
   }
 }
 
@@ -542,8 +664,9 @@ class _GlassSlider extends ConsumerWidget {
   }
 }
 
-class _ActionCard extends StatelessWidget {
-  const _ActionCard({
+/// Položka ve skupině Profilu: ikona, název, popis a tlačítko.
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
     required this.icon,
     required this.title,
     required this.description,
@@ -560,20 +683,21 @@ class _ActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SurfaceCard(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon),
+              Icon(icon, size: 20),
               const SizedBox(width: 10),
-              Text(title, style: theme.textTheme.titleMedium),
+              Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
             ],
           ),
+          const SizedBox(height: 4),
+          Text(description, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 8),
-          Text(description, style: theme.textTheme.bodySmall),
-          const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerRight,
             child: GlassButton(label: buttonLabel, compact: true, onPressed: onPressed),

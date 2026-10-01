@@ -226,6 +226,37 @@ class LiquidGlassController extends StateNotifier<bool> {
 
 final liquidGlassProvider = StateNotifierProvider<LiquidGlassController, bool>((ref) => LiquidGlassController());
 
+/// Profil › Vzhled › "Bez skla": Liquid Glass úplně vypnuté -- každý
+/// skleněný prvek (lišta, mini přehrávač, sheety, ovládání, tlačítka,
+/// segmenty) je plná M3 Expressive plocha s kontrastním okrajem. Pro starší
+/// iPhony (bez rozmazání a lomu je to výrazně lehčí) a horší zrak (plné
+/// plochy = vyšší kontrast textu).
+class GlassOffController extends StateNotifier<bool> {
+  GlassOffController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.glass_off';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final glassOffProvider = StateNotifierProvider<GlassOffController, bool>((ref) => GlassOffController());
+
 /// Nastavení skla pro celý strom (`GlassContainer` je bez Riverpodu).
 class GlassSettings extends InheritedWidget {
   const GlassSettings({
@@ -240,6 +271,7 @@ class GlassSettings extends InheritedWidget {
     this.fineGrain = false,
     required this.glassButtons,
     this.liquid = false,
+    this.solid = false,
     required super.child,
   });
 
@@ -261,6 +293,12 @@ class GlassSettings extends InheritedWidget {
   final bool glassButtons;
   final bool liquid;
 
+  /// "Bez skla": plné plochy místo skla (viz `glassOffProvider`).
+  final bool solid;
+
+  /// Zkratka pro prvky, co si sklo kreslí samy (kapka tab baru, segmenty).
+  static bool solidOf(BuildContext context) => maybeOf(context)?.solid ?? false;
+
   static GlassSettings? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<GlassSettings>();
 
 
@@ -275,5 +313,6 @@ class GlassSettings extends InheritedWidget {
       old.grain != grain ||
       old.fineGrain != fineGrain ||
       old.glassButtons != glassButtons ||
-      old.liquid != liquid;
+      old.liquid != liquid ||
+      old.solid != solid;
 }

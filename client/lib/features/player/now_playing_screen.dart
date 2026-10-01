@@ -12,6 +12,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../widgets/like_heart.dart';
 import '../../state/audio_player_controller.dart';
+import '../../state/glass_settings.dart';
 import '../../state/provisioning_controller.dart';
 import '../../theme/accent_color.dart';
 import '../../theme/glass_tokens.dart';
@@ -432,6 +433,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             const Positioned.fill(
               child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(color: Color(0x59000000)))),
             ),
+          if (!GlassSettings.solidOf(context))
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(

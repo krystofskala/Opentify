@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/physics.dart';
 
+import '../../state/glass_settings.dart';
 import '../../theme/glass_tokens.dart';
 import '../glass_container.dart';
 
@@ -242,6 +243,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
 
   Widget _drop(ThemeData theme, Color accent, bool isDark, double width) {
     const h = GlassTokens.tabBarHeight;
+    final solid = GlassSettings.solidOf(context);
     const pad = 5.0;
     final lift = _lift.value;
     // Natažení ve směru pohybu podle rychlosti (jako kapka).
@@ -277,13 +279,16 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                 // Zvednutá kapka zvětšuje, co je skutečně pod ní (lišta
                 // i obsah) -- ikony pod ní pak sedí přesně pod barevnou
                 // kopií (dřív prosvítaly nezvětšené a byly dvakrát).
-                if (magnify > 1.001) Positioned.fill(child: _MagnifyBackdrop(scale: magnify)),
+                if (magnify > 1.001 && !solid) Positioned.fill(child: _MagnifyBackdrop(scale: magnify)),
                 // Sklo kapky: v klidu jemné (jako dřív), zvednuté čiré.
                 Positioned.fill(
                   child: ColoredBox(
-                    color: Colors.white.withValues(
-                      alpha: (isDark ? 0.12 : 0.6) * (1 - lift.clamp(0.0, 1.0)) + 0.06 * lift.clamp(0.0, 1.0),
-                    ),
+                    // "Bez skla": plná kapsle v barvě výběru (M3 indikátor).
+                    color: solid
+                        ? theme.colorScheme.secondaryContainer
+                        : Colors.white.withValues(
+                            alpha: (isDark ? 0.12 : 0.6) * (1 - lift.clamp(0.0, 1.0)) + 0.06 * lift.clamp(0.0, 1.0),
+                          ),
                   ),
                 ),
                 Positioned(
@@ -298,6 +303,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                   ),
                 ),
                 // Světelný lem: nahoře jasnější, zvednutá kapka výraznější.
+                if (!solid)
                 Positioned.fill(
                   child: DecoratedBox(
                     decoration: BoxDecoration(

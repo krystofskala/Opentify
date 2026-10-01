@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../state/glass_settings.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../theme/glass_tokens.dart';
@@ -280,6 +282,13 @@ class SelectedCapsule extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final shape = glassShape(const BorderRadius.all(Radius.circular(999)));
+    if (GlassSettings.solidOf(context)) {
+      return AnimatedContainer(
+        duration: Motion.state.duration,
+        curve: Motion.state,
+        decoration: ShapeDecoration(shape: shape, color: Theme.of(context).colorScheme.secondaryContainer),
+      );
+    }
     final base = isDark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.62);
     final fill = tint == null ? base : Color.alphaBlend(tint!.withValues(alpha: isDark ? 0.24 : 0.14), base);
     return AnimatedContainer(
