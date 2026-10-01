@@ -18,7 +18,8 @@
           "date": "2026-10-01T12:35:16Z",
           "size": 13463508,
           "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-lb-10011431/Opentify.ipa",
-          "minOSVersion": "15.0"
+          "minOSVersion": "15.0",
+          "buildVersion": "12"
         }
       ],
       "appPermissions": {
