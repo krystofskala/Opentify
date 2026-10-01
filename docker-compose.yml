@@ -13,6 +13,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       # Přihlášení jménem a heslem (app/auth.py); `open` = bez přihlašování.
       AUTH_MODE: ${AUTH_MODE:-login}
+      # Knihovna › Server: přehled sdílení na Soulseeku (jen čtení, viz
+      # GET /library/soulseek) -- stejný klíč jako worker.
+      SLSKD_URL: http://gluetun:5030
+      SLSKD_API_KEY: "${SLSKD_API_KEY_SECRET:?vygeneruj: openssl rand -base64 32}"
       MUSICBRAINZ_BASE_URL: https://musicbrainz.org/ws/2
       MUSICBRAINZ_USER_AGENT: ${MUSICBRAINZ_USER_AGENT:?nastav v .env dle MusicBrainz API etiquette, např. "VaultPersonal/0.1 (tvuj@email)"}
       # Wikidata/Wikipedia (artist bio) mají stejnou User-Agent politiku --

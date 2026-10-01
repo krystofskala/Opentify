@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'soulseek_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -283,6 +284,8 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
           return CustomScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
+              // Server (admin): sdílení na Soulseeku -- kdo si co od nás stáhl.
+              if (ref.watch(libraryScopeProvider) == LibraryScope.all) const SliverToBoxAdapter(child: SoulseekCard()),
               SliverToBoxAdapter(
                 child: TrackCollectionToolbar(
                   controller: _collection,

@@ -1210,3 +1210,46 @@ def export_library(current: tuple[str, str] = Depends(get_current_user)):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="opentify-export-{stamp}.zip"'},
     )
+
+
+@library_router.get("/soulseek")
+async def soulseek_overview(_admin=Depends(require_admin)):
+    """Knihovna › Server (admin): co sdílíme na Soulseeku a kdo si co od nás
+    stáhl (slskd API, jen čtení)."""
+    import os
+
+    base, key = os.environ.get("SLSKD_URL"), os.environ.get("SLSKD_API_KEY")
+    if not base or not key:
+        raise HTTPException(status_code=503, detail="Soulseek není nastavený.")
+    headers = {"X-API-Key": key}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            app_state = (await client.get(f"{base}/api/v0/application", headers=headers)).json()
+            uploads = (
+                await client.get(f"{base}/api/v0/transfers/uploads", headers=headers, params={"includeRemoved": "true"})
+            ).json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Soulseek (slskd) teď neodpovídá.") from exc
+    shares = app_state.get("shares") or {}
+    items = []
+    for user in uploads or []:
+        for directory in user.get("directories", []):
+            for f in directory.get("files", []):
+                name = (f.get("filename") or "").replace("\\", "/")
+                items.append({
+                    "user": user.get("username"),
+                    "file": name.rsplit("/", 1)[-1],
+                    "folder": name.rsplit("/", 2)[-2] if name.count("/") >= 1 else "",
+                    "state": f.get("state") or "",
+                    "done": "Succeeded" in (f.get("state") or ""),
+                    "at": f.get("endedAt") or f.get("requestedAt") or f.get("enqueuedAt"),
+                })
+    items.sort(key=lambda i: i["at"] or "", reverse=True)
+    return {
+        "connected": "LoggedIn" in str((app_state.get("server") or {}).get("state") or ""),
+        "sharedFiles": shares.get("files", 0),
+        "sharedFolders": shares.get("directories", 0),
+        "downloads": sum(1 for i in items if i["done"]),
+        "users": len({i["user"] for i in items if i["done"]}),
+        "items": items[:200],
+    }
