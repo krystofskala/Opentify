@@ -66,9 +66,11 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
         router.push('/playlists/${result['playlistId']}');
       default:
         messenger?.showSnackBar(SnackBar(
-          content: Text(choice.kind == 'live'
-              ? 'Koncert je u interpreta ${choice.artist}.'
-              : 'Album je v diskografii interpreta ${choice.artist}.'),
+          content: Text(switch (choice.kind) {
+            'live' => 'Koncert je u interpreta ${choice.artist}.',
+            'soundtrack' => 'Soundtrack „${choice.title}“ je přidaný jako album.',
+            _ => 'Album je v diskografii interpreta ${choice.artist}.',
+          }),
         ));
         router.push('/releases/${result['releaseId']}');
     }
@@ -117,8 +119,10 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
       else ('track', 'Skladba', 'Jen ji pustit'),
       ('album', 'Album interpreta', 'Neoficiální / jen na YouTube – do jeho diskografie'),
       ('live', 'Koncert', 'Živé vystoupení – k interpretovi'),
+      ('soundtrack', 'Soundtrack', 'Hudba k filmu, seriálu nebo hře – jako album'),
     ];
-    final needsNames = _kind == 'album' || _kind == 'live';
+    final needsNames = _kind == 'album' || _kind == 'live' || _kind == 'soundtrack';
+    final soundtrack = _kind == 'soundtrack';
     return AlertDialog(
       title: const Text('Co je tohle?'),
       content: SingleChildScrollView(
@@ -148,11 +152,22 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
               ),
             ),
             if (needsNames) ...[
-              TextField(controller: _artist, decoration: const InputDecoration(labelText: 'Interpret')),
+              TextField(
+                controller: _artist,
+                decoration: InputDecoration(
+                  labelText: soundtrack ? 'Skladatel nebo „Various Artists“' : 'Interpret',
+                ),
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _title,
-                decoration: InputDecoration(labelText: _kind == 'live' ? 'Název koncertu' : 'Název alba'),
+                decoration: InputDecoration(
+                  labelText: switch (_kind) {
+                    'live' => 'Název koncertu',
+                    'soundtrack' => 'Film / seriál / hra',
+                    _ => 'Název alba',
+                  },
+                ),
               ),
             ],
           ],

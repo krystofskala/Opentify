@@ -10,6 +10,8 @@ proto dva kroky:
    - `album`    -- album interpreta, které jinde není (neoficiální / jen na
                    YouTube) -> objeví se v jeho diskografii se štítkem,
    - `live`     -- koncert interpreta (stejně jako album, štítek Živě).
+   - `soundtrack` -- hudba k filmu/seriálu/hře jako album; každá skladba
+                   si nechá svého interpreta (u soundtracku hraje každý jiný).
 
 Skladby nesou `external_refs.youtubeId` -> worker stáhne PŘESNĚ to video
 (žádné hledání, žádný Soulseek). YouTube jde napřímo (volba uživatele,
@@ -134,7 +136,7 @@ async def import_youtube_link(
     artist_name: str | None = None,
     title: str | None = None,
 ) -> dict[str, Any]:
-    if kind not in ("track", "playlist", "album", "live"):
+    if kind not in ("track", "playlist", "album", "live", "soundtrack"):
         raise YoutubeLinkError("Neznámý druh importu.")
     info = await inspect_youtube_link(text)
     videos = info["videos"]
@@ -192,15 +194,22 @@ async def import_youtube_link(
         "youtubeSource": source_id,
         "unofficial": True,
         "live": kind == "live",
-        "notes": "Živě · z YouTube" if kind == "live" else "Neoficiální vydání · jen na YouTube",
+        "soundtrack": kind == "soundtrack",
+        "notes": {
+            "live": "Živě · z YouTube",
+            "soundtrack": "Soundtrack · z YouTube",
+        }.get(kind, "Neoficiální vydání · jen na YouTube"),
     }
     for number, v in enumerate(videos, start=1):
         recording = session.exec(
             select(Recording).where(Recording.release_id == release.id, Recording.track_number == number)
         ).first()
+        # Soundtrack: interpret skladby z názvu videa (album je "Various").
+        track_artist = find_or_create_artist(session, v["artist"]) if kind == "soundtrack" and v["artist"] else artist
         if recording is None:
-            recording = Recording(artist_id=artist.id, release_id=release.id, title=v["title"], track_number=number)
-        recording.title = v["title"] if v["artist"] == artist.name or len(videos) > 1 else recording.title
+            recording = Recording(artist_id=track_artist.id, release_id=release.id, title=v["title"], track_number=number)
+        recording.artist_id = track_artist.id
+        recording.title = v["title"]
         recording.duration_ms = int(v["duration"] * 1000) if v.get("duration") else recording.duration_ms
         recording.external_refs = {**(recording.external_refs or {}), "youtubeId": v["id"]}
         session.add(recording)

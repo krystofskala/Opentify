@@ -1257,7 +1257,7 @@ async def soulseek_overview(_admin=Depends(require_admin)):
 
 class YoutubeLinkIn(BaseModel):
     url: str
-    kind: str | None = None  # track | playlist | album | live
+    kind: str | None = None  # track | playlist | album | live | soundtrack
     artist_name: str | None = None
     title: str | None = None
 
@@ -1291,7 +1291,7 @@ async def youtube_import(
     if result["kind"] == "track":
         recording = session.get(Recording, result["recordingId"])
         result["recording"] = _local_recording_out(session, recording).model_dump(by_alias=True) if recording else None
-    if result["kind"] in ("album", "live"):
+    if result["kind"] in ("album", "live", "soundtrack"):
         from app.catalog.cache import CACHE_PREFIX
         from app.redis_bus import get_redis
 
