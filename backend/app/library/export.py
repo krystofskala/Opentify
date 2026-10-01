@@ -160,7 +160,7 @@ def build_export(session: Session, user_id: str, profile_name: str) -> bytes:
     ).all()
     later = [t for t in (look.track(r.target_id) for r in later_rows if r.listened_at is None) if t]
     if later:
-        playlists.append(("Poslechnout později", later))
+        playlists.append(("Na později", later))
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:

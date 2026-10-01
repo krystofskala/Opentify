@@ -213,8 +213,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
             // Zrušené gesto (prst sjel z okna/displeje): vrátit lištu, jinak
             // zůstala viset napůl stažená za navigací.
             onPanCancel: () => _onPanEnd(DragEndDetails(), playback, screenHeight),
-            // Stejné neutrální sklo jako tab bar pod ní -- s tónem barvy
-            // skladby měly lišty každá jiný nádech (živě nahlášeno).
+            // Stejné sklo jako tab bar pod ní (stejný tón z GlassSettings) --
+            // dřív měla každá lišta jiný nádech (živě nahlášeno).
             child: GlassContainer(
               // Stejně kulatá jako tab bar pod ní -- dřív 26 vs. 31 (design audit #11).
               borderRadius: BorderRadius.circular(GlassTokens.tabBarHeight / 2),

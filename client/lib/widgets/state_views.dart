@@ -296,7 +296,7 @@ class SkeletonCardRail extends StatelessWidget {
             child: Column(
               crossAxisAlignment: circle ? CrossAxisAlignment.center : CrossAxisAlignment.start,
               children: [
-                SkeletonBox(width: cardWidth, height: cardWidth, radius: circle ? AppRadii.pill : AppRadii.md),
+                SkeletonBox(width: cardWidth, height: cardWidth, radius: circle ? AppRadii.pill : AppRadii.sm),
                 const SizedBox(height: AppSpacing.xs),
                 SkeletonBox(width: cardWidth * 0.8, height: 12, radius: AppRadii.xs),
                 const SizedBox(height: 6),

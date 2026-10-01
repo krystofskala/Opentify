@@ -85,7 +85,7 @@ class ShazamCollectionScreen extends ConsumerWidget {
             return const EmptyState(
               icon: Symbols.graphic_eq_rounded,
               message: 'Zatím nic. Co poznáš přes „Poznat skladbu“, se uloží sem '
-                  '(a do Poslechnout později).',
+                  '(a do „Na později“).',
             );
           }
           final tracks = <RecordingModel>[for (final i in items) i.track!];

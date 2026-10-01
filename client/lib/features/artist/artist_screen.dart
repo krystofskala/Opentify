@@ -177,7 +177,7 @@ class _ArtistBody extends ConsumerWidget {
                 ),
                 HeroAction(
                   icon: artistLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
-                  tooltip: artistLater ? 'Odebrat z Poslechnout později' : 'Prozkoumat později',
+                  tooltip: artistLater ? 'Odebrat z „Na později“' : 'Uložit na později',
                   onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.artist, artist.id),
                 ),
               ],

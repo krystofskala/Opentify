@@ -23,8 +23,8 @@ import '../../widgets/track_tile.dart';
 import '../shazam/open_shazam_badge.dart';
 import 'pinned_tile.dart';
 
-const _title = 'Poslechnout později';
-const _sourceLabel = 'Poslechnout později';
+const _title = 'Na později';
+const _sourceLabel = 'Na později';
 
 /// Připnutá karta v Knihovně (pod Oblíbenými) -- tónový kontejner, ne sklo.
 class ListenLaterCard extends ConsumerWidget {
@@ -36,7 +36,7 @@ class ListenLaterCard extends ConsumerWidget {
     final count = ref.watch(listenLaterProvider).valueOrNull?.active.length;
     return PinnedTile(
       icon: Symbols.schedule_rounded,
-      title: 'Na později',
+      title: _title,
       subtitle: count == null || count == 0 ? 'Hudba na potom' : '$count ${_items(count)}',
       colors: [scheme.tertiaryContainer, scheme.secondaryContainer],
       iconBackground: scheme.tertiary,
@@ -106,7 +106,7 @@ class _ListenLaterScreenState extends ConsumerState<ListenLaterScreen> {
     if (data.active.isEmpty && data.listened.isEmpty) {
       return const EmptyState(
         icon: Symbols.schedule_rounded,
-        message: 'Zatím tu nic není. Přidávej přes menu skladby („Poslechnout později“), '
+        message: 'Zatím tu nic není. Přidávej přes menu skladby („Uložit na později“), '
             'dlouhým tahem skladby doleva, nebo tlačítkem s hodinami u alba a interpreta. '
             'Co si poslechneš, přesune se samo do „Poslechnuto“ a pár skladeb odsud '
             'ti občas přimíchám do Denních mixů.',

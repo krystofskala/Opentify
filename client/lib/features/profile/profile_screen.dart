@@ -155,7 +155,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   _ActionRow(
                     icon: Symbols.ios_share_rounded,
                     title: 'Exportovat moje data',
-                    description: 'Oblíbené, playlisty, historie poslechů a Poslechnout později v jednom ZIPu. '
+                    description: 'Oblíbené, playlisty, historie poslechů a seznam „Na později“ v jednom ZIPu. '
                         'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',
                     buttonLabel: 'Exportovat',
                     onPressed: () => _export(context),

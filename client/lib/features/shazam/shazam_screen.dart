@@ -221,7 +221,7 @@ class _ListenButton extends StatelessWidget {
       _Phase.listening => ('Poslouchám…', 'Drž telefon blíž k hudbě. Klepnutím zrušíš.'),
       _Phase.notFound => ('Tuhle jsem nepoznal', 'Zkus to blíž k reproduktoru, nebo v refrénu.'),
       _Phase.error => ('Něco se nepovedlo', error),
-      _ => ('Klepni a poznej skladbu', 'Rozpoznaná skladba se uloží do Poslechnout později.'),
+      _ => ('Klepni a poznej skladbu', 'Rozpoznaná skladba se uloží do „Na později“.'),
     };
     return Column(
       children: [
@@ -314,7 +314,7 @@ class _ResultCard extends StatelessWidget {
             Icon(Symbols.schedule_rounded, size: 16, color: scheme.onSurfaceVariant),
             const SizedBox(width: 6),
             Text(
-              'Uloženo do Poslechnout později',
+              'Uloženo na později',
               style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ],

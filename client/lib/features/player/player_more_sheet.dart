@@ -158,22 +158,6 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             ),
                           if (playback.nowPlaying != null) _shareTile(context, playback),
                           if (playback.nowPlaying != null) _abRepeatTile(context, playback),
-                          if (playback.nowPlaying != null)
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: const Icon(Symbols.close_rounded),
-                              title: const Text('Zavřít přehrávač'),
-                              subtitle: const Text('Zastaví hudbu a vyprázdní frontu'),
-                              onTap: () {
-                                // Nejdřív zasunout velký přehrávač, pak ukončit -- jinak by
-                                // na chvíli ukázal prázdné "Nic nehraje".
-                                final sheet = NowPlayingSheetController.of(context);
-                                final player = ref.read(audioPlayerControllerProvider.notifier);
-                                Navigator.of(context).pop();
-                                sheet.close();
-                                Future.delayed(const Duration(milliseconds: 450), player.dismiss);
-                              },
-                            ),
                           const Divider(),
                           const Row(
                             children: [
@@ -261,6 +245,25 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               ),
                             ],
                           ),
+                          // Nevratné (zastaví hudbu, vyprázdní frontu) -- až úplně dole
+                          // a červeně, ne mezi neškodnými položkami.
+                          if (playback.nowPlaying != null) const Divider(),
+                          if (playback.nowPlaying != null)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(Symbols.close_rounded, color: Theme.of(context).colorScheme.error),
+                              title: Text('Zavřít přehrávač', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                              subtitle: const Text('Zastaví hudbu a vyprázdní frontu'),
+                              onTap: () {
+                                // Nejdřív zasunout velký přehrávač, pak ukončit -- jinak by
+                                // na chvíli ukázal prázdné "Nic nehraje".
+                                final sheet = NowPlayingSheetController.of(context);
+                                final player = ref.read(audioPlayerControllerProvider.notifier);
+                                Navigator.of(context).pop();
+                                sheet.close();
+                                Future.delayed(const Duration(milliseconds: 450), player.dismiss);
+                              },
+                            ),
                         ],
                       ),
                     ),
@@ -281,7 +284,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded),
-      title: Text(isLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později'),
+      title: Text(isLater ? 'Odebrat z „Na později“' : 'Uložit na později'),
       onTap: () {
         final host = Navigator.of(context).context;
         Navigator.of(context).pop();

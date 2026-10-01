@@ -93,7 +93,11 @@ class GlassTokens {
   /// Mírné zjasnění rozmazaného pozadí (součást vibrance).
   static const double brightness = 1.04;
 
-  /// Neutrální výplň skla -- žádné akcentové tónování na chrome.
+  /// Výplň skla: ve výchozím stavu tónovaná barvou hrající skladby (Profil ›
+  /// Vzhled › "Tón v barvě skladby", síla/tmavost/barevnost odladěné
+  /// a schválené). Neutrální šedá/bílá je volba, ne pravidlo. Všechno sklo
+  /// (lišty, mini přehrávač, sheety) ale tónuje STEJNĚ -- žádné jednotlivé
+  /// prvky s vlastním odstínem.
   /// Světlý režim: bílá ~12 %, tmavý: černá ~26 % + náznak bílé.
   /// Výrazný tón skla, ať se od okolí jasně odliší (s průhledným sklem se
   /// lišty slévaly s pozadím -- živě nahlášeno): světlý režim bílá, tmavý
@@ -164,7 +168,7 @@ class GlassTokens {
   static const Size grabberSize = Size(36, 5);
 
   /// Panel návrhů / menu.
-  static const double panelRadius = 14;
+  static const double panelRadius = 16;
 
   // --- Stavy ---------------------------------------------------------------
 

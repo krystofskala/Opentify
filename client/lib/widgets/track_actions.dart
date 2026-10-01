@@ -201,7 +201,7 @@ class _TrackActionsSheet extends ConsumerWidget {
               ),
               _Item(
                 icon: isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
-                label: isLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',
+                label: isLater ? 'Odebrat z „Na později“' : 'Uložit na později',
                 onTap: () => run(
                   () => ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id),
                 ),

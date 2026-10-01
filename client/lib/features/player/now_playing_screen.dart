@@ -1210,11 +1210,11 @@ class _Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: ShapeDecoration(
-        shape: AppShapes.of(24),
+        shape: AppShapes.of(Expressive.cornerExtraLarge),
         shadows: const [BoxShadow(color: Color(0x55000000), blurRadius: 32, offset: Offset(0, 14))],
       ),
       child: ClipPath(
-        clipper: ShapeBorderClipper(shape: AppShapes.of(24)),
+        clipper: ShapeBorderClipper(shape: AppShapes.of(Expressive.cornerExtraLarge)),
         child: (url ?? info.artworkUrl) != null
             ? NetImage(url: (url ?? info.artworkUrl)!)
             : const ArtworkPlaceholder(icon: Symbols.music_note_rounded, iconSize: 96),

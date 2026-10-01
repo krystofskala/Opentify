@@ -1420,7 +1420,7 @@ class _HeroCircleButton extends StatelessWidget {
         child: GestureDetector(
           onTap: onPressed,
           child: GlassContainer(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(AppRadii.lg),
             rim: true,
             liquid: true,
             child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),

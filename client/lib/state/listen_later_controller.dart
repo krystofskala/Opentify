@@ -80,7 +80,7 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
     try {
       if (existing != null) {
         await remove(existing.id);
-        messenger?.showSnackBar(const SnackBar(content: Text('Odebráno z Poslechnout později')));
+        messenger?.showSnackBar(const SnackBar(content: Text('Odebráno z „Na později“')));
         return;
       }
       final item = await add(kind, targetId);
@@ -90,7 +90,7 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
             children: [
               Icon(Symbols.schedule_rounded, size: 18),
               SizedBox(width: 8),
-              Expanded(child: Text('Přidáno do Poslechnout později')),
+              Expanded(child: Text('Uloženo na později')),
             ],
           ),
           action: context.mounted

@@ -174,7 +174,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                 ),
                 HeroAction(
                   icon: albumLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
-                  tooltip: albumLater ? 'Odebrat z Poslechnout později' : 'Poslechnout později',
+                  tooltip: albumLater ? 'Odebrat z „Na později“' : 'Uložit na později',
                   onPressed: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.album, release.id),
                 ),
                 // Univerzální odkaz na album (album.link) -- načtený dopředu.
