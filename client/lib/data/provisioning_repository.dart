@@ -1,4 +1,5 @@
 import '../core/api_client.dart';
+import '../core/device_token.dart';
 import '../models/provisioning_model.dart';
 
 /// Tenká vrstva nad provisioning endpointy (docs/openapi.yaml): spouští
@@ -34,6 +35,8 @@ class ProvisioningRepository {
   }
 
   /// `GET /tracks/{id}/stream` — přímá URL pro audio player. Vyžaduje
-  /// `MediaAsset.status == AVAILABLE`, jinak backend vrátí 409.
-  String streamUrl(String recordingId) => '${_api.baseUrl}/tracks/$recordingId/stream';
+  /// `MediaAsset.status == AVAILABLE`, jinak backend vrátí 409. Stream je za
+  /// přihlášením: nativní přehrávač neposílá hlavičky, proto klíč v `?t=`
+  /// (web má cookie).
+  String streamUrl(String recordingId) => withDeviceToken('${_api.baseUrl}/tracks/$recordingId/stream');
 }
