@@ -331,20 +331,24 @@ class _HeroFlexible extends StatelessWidget {
             // Končí 2 px nad spodní hranou a maska je průhledná už od 94 % --
             // na iPhonu (zlomkové pixely) jinak poslední řádek fotky vyklouzl
             // masce a nad popiskem problikávala tenká čára (živě nahlášeno).
+            // Pořád občas čára (živě nahlášeno znovu): prolnutí končí dřív
+            // (88 %, 4 px nad hranou) a obsah je oříznutý přesně na masku --
+            // nic pod ní nevyčuhuje neprolnuté.
             Positioned(
               left: 0,
               right: 0,
               top: 0,
-              bottom: 2,
+              bottom: 4,
               child: ShaderMask(
                 blendMode: BlendMode.dstIn,
                 shaderCallback: (rect) => const LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [Colors.black, Colors.black, Color(0x00000000), Color(0x00000000)],
-                  stops: [0, 0.42, 0.94, 1],
+                  stops: [0, 0.42, 0.88, 1],
                 ).createShader(rect),
                 child: Stack(
+                  clipBehavior: Clip.hardEdge,
                   fit: StackFit.expand,
                   children: [
                     Positioned(
