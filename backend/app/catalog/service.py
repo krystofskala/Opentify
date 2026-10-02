@@ -739,8 +739,13 @@ class CatalogService:
         if artist is None:
             return None
         if (artist.mbid or "").startswith("own:"):
-            # Vlastní interpret: vlastní text (členové kapely...), nic online.
-            return ArtistBioOut(bio=(artist.external_refs or {}).get("bio"), related_artists=[])
+            # Vlastní interpret: vlastní text a ručně zadané kapely
+            # (`external_refs.bands` = id našich interpretů), nic online.
+            refs = artist.external_refs or {}
+            bands = [a for a in (self._session.get(Artist, i) for i in refs.get("bands") or []) if a is not None]
+            return ArtistBioOut(
+                bio=refs.get("bio"), related_artists=[], bands=[self._to_artist_out(a) for a in bands]
+            )
         # "Podobní" z Last.fm (podobnost podle posluchačů) -- MusicBrainz
         # vztahy (členové, spolupráce) jsou jen záloha.
         similar = await self._lastfm_similar(artist)
@@ -761,7 +766,49 @@ class CatalogService:
             bio = await wiki.get_bio_from_wikidata(wikidata_qid)
 
         related = similar or self._upsert_related_artists(relations)
-        return ArtistBioOut(bio=bio, related_artists=[self._to_artist_out(a) for a in related])
+        bands, members = self._band_relations(relations)
+        self._session.commit()
+        return ArtistBioOut(
+            bio=bio,
+            related_artists=[self._to_artist_out(a) for a in related if a.id not in {b.id for b in bands + members}],
+            bands=[self._to_artist_out(a) for a in bands],
+            members=[self._to_artist_out(a) for a in members],
+        )
+
+    def _band_relations(self, relations: list[dict[str, Any]]) -> tuple[list[Artist], list[Artist]]:
+        """MusicBrainz "member of band": `forward` = tenhle člověk je členem
+        kapely (-> kapely a projekty), `backward` = člen téhle kapely (->
+        členové, současní napřed). Vlastní interpret s `external_refs.mbidAlias`
+        nahradí stejného člověka z MusicBrainz (Tyler Joseph u Pilotů vede na
+        jeho vlastní profil)."""
+        aliases: dict[str, Artist] = {}
+        for own in self._session.exec(select(Artist).where(Artist.mbid.like("own:%"))).all():  # type: ignore[union-attr]
+            alias = (own.external_refs or {}).get("mbidAlias")
+            if alias:
+                aliases[alias] = own
+
+        bands: list[Artist] = []
+        current: list[Artist] = []
+        former: list[Artist] = []
+        seen: set[str] = set()
+        for rel in relations:
+            if rel.get("type") != "member of band" or rel.get("target-type") != "artist":
+                continue
+            stub = rel.get("artist") or {}
+            mbid, name = stub.get("id"), stub.get("name")
+            if not mbid or not name or mbid in seen:
+                continue
+            seen.add(mbid)
+            row = aliases.get(mbid) or upsert_artist(
+                self._session, mbid=mbid, name=name, sort_name=stub.get("sort-name")
+            )
+            if rel.get("direction") == "forward":
+                bands.append(row)
+            elif rel.get("ended"):
+                former.append(row)
+            else:
+                current.append(row)
+        return bands[:12], (current + former)[:12]
 
     _SIMILAR_LIMIT = 12
 

@@ -84,6 +84,10 @@ class DiscographyOut(CamelModel):
 class ArtistBioOut(CamelModel):
     bio: str | None = None
     related_artists: list[ArtistOut] = []
+    # U člověka kapely a projekty, ve kterých hraje/hrál; u kapely členové
+    # (současní napřed). Z MusicBrainz "member of band".
+    bands: list[ArtistOut] = []
+    members: list[ArtistOut] = []
 
 
 class SearchResponse(CamelModel):

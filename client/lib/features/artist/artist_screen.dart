@@ -273,7 +273,15 @@ class _ArtistBody extends ConsumerWidget {
               ],
               SliverToBoxAdapter(
                 child: bio.maybeWhen(
-                  data: (data) => _RelatedArtistsSection(bio: data),
+                  // Kapely člověka / členové kapely napřed, pak podobní.
+                  data: (data) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _RelatedArtistsSection(artists: data.bands, title: 'Kapely a projekty'),
+                      _RelatedArtistsSection(artists: data.members, title: 'Členové'),
+                      _RelatedArtistsSection(artists: data.relatedArtists),
+                    ],
+                  ),
                   orElse: () => const SizedBox.shrink(),
                 ),
               ),
@@ -419,19 +427,20 @@ class _PopularTracksSectionState extends ConsumerState<_PopularTracksSection> {
 
 /// "Podobní interpreti" (životopis je jako upoutávka hned pod hlavičkou).
 class _RelatedArtistsSection extends StatelessWidget {
-  const _RelatedArtistsSection({required this.bio});
-  final ArtistBioModel bio;
+  const _RelatedArtistsSection({required this.artists, this.title = 'Podobní interpreti'});
+  final List<ArtistModel> artists;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
-    final related = bio.relatedArtists;
+    final related = artists;
     if (related.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ...[
-          const SectionHeader('Podobní interpreti'),
+          SectionHeader(title),
           SizedBox(
             height: 180,
             child: ListView.builder(
