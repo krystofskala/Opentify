@@ -251,6 +251,7 @@ def local_albums(
             Artist.name,
             func.count(func.distinct(Recording.id)),
             func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.updated_at)),
+            Release.external_refs,
         )
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
@@ -264,19 +265,40 @@ def local_albums(
         .order_by(Artist.name, Release.title)
     ).all()
 
-    return [
-        {
-            "id": release_id,
-            "title": title,
-            "coverImageUrl": images[0] if images else None,
-            "artistId": artist_id,
-            "artistName": artist_name,
-            "trackCount": track_count,
-            # Kdy přibyla do knihovny (nejnovější skladba) -- řazení "Přidáno".
-            "addedAt": _iso(added_at),
-        }
-        for release_id, title, images, artist_id, artist_name, track_count, added_at in rows
-    ]
+    # Různé názvy skladeb alba v knihovně (katalog má občas stejnou skladbu
+    # dvakrát) -- pro "celé album".
+    owned_titles: dict[str, set[str]] = {}
+    for release_id, rec_title in session.exec(
+        select(Recording.release_id, Recording.title)
+        .join(MediaAsset, MediaAsset.recording_id == Recording.id)
+        .outerjoin(
+            LibraryEntry,
+            (LibraryEntry.recording_id == Recording.id) & (LibraryEntry.user_id == current[0]),  # type: ignore[arg-type]
+        )
+        .where(_in_library(current[0]))
+    ).all():
+        owned_titles.setdefault(release_id, set()).add((rec_title or "").strip().lower())
+
+    out = []
+    for release_id, title, images, artist_id, artist_name, track_count, added_at, refs in rows:
+        total = (refs or {}).get("tracklistCount")
+        out.append(
+            {
+                "id": release_id,
+                "title": title,
+                "coverImageUrl": images[0] if images else None,
+                "artistId": artist_id,
+                "artistName": artist_name,
+                "trackCount": track_count,
+                # Kdy přibyla do knihovny (nejnovější skladba) -- řazení "Přidáno".
+                "addedAt": _iso(added_at),
+                # Celé album: všechny skladby tracklistu v knihovně (tracklist
+                # neznámý = nevíme, do filtru "Jen celá alba" nepatří).
+                "totalTracks": total,
+                "complete": bool(total) and len(owned_titles.get(release_id, ())) >= total,
+            }
+        )
+    return out
 
 
 def _iso(value) -> str | None:  # noqa: ANN001 -- SQLite vrací str nebo datetime

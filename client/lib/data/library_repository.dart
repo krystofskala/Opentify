@@ -29,6 +29,8 @@ class LocalAlbum {
     required this.artistName,
     required this.trackCount,
     this.addedAt,
+    this.totalTracks,
+    this.complete = false,
   });
 
   final String id;
@@ -37,6 +39,12 @@ class LocalAlbum {
   final String artistId;
   final String artistName;
   final int trackCount;
+
+  /// Kolik skladeb album má (z tracklistu); `null` = zatím neznámé.
+  final int? totalTracks;
+
+  /// V knihovně jsou všechny skladby alba ("Jen celá alba").
+  final bool complete;
 
   /// Kdy album přibylo do knihovny (ISO) -- řazení „Přidáno".
   final String? addedAt;
@@ -49,6 +57,8 @@ class LocalAlbum {
         artistName: json['artistName'] as String,
         trackCount: json['trackCount'] as int,
         addedAt: json['addedAt'] as String?,
+        totalTracks: json['totalTracks'] as int?,
+        complete: json['complete'] as bool? ?? false,
       );
 }
 

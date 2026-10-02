@@ -860,6 +860,19 @@ class CatalogService:
         return self._to_release_out(release)
 
     async def get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
+        tracks = await self._get_release_tracks(release_id)
+        if tracks:
+            # Kolik skladeb album má (různé názvy) -- Knihovna podle toho pozná
+            # celá alba ("Jen celá alba").
+            count = len({(t.title or "").strip().lower() for t in tracks})
+            release = self._session.get(Release, release_id)
+            if release is not None and (release.external_refs or {}).get("tracklistCount") != count:
+                release.external_refs = {**(release.external_refs or {}), "tracklistCount": count}
+                self._session.add(release)
+                self._session.commit()
+        return tracks
+
+    async def _get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
         release = self._session.get(Release, release_id)
         if release is None:
             return None

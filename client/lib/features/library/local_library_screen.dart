@@ -377,13 +377,16 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
 /// Přepínač mřížka/seznam nad alby/interprety. Vlastní filtr tu není --
 /// hledá se horním polem "Hledat v knihovně".
 class _GridViewBar extends StatelessWidget {
-  const _GridViewBar({required this.viewMode, required this.onViewMode, this.sort});
+  const _GridViewBar({required this.viewMode, required this.onViewMode, this.sort, this.filter});
 
   final ViewMode viewMode;
   final ValueChanged<ViewMode> onViewMode;
 
   /// Řazení vlevo (jako u Skladeb).
   final Widget? sort;
+
+  /// Filtr vedle řazení (Alba: "Celá alba").
+  final Widget? filter;
 
   @override
   Widget build(BuildContext context) {
@@ -392,6 +395,7 @@ class _GridViewBar extends StatelessWidget {
       child: Row(
         children: [
           if (sort != null) sort!,
+          if (filter != null) ...[const SizedBox(width: AppSpacing.xs), filter!],
           const Spacer(),
           ViewModeToggle(mode: viewMode, onChanged: onViewMode),
         ],
@@ -411,6 +415,9 @@ const _librarySortLabels = {
 };
 
 final _librarySortProvider = StateProvider.family<LibrarySort, String>((ref, tab) => LibrarySort.added);
+
+/// Knihovna › Alba › "Celá alba": jen alba, ze kterých má uživatel všechny skladby.
+final _completeAlbumsOnlyProvider = StateProvider<bool>((ref) => false);
 
 /// Novější první; bez data na konec.
 int _byAddedDesc(String? a, String? b) => (b ?? '').compareTo(a ?? '');
@@ -452,9 +459,10 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
     super.build(context);
     final albums = ref.watch(_localAlbumsProvider);
     final sort = ref.watch(_librarySortProvider('albums'));
+    final completeOnly = ref.watch(_completeAlbumsOnlyProvider);
     return albums.when(
       data: (loaded) {
-        final items = [...loaded]..sort((a, b) => switch (sort) {
+        final items = [for (final a in loaded) if (!completeOnly || a.complete) a]..sort((a, b) => switch (sort) {
               LibrarySort.added => _byAddedDesc(a.addedAt, b.addedAt),
               LibrarySort.name => _byName(a.title, b.title),
               LibrarySort.artist => _byName(a.artistName, b.artistName) != 0
@@ -462,7 +470,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                   : _byName(a.title, b.title),
               LibrarySort.count => b.trackCount.compareTo(a.trackCount),
             });
-        if (items.isEmpty) {
+        if (loaded.isEmpty) {
           return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba – spusť sken v Profilu.');
         }
         return RefreshIndicator(
@@ -478,10 +486,21 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                     tab: 'albums',
                     options: [LibrarySort.added, LibrarySort.name, LibrarySort.artist, LibrarySort.count],
                   ),
+                  filter: FilterChip(
+                    label: const Text('Celá alba'),
+                    tooltip: 'Jen alba, ze kterých máš všechny skladby',
+                    selected: completeOnly,
+                    onSelected: (on) => ref.read(_completeAlbumsOnlyProvider.notifier).state = on,
+                  ),
                 ),
               ),
               if (items.isEmpty)
-                const SliverToBoxAdapter(child: EmptyState(compact: true, message: 'Filtru nic neodpovídá.'))
+                SliverToBoxAdapter(
+                  child: EmptyState(
+                    compact: true,
+                    message: completeOnly ? 'Zatím žádné celé album.' : 'Filtru nic neodpovídá.',
+                  ),
+                )
               else if (_viewMode == ViewMode.grid)
                 SliverPadding(
                   padding: const EdgeInsets.all(AppSpacing.sm),
