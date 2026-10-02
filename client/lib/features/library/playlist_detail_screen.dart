@@ -22,6 +22,7 @@ import '../../widgets/glass/glass.dart';
 import '../../core/cz_plural.dart';
 import '../../widgets/toast.dart';
 import '../../theme/shapes.dart';
+import 'package:file_picker/file_picker.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -145,6 +146,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     isRadio: detail.source?.startsWith('radio:') ?? false,
                     onSaveCopy: readOnly && !pinned ? () => _saveToLibrary(context, detail) : null,
                     onDelete: readOnly ? null : () => _confirmDelete(context),
+                    onEdit: readOnly ? null : () => _editPlaylist(context, detail),
                   ),
                 ),
               ],
@@ -343,6 +345,96 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final top =
         (counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).map((e) => e.key).take(2).toList();
     return counts.length > top.length ? '${top.join(', ')} a další' : top.join(' a ');
+  }
+
+  /// ⋯ › Upravit: název, krátký popis a vlastní obal (místo mozaiky).
+  Future<void> _editPlaylist(BuildContext context, PlaylistDetailModel detail) async {
+    final title = TextEditingController(text: detail.title);
+    final description = TextEditingController(text: detail.description ?? '');
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final api = ref.read(apiClientProvider);
+    final saved = await showGlassSheet<bool>(
+      context,
+      builder: (sheet) => GlassSheet(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md + MediaQuery.viewInsetsOf(sheet).bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Upravit playlist', style: Theme.of(sheet).textTheme.titleLarge),
+              const SizedBox(height: AppSpacing.sm),
+              TextField(controller: title, decoration: const InputDecoration(labelText: 'Název')),
+              const SizedBox(height: AppSpacing.xs),
+              TextField(
+                controller: description,
+                maxLines: 3,
+                minLines: 1,
+                maxLength: 500,
+                decoration: const InputDecoration(labelText: 'Krátký popis (nepovinné)'),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: GlassButton(
+                      label: 'Vybrat obal…',
+                      icon: Symbols.image_rounded,
+                      style: GlassButtonStyle.tonal,
+                      onPressed: () async {
+                        final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+                        final file = picked?.files.firstOrNull;
+                        if (file?.bytes == null) return;
+                        try {
+                          await api.postMultipart('/playlists/${detail.id}/cover',
+                              fieldName: 'file', bytes: file!.bytes!, filename: file.name);
+                          showToast(messenger, 'Obal nastaven');
+                        } catch (e) {
+                          showToast(messenger, 'Obal se nepodařilo nahrát: $e');
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  GlassButton(
+                    label: 'Mozaika',
+                    icon: Symbols.grid_view_rounded,
+                    style: GlassButtonStyle.plain,
+                    onPressed: () async {
+                      try {
+                        await api.deleteJson('/playlists/${detail.id}/cover');
+                        showToast(messenger, 'Zpátky na mozaiku z obalů skladeb');
+                      } catch (_) {}
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              GlassButton(
+                label: 'Uložit',
+                style: GlassButtonStyle.prominent,
+                expand: true,
+                onPressed: () => Navigator.of(sheet).pop(true),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved == true) {
+      try {
+        await api.patchJson('/playlists/${detail.id}', body: {
+          'title': title.text.trim(),
+          'description': description.text.trim(),
+        });
+      } catch (e) {
+        showToast(messenger, 'Uložení selhalo: $e');
+      }
+    }
+    title.dispose();
+    description.dispose();
+    ref.invalidate(myPlaylistsProvider);
+    ref.invalidate(playlistDetailProvider(detail.id));
   }
 
   /// Uložit mix / žebříček: zachytit dnešní stav (kopie), nebo připnout živý.

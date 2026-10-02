@@ -51,6 +51,7 @@ Future<void> showCollectionActions(
   bool isRadio = false,
   VoidCallback? onSaveCopy,
   VoidCallback? onDelete,
+  VoidCallback? onEdit,
 }) {
   HapticFeedback.selectionClick();
   return showGlassSheet<void>(
@@ -71,6 +72,7 @@ Future<void> showCollectionActions(
       isRadio: isRadio,
       onSaveCopy: onSaveCopy,
       onDelete: onDelete,
+      onEdit: onEdit,
     ),
   );
 }
@@ -92,6 +94,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
     this.isRadio = false,
     this.onSaveCopy,
     this.onDelete,
+    this.onEdit,
   });
 
   final BuildContext hostContext;
@@ -122,6 +125,9 @@ class _CollectionActionsSheet extends ConsumerWidget {
 
   /// Vlastní playlist: smazat (dole, červeně).
   final VoidCallback? onDelete;
+
+  /// Vlastní playlist: název, popis, obal.
+  final VoidCallback? onEdit;
 
   // Přes kontejner appky -- načítá se až po zavření sheetu, jeho `ref` už
   // v tu chvíli neplatí.
@@ -235,6 +241,15 @@ class _CollectionActionsSheet extends ConsumerWidget {
               }),
             ),
             const _MenuDivider(),
+            if (onEdit != null)
+              _Row(
+                icon: Symbols.edit_rounded,
+                label: 'Upravit název, popis a obal…',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onEdit!();
+                },
+              ),
             if (onSaveCopy != null)
               _Row(
                 icon: Symbols.library_add_rounded,

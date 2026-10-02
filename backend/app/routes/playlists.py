@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -22,6 +22,7 @@ from app.db import get_session
 from app.home.generators import _covers_for
 from app.models import GLOBAL_PLAYLIST_OWNER, Playlist, PlaylistItem, PlaylistKind, Recording
 from app.recommendations.schemas import PlaylistDetailOut, PlaylistOut
+from app.utils import utcnow
 
 playlists_router = APIRouter(prefix="/playlists", tags=["playlists"])
 
@@ -176,6 +177,77 @@ def list_playlists(
             "pinned": True,
         })
     return results
+
+
+class UpdatePlaylistBody(BaseModel):
+    title: str | None = None
+    description: str | None = None
+
+
+@playlists_router.patch("/{playlist_id}")
+def update_playlist(
+    playlist_id: str,
+    body: UpdatePlaylistBody,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Název a krátký popis vlastního playlistu."""
+    user_id, _device_id = current
+    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="název playlistu nesmí být prázdný")
+        playlist.title = title[:200]
+    if body.description is not None:
+        playlist.description = body.description.strip()[:500] or None
+    playlist.updated_at = utcnow()
+    session.add(playlist)
+    session.commit()
+    session.refresh(playlist)
+    return _playlist_detail(session, playlist).model_dump(by_alias=True)
+
+
+@playlists_router.post("/{playlist_id}/cover")
+async def upload_playlist_cover(
+    playlist_id: str,
+    file: UploadFile,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Vlastní obal playlistu (místo mozaiky z obalů skladeb)."""
+    import asyncio
+
+    from app.catalog.embedded_art import URL_TEMPLATE, _save_resized, artwork_path
+    from app.uploads import read_limited
+
+    user_id, _device_id = current
+    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    raw = await read_limited(file, 15 * 1024 * 1024, "Obrázek")
+    if not await asyncio.to_thread(_save_resized, raw, artwork_path(playlist.id)):
+        raise HTTPException(status_code=400, detail="Tohle není obrázek (nebo je moc malý).")
+    playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id)]
+    playlist.updated_at = utcnow()
+    session.add(playlist)
+    session.commit()
+    session.refresh(playlist)
+    return _playlist_detail(session, playlist).model_dump(by_alias=True)
+
+
+@playlists_router.delete("/{playlist_id}/cover")
+def remove_playlist_cover(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Zpátky na mozaiku z obalů skladeb."""
+    user_id, _device_id = current
+    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    playlist.cover_urls = []
+    session.add(playlist)
+    session.commit()
+    session.refresh(playlist)
+    return _playlist_detail(session, playlist).model_dump(by_alias=True)
 
 
 @playlists_router.post("/{playlist_id}/pin")
