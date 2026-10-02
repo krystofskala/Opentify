@@ -44,16 +44,21 @@ class ShareCardScreen extends ConsumerStatefulWidget {
   ConsumerState<ShareCardScreen> createState() => _ShareCardScreenState();
 }
 
+/// Formát obrázku: zpráva (4:5 -- v náhledu iMessage/WhatsAppu se zobrazí
+/// celý, 9:16 se ořízl) nebo příběh (9:16, Instagram stories).
+enum _CardFormat { message, story }
+
 class _ShareCardScreenState extends ConsumerState<ShareCardScreen> {
   final _keys = [GlobalKey(), GlobalKey()];
   final _page = PageController(viewportFraction: 0.82);
   final Map<String, Uint8List> _rendered = {};
   int _index = 0;
+  _CardFormat _format = _CardFormat.message;
   int? _lineStart; // první řádek na kartě s textem
   Timer? _renderTimer;
   bool _sharing = false;
 
-  static const _linesOnCard = 4;
+  int get _linesOnCard => _format == _CardFormat.story ? 4 : 3;
 
   @override
   void dispose() {
@@ -88,7 +93,7 @@ class _ShareCardScreenState extends ConsumerState<ShareCardScreen> {
     return out;
   }
 
-  String get _key => '$_index:${_lineStart ?? -1}';
+  String get _key => '${_format.name}:$_index:${_lineStart ?? -1}';
 
   void _scheduleRender() {
     _renderTimer?.cancel();
@@ -141,13 +146,16 @@ class _ShareCardScreenState extends ConsumerState<ShareCardScreen> {
       _CardFrame(
         repaintKey: _keys[0],
         accent: widget.accent,
+        aspectRatio: _format == _CardFormat.story ? 9 / 16 : 4 / 5,
         child: _SongCard(title: widget.title, artist: widget.artist, artworkUrl: widget.artworkUrl),
       ),
       if (hasLyrics)
         _CardFrame(
           repaintKey: _keys[1],
           accent: widget.accent,
+          aspectRatio: _format == _CardFormat.story ? 9 / 16 : 4 / 5,
           child: _LyricsCard(
+            compact: _format == _CardFormat.message,
             title: widget.title,
             artist: widget.artist,
             artworkUrl: widget.artworkUrl,
@@ -165,6 +173,17 @@ class _ShareCardScreenState extends ConsumerState<ShareCardScreen> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 4, 24, 4),
+            child: GlassSegmentedControl<_CardFormat>(
+              segments: const [
+                GlassSegment(value: _CardFormat.message, label: 'Zpráva 4:5'),
+                GlassSegment(value: _CardFormat.story, label: 'Příběh 9:16'),
+              ],
+              selected: _format,
+              onChanged: (f) => setState(() => _format = f),
+            ),
+          ),
           Expanded(
             child: PageView(
               controller: _page,
@@ -212,12 +231,13 @@ class _ShareCardScreenState extends ConsumerState<ShareCardScreen> {
   }
 }
 
-/// 9:16 rám s pozadím z barvy alba a zrnem -- tohle se vykresluje do PNG.
+/// Rám (4:5 / 9:16) s pozadím z barvy alba a zrnem -- tohle se vykresluje do PNG.
 class _CardFrame extends StatelessWidget {
-  const _CardFrame({required this.repaintKey, required this.accent, required this.child});
+  const _CardFrame({required this.repaintKey, required this.accent, required this.aspectRatio, required this.child});
 
   final GlobalKey repaintKey;
   final Color accent;
+  final double aspectRatio;
   final Widget child;
 
   @override
@@ -226,7 +246,7 @@ class _CardFrame extends StatelessWidget {
     final top = hsl.withLightness((hsl.lightness * 0.9).clamp(0.25, 0.55)).toColor();
     final bottom = hsl.withLightness(0.08).withSaturation((hsl.saturation * 0.8).clamp(0, 1)).toColor();
     return AspectRatio(
-      aspectRatio: 9 / 16,
+      aspectRatio: aspectRatio,
       child: RepaintBoundary(
         key: repaintKey,
         child: ClipRRect(
@@ -263,17 +283,22 @@ class _SongCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        AspectRatio(
-          aspectRatio: 1,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded),
+        // Obal zabere, kolik zbude -- vejde se do 4:5 i 9:16.
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded),
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 18),
         Text(
           title,
           maxLines: 2,
@@ -284,7 +309,7 @@ class _SongCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(artist!, maxLines: 1, style: const TextStyle(color: Colors.white70, fontSize: 17)),
         ],
-        const Spacer(),
+        const SizedBox(height: 16),
         const _Brand(),
       ],
     );
@@ -292,8 +317,16 @@ class _SongCard extends StatelessWidget {
 }
 
 class _LyricsCard extends StatelessWidget {
-  const _LyricsCard({required this.title, required this.artist, required this.artworkUrl, required this.lines});
+  const _LyricsCard({
+    required this.title,
+    required this.artist,
+    required this.artworkUrl,
+    required this.lines,
+    this.compact = false,
+  });
 
+  /// 4:5 -- menší písmo, ať se 3 řádky vejdou.
+  final bool compact;
   final String title;
   final String? artist;
   final String? artworkUrl;
@@ -336,7 +369,8 @@ class _LyricsCard extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 6),
             child: Text(
               line,
-              style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w800, height: 1.2),
+              style: TextStyle(
+                  color: Colors.white, fontSize: compact ? 22 : 25, fontWeight: FontWeight.w800, height: 1.2),
             ),
           ),
         const Spacer(),
