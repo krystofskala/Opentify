@@ -534,14 +534,24 @@ class SlskdProvider:
         filename = peer["filename"]
         # Soulseek cesty mají zpětná lomítka i na Linuxu -- basename ručně.
         basename = filename.rsplit("\\", 1)[-1]
+        remote_dir = filename.rsplit("\\", 2)[-2] if filename.count("\\") >= 1 else ""
         source_path: Path | None = None
+        since = time.time() - 5
+
+        def locate() -> Path | None:
+            return self._locate_downloaded_file(basename, remote_dir, since)
 
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
-            queued = await client.post(
-                f"/api/v0/transfers/downloads/{username}",
-                json=[{"filename": filename, "size": peer.get("size", 0)}],
-            )
-            queued.raise_for_status()
+            try:
+                queued = await client.post(
+                    f"/api/v0/transfers/downloads/{username}",
+                    json=[{"filename": filename, "size": peer.get("size", 0)}],
+                )
+                queued.raise_for_status()
+            except httpx.HTTPError as exc:
+                # 429/5xx od slskd -- zkusit dalšího peera, ne shodit celý slskd.
+                raise _PeerFailed(f"slskd nezafrontil ({exc})") from exc
+            poll_errors = 0
 
             loop = asyncio.get_running_loop()
             started = loop.time()
@@ -556,8 +566,17 @@ class SlskdProvider:
                         await self._cancel(client, username, transfer)
                         raise _PeerFailed(f"nedokončeno do {limit:.0f} s")
 
-                    transfers_resp = await client.get(f"/api/v0/transfers/downloads/{username}")
-                    transfers_resp.raise_for_status()
+                    try:
+                        transfers_resp = await client.get(f"/api/v0/transfers/downloads/{username}")
+                        transfers_resp.raise_for_status()
+                    except httpx.HTTPError as exc:
+                        poll_errors += 1
+                        if poll_errors >= 6:
+                            await self._cancel(client, username, transfer)
+                            raise _PeerFailed(f"slskd neodpovídá ({exc})") from exc
+                        await asyncio.sleep(min(2.0 * poll_errors, 10.0))
+                        continue
+                    poll_errors = 0
                     transfer = self._find_transfer(transfers_resp.json(), filename)
                     if transfer is not None:
                         transferred = int(transfer.get("bytesTransferred", 0))
@@ -567,7 +586,7 @@ class SlskdProvider:
                             last_bytes = transferred
                             last_change = now
                         if source_path is None and transferred > 0:
-                            found = await asyncio.to_thread(self._locate_downloaded_file, basename)
+                            found = await asyncio.to_thread(locate)
                             if found is not None:
                                 source_path = found
                                 await on_file_located(found)
@@ -595,9 +614,14 @@ class SlskdProvider:
                 # nezůstane viset ve frontě peeru a později nestáhne sirotka.
                 await asyncio.shield(self._cancel(client, username, transfer))
                 raise
+            except _PeerFailed:
+                raise
+            except Exception:
+                await self._cancel(client, username, transfer)
+                raise
 
         if source_path is None:
-            source_path = await asyncio.to_thread(self._locate_downloaded_file, basename)
+            source_path = await asyncio.to_thread(locate)
         if source_path is None:
             raise _PeerFailed(f"dokončený transfer '{basename}' se nenašel pod {self.downloads_dir}")
 
@@ -627,14 +651,28 @@ class SlskdProvider:
         except httpx.HTTPError:
             pass
 
-    def _locate_downloaded_file(self, basename: str) -> Path | None:
-        """Nejnovější soubor s tímhle jménem kdekoliv pod `downloads_dir` --
-        `rglob` místo pevné cesty, slskd strukturu zplošťuje po svém."""
+    def _locate_downloaded_file(self, basename: str, remote_dir: str = "", since: float = 0.0) -> Path | None:
+        """Soubor tohohle stažení pod `downloads_dir` -- `rglob` místo pevné
+        cesty, slskd strukturu zplošťuje po svém. Jen soubory změněné od
+        začátku stažení (ne stejnojmenný pozůstatek z dřívějška), přednost má
+        složka pojmenovaná jako vzdálená. slskd při kolizi přidá `_<ticks>`."""
+        stem, dot, ext = basename.rpartition(".")
         # Jméno souboru od cizího člověka -- "[", "*", "?" by glob bral jako vzor.
-        candidates = list(self.downloads_dir.rglob(glob.escape(basename)))
+        patterns = [glob.escape(basename)]
+        if dot:
+            patterns.append(glob.escape(stem) + "_*." + glob.escape(ext))
+        candidates: list[tuple[Path, float]] = []
+        for pattern in patterns:
+            for path in self.downloads_dir.rglob(pattern):
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime >= since:
+                    candidates.append((path, mtime))
         if not candidates:
             return None
-        return max(candidates, key=lambda p: p.stat().st_mtime)
+        return max(candidates, key=lambda c: (bool(remote_dir) and c[0].parent.name == remote_dir, c[1]))[0]
 
     @staticmethod
     def _find_transfer(payload: dict, filename: str) -> dict | None:

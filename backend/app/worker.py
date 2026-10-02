@@ -71,8 +71,11 @@ MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/data/media"))
 CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
 CLAIM_IDLE_MS = 60_000  # zprávy visící > 60s u mrtvého konzumenta se přeberou
 BLOCK_MS = 1_000
-LOCK_TTL_S = 90
-HEARTBEAT_S = 20
+# Zámek musí vypršet DŘÍV, než XAUTOCLAIM převezme zprávu mrtvého workeru --
+# jinak nový worker narazí na "živý" zámek, zprávu zahodí a job zůstane
+# navždy RUNNING (živě 2 joby).
+LOCK_TTL_S = 45
+HEARTBEAT_S = 15
 MAX_INTERACTIVE_JOBS = int(os.environ.get("WORKER_MAX_INTERACTIVE_JOBS", "4"))
 MAX_BACKGROUND_JOBS = int(os.environ.get("WORKER_MAX_BACKGROUND_JOBS", "2"))
 # Když v závodě vyhraje YouTube, slskd stahuje dál a lepší (FLAC/320) soubor
@@ -275,7 +278,15 @@ def _finish_failure(job_id: str, error_message: str, attempts: int, max_attempts
         return retry
 
 
-def _apply_upgrade(recording_id: str, new_path: str, replaces: str, source: str, audio_format: str, bitrate: int | None) -> bool:
+def _apply_upgrade(
+    recording_id: str,
+    new_path: str,
+    replaces: str,
+    source: str,
+    audio_format: str,
+    bitrate: int | None,
+    source_key: str | None = None,
+) -> bool:
     """Prohodí YouTube soubor za lepší ze slskd -- jen pokud asset pořád
     ukazuje na ten YouTube soubor (mezitím mohl proběhnout nový provisioning
     apod.). Starý soubor se maže až po úspěšném zápisu do DB."""
@@ -302,6 +313,14 @@ def _apply_upgrade(recording_id: str, new_path: str, replaces: str, source: str,
         asset.waveform_duration_ms = None
         asset.updated_at = utcnow()
         session.add(asset)
+        recording = session.get(Recording, recording_id)
+        if recording is not None and source_key:
+            # Zdroj je teď slskd soubor -- "Špatná verze" musí odmítnout ten,
+            # ne původní YouTube video.
+            refs = {**(recording.external_refs or {}), "sourceKey": source_key}
+            refs.pop("youtubeUrl", None)
+            recording.external_refs = refs
+            session.add(recording)
         session.commit()
     Path(replaces).unlink(missing_ok=True)
     return True
@@ -352,6 +371,7 @@ def _spawn_upgrade(recording_id: str, slskd_task: asyncio.Task, replaces: Path) 
                 "source": result.source_provider,
                 "format": result.format,
                 "bitrate": result.bitrate_kbps,
+                "source_key": result.source_key,
             }
         )
         await get_redis().zadd(UPGRADES_ZSET, {item: time.time() + UPGRADE_DELAY_S})
@@ -374,6 +394,7 @@ async def _process_due_upgrades(r) -> None:
             data["source"],
             data["format"],
             data.get("bitrate"),
+            data.get("source_key"),
         )
         logger.info("upgrade %s: %s", data["recording_id"], "prohozeno" if applied else "zahozeno (asset se mezitím změnil)")
         if applied:
@@ -710,8 +731,10 @@ async def reclaim_stale(r) -> None:
                 _spawn(r, stream, message_id, fields)
 
 
-_ORPHAN_AFTER_S = 120
+_ORPHAN_AFTER_S = 600
+_RUNNING_ORPHAN_AFTER_S = 300
 _ORPHAN_SWEEP_KEY = "provisioning:orphan-sweep"
+_REQUEUED_KEY = "provisioning:requeued:{}"
 
 
 async def requeue_orphaned_jobs(r) -> None:
@@ -724,23 +747,34 @@ async def requeue_orphaned_jobs(r) -> None:
     if not await r.set(_ORPHAN_SWEEP_KEY, CONSUMER_NAME, nx=True, ex=55):
         return
     cutoff = utcnow() - timedelta(seconds=_ORPHAN_AFTER_S)
+    running_cutoff = utcnow() - timedelta(seconds=_RUNNING_ORPHAN_AFTER_S)
 
-    def stale_pending() -> list[str]:
+    def stale() -> list[str]:
         with Session(engine) as session:
-            return list(
-                session.exec(
-                    select(ProvisioningJob.id).where(
-                        ProvisioningJob.status == ProvisioningJobStatus.PENDING,
-                        ProvisioningJob.created_at < cutoff,
-                    )
-                ).all()
-            )
+            pending = session.exec(
+                select(ProvisioningJob.id).where(
+                    ProvisioningJob.status == ProvisioningJobStatus.PENDING,
+                    ProvisioningJob.created_at < cutoff,
+                )
+            ).all()
+            # RUNNING bez zámku = worker umřel uprostřed (zámek vypršel).
+            running = session.exec(
+                select(ProvisioningJob.id).where(
+                    ProvisioningJob.status == ProvisioningJobStatus.RUNNING,
+                    ProvisioningJob.started_at < running_cutoff,  # type: ignore[operator]
+                )
+            ).all()
+            return list(pending) + list(running)
 
-    for job_id in await asyncio.to_thread(stale_pending):
+    for job_id in await asyncio.to_thread(stale):
         if await r.exists(job_lock_key(job_id)):
             continue
+        # Dlouhá fronta prefetchů: PENDING job tam pořád čeká -- bez tohohle
+        # by se každou minutu přidala další kopie (stream rostl donekonečna).
+        if not await r.set(_REQUEUED_KEY.format(job_id), "1", nx=True, ex=1800):
+            continue
         await r.xadd(PROVISIONING_STREAM, {"job_id": job_id})
-        logger.warning("job %s visel ve stavu PENDING, posílám znovu do fronty", job_id)
+        logger.warning("job %s visel (bez workeru), posílám znovu do fronty", job_id)
 
 
 async def main() -> None:

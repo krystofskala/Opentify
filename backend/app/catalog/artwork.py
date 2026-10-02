@@ -205,6 +205,10 @@ async def resolve_artist_image(
         picture = deezer_image((dz or {}).get("picture_xl") or (dz or {}).get("picture_big"))
         if picture and not _is_deezer_placeholder(picture):
             return picture
+        if dz:
+            # Interpret na Deezeru bez fotky -- hledání podle jména by vrátilo
+            # cizího jmenovce; jen Wikidata (podle MBID) je pořád ten pravý.
+            return await _wikidata_image(artist_mbid) if artist_mbid and allow_musicbrainz else None
     wanted = primary_artist_name(name)
     try:
         artists = await get_deezer_client().search_artist(wanted, trust_name=False)
