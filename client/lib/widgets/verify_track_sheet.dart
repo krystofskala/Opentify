@@ -53,8 +53,7 @@ class _VerifyResultSheetState extends ConsumerState<_VerifyResultSheet> {
       setState(() => _done = action);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)
-          ?.showSnackBar(SnackBar(content: Text(e is ApiException ? (e.detail ?? 'Nepodařilo se') : 'Nepodařilo se')));
+      toast(context, e is ApiException ? (e.detail ?? 'Nepodařilo se') : 'Nepodařilo se');
     }
   }
 

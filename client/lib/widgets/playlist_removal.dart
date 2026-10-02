@@ -75,7 +75,7 @@ Future<bool> leavePlaylist(BuildContext context, WidgetRef ref, {required String
   if (p.pinned) {
     return (label: 'Odebrat z knihovny', run: () => unpinPlaylist(context, ref, id: p.id, title: p.title));
   }
-  if (p.collab && p.ownerName != null) {
+  if (p.member || (p.collab && p.ownerName != null)) {
     return (label: 'Opustit společný playlist', run: () => leavePlaylist(context, ref, id: p.id, title: p.title));
   }
   return (label: 'Smazat playlist', run: () => confirmDeletePlaylist(context, ref, id: p.id, title: p.title));

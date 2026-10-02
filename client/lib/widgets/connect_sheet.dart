@@ -34,7 +34,9 @@ class _ConnectSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final devices = ref.watch(connectProvider);
-    final local = ref.watch(audioPlayerControllerProvider);
+    // Jen co hraje a jestli hraje -- ne pozice (překreslovalo se ~5x za vteřinu).
+    final local = ref.watch(
+        audioPlayerControllerProvider.select((s) => (nowPlaying: s.nowPlaying, isPlaying: s.isPlaying)));
     final connect = ref.read(connectProvider.notifier);
     final localPlaying = local.nowPlaying != null;
 
@@ -127,7 +129,7 @@ class _ConnectSheet extends ConsumerWidget {
                           if (d.hasTrack)
                             GlassButton(
                               label: 'Přehrát tady',
-                              icon: Symbols.download_rounded,
+                              icon: Symbols.phonelink_rounded,
                               style: GlassButtonStyle.tonal,
                               compact: true,
                               onPressed: () {

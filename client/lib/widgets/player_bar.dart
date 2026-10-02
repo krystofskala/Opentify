@@ -187,7 +187,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
     final targetAccent = playback.accentColor ?? ref.watch(effectiveAccentProvider) ?? theme.colorScheme.primary;
     final duration = playback.duration ?? Duration.zero;
     final hasError = playback.error != null;
-    final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
+    final provisioningState = ref.watch(provisioningControllerProvider.select((m) => m[nowPlaying.recordingId]));
     final isProvisioning = provisioningState?.isInFlight ?? false;
     final provisioningPct = provisioningState?.pct;
     final screenHeight = MediaQuery.sizeOf(context).height;

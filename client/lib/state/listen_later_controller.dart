@@ -85,19 +85,12 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
         return;
       }
       final item = await add(kind, targetId);
-      messenger?.showSnackBar(
-        SnackBar(persist: false, 
-          content: const Row(
-            children: [
-              Icon(Symbols.schedule_rounded, size: 18),
-              SizedBox(width: 8),
-              Expanded(child: Text('Uloženo na později')),
-            ],
-          ),
-          action: context.mounted
-              ? SnackBarAction(label: 'Poznámka', onPressed: () => editLaterNote(context, this, item))
-              : null,
-        ),
+      showToast(
+        messenger,
+        'Uloženo na později',
+        action: context.mounted
+            ? SnackBarAction(label: 'Poznámka', onPressed: () => editLaterNote(context, this, item))
+            : null,
       );
     } catch (_) {
       showToast(messenger, 'Nepodařilo se uložit, zkus to znovu');

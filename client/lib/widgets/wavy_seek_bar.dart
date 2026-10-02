@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -57,7 +58,7 @@ class WavySeekBar extends StatefulWidget {
 }
 
 class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin {
-  late final AnimationController _phaseController;
+  late final _SteppedPhase _phaseController;
   late final AnimationController _ampController;
   late final AnimationController _interactionController;
 
@@ -76,7 +77,11 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     // Nekonečná fáze vlny -- běží pořád, ale je vidět jen když amplituda > 0,
     // stejně jako originální `SineWaveLine`/`WavySliderExpressive` (fáze
     // lineárně roste 0..2π, `animationDurationMillis`/`waveSpeed` v originále).
-    _phaseController = AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
+    // Fáze vlny časovačem ~24x/s, ne každým snímkem: AnimationController
+    // .repeat() si říkal o snímek při každém vsyncu a tím držel celou appku
+    // (rozmazání, sklo, pozadí) na 60/120 fps po celou dobu přehrávání --
+    // na starším iPhonu hlavní zdroj zasekávání (audit výkonu).
+    _phaseController = _SteppedPhase(() => mounted && TickerMode.valuesOf(context).enabled)..repeat();
     _ampController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -319,5 +324,43 @@ class _WavySeekBarPainter extends CustomPainter {
         oldDelegate.interactionFraction != interactionFraction ||
         oldDelegate.activeColor != activeColor ||
         oldDelegate.inactiveColor != inactiveColor;
+  }
+}
+
+
+/// Fáze vlny 0..1 (perioda 3 s), posouvaná časovačem ~24x za sekundu.
+class _SteppedPhase extends ChangeNotifier {
+  _SteppedPhase(this._visible);
+
+  final bool Function() _visible;
+  Timer? _timer;
+  double _value = 0;
+  DateTime _last = DateTime.now();
+
+  double get value => _value;
+  bool get isAnimating => _timer != null;
+
+  void repeat() {
+    if (_timer != null) return;
+    _last = DateTime.now();
+    _timer = Timer.periodic(const Duration(milliseconds: 42), (_) {
+      final now = DateTime.now();
+      final dt = now.difference(_last).inMicroseconds / 1e6;
+      _last = now;
+      if (!_visible()) return;
+      _value = (_value + dt / 3.0) % 1.0;
+      notifyListeners();
+    });
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  @override
+  void dispose() {
+    stop();
+    super.dispose();
   }
 }

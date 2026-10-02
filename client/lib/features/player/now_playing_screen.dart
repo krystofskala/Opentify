@@ -426,7 +426,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final isWide = MediaQuery.sizeOf(context).width >= 720;
     final sideColumnFits = MediaQuery.sizeOf(context).width >= _sideColumnMinWidth;
 
-    final provisioningState = ref.watch(provisioningControllerProvider)[nowPlaying.recordingId];
+    final provisioningState = ref.watch(provisioningControllerProvider.select((m) => m[nowPlaying.recordingId]));
     final isProvisioning = provisioningState?.isInFlight ?? false;
     final provisioningPct = provisioningState?.pct;
 
@@ -470,6 +470,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                           Expanded(
                             child: LayoutBuilder(
                               builder: (context, constraints) {
+                                // Telefon: vlastní rozložení -- desktopové
+                                // `player` (karusel, ovládání) ani nestavět.
+                                if (!sideColumnFits) {
+                                  return _phoneStage(constraints, playback, accent, duration, positionMs,
+                                      isProvisioning, provisioningState, provisioningPct);
+                                }
                                 final player = ConstrainedBox(
                                   constraints: BoxConstraints(maxWidth: isWide ? 480 : double.infinity),
                                   child: Column(
@@ -488,10 +494,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                     ],
                                   ),
                                 );
-                                if (!sideColumnFits) {
-                                  return _phoneStage(constraints, playback, accent, duration, positionMs,
-                                      isProvisioning, provisioningState, provisioningPct);
-                                }
                                 // PC: text/fronta jako druhý sloupec vedle
                                 // obalu a ovládání (stejné světlejší sklo),
                                 // jen když ho uživatel otevře.
@@ -967,6 +969,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 IconButton(
+                  tooltip: 'Předchozí',
                   icon: Icon(Symbols.skip_previous_rounded, color: playerFg(context), size: 34),
                   // Bez předchozí skladby `previous()` přetočí na začátek.
                   onPressed: () => _skip(forward: false),
@@ -1001,6 +1004,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   ),
                 ),
                 IconButton(
+                  tooltip: 'Další',
                   icon: Icon(Symbols.skip_next_rounded, color: playerFg(context), size: 34),
                   onPressed: playback.hasNext ? () => _skip(forward: true) : null,
                 ),

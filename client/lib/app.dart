@@ -10,7 +10,7 @@ import 'state/glass_settings.dart';
 import 'state/grain_controller.dart';
 import 'state/theme_mode_controller.dart';
 import 'state/user_idle.dart';
-import 'theme/accent_color.dart' show AnimatedAccent, accentTransitionCurve, accentTransitionDuration;
+import 'theme/accent_color.dart' show AnimatedAccent, accentTransitionCurve;
 import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
@@ -66,8 +66,10 @@ class OpentifyApp extends ConsumerWidget {
       routerConfig: router,
       scrollBehavior: const TopFadeScrollBehavior(),
       // Změna seedu (jiné album/interpret/skladba) přebarví celé téma
-      // plynule, stejnou křivkou jako přehrávač a pozadí -- ne skokem.
-      themeAnimationDuration: accentTransitionDuration,
+      // plynule -- ale krátce: 2,8 s přechodu znamenalo 2,8 s překreslování
+      // skoro celé appky každý snímek při každé změně skladby (audit výkonu,
+      // starší iPhone). Pomalý přechod zůstává jen u pozadí a přehrávače.
+      themeAnimationDuration: const Duration(milliseconds: 500),
       themeAnimationCurve: accentTransitionCurve,
       // Zrnité pozadí pod úplně vším -- `Scaffold`y jsou průhledné
       // (`buildAppTheme`), takže prosvítá skrz. I přehrávač je teď průhledný

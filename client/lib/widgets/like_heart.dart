@@ -30,7 +30,7 @@ class LikeHeart extends ConsumerWidget {
         ? (Symbols.heart_broken_rounded, 1.0, base.withValues(alpha: 0.75), 'Nelíbí se mi – podrž pro zrušení')
         : liked
             ? (Symbols.favorite_rounded, 1.0, Colors.redAccent, 'Odebrat z oblíbených')
-            : (Symbols.favorite_border_rounded, 0.0, base, 'Přidat do oblíbených (podrž = nelíbí se mi)');
+            : (Symbols.favorite_rounded, 0.0, base, 'Přidat do oblíbených (podrž = nelíbí se mi)');
     return Semantics(
       button: true,
       label: label,
@@ -57,11 +57,8 @@ class LikeHeart extends ConsumerWidget {
           }
           // Dlouhý stisk se dá udělat omylem (na iOS čte jako "menu") -- vždy
           // potvrdit a nabídnout Zpět.
-          messenger?.hideCurrentSnackBar();
-          messenger?.showSnackBar(SnackBar(persist: false, 
-            content: Text(wasDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi'),
-            action: SnackBarAction(label: 'Zpět', onPressed: () => notifier.toggle(recordingId)),
-          ));
+          showToast(messenger, wasDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi',
+              action: SnackBarAction(label: 'Zpět', onPressed: () => notifier.toggle(recordingId)));
         },
         child: SizedBox.square(
           dimension: 48,

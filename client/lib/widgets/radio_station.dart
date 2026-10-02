@@ -1,3 +1,4 @@
+import 'toast.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -31,18 +32,7 @@ Future<void> goToRadio(
   // Kontejner appky, ne `ref` volajícího -- volá se i ze zavíraného menu,
   // jehož `ref` už neplatí.
   final api = ProviderScope.containerOf(context, listen: false).read(apiClientProvider);
-  messenger
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(const SnackBar(
-      duration: Duration(seconds: 20),
-      content: Row(
-        children: [
-          Icon(Symbols.radio_rounded, size: 18),
-          SizedBox(width: 8),
-          Expanded(child: Text('Ladím rádio…')),
-        ],
-      ),
-    ));
+  showToast(messenger, 'Ladím rádio…', duration: const Duration(seconds: 20));
   try {
     final json = await api.postJson('/recommendations/radio', body: {'kind': seed.name, 'id': id});
     messenger?.hideCurrentSnackBar();
@@ -52,9 +42,7 @@ Future<void> goToRadio(
     // Z přehrávače nahradit jeho trasu (viz NowPlayingSheetController.slideDown).
     replaceTop ? router.pushReplacement(location) : router.push(location);
   } catch (e) {
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(_message(e))));
+    showToast(messenger, _message(e));
   } finally {
     _tuning = false;
   }

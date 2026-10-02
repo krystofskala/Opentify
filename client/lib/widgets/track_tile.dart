@@ -1,3 +1,4 @@
+import 'toast.dart';
 import 'like_heart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -98,8 +99,9 @@ class TrackTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final provisioning = ref.watch(provisioningControllerProvider);
-    final trackState = provisioning[recording.id];
+    // Jen stav TÉHLE skladby -- dřív každý průběh libovolného stahování
+    // překreslil všechny viditelné řádky.
+    final trackState = ref.watch(provisioningControllerProvider.select((m) => m[recording.id]));
     final status = trackState?.status;
     final isAvailable = status == 'AVAILABLE' || recording.availability == Availability.available;
     final isInFlight = trackState?.isInFlight ?? false;
@@ -165,12 +167,8 @@ class TrackTile extends ConsumerWidget {
       } else {
         controller.addToQueue(info);
       }
-      ScaffoldMessenger.maybeOf(context)
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(next ? '„${recording.title}“ hraje jako další' : '„${recording.title}“ na konci fronty'),
-          duration: const Duration(seconds: 2),
-        ));
+      // Stejné znění jako v menu skladby.
+      toast(context, next ? 'Jako další: ${recording.title}' : 'Do fronty: ${recording.title}');
     }
 
     final row = switch (layout) {

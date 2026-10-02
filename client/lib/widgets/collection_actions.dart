@@ -552,7 +552,7 @@ Future<void> showPlayOptions(BuildContext context, {required String title, requi
                 }),
               ),
               _Row(
-                icon: Symbols.queue_music_rounded,
+                icon: Symbols.add_to_queue_rounded,
                 label: 'Přidat do fronty',
                 onTap: () => run(() async {
                   await controller.addAllToQueue(infos, sourceLabel: title);

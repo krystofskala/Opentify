@@ -9,6 +9,7 @@ import 'config.dart';
 import 'diagnostics.dart';
 import 'device_token.dart';
 import '../features/share/share_card_screen.dart' show openShareCard;
+import '../widgets/toast.dart';
 
 /// Most k nativní části iOS (kanál `opentify/nav`):
 ///  - tlačítka v Ovládacím centru (Ladička) a klepnutí na upozornění Shazamu
@@ -51,11 +52,8 @@ class NativeNav {
     if (router.routerDelegate.currentConfiguration.uri.path != '/now-playing') return;
     final context = router.routerDelegate.navigatorKey.currentContext;
     if (context == null) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(persist: false, 
-      content: const Text('Sdílet jako obrázek?'),
-      duration: const Duration(seconds: 5),
-      action: SnackBarAction(label: 'Sdílet', onPressed: () => openShareCard(context)),
-    ));
+    toast(context, 'Sdílet jako obrázek?',
+        action: SnackBarAction(label: 'Sdílet', onPressed: () => openShareCard(context)));
   }
 
   static void _open(GoRouter router, String route) {

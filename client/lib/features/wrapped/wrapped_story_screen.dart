@@ -109,6 +109,7 @@ class _Locked extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 IconButton(
+                  tooltip: 'Zavřít',
                   onPressed: () => context.pop(),
                   icon: const Icon(Symbols.close_rounded, color: Colors.white),
                 ),

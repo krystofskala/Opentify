@@ -410,17 +410,25 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   /// Uloží stav: hned při změně skladby/fronty, pozici nejvýš jednou za 5 s.
+  List<NowPlayingInfo>? _encodedQueueFor;
+  String _encodedQueue = '[]';
+
   void _maybePersistSession(AudioPlayerState s, {bool force = false}) {
     final np = s.nowPlaying;
     if (np == null || _restoredIdle) return;
-    _recordCollectionProgress(s);
     final key = '${np.recordingId}|${s.queueIndex}|${s.queue.length}|${s.shuffleEnabled}|${s.repeatMode.name}';
     final now = DateTime.now();
     if (!force && key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
+    // Až za omezením (dřív se pokrok alba ukládal na disk ~5x za vteřinu).
+    _recordCollectionProgress(s);
     _lastPersistKey = key;
     _lastPersist = now;
-    final data = jsonEncode({
-      'queue': [for (final q in s.queue) _infoToJson(q)],
+    // Frontu (klidně tisíce skladeb) zakódovat jen když se změnila.
+    if (!identical(s.queue, _encodedQueueFor)) {
+      _encodedQueueFor = s.queue;
+      _encodedQueue = jsonEncode([for (final q in s.queue) _infoToJson(q)]);
+    }
+    final rest = jsonEncode({
       'index': s.queueIndex,
       'positionMs': s.position.inMilliseconds,
       'source': s.queueSourceLabel,
@@ -429,6 +437,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       'shuffleOrder': s.shuffleOrder,
       'repeat': s.repeatMode.name,
     });
+    final data = '{"queue":$_encodedQueue,${rest.substring(1)}';
     unawaited(SharedPreferences.getInstance().then((p) => p.setString(_sessionPrefKey, data)).then<void>(
           (_) {},
           onError: (Object _) {},

@@ -181,7 +181,7 @@ class _OfflineRow extends ConsumerWidget {
             ),
             IconButton(
               tooltip: 'Smazat ze zařízení',
-              icon: const Icon(Symbols.remove_circle_outline_rounded),
+              icon: const Icon(Symbols.delete_rounded),
               onPressed: onRemove,
             ),
           ],

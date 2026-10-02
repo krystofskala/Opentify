@@ -110,6 +110,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                     ),
                     const SizedBox(width: 8),
                     IconButton(
+                      tooltip: 'Vytvořit playlist',
                       icon: _creating
                           ? const ExpressiveLoadingIndicator(size: 22)
                           : const Icon(Symbols.add_circle_rounded),

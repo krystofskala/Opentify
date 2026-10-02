@@ -185,7 +185,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                   const _ImportedHistoryLine(),
                   _ActionRow(
-                    icon: Symbols.download_rounded,
+                    icon: Symbols.archive_rounded,
                     title: 'Exportovat moje data',
                     description: 'Oblíbené, playlisty, historie poslechů a seznam „Na později“ v jednom ZIPu. '
                         'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',

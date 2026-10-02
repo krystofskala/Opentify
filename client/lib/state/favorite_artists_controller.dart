@@ -32,6 +32,13 @@ class FavoriteArtistsController extends AsyncNotifier<List<FavoriteArtist>> {
 
   Future<void> toggle(BuildContext context, {required String id, required String name, String? imageUrl}) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
+    // Seznam se ještě načítá: počkat, jinak by se přepnulo proti prázdnému
+    // seznamu a načtená data by klepnutí hned přepsala.
+    if (!state.hasValue) {
+      try {
+        await future;
+      } catch (_) {}
+    }
     final was = isFavorite(id);
     HapticFeedback.selectionClick();
     final before = state.valueOrNull ?? const [];

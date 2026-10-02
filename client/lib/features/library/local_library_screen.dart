@@ -387,7 +387,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   padding: const EdgeInsets.all(AppSpacing.sm),
                   sliver: SliverGrid.builder(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: _gridColumns(MediaQuery.of(context).size.width),
+                      crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
                       childAspectRatio: 0.72,
                       crossAxisSpacing: AppSpacing.sm,
                       mainAxisSpacing: AppSpacing.sm,
@@ -405,7 +405,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                         sourceLabel: _librarySourceLabel,
                         // Modulo -- na 1000+ položkách by pozdější dlaždice
                         // čekaly na nástupní animaci celé minuty.
-                        animationIndex: index % 12,
+                        animationIndex: index < 12 ? index : null, // jen první obrazovka, ne při scrollu
                       );
                     },
                   ),
@@ -565,7 +565,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                   padding: const EdgeInsets.all(AppSpacing.sm),
                   sliver: SliverGrid.builder(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: _gridColumns(MediaQuery.of(context).size.width),
+                      crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
                       childAspectRatio: 0.72,
                       crossAxisSpacing: AppSpacing.sm,
                       mainAxisSpacing: AppSpacing.sm,
@@ -590,7 +590,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                           // menu nenabídlo "Odebrat z knihovny".
                           inLibrary: true,
                         ),
-                        animationIndex: index % 12,
+                        animationIndex: index < 12 ? index : null, // jen první obrazovka, ne při scrollu
                       );
                     },
                   ),
@@ -714,7 +714,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                   padding: const EdgeInsets.all(AppSpacing.sm),
                   sliver: SliverGrid.builder(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: _gridColumns(MediaQuery.of(context).size.width),
+                      crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
                       childAspectRatio: 0.8,
                       crossAxisSpacing: AppSpacing.sm,
                       mainAxisSpacing: AppSpacing.sm,
@@ -732,7 +732,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                         onTap: () => context.push('/artists/${artist.id}'),
                         onLongPress: () =>
                             showArtistActions(context, id: artist.id, name: artist.name, imageUrl: artist.imageUrl),
-                        animationIndex: index % 12,
+                        animationIndex: index < 12 ? index : null, // jen první obrazovka, ne při scrollu
                       );
                     },
                   ),

@@ -19,6 +19,7 @@ class PlaylistSummaryModel {
     this.updatedAt,
     this.pinned = false,
     this.collab = false,
+    this.member = false,
     this.ownerName,
   });
 
@@ -42,6 +43,9 @@ class PlaylistSummaryModel {
 
   /// Společný playlist (sdílený s dalšími profily); `ownerName` u cizího.
   final bool collab;
+
+  /// Jsem v cizím společném playlistu jen člen.
+  final bool member;
   final String? ownerName;
 
   final String id;
@@ -68,6 +72,7 @@ class PlaylistSummaryModel {
         updatedAt: json['updatedAt'] as String?,
         pinned: json['pinned'] as bool? ?? false,
         collab: json['collab'] as bool? ?? false,
+        member: json['member'] as bool? ?? false,
         ownerName: json['ownerName'] as String?,
       );
 }

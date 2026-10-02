@@ -134,7 +134,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 if (readOnly)
                   HeroAction(
                     icon: pinned ? Symbols.library_add_check_rounded : Symbols.library_add_rounded,
-                    tooltip: pinned ? 'V knihovně (aktualizuje se)' : 'Uložit do knihovny',
+                    tooltip: pinned ? 'V knihovně (aktualizuje se)' : 'Přidat do knihovny',
                     onPressed: () => pinned ? _unpin(context, detail) : _saveToLibrary(context, detail),
                   ),
                 HeroAction(
@@ -534,12 +534,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     try {
       final copy = await ref.read(playlistsRepositoryProvider).copy(detail.id);
       ref.invalidate(myPlaylistsProvider);
-      messenger?.showSnackBar(
-        SnackBar(persist: false, 
-          content: Text('„${detail.title}“ přidán do knihovny'),
-          action: SnackBarAction(label: 'Otevřít', onPressed: () => context.push('/playlists/${copy.id}')),
-        ),
-      );
+      showToast(messenger, '„${detail.title}“ přidán do knihovny',
+          action: SnackBarAction(label: 'Otevřít', onPressed: () => context.push('/playlists/${copy.id}')));
     } catch (e) {
       showToast(messenger, 'Přidání selhalo: $e');
     }

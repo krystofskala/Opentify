@@ -58,4 +58,23 @@ void main() {
     ];
     expect(offenders, isEmpty, reason: 'Použij SectionAppBar: $offenders');
   });
+
+  // Jedna podoba hlášek (stejná délka, nová nahradí starou): jen showToast.
+  test('hlášky jen přes showToast', () {
+    final offenders = [
+      for (final f in files)
+        if (!rel(f).endsWith('widgets/toast.dart') && f.readAsStringSync().contains('showSnackBar(')) rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Použij showToast / toast: $offenders');
+  });
+
+  // Jedna sada ikon (zaoblené Material Symbols), žádné "outline" varianty.
+  test('žádné outline ikony', () {
+    final outline = RegExp(r'Symbols\.\w*outline');
+    final offenders = [
+      for (final f in files)
+        if (outline.hasMatch(f.readAsStringSync())) rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Použij *_rounded s fill: $offenders');
+  });
 }

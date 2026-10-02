@@ -19,6 +19,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import 'browse_grid.dart' show BrowseTile, categoryIcon;
 import 'tag_screen.dart' show TagChips;
+import '../../widgets/toast.dart';
 import '../../widgets/collection_actions.dart';
 import '../../core/cz_plural.dart';
 import '../../data/home_repository.dart';
@@ -62,8 +63,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
       if (mounted) context.push('/playlists/$id');
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(const SnackBar(content: Text('Playlist se nepodařilo otevřít, zkus to znovu.')));
+        toast(context, 'Playlist se nepodařilo otevřít, zkus to znovu.');
       }
     } finally {
       if (mounted) setState(() => _opening = null);
@@ -354,8 +354,7 @@ class _DeezerPlaylistTileState extends ConsumerState<DeezerPlaylistTile> {
       if (mounted) context.push('/playlists/$id');
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(const SnackBar(content: Text('Playlist se nepodařilo otevřít, zkus to znovu.')));
+        toast(context, 'Playlist se nepodařilo otevřít, zkus to znovu.');
       }
     } finally {
       if (mounted) setState(() => _opening = false);
@@ -472,7 +471,7 @@ class _HeroMixState extends ConsumerState<_HeroMix> {
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Mix se nepodařilo spustit.')));
+        toast(context, 'Mix se nepodařilo spustit.');
       }
     } finally {
       if (mounted) setState(() => _loading = false);

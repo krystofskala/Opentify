@@ -36,10 +36,7 @@ Future<void> importSpotifyLink(BuildContext context, WidgetRef ref, String url) 
       // Safari po await už nemusí brát přehrání jako gesto uživatele --
       // zkusí se hned, a kdyby to zablokoval, snackbar má tlačítko.
       play();
-      messenger?.showSnackBar(SnackBar(persist: false, 
-        content: Text(rec.title),
-        action: SnackBarAction(label: 'Přehrát', onPressed: play),
-      ));
+      showToast(messenger, rec.title, action: SnackBarAction(label: 'Přehrát', onPressed: play));
       return;
     }
     ref.invalidate(myPlaylistsProvider);

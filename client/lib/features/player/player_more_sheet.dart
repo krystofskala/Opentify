@@ -21,6 +21,7 @@ import '../../widgets/radio_station.dart';
 import 'player_buttons_sheet.dart';
 import '../../widgets/connect_sheet.dart';
 import '../../widgets/report_problem.dart';
+import '../../widgets/toast.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -392,8 +393,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
           notifier.state = (recordingId: id, a: position, b: null);
         } else if (active.b == null) {
           if (position <= active.a + const Duration(seconds: 1)) {
-            ScaffoldMessenger.maybeOf(context)
-                ?.showSnackBar(const SnackBar(content: Text('Bod B musí být až za bodem A.')));
+            toast(context, 'Bod B musí být až za bodem A.');
             return;
           }
           notifier.state = (recordingId: id, a: active.a, b: position);

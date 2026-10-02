@@ -1,3 +1,4 @@
+import 'toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -76,21 +77,42 @@ class TrackCollectionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Výsledek posledního `apply` -- obrazovka ho volá při každém překreslení
+  // (klepnutí na výběr, srdíčko...); u tisíců skladeb bylo řazení s převodem
+  // diakritiky v každém porovnání znát (audit výkonu).
+  List<RecordingModel>? _lastInput;
+  int _lastLength = -1;
+  String? _lastQuery;
+  TrackSort? _lastSort;
+  List<RecordingModel> _lastResult = const [];
+  final Map<String, String> _foldCache = {};
+
+  String _folded(String text) => _foldCache[text] ??= _fold(text);
+
   List<RecordingModel> apply(List<RecordingModel> items) {
+    if (identical(items, _lastInput) && items.length == _lastLength && _query == _lastQuery && _sort == _lastSort) {
+      return _lastResult;
+    }
+    if (_foldCache.length > 20000) _foldCache.clear();
     final q = _fold(_query.trim());
     var result = q.isEmpty
         ? List.of(items)
-        : items.where((r) => _fold(r.title).contains(q) || _fold(r.artistName ?? '').contains(q)).toList();
+        : items.where((r) => _folded(r.title).contains(q) || _folded(r.artistName ?? '').contains(q)).toList();
     switch (_sort) {
       case TrackSort.original:
         break;
       case TrackSort.title:
-        result.sort((a, b) => _fold(a.title).compareTo(_fold(b.title)));
+        result.sort((a, b) => _folded(a.title).compareTo(_folded(b.title)));
       case TrackSort.artist:
-        result.sort((a, b) => _fold(a.artistName ?? '').compareTo(_fold(b.artistName ?? '')));
+        result.sort((a, b) => _folded(a.artistName ?? '').compareTo(_folded(b.artistName ?? '')));
       case TrackSort.duration:
         result.sort((a, b) => (a.durationMs ?? 0).compareTo(b.durationMs ?? 0));
     }
+    _lastInput = items;
+    _lastLength = items.length;
+    _lastQuery = _query;
+    _lastSort = _sort;
+    _lastResult = result;
     return result;
   }
 }
@@ -120,6 +142,8 @@ const _diacritics = {
 /// Lowercase bez diakritiky -- "prilis" najde "Příliš".
 String _fold(String input) {
   final lower = input.toLowerCase();
+  // Rychlá cesta: čisté ASCII nemá co převádět.
+  if (lower.codeUnits.every((c) => c < 128)) return lower;
   final buffer = StringBuffer();
   for (final ch in lower.split('')) {
     buffer.write(_diacritics[ch] ?? ch);
@@ -194,8 +218,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
     for (final r in tracks) {
       player.addToQueue(nowPlayingInfoFor(r, artworkUrl: widget.albumArtUrl, artistNameFallback: widget.artistName));
     }
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text('Do fronty: ${songsCount(tracks.length)}')));
+    toast(context, 'Do fronty: ${songsCount(tracks.length)}');
     widget.controller.setSelecting(false);
   }
 
@@ -250,7 +273,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
               ),
               GlassButton(
                 label: 'Do fronty',
-                icon: Symbols.queue_music_rounded,
+                icon: Symbols.add_to_queue_rounded,
                 compact: true,
                 onPressed: count == 0 ? null : _addSelectedToQueue,
               ),

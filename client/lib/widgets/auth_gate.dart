@@ -90,6 +90,13 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
       }
       if (json['token'] case final String token) await saveDeviceToken(token);
       ref.invalidate(authProvider);
+      // Server přihlášení přijal, ale prohlížeč si cookie nenechal (blokování
+      // cookies, anonymní okno) -- dřív se jen tiše vrátil přihlašovací formulář.
+      final after = await ref.read(authProvider.future);
+      if (after.user == null && mounted) {
+        setState(() => _error = 'Heslo sedí, ale prohlížeč si přihlášení nezapamatoval. '
+            'Vypni blokování cookies pro tuhle stránku (nebo nepoužívej anonymní okno) a zkus to znovu.');
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _error = e is ApiException

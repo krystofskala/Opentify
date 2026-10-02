@@ -257,6 +257,13 @@ class _AppBackgroundState extends State<AppBackground> {
   }
 
   void _onTick(Timer _) {
+    // Appka na pozadí / zamčený telefon (hudba hraje dál): nic nepočítat ani
+    // nepřekreslovat -- dřív 30x za vteřinu naprázdno (baterie).
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) {
+      _lastPaintAt = _now;
+      return;
+    }
     final now = _now;
     final dt = now - _lastPaintAt;
     _lastPaintAt = now;
