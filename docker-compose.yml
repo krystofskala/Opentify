@@ -40,7 +40,6 @@ services:
       LISTENBRAINZ_USERNAME: ${LISTENBRAINZ_USERNAME:-demo-user}
       # Uživatelský token (listenbrainz.org -> Settings) pro odesílání poslechů.
       LISTENBRAINZ_TOKEN: ${LISTENBRAINZ_TOKEN:-}
-      JWT_SECRET: ${JWT_SECRET:?set a real secret in .env}
       # Tailscale účet admina (profil podle Tailscale, viz app/auth.py).
       TAILSCALE_ADMIN_LOGIN: ${TAILSCALE_ADMIN_LOGIN:-}
       LOCAL_MUSIC_ROOT: /data/local-music
