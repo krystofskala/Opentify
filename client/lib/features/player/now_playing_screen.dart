@@ -40,6 +40,7 @@ import '../../widgets/add_to_playlist_sheet.dart';
 import '../../widgets/radio_station.dart';
 import '../../widgets/share_sheet.dart';
 import '../share/share_card_screen.dart';
+import '../../widgets/section_app_bar.dart';
 
 /// Celoobrazovkový přehrávač -- interaktivní "sheet" nad aktuální stránkou
 /// (poloha z `NowPlayingSheetController`: tažení z mini přehrávače nahoru,
@@ -303,7 +304,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final sheet = _sheet ?? NowPlayingSheetController.of(context);
 
     if (nowPlaying == null) {
-      return Scaffold(appBar: AppBar(), body: const EmptyState(message: 'Nic nehraje.'));
+      return const Scaffold(appBar: SectionAppBar(''), body: EmptyState(message: 'Nic nehraje.'));
     }
 
     return PopScope(

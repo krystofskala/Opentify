@@ -12,6 +12,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/toast.dart';
+import '../../theme/shapes.dart';
 
 /// Profil › Profily -- jen pro admina. Založit profil (jméno + přihlašovací
 /// jméno; heslo si dotyčný vytvoří sám při prvním přihlášení), vynulovat
@@ -227,6 +228,48 @@ class ProfilesSection extends ConsumerWidget {
     }
   }
 
+  /// ⋯ u profilu -- stejný skleněný sheet jako ostatní menu (ne vyskakovací).
+  void _profileMenu(BuildContext context, WidgetRef ref, ProfileRow p) {
+    final actions = <(IconData, String, VoidCallback)>[
+      (Symbols.edit_rounded, 'Upravit jméno', () => _edit(context, ref, p)),
+      if (p.username == null && p.role != 'admin')
+        (Symbols.mail_rounded, 'Nová pozvánka', () => _newInvite(context, ref, p)),
+      if (p.username != null && !p.hasPassword && p.role != 'admin')
+        (Symbols.key_rounded, 'Údaje k přihlášení', () => _showLoginInfo(context, p.name, p.username!)),
+      if (p.hasPassword && p.role != 'admin')
+        (Symbols.lock_reset_rounded, 'Vynulovat heslo', () => _resetPassword(context, ref, p)),
+    ];
+    showGlassSheet<void>(
+      context,
+      builder: (sheet) => GlassSheet(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.sm, AppSpacing.xs, AppSpacing.sm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+                child: Text(p.name, style: Theme.of(sheet).textTheme.titleMedium),
+              ),
+              for (final (icon, label, onTap) in actions)
+                ListTile(
+                  dense: true,
+                  shape: AppShapes.md,
+                  leading: Icon(icon),
+                  title: Text(label),
+                  onTap: () {
+                    Navigator.of(sheet).pop();
+                    onTap();
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _switch(WidgetRef ref, String? userId) async {
     await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': userId});
     await saveActAs(userId);
@@ -286,24 +329,10 @@ class ProfilesSection extends ConsumerWidget {
                     compact: true,
                     onPressed: () => _switch(ref, p.role == 'admin' ? null : p.id),
                   ),
-                PopupMenuButton<String>(
+                IconButton(
+                  tooltip: 'Další možnosti',
                   icon: const Icon(Symbols.more_horiz_rounded),
-                  onSelected: (action) => switch (action) {
-                    'edit' => _edit(context, ref, p),
-                    'reset' => _resetPassword(context, ref, p),
-                    'info' => p.username == null ? null : _showLoginInfo(context, p.name, p.username!),
-                    'invite' => _newInvite(context, ref, p),
-                    _ => null,
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(value: 'edit', child: Text('Upravit jméno')),
-                    if (p.username == null && p.role != 'admin')
-                      const PopupMenuItem(value: 'invite', child: Text('Nová pozvánka')),
-                    if (p.username != null && !p.hasPassword && p.role != 'admin')
-                      const PopupMenuItem(value: 'info', child: Text('Údaje k přihlášení')),
-                    if (p.hasPassword && p.role != 'admin')
-                      const PopupMenuItem(value: 'reset', child: Text('Vynulovat heslo')),
-                  ],
+                  onPressed: () => _profileMenu(context, ref, p),
                 ),
               ],
             ),

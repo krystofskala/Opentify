@@ -9,6 +9,7 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/toast.dart';
+import '../../widgets/section_app_bar.dart';
 
 typedef BlendRow = ({
   String id,
@@ -68,7 +69,7 @@ class BlendScreen extends ConsumerWidget {
     final api = ref.read(apiClientProvider);
     final muted = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     return Scaffold(
-      appBar: AppBar(backgroundColor: Colors.transparent, title: const Text('Společné mixy')),
+      appBar: const SectionAppBar('Společné mixy'),
       body: data.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => const Center(child: Text('Nepodařilo se načíst.')),

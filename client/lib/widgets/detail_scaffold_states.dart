@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/design_tokens.dart';
 import 'player_bar.dart';
 import 'state_views.dart';
+import 'section_app_bar.dart';
 
 /// Loading/error stav detailové obrazovky (Album/Interpret/Playlist/Skladba)
 /// -- vždy s reálným `AppBar`em a tlačítkem zpět, ať pomalé načítání není
@@ -13,7 +14,7 @@ class DetailLoadingScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(),
+      appBar: const SectionAppBar(''),
       bottomNavigationBar: const PlayerBar(),
       body: const SingleChildScrollView(
         physics: NeverScrollableScrollPhysics(),
@@ -58,7 +59,7 @@ class DetailErrorScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(),
+      appBar: const SectionAppBar(''),
       bottomNavigationBar: const PlayerBar(),
       body: ErrorState(message: message, error: error, onRetry: onRetry),
     );

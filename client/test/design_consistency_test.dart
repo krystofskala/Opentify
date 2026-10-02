@@ -37,4 +37,25 @@ void main() {
     }
     expect(offenders, isEmpty, reason: 'Obsah sheetu obal do GlassSheet: $offenders');
   });
+
+  // Vizuální audit (2026-10): menu jsou skleněné sheety, ne vyskakovací.
+  test('žádné PopupMenuButton', () {
+    final offenders = [
+      for (final f in files)
+        if (f.readAsStringSync().contains('PopupMenuButton')) rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Menu přes showGlassSheet (viz SortButton): $offenders');
+  });
+
+  // Horní lišta jen přes SectionAppBar (stejné zpět, průhlednost); holý
+  // AppBar jen tam, kde je záměrně jiný (černá karta ke sdílení).
+  test('AppBar jen přes SectionAppBar', () {
+    const allowed = ['widgets/section_app_bar.dart', 'features/share/share_card_screen.dart'];
+    final bare = RegExp(r'(?<![A-Za-z])AppBar\(');
+    final offenders = [
+      for (final f in files)
+        if (!allowed.any((a) => rel(f).endsWith(a)) && bare.hasMatch(f.readAsStringSync())) rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Použij SectionAppBar: $offenders');
+  });
 }

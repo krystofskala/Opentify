@@ -10,6 +10,7 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart' show ArtworkImage;
 import '../../widgets/track_actions.dart' show nowPlayingInfoFor;
+import '../../widgets/section_app_bar.dart';
 
 final _sharedTrackProvider =
     FutureProvider.autoDispose.family<({RecordingModel recording, String? cover}), String>((ref, id) async {
@@ -37,7 +38,7 @@ class TrackLinkScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final track = ref.watch(_sharedTrackProvider(recordingId));
     return Scaffold(
-      appBar: AppBar(backgroundColor: Colors.transparent, title: const Text('Poslaná skladba')),
+      appBar: const SectionAppBar('Poslaná skladba'),
       body: track.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => const Center(child: Text('Skladbu se nepodařilo najít.')),
