@@ -32,6 +32,14 @@ import '../../widgets/state_views.dart';
 import '../../widgets/wavy_seek_bar.dart';
 import 'player_more_sheet.dart';
 import 'queue_panel.dart';
+import 'dart:async';
+import '../../data/listen_later_repository.dart' show LaterKind;
+import '../../state/listen_later_controller.dart';
+import '../../state/player_buttons_controller.dart';
+import '../../widgets/add_to_playlist_sheet.dart';
+import '../../widgets/radio_station.dart';
+import '../../widgets/share_sheet.dart';
+import '../share/share_card_screen.dart';
 
 /// Celoobrazovkový přehrávač -- interaktivní "sheet" nad aktuální stránkou
 /// (poloha z `NowPlayingSheetController`: tažení z mini přehrávače nahoru,
@@ -998,9 +1006,85 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             // na PC otevírají druhý sloupec, na mobilu sheet.
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              // Uživatel si vybírá až 5 tlačítek (⋯ › Upravit tlačítka).
               children: [
-                // Náhodně a opakování dole mezi ikonami (bez popisků se vejdou).
-                IconButton(
+                for (final button in ref.watch(playerButtonsProvider))
+                  _playerButton(button, accent, playback, controller),
+              ],
+            ),
+          ],
+        )),
+      ),
+    ));
+  }
+
+  Widget _playerButton(
+    PlayerButton button,
+    Color accent,
+    AudioPlayerState playback,
+    AudioPlayerController controller,
+  ) {
+    final fg = playerFg(context);
+    final idle = fg.withValues(alpha: 0.72);
+    Widget plain(String tooltip, IconData icon, VoidCallback? onPressed, {bool active = false}) => IconButton(
+          tooltip: tooltip,
+          style: IconButton.styleFrom(foregroundColor: active ? accent : idle, fixedSize: const Size.square(44)),
+          icon: Icon(icon, size: 22, semanticLabel: tooltip),
+          onPressed: onPressed,
+        );
+    final np = playback.nowPlaying;
+    switch (button) {
+      case PlayerButton.lyrics:
+        return _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, fg);
+      case PlayerButton.queue:
+        return _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, fg);
+      case PlayerButton.like:
+        return _likeButton(playback, fg);
+      case PlayerButton.later:
+        final later = np != null &&
+            (ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, np.recordingId))) !=
+                null);
+        return plain(later ? 'Odebrat z „Na později“' : 'Uložit na později', Symbols.schedule_rounded,
+            np == null ? null : () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.track, np.recordingId),
+            active: later);
+      case PlayerButton.radio:
+        return plain('Přejít na rádio', Symbols.radio_rounded, np == null
+            ? null
+            : () {
+                final sheet = NowPlayingSheetController.of(context);
+                final closed = Completer<bool>();
+                goToRadio(context, RadioSeed.track, np.recordingId, openAfter: closed.future, replaceTop: true);
+                closed.complete(sheet.slideDown());
+              });
+      case PlayerButton.share:
+        return plain('Sdílet…', Symbols.ios_share_rounded, np == null
+            ? null
+            : () => showShareSheet(
+                  context,
+                  title: np.title,
+                  artistName: np.artistName,
+                  opentifyPath: '/track/${np.recordingId}',
+                  external: (kind: 'recordings', id: np.recordingId),
+                  asImage: () => openShareCard(context),
+                ));
+      case PlayerButton.playlist:
+        return plain('Přidat do playlistu', Symbols.playlist_add_rounded,
+            np == null ? null : () => showAddToPlaylistSheet(context, recordingId: np.recordingId));
+      case PlayerButton.shuffle:
+      case PlayerButton.repeat:
+        break;
+    }
+    return _shuffleOrRepeat(button, accent, playback, controller);
+  }
+
+  Widget _shuffleOrRepeat(
+    PlayerButton button,
+    Color accent,
+    AudioPlayerState playback,
+    AudioPlayerController controller,
+  ) {
+    if (button == PlayerButton.shuffle) {
+      return IconButton(
                   tooltip: 'Náhodné přehrávání',
                   style: IconButton.styleFrom(
                     foregroundColor: playback.shuffleEnabled ? accent : playerFg(context).withValues(alpha: 0.72),
@@ -1008,10 +1092,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   ),
                   icon: const Icon(Symbols.shuffle_rounded, size: 22, semanticLabel: 'Náhodné přehrávání'),
                   onPressed: controller.toggleShuffle,
-                ),
-                _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, playerFg(context)),
-                _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, playerFg(context)),
-                IconButton(
+                );
+    }
+    return IconButton(
                   tooltip: 'Opakování',
                   style: IconButton.styleFrom(
                     foregroundColor:
@@ -1024,15 +1107,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     semanticLabel: 'Opakování',
                   ),
                   onPressed: controller.cycleRepeatMode,
-                ),
-                // Mobil: srdíčko tady místo horní lišty (tam na něj není místo).
-                _likeButton(playback, playerFg(context)),
-              ],
-            ),
-          ],
-        )),
-      ),
-    ));
+                );
   }
 
   /// Štítek běžícího A-B opakování (nastavuje se v menu "⋮"); klepnutí vypne.
