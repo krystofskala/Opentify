@@ -29,7 +29,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.redis_bus import get_redis
 
-logger = logging.getLogger("vault.realtime")
+# Pod uvicorn.error -- jen ten má v API nastavený výpis (vlastní "vault.*" loggery
+# by INFO zahodily).
+logger = logging.getLogger("uvicorn.error.connect")
 
 
 @dataclass
@@ -63,8 +65,8 @@ class ConnectionManager:
     async def _send(self, user_id: str, dev: _Device, message: str) -> None:
         try:
             await dev.ws.send_text(message)
-        except Exception:
-            logger.exception("odeslání na WS selhalo, odpojuji klienta")
+        except Exception:  # noqa: BLE001 -- zařízení se mezitím odpojilo
+            logger.info("connect %s: %s se odpojilo", user_id[:8], dev.name)
             self.disconnect(user_id, dev.ws)
 
     # --- Opentify Connect -------------------------------------------------
