@@ -93,10 +93,17 @@ actor BackgroundShazam {
 
   private static var queueDir: URL {
     let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let dir = base.appendingPathComponent("ShazamQueue", isDirectory: true)
+    var dir = base.appendingPathComponent("ShazamQueue", isDirectory: true)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    // Nahrávky z mikrofonu nepatří do zálohy iCloudu.
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? dir.setResourceValues(values)
     return dir
   }
+
+  /// Klip starší než týden už nemá smysl poznávat -- pryč (soukromí).
+  private static let maxClipAge: TimeInterval = 7 * 24 * 60 * 60
 
   private func enqueue(_ clip: Data) {
     let url = Self.queueDir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString).wav")
@@ -108,6 +115,12 @@ actor BackgroundShazam {
   func flushQueue() async {
     let files = (try? FileManager.default.contentsOfDirectory(at: Self.queueDir, includingPropertiesForKeys: nil)) ?? []
     for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+      // Název začíná časem uložení (sekundy od 1970).
+      if let stamp = TimeInterval(file.lastPathComponent.split(separator: "-").first ?? ""),
+         Date().timeIntervalSince1970 - stamp > Self.maxClipAge {
+        try? FileManager.default.removeItem(at: file)
+        continue
+      }
       guard let clip = try? Data(contentsOf: file) else {
         try? FileManager.default.removeItem(at: file)
         continue
