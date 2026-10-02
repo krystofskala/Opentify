@@ -97,7 +97,7 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, unknown }
+enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'quick_picks' => HomeSectionType.quickPicks,
@@ -105,6 +105,7 @@ HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'album_cards' => HomeSectionType.albumCards,
       'track_rail' => HomeSectionType.trackRail,
       'category_tiles' => HomeSectionType.categoryTiles,
+      'genre_showcase' => HomeSectionType.genreShowcase,
       _ => HomeSectionType.unknown,
     };
 
@@ -119,7 +120,15 @@ class HomeSection {
     this.tracks = const [],
     this.categories = const [],
     this.playlistId,
+    this.showcase = const [],
+    this.categoryId,
   });
+
+  /// Vitrína žánru: mix, novinky, alba, interpreti na přeskáčku.
+  final List<ShowcaseItem> showcase;
+
+  /// Žánr vitríny -- "Zobrazit vše" otevře jeho stránku.
+  final String? categoryId;
 
   final String id;
   final String title;
@@ -142,6 +151,8 @@ class HomeSection {
       title: json['title'] as String,
       type: type,
       playlistId: json['playlistId'] as String?,
+      categoryId: json['categoryId'] as String?,
+      showcase: type == HomeSectionType.genreShowcase ? items.map(ShowcaseItem.fromJson).toList() : const [],
       playlists: type == HomeSectionType.playlistCards || type == HomeSectionType.quickPicks
           ? items.map(HomePlaylistCard.fromJson).toList()
           : const [],
@@ -223,4 +234,29 @@ class HomeRepository {
         .where((s) => s.type != HomeSectionType.unknown)
         .toList();
   }
+}
+
+
+/// Položka vitríny žánru na Domů -- playlist, album nebo interpret.
+class ShowcaseItem {
+  const ShowcaseItem({this.playlist, this.album, this.artistId, this.artistName, this.artistImage, this.badge});
+
+  final HomePlaylistCard? playlist;
+  final HomeAlbumCard? album;
+  final String? artistId;
+  final String? artistName;
+  final String? artistImage;
+
+  /// "Novinka" u nového alba.
+  final String? badge;
+
+  factory ShowcaseItem.fromJson(Map<String, dynamic> json) => switch (json['itemType']) {
+        'playlist' => ShowcaseItem(playlist: HomePlaylistCard.fromJson(json)),
+        'album' => ShowcaseItem(album: HomeAlbumCard.fromJson(json), badge: json['badge'] as String?),
+        _ => ShowcaseItem(
+            artistId: json['id'] as String,
+            artistName: json['name'] as String?,
+            artistImage: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()).firstOrNull,
+          ),
+      };
 }

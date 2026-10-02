@@ -17,9 +17,12 @@ import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
-import 'browse_grid.dart' show categoryIcon;
+import 'browse_grid.dart' show BrowseTile, categoryIcon;
 import '../../widgets/collection_actions.dart';
 import '../../core/cz_plural.dart';
+import '../../data/home_repository.dart';
+import '../../state/audio_player_controller.dart';
+import '../../widgets/track_actions.dart' show nowPlayingInfoFor;
 
 /// Stránka jedné kategorie z Procházet: playlisty (redakční Deezer), u žánrů
 /// i populární skladby, alba a interpreti. Barva kategorie tónuje appku.
@@ -126,24 +129,42 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
             ),
           ),
         ),
+        // 1. Hlavní mix žánru (stejný jako na Domů) -- velká karta nahoře.
+        if (data.mixes.isNotEmpty) SliverToBoxAdapter(child: _HeroMix(card: data.mixes.first, accent: c.color)),
+        // 2. Pro tebe -- tvůj mix žánru, alba od tvých interpretů, koho ještě neznáš.
         SliverToBoxAdapter(child: _YourMix(categoryId: c.id)),
-        if (data.playlists.isNotEmpty) ...[
-          const SliverToBoxAdapter(child: SectionHeader('Playlisty')),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            sliver: SliverGrid.builder(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 190,
-                childAspectRatio: 0.74,
-                crossAxisSpacing: AppSpacing.sm,
-                mainAxisSpacing: AppSpacing.sm,
-              ),
-              itemCount: data.playlists.length,
-              itemBuilder: (context, i) => _PlaylistTile(
-                playlist: data.playlists[i],
-                opening: _opening == data.playlists[i].deezerId,
-                onTap: () => _openPlaylist(data.playlists[i]),
-              ),
+        if (c.group == 'genre') SliverToBoxAdapter(child: _ForYou(categoryId: c.id)),
+        // 3. Novinky.
+        if (data.mixes.length > 1 || data.newReleases.isNotEmpty) ...[
+          const SliverToBoxAdapter(child: SectionHeader('Novinky')),
+          SliverToBoxAdapter(
+            child: _Rail(
+              height: 214,
+              children: [
+                for (final m in data.mixes.skip(1))
+                  PlaylistCardView(
+                    card: m,
+                    onTap: () => context.push('/playlists/${m.id}'),
+                    onLongPress: () => showCollectionActions(
+                      context,
+                      kind: CollectionKind.playlist,
+                      id: m.id,
+                      title: m.title,
+                      imageUrl: m.coverUrls.firstOrNull,
+                    ),
+                  ),
+                for (final a in data.newReleases) SizedBox(width: 150, child: _albumCard(context, a)),
+              ],
+            ),
+          ),
+        ],
+        // 4. Best of -- zásadní alba a nejposlouchanější skladby.
+        if (data.classics.isNotEmpty) ...[
+          const SliverToBoxAdapter(child: SectionHeader('Zásadní alba')),
+          SliverToBoxAdapter(
+            child: _Rail(
+              height: 204,
+              children: [for (final a in data.classics) SizedBox(width: 150, child: _albumCard(context, a))],
             ),
           ),
         ],
@@ -162,53 +183,59 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
             ),
           ),
         ],
+        // 5. Hlavní interpreti žánru.
+        if ((data.topArtists.isEmpty ? data.artists : data.topArtists).isNotEmpty) ...[
+          const SliverToBoxAdapter(child: SectionHeader('Hlavní interpreti')),
+          SliverToBoxAdapter(
+            child: _Rail(
+              height: 190,
+              children: [
+                for (final a in (data.topArtists.isEmpty ? data.artists : data.topArtists))
+                  SizedBox(width: 130, child: _artistCard(context, a)),
+              ],
+            ),
+          ),
+        ],
+        // Alba z žánrové řady (u nálad hlavní obsah, u žánrů doplněk).
         if (data.albums.isNotEmpty) ...[
-          const SliverToBoxAdapter(child: SectionHeader('Alba')),
+          SliverToBoxAdapter(child: SectionHeader(c.group == 'genre' ? 'Další alba' : 'Alba')),
           SliverToBoxAdapter(
             child: _Rail(
               height: 204,
+              children: [for (final a in data.albums) SizedBox(width: 150, child: _albumCard(context, a))],
+            ),
+          ),
+        ],
+        // 6. Playlisty z Deezeru.
+        if (data.playlists.isNotEmpty) ...[
+          const SliverToBoxAdapter(child: SectionHeader('Playlisty')),
+          SliverToBoxAdapter(
+            child: _Rail(
+              height: 214,
               children: [
-                for (final a in data.albums)
+                for (final p in data.playlists)
                   SizedBox(
                     width: 150,
-                    child: MediaCard(
-                      title: a.title,
-                      subtitle: a.artistName,
-                      imageUrl: a.images.isEmpty ? null : a.images.first,
-                      artworkKey: (releaseId: a.id, artistId: a.artistId),
-                      onTap: () => context.push('/releases/${a.id}'),
-                      onLongPress: () => showCollectionActions(
-                        context,
-                        kind: CollectionKind.album,
-                        id: a.id,
-                        title: a.title,
-                        subtitle: a.artistName,
-                        imageUrl: a.images.isEmpty ? null : a.images.first,
-                      ),
-                    ),
+                    child: _PlaylistTile(playlist: p, opening: _opening == p.deezerId, onTap: () => _openPlaylist(p)),
                   ),
               ],
             ),
           ),
         ],
-        if (data.artists.isNotEmpty) ...[
-          const SliverToBoxAdapter(child: SectionHeader('Interpreti')),
+        // 7. O žánru (Last.fm, anglicky) a podobné žánry.
+        if (data.about != null) SliverToBoxAdapter(child: _About(text: data.about!)),
+        if (data.related.isNotEmpty) ...[
+          const SliverToBoxAdapter(child: SectionHeader('Podobné žánry')),
           SliverToBoxAdapter(
-            child: _Rail(
-              height: 190,
-              children: [
-                for (final a in data.artists)
-                  SizedBox(
-                    width: 130,
-                    child: MediaCard(
-                      title: a.name,
-                      imageUrl: a.images.isEmpty ? null : a.images.first,
-                      shape: MediaCardShape.circle,
-                      placeholderIcon: Symbols.person_rounded,
-                      onTap: () => context.push('/artists/${a.id}'),
-                    ),
-                  ),
-              ],
+            child: SizedBox(
+              height: 168 / 1.75,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: data.related.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (_, i) => SizedBox(width: 168, child: BrowseTile(category: data.related[i])),
+              ),
             ),
           ),
         ],
@@ -385,6 +412,200 @@ class _PlaylistTile extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+
+Widget _albumCard(BuildContext context, HomeAlbumCard a) => MediaCard(
+      title: a.title,
+      subtitle: a.artistName,
+      imageUrl: a.images.isEmpty ? null : a.images.first,
+      artworkKey: (releaseId: a.id, artistId: a.artistId),
+      onTap: () => context.push('/releases/${a.id}'),
+      onLongPress: () => showCollectionActions(
+        context,
+        kind: CollectionKind.album,
+        id: a.id,
+        title: a.title,
+        subtitle: a.artistName,
+        imageUrl: a.images.isEmpty ? null : a.images.first,
+      ),
+    );
+
+Widget _artistCard(BuildContext context, BrowseArtist a) => MediaCard(
+      title: a.name,
+      imageUrl: a.images.isEmpty ? null : a.images.first,
+      shape: MediaCardShape.circle,
+      placeholderIcon: Symbols.person_rounded,
+      artworkKey: (releaseId: null, artistId: a.id),
+      onTap: () => context.push('/artists/${a.id}'),
+    );
+
+/// Hlavní mix žánru nahoře stránky: velký obal, název, popis a Přehrát.
+class _HeroMix extends ConsumerStatefulWidget {
+  const _HeroMix({required this.card, required this.accent});
+  final HomePlaylistCard card;
+  final Color accent;
+
+  @override
+  ConsumerState<_HeroMix> createState() => _HeroMixState();
+}
+
+class _HeroMixState extends ConsumerState<_HeroMix> {
+  bool _loading = false;
+
+  Future<void> _play() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      final detail = await ref.read(playlistsRepositoryProvider).get(widget.card.id);
+      final infos = [for (final t in detail.items) nowPlayingInfoFor(t)];
+      if (infos.isNotEmpty) {
+        await ref.read(audioPlayerControllerProvider.notifier).playQueue(infos, 0, sourceLabel: widget.card.title);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Mix se nepodařilo spustit.')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final card = widget.card;
+    final shape = AppShapes.of(Expressive.cornerLarge);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+      child: GlassPressable(
+        shape: shape,
+        minSize: Size.zero,
+        onPressed: () => context.push('/playlists/${card.id}'),
+        child: Row(
+          children: [
+            SizedBox.square(
+              dimension: 128,
+              child: DecoratedBox(
+                decoration: ShapeDecoration(
+                  shape: shape,
+                  shadows: const [BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 4))],
+                ),
+                child: ClipPath(
+                  clipper: ShapeBorderClipper(shape: shape),
+                  child: card.coverUrls.isEmpty
+                      ? ColoredBox(color: widget.accent)
+                      : NetImage(url: card.coverUrls.first),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('MIX ŽÁNRU', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, color: theme.colorScheme.primary)),
+                  const SizedBox(height: 2),
+                  Text(card.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleLarge),
+                  if (card.description != null)
+                    Text(
+                      card.description!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  const SizedBox(height: AppSpacing.xs),
+                  GlassButton(
+                    label: _loading ? 'Načítám…' : 'Přehrát',
+                    icon: Symbols.play_arrow_rounded,
+                    style: GlassButtonStyle.prominent,
+                    compact: true,
+                    onPressed: _loading ? null : _play,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Pro tebe (podle tvých poslechů): alba žánru od interpretů, které
+/// posloucháš, a hlavní interpreti žánru, které ještě neznáš.
+class _ForYou extends ConsumerWidget {
+  const _ForYou({required this.categoryId});
+  final String categoryId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final data = ref.watch(browseForYouProvider(categoryId)).valueOrNull;
+    if (data == null) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (data.albums.isNotEmpty) ...[
+          const SectionHeader('Od tvých interpretů'),
+          _Rail(
+            height: 204,
+            children: [for (final a in data.albums) SizedBox(width: 150, child: _albumCard(context, a))],
+          ),
+        ],
+        if (data.discover.isNotEmpty) ...[
+          const SectionHeader('Ještě neznáš'),
+          _Rail(
+            height: 190,
+            children: [for (final a in data.discover) SizedBox(width: 130, child: _artistCard(context, a))],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// O žánru -- krátký popis (Last.fm), rozbalitelný.
+class _About extends StatefulWidget {
+  const _About({required this.text});
+  final String text;
+
+  @override
+  State<_About> createState() => _AboutState();
+}
+
+class _AboutState extends State<_About> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader('O žánru'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: GestureDetector(
+            onTap: () => setState(() => _open = !_open),
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              alignment: Alignment.topCenter,
+              child: Text(
+                widget.text,
+                maxLines: _open ? null : 4,
+                overflow: _open ? null : TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.md, 4, AppSpacing.md, 0),
+          child: Text('Zdroj: Last.fm', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
+        ),
+      ],
     );
   }
 }

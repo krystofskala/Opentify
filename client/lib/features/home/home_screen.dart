@@ -320,6 +320,79 @@ class _HomeSectionView extends StatelessWidget {
             _TrackCardRow(recordings: section.tracks, sourceLabel: section.title),
           ],
         );
+      case HomeSectionType.genreShowcase:
+        // Ukázka stránky žánru: mix napřed, pak novinky, alba a interpreti.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(
+              section.title,
+              onSeeAll: section.categoryId == null ? null : () => context.push('/browse/${section.categoryId}'),
+            ),
+            SizedBox(
+              height: 214,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: section.showcase.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) {
+                  final item = section.showcase[index];
+                  if (item.playlist case final card?) {
+                    return PlaylistCardView(
+                      card: card,
+                      onTap: () => context.push('/playlists/${card.id}'),
+                      onLongPress: () => _playlistActions(context, card),
+                    );
+                  }
+                  if (item.album case final album?) {
+                    return SizedBox(
+                      width: 150,
+                      child: Stack(
+                        children: [
+                          _albumCard(context, album, null),
+                          if (item.badge != null)
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: DecoratedBox(
+                                decoration: ShapeDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  shape: const StadiumBorder(),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  child: Text(
+                                    item.badge!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(color: Theme.of(context).colorScheme.onPrimary),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  }
+                  return SizedBox(
+                    width: 140,
+                    child: MediaCard(
+                      title: item.artistName ?? '',
+                      subtitle: 'Interpret',
+                      imageUrl: item.artistImage,
+                      shape: MediaCardShape.circle,
+                      placeholderIcon: Symbols.person_rounded,
+                      artworkKey: (releaseId: null, artistId: item.artistId),
+                      onTap: () => context.push('/artists/${item.artistId}'),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
       case HomeSectionType.categoryTiles:
         // Stejné dlaždice jako v Hledat (BrowseTile), ne karty playlistů.
         const tileWidth = 168.0;

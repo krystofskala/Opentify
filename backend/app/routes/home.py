@@ -181,6 +181,10 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
             if c is not None:
                 await browse.genre_rail(c)
                 await browse.genre_new_releases(c)  # novinky (bluegrass) hned, ne až za hodinu
+                try:
+                    await browse.build_showcase(c)  # vitrína žánru na Domů hned
+                except Exception:  # noqa: BLE001
+                    pass
         await invalidate_home_cache()
 
     asyncio.create_task(warm())

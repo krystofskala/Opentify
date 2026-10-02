@@ -79,6 +79,10 @@ final wrappedStatsProvider = FutureProvider.autoDispose.family<WrappedStats, Str
 });
 
 /// "Tvůj mix · X" na stránce kategorie (viz backend app/home/category_mixes.py).
+final browseForYouProvider = FutureProvider.autoDispose.family<GenreForYou, String>((ref, id) {
+  return ref.watch(browseRepositoryProvider).forYou(id);
+});
+
 final browseMixProvider = FutureProvider.autoDispose.family<HomePlaylistCard?, String>((ref, id) {
   return ref.watch(browseRepositoryProvider).mix(id);
 });

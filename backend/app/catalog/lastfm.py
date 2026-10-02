@@ -219,3 +219,29 @@ async def tag_top_tracks(tag: str, limit: int = 50) -> list[dict[str, Any]]:
         for t in _as_list(((data or {}).get("tracks") or {}).get("track"))
         if t.get("name") and (t.get("artist") or {}).get("name")
     ]
+
+
+async def tag_top_artists(tag: str, limit: int = 30) -> list[str]:
+    data = await get({"method": "tag.gettopartists", "tag": tag, "limit": str(limit)}, ttl=DAY)
+    return [a["name"] for a in _as_list(((data or {}).get("topartists") or {}).get("artist")) if a.get("name")]
+
+
+async def tag_top_albums(tag: str, limit: int = 30) -> list[dict[str, str]]:
+    data = await get({"method": "tag.gettopalbums", "tag": tag, "limit": str(limit)}, ttl=DAY)
+    return [
+        {"title": a["name"], "artist": (a.get("artist") or {}).get("name") or ""}
+        for a in _as_list(((data or {}).get("albums") or {}).get("album"))
+        if a.get("name") and (a.get("artist") or {}).get("name")
+    ]
+
+
+async def tag_summary(tag: str) -> str | None:
+    """Krátký popis žánru z Last.fm wiki (bez HTML a odkazu "Read more")."""
+    import html
+    import re
+
+    data = await get({"method": "tag.getinfo", "tag": tag}, ttl=7 * DAY)
+    text = (((data or {}).get("tag") or {}).get("wiki") or {}).get("summary") or ""
+    text = re.sub(r"<a [^>]*>Read more on Last\.fm</a>\.?", "", text)
+    text = html.unescape(re.sub(r"<[^>]+>", "", text)).strip()
+    return text or None

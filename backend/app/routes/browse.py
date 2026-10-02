@@ -55,6 +55,16 @@ async def category_mix(category_id: str, current: tuple[str, str] = Depends(get_
     return {"playlist": cm.playlist_card(playlist_id) if playlist_id else None}
 
 
+@browse_router.get("/{category_id}/for-you")
+async def category_for_you(category_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Stránka žánru › Pro tebe: alba od tvých interpretů, interpreti žánru,
+    které ještě neznáš."""
+    c = browse.get_category(category_id)
+    if c is None or c.group != "genre":
+        raise HTTPException(status_code=404, detail="žánr neexistuje")
+    return await browse.genre_for_you(c, current[0])
+
+
 @browse_router.post("/deezer-playlists/{deezer_id}")
 async def open_playlist(deezer_id: str, title: str | None = None):
     """Otevřít Deezer playlist z kategorie -- převezme ho do katalogu a vrátí

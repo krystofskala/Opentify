@@ -17,6 +17,7 @@ ne dopředu -- šetří to Deezer i databázi.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
@@ -489,7 +490,8 @@ NEW_SKIP_ARTISTS = {
     "The Country Gentlemen", "J.D. Crowe & The New South", "Tony Rice", "Bluegrass Album Band",
 }
 _REISSUE = re.compile(
-    r"remaster|anniversary|deluxe|expanded|reissue|story|best of|greatest|collection|anthology|essential|hits|complete|years",
+    r"remaster|anniversary|deluxe|expanded|reissue|story|best of|greatest|collection|anthology|essential|hits|complete"
+    r"|years|integral|\b(19|20)\d\d\s*[-–]\s*(19|20)?\d\d\b|\bvol(ume)?\.?\s*\d",
     re.I,
 )
 
@@ -579,9 +581,342 @@ async def build_genre_rails() -> int:
     for c in genres:
         if await genre_rail(c):
             built += 1
-        if c.id in wanted and await genre_new_releases(c):
-            built += 1
+        if c.id in wanted:
+            if await genre_new_releases(c):
+                built += 1
+            try:
+                await build_showcase(c)
+            except Exception:  # noqa: BLE001 -- vitrína je bonus, řada žánru stačí
+                logging.getLogger(__name__).exception("vitrína žánru %s selhala", c.id)
     return built
+
+
+def showcase_key(category_id: str) -> str:
+    return f"genre-showcase:{category_id}"
+
+
+async def build_showcase(c: Category) -> None:
+    """Ukázka stránky žánru pro Domů: žánrový mix napřed, pak Novinky,
+    nová a zásadní alba a interpreti na přeskáčku."""
+    from app.models import HomeSnapshot
+
+    extras = await genre_extras(c)
+    with Session(engine) as session:
+        rail = session.get(HomeSnapshot, rail_key(c.id))
+        new = session.get(HomeSnapshot, new_key(c.id))
+        payload = {
+            "railId": (rail.payload or {}).get("playlistId") if rail else None,
+            "newId": (new.payload or {}).get("playlistId") if new else None,
+            "newReleaseIds": (extras.get("newReleaseIds") or [])[:5],
+            "artistIds": (extras.get("artistIds") or [])[:6],
+            "classicIds": (extras.get("classicIds") or [])[:5],
+        }
+        row = session.get(HomeSnapshot, showcase_key(c.id)) or HomeSnapshot(key=showcase_key(c.id))
+        row.payload = payload
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+
+
+def showcase_items(session: Session, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Karty vitríny (`build_showcase`) -- playlisty, alba, interpreti."""
+    from app.home.service import _card
+
+    items: list[dict[str, Any]] = []
+    for pid in (payload.get("railId"), payload.get("newId")):
+        pl = session.get(Playlist, pid) if pid else None
+        if pl is not None:
+            items.append({"itemType": "playlist", **_card(session, pl).model_dump(mode="json", by_alias=True)})
+    new = [r for r in (session.get(Release, i) for i in payload.get("newReleaseIds") or []) if r is not None]
+    classic = [r for r in (session.get(Release, i) for i in payload.get("classicIds") or []) if r is not None]
+    artists = [a for a in (session.get(Artist, i) for i in payload.get("artistIds") or []) if a is not None]
+    for i in range(max(len(new), len(classic), len(artists))):
+        for group, kind in ((new, "new"), (artists, "artist"), (classic, "classic")):
+            if i >= len(group):
+                continue
+            x = group[i]
+            if kind == "artist":
+                items.append({"itemType": "artist", **_artist_card(x)})
+            else:
+                items.append({"itemType": "album", "badge": "Novinka" if kind == "new" else None, **_album_card(session, x)})
+    return items
+
+
+# Podobné žánry (odkazy dole na stránce žánru).
+RELATED_GENRES: dict[str, tuple[str, ...]] = {
+    "pop": ("dance", "rnb", "indie", "asian"), "hiphop": ("rnb", "soul", "african", "pop"),
+    "rock": ("metal", "indie", "blues", "folk"), "indie": ("rock", "folk", "electronic", "pop"),
+    "electronic": ("dance", "indie", "pop", "hiphop"), "dance": ("electronic", "pop", "latin", "african"),
+    "rnb": ("soul", "hiphop", "pop", "jazz"), "jazz": ("blues", "soul", "classical", "brazil"),
+    "classical": ("jazz", "folk", "kids", "indie"), "folk": ("bluegrass", "country", "indie", "blues"),
+    "metal": ("rock", "indie", "electronic", "blues"), "soul": ("rnb", "jazz", "blues", "hiphop"),
+    "country": ("bluegrass", "folk", "blues", "rock"), "bluegrass": ("country", "folk", "blues", "jazz"),
+    "blues": ("jazz", "soul", "rock", "bluegrass"), "reggae": ("african", "latin", "hiphop", "soul"),
+    "latin": ("brazil", "reggae", "dance", "pop"), "brazil": ("latin", "jazz", "african", "reggae"),
+    "african": ("reggae", "hiphop", "latin", "dance"), "asian": ("pop", "dance", "indian", "electronic"),
+    "indian": ("asian", "pop", "african", "classical"), "kids": ("pop", "classical", "folk", "dance"),
+}
+EXTRAS_TTL_S = 12 * 60 * 60
+
+
+def _album_card(session: Session, release: Release) -> dict[str, Any]:
+    from app.home.service import AlbumCardOut
+
+    art = session.get(Artist, release.artist_id) if release.artist_id else None
+    return AlbumCardOut(
+        id=release.id,
+        title=release.title,
+        artist_id=release.artist_id,
+        artist_name=art.name if art else None,
+        release_date=release.release_date,
+        release_type=release.release_type,
+        images=release.images or [],
+    ).model_dump(mode="json", by_alias=True)
+
+
+def _artist_card(artist: Artist) -> dict[str, Any]:
+    return {"id": artist.id, "name": artist.name, "images": artist.images or []}
+
+
+async def _resolve_artists(names: list[str], limit: int, skip: set[str]) -> list[str]:
+    """Jména (Last.fm / vlastní výběr) -> naši interpreti přes Deezer, jen
+    přesná shoda jména."""
+    from app.catalog.artwork import _normalize
+    from app.catalog.deezer_ingest import ingest_artist
+
+    dz = get_deezer_client()
+    ids: list[str] = []
+    seen_names: set[str] = set()
+    for name in names:
+        key = _normalize(name)
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        hits = await dz.search_artist(name, limit=5)
+        hit = next((h for h in hits if _normalize(h.get("name") or "") == key), None)
+        if hit is None:
+            continue
+        with Session(engine) as session:
+            artist = ingest_artist(session, hit)
+            session.commit()
+            if artist is not None and artist.id not in ids and artist.id not in skip:
+                ids.append(artist.id)
+        if len(ids) >= limit:
+            break
+    return ids
+
+
+async def _resolve_albums(items: list[dict[str, str]], limit: int) -> list[str]:
+    """(interpret, album) z Last.fm -> naše vydání přes Deezer (přesný název)."""
+    from app.catalog.artwork import _normalize
+    from app.catalog.deezer_ingest import ingest_album, ingest_artist
+
+    dz = get_deezer_client()
+    ids: list[str] = []
+    for item in items:
+        hits = await dz.search_album(item["artist"], item["title"])
+        hit = next(
+            (
+                h
+                for h in hits
+                if _normalize(h.get("title") or "") == _normalize(item["title"])
+                and _normalize((h.get("artist") or {}).get("name") or "") == _normalize(item["artist"])
+            ),
+            None,
+        )
+        if hit is None:
+            continue
+        with Session(engine) as session:
+            artist = ingest_artist(session, hit.get("artist") or {})
+            release = ingest_album(session, hit, artist) if artist else None
+            session.commit()
+            if release is not None and release.id not in ids:
+                ids.append(release.id)
+        if len(ids) >= limit:
+            break
+    return ids
+
+
+def _ingest_dz_albums(albums: list[dict[str, Any]], limit: int) -> list[str]:
+    from app.catalog.deezer_ingest import ingest_album, ingest_artist
+
+    ids: list[str] = []
+    with Session(engine) as session:
+        for a in albums:
+            artist = ingest_artist(session, a.get("artist") or {})
+            release = ingest_album(session, a, artist) if artist else None
+            if release is not None and release.id not in ids:
+                ids.append(release.id)
+            if len(ids) >= limit:
+                break
+        session.commit()
+    return ids
+
+
+async def _first_release_year(artist: str, title: str) -> int | None:
+    """Rok prvního vydání alba podle MusicBrainz (release group), nebo None."""
+    from app.catalog.musicbrainz import MusicBrainzError, get_musicbrainz_client
+
+    def q(text: str) -> str:
+        return text.replace("\\", " ").replace('"', " ")
+
+    if not artist or not title:
+        return None
+    data: dict[str, Any] = {}
+    for attempt in range(4):
+        try:
+            data = await get_musicbrainz_client().search(
+                "release-group", f'releasegroup:"{q(title)}" AND artist:"{q(artist)}"', 5, 0
+            )
+            break
+        except MusicBrainzError:
+            # Fronta MusicBrainz plná (backfilly na pozadí) -- chvíli počkat.
+            await asyncio.sleep(3 * (attempt + 1))
+    else:
+        return None
+    years = []
+    for rg in data.get("release-groups") or []:
+        if (rg.get("score") or 0) < 90:
+            continue
+        date_text = rg.get("first-release-date") or ""
+        if len(date_text) >= 4 and date_text[:4].isdigit():
+            years.append(int(date_text[:4]))
+    return min(years) if years else None
+
+
+async def _recent_albums(artist_ids: list[str], limit: int) -> list[str]:
+    """Alba a EP hlavních interpretů žánru z posledního roku (bez kompilací
+    a reedic), nejnovější první."""
+    from datetime import date
+
+    from app.catalog.deezer_ingest import ingest_album
+
+    dz = get_deezer_client()
+    cutoff = date.today().toordinal() - NEW_WITHIN_DAYS
+    found: list[tuple[date, dict[str, Any], str]] = []
+    for aid in artist_ids:
+        with Session(engine) as session:
+            artist = session.get(Artist, aid)
+            dzid = artist.deezer_id if artist else None
+        if not dzid:
+            continue
+        for album in await dz.artist_albums(dzid) or []:
+            if album.get("record_type") not in ("album", "ep") or _REISSUE.search(album.get("title") or ""):
+                continue
+            try:
+                released = date.fromisoformat(album.get("release_date") or "")
+            except ValueError:
+                continue
+            if released.toordinal() >= cutoff:
+                found.append((released, album, aid))
+    found.sort(key=lambda x: x[0], reverse=True)
+    ids: list[str] = []
+    checked = 0
+    with Session(engine) as session:
+        for _released, album, aid in found:
+            if checked < 30:
+                # Deezer dává reedicím datum digitálního vydání (Rubber Soul jako
+                # novinka) -- MusicBrainz zná datum PRVNÍHO vydání.
+                checked += 1
+                artist = session.get(Artist, aid)
+                first = await _first_release_year(artist.name if artist else "", album.get("title") or "")
+                if first is not None and first < date.today().year - 1:
+                    continue
+            release = ingest_album(session, album, session.get(Artist, aid))
+            if release is not None and release.id not in ids:
+                ids.append(release.id)
+            if len(ids) >= limit:
+                break
+        session.commit()
+    return ids
+
+
+async def genre_extras(c: Category) -> dict[str, Any]:
+    """Obsah stránky žánru navíc (a ukázka na Domů): nová alba, hlavní
+    interpreti, zásadní alba, popis žánru, podobné žánry. Deezer napřed,
+    Last.fm doplní (štítky posluchačů). Cache 12 h."""
+    from app.catalog import lastfm
+    from app.catalog.deezer_ingest import ingest_artist
+
+    async def build() -> dict[str, Any]:
+        dz = get_deezer_client()
+        tags = LASTFM_TAGS.get(c.id) or (c.query,)
+        # Interpreti: nejposlouchanější se štítkem žánru (Last.fm), u
+        # bluegrassu doplní vlastní výběr. Deezer "chart artists" je jen
+        # místní žebříček (CZ rap u country), ne žánr.
+        names: list[str] = []
+        for tag in tags[:2]:
+            names += await lastfm.tag_top_artists(tag, 40)
+        names += list(SEED_ARTISTS.get(c.id, ()))
+        artist_ids = await _resolve_artists(names, 24, set())
+        # Nová alba: co hlavní interpreti žánru vydali za poslední rok (alba
+        # a EP). Redakce Deezeru míchala reedice klasik s novým datem
+        # (Rubber Soul, "Ella Fitzgerald 1960 - 1962"). U bluegrassu vlastní
+        # Novinky.
+        new_ids: list[str] = []
+        if c.id in SEED_ARTISTS:
+            new_pl = await genre_new_releases(c)
+            if new_pl:
+                with Session(engine) as session:
+                    for rid in _playlist_ids(new_pl):
+                        rec = session.get(Recording, rid)
+                        if rec is not None and rec.release_id and rec.release_id not in new_ids:
+                            new_ids.append(rec.release_id)
+                new_ids = new_ids[:15]
+        if not new_ids:
+            new_ids = await _recent_albums(artist_ids[:20], 15)
+        # Zásadní alba: nejposlouchanější alba se štítkem žánru (Last.fm).
+        classic_items: list[dict[str, str]] = []
+        for tag in tags[:2]:
+            classic_items += await lastfm.tag_top_albums(tag, 30)
+        classic_ids = await _resolve_albums(classic_items, 15)
+        about = await lastfm.tag_summary(tags[0])
+        return {
+            "newReleaseIds": new_ids,
+            "artistIds": artist_ids,
+            "classicIds": [i for i in classic_ids if i not in new_ids],
+            "about": about,
+            "related": [r for r in RELATED_GENRES.get(c.id, ()) if r in _BY_ID],
+        }
+
+    return await cached_json(f"browse:extras:v6:{c.id}", EXTRAS_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+
+
+def extras_cards(extras: dict[str, Any]) -> dict[str, Any]:
+    """Id z `genre_extras` -> karty alb/interpretů (čerstvé obrázky z DB)."""
+    with Session(engine) as session:
+
+        def albums(ids: list[str]) -> list[dict[str, Any]]:
+            return [_album_card(session, r) for r in (session.get(Release, i) for i in ids) if r is not None]
+
+        artists = [
+            _artist_card(a) for a in (session.get(Artist, i) for i in extras.get("artistIds") or []) if a is not None
+        ]
+        return {
+            "newReleases": albums(extras.get("newReleaseIds") or []),
+            "classics": albums(extras.get("classicIds") or []),
+            "topArtists": artists,
+            "about": extras.get("about"),
+            "related": [
+                {"id": r.id, "title": r.title, "group": r.group, "color": r.color, "icon": r.icon}
+                for r in (get_category(i) for i in extras.get("related") or [])
+                if r is not None
+            ],
+        }
+
+
+def genre_mixes(c: Category, rail_id: str | None, new_id: str | None) -> list[dict[str, Any]]:
+    """Naše playlisty žánru jako karty: žánrový mix (stejný jako na Domů)
+    a Novinky."""
+    from app.home.service import _card
+
+    out = []
+    with Session(engine) as session:
+        for pid in (rail_id, new_id):
+            pl = session.get(Playlist, pid) if pid else None
+            if pl is not None:
+                out.append(_card(session, pl).model_dump(mode="json", by_alias=True))
+    return out
 
 
 async def category_page(c: Category) -> dict[str, Any]:
@@ -604,7 +939,12 @@ async def category_page(c: Category) -> dict[str, Any]:
             page["playlistId"] = playlist_id
         return page
 
-    return await cached_json(f"browse:v3:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
+    page = await cached_json(f"browse:v3:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
+    if c.group == "genre":
+        page = {**page, **extras_cards(await genre_extras(c))}
+        new_id = await genre_new_releases(c) if c.id in SEED_ARTISTS else None
+        page["mixes"] = genre_mixes(c, page.get("playlistId"), new_id)
+    return page
 
 
 async def open_deezer_playlist(deezer_id: str, title_hint: str | None = None) -> str | None:
@@ -639,3 +979,56 @@ async def open_deezer_playlist(deezer_id: str, title_hint: str | None = None) ->
         cover_urls=[picture] if picture else g._covers_for(ids),
         ttl=g.DAILY_TTL,
     )
+
+
+def _known_artists(user_id: str) -> set[str]:
+    """Interpreti, které profil zná: poslouchal, má jejich skladbu v Oblíbených
+    nebo je má mezi oblíbenými interprety."""
+    from app.models import FavoriteArtist, Listen, PlaylistItem
+
+    with Session(engine) as session:
+        known = set(
+            session.exec(
+                select(Recording.artist_id).join(Listen, Listen.recording_id == Recording.id).where(Listen.user_id == user_id)
+            ).all()
+        )
+        known |= set(
+            session.exec(
+                select(Recording.artist_id)
+                .join(PlaylistItem, PlaylistItem.recording_id == Recording.id)
+                .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+                .where(Playlist.owner_user_id == user_id, Playlist.source == "liked-songs")
+            ).all()
+        )
+        known |= set(session.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all())
+    known.discard(None)
+    return known  # type: ignore[return-value]
+
+
+async def genre_for_you(c: Category, user_id: str) -> dict[str, Any]:
+    """"Pro tebe" na stránce žánru: alba žánru od interpretů, které
+    posloucháš (novinky napřed), a hlavní interpreti žánru, které ještě
+    neznáš."""
+    extras = await genre_extras(c)
+    known = await asyncio.to_thread(_known_artists, user_id)
+    with Session(engine) as session:
+        albums = []
+        seen: set[str] = set()
+        candidates = (extras.get("newReleaseIds") or []) + (extras.get("classicIds") or [])
+        # + jejich další alba, co už v katalogu máme
+        for rid in candidates:
+            rel = session.get(Release, rid)
+            if rel is not None and rel.artist_id in known and rel.id not in seen:
+                seen.add(rel.id)
+                albums.append(_album_card(session, rel))
+        discover = [
+            _artist_card(a)
+            for a in (session.get(Artist, i) for i in extras.get("artistIds") or [])
+            if a is not None and a.id not in known
+        ]
+        yours = [
+            _artist_card(a)
+            for a in (session.get(Artist, i) for i in extras.get("artistIds") or [])
+            if a is not None and a.id in known
+        ]
+    return {"albums": albums[:12], "discover": discover[:12], "yourArtists": yours[:12]}

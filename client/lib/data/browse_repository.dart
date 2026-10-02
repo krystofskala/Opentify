@@ -75,6 +75,12 @@ class BrowsePage {
     this.tracks = const [],
     this.albums = const [],
     this.artists = const [],
+    this.mixes = const [],
+    this.newReleases = const [],
+    this.classics = const [],
+    this.topArtists = const [],
+    this.about,
+    this.related = const [],
   });
 
   final BrowseCategory category;
@@ -82,6 +88,24 @@ class BrowsePage {
   final List<RecordingModel> tracks;
   final List<HomeAlbumCard> albums;
   final List<BrowseArtist> artists;
+
+  /// Naše playlisty žánru: žánrový mix (první, hlavní) a Novinky.
+  final List<HomePlaylistCard> mixes;
+
+  /// Nová alba žánru (redakce Deezeru / hlavní interpreti za poslední rok).
+  final List<HomeAlbumCard> newReleases;
+
+  /// Zásadní alba -- nejposlouchanější se štítkem žánru (Last.fm).
+  final List<HomeAlbumCard> classics;
+
+  /// Hlavní interpreti žánru (Last.fm štítky, u bluegrassu vlastní výběr).
+  final List<BrowseArtist> topArtists;
+
+  /// Krátký popis žánru (Last.fm, anglicky).
+  final String? about;
+
+  /// Podobné žánry.
+  final List<BrowseCategory> related;
 
   factory BrowsePage.fromJson(Map<String, dynamic> json) {
     List<Map<String, dynamic>> list(String key) =>
@@ -92,6 +116,36 @@ class BrowsePage {
       tracks: list('tracks').map(RecordingModel.fromJson).toList(),
       albums: list('albums').map(HomeAlbumCard.fromJson).toList(),
       artists: list('artists').map(BrowseArtist.fromJson).toList(),
+      mixes: list('mixes').map(HomePlaylistCard.fromJson).toList(),
+      newReleases: list('newReleases').map(HomeAlbumCard.fromJson).toList(),
+      classics: list('classics').map(HomeAlbumCard.fromJson).toList(),
+      topArtists: list('topArtists').map(BrowseArtist.fromJson).toList(),
+      about: json['about'] as String?,
+      related: list('related').map(BrowseCategory.fromJson).toList(),
+    );
+  }
+}
+
+/// Stránka žánru › Pro tebe (`GET /browse/{id}/for-you`).
+class GenreForYou {
+  const GenreForYou({this.albums = const [], this.discover = const [], this.yourArtists = const []});
+
+  /// Alba žánru od interpretů, které posloucháš.
+  final List<HomeAlbumCard> albums;
+
+  /// Hlavní interpreti žánru, které ještě neznáš.
+  final List<BrowseArtist> discover;
+
+  /// Interpreti žánru, které už posloucháš.
+  final List<BrowseArtist> yourArtists;
+
+  factory GenreForYou.fromJson(Map<String, dynamic> json) {
+    List<Map<String, dynamic>> list(String key) =>
+        (json[key] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
+    return GenreForYou(
+      albums: list('albums').map(HomeAlbumCard.fromJson).toList(),
+      discover: list('discover').map(BrowseArtist.fromJson).toList(),
+      yourArtists: list('yourArtists').map(BrowseArtist.fromJson).toList(),
     );
   }
 }
@@ -107,6 +161,9 @@ class BrowseRepository {
   }
 
   Future<BrowsePage> page(String categoryId) async => BrowsePage.fromJson(await _api.getJson('/browse/$categoryId'));
+
+  Future<GenreForYou> forYou(String categoryId) async =>
+      GenreForYou.fromJson(await _api.getJson('/browse/$categoryId/for-you'));
 
   /// "Tvůj mix" kategorie podle poslechů; `null`, když na něj nemáš v téhle
   /// náladě/žánru dost skladeb. Poprvé za den se skládá pár sekund.

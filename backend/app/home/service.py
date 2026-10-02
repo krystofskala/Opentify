@@ -346,7 +346,16 @@ def build_home(user_id: str) -> dict[str, Any]:
         from app.models import HomeSnapshot as _Snap
 
         for c in browse.pinned_genres(user_id):
-            # Řada žánru a u bluegrassu i jeho novinky z posledního roku.
+            # Vitrína žánru: mix napřed, pak novinky, alba a interpreti --
+            # ukázka celé stránky žánru (dřív jen řada skladeb jednoho playlistu).
+            showcase = session.get(_Snap, browse.showcase_key(c.id))
+            items = browse.showcase_items(session, showcase.payload or {}) if showcase else []
+            if len(items) >= 4:
+                sections.append(
+                    {"id": f"genre_{c.id}", "title": c.title, "type": "genre_showcase", "categoryId": c.id, "items": items}
+                )
+                continue
+            # Vitrína ještě není (první hodina) -- řada žánru a novinky.
             for key, section_id, title in (
                 (browse.rail_key(c.id), f"genre_{c.id}", c.title),
                 (browse.new_key(c.id), f"genre_new_{c.id}", f"Novinky: {c.title}"),
