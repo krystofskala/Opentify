@@ -16,6 +16,7 @@ import '../features/player/now_playing_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/profile/year_in_review_screen.dart';
 import '../features/browse/browse_category_screen.dart';
+import '../features/browse/tag_screen.dart';
 import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/shazam/shazam_screen.dart';
@@ -73,6 +74,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           releaseId: state.pathParameters['releaseId']!,
           highlightTrackId: state.uri.queryParameters['track'],
         ),
+      ),
+      GoRoute(
+        path: '/browse/tag/:tag',
+        builder: (context, state) => TagScreen(tag: state.pathParameters['tag']!),
       ),
       GoRoute(
         path: '/browse/:categoryId',

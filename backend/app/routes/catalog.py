@@ -112,7 +112,7 @@ async def get_artist_stats(artist_id: str, _current=Depends(get_current_user)):
         if artist is None:
             raise HTTPException(status_code=404, detail="interpret nenalezen")
         if (artist.mbid or "").startswith("own:"):
-            return {"listeners": None, "playcount": None, "popularReleaseIds": []}
+            return {"listeners": None, "playcount": None, "popularReleaseIds": [], "tags": []}
         name = primary_artist_name(artist.name)
         releases = session.exec(select(Release).where(Release.artist_id == artist_id)).all()
         # Přesný název (i se závorkami) -- Last.fm počítá každou verzi zvlášť
@@ -131,10 +131,14 @@ async def get_artist_stats(artist_id: str, _current=Depends(get_current_user)):
             popular.append(candidates[0].id)
         if len(popular) >= 10:
             break
+    from app.tags import is_style
+
     return {
         "listeners": (info or {}).get("listeners"),
         "playcount": (info or {}).get("playcount"),
         "popularReleaseIds": popular,
+        # Styly interpreta (štítky Last.fm) -- čipy vedou na stránku stylu.
+        "tags": [t.lower() for t in (info or {}).get("tags") or [] if is_style(t)][:6],
     }
 
 

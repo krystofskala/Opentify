@@ -27,6 +27,16 @@ async def search_playlists(q: str = Query(..., min_length=2, max_length=100)):
     return {"playlists": await browse.search_playlists(q, limit=15, min_tracks=5, max_tracks=3000)}
 
 
+@browse_router.get("/tag/{tag:path}")
+async def tag_page(tag: str, _current: tuple[str, str] = Depends(get_current_user)):
+    """Stránka stylu ze štítku Last.fm (podžánr, štítek interpreta)."""
+    from app import tags
+
+    if not tags.is_style(tag):
+        raise HTTPException(status_code=404, detail="tohle není hudební styl")
+    return await tags.tag_page(tag)
+
+
 @browse_router.get("/{category_id}")
 async def category(category_id: str):
     c = browse.get_category(category_id)

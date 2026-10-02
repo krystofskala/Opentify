@@ -24,6 +24,7 @@ import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
 import '../../widgets/collection_actions.dart';
 import 'artist_support.dart';
+import '../browse/tag_screen.dart' show TagChips;
 import '../../state/favorite_artists_controller.dart';
 
 final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
@@ -210,6 +211,9 @@ class _ArtistBody extends ConsumerWidget {
                   orElse: () => const SizedBox.shrink(),
                 ),
               ),
+              // Styly interpreta (štítky Last.fm) -- stránka stylu s mixem.
+              if (stats?.tags case final tags? when tags.isNotEmpty)
+                SliverToBoxAdapter(child: TagChips(tags: tags)),
               SliverToBoxAdapter(
                 child: _PopularTracksSection(
                   artistId: artist.id,
@@ -313,7 +317,8 @@ class _ArtistBody extends ConsumerWidget {
   }
 }
 
-final artistStatsProvider = FutureProvider.autoDispose.family<({int? listeners, List<String> popularReleaseIds}), String>(
+final artistStatsProvider =
+    FutureProvider.autoDispose.family<({int? listeners, List<String> popularReleaseIds, List<String> tags}), String>(
     (ref, artistId) => ref.watch(catalogRepositoryProvider).getArtistStats(artistId));
 
 /// "1,2 mil." / "345 tis." -- počet posluchačů do hlavičky.

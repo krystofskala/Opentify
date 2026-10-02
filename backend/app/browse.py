@@ -588,6 +588,14 @@ async def build_genre_rails() -> int:
                 await build_showcase(c)
             except Exception:  # noqa: BLE001 -- vitrína je bonus, řada žánru stačí
                 logging.getLogger(__name__).exception("vitrína žánru %s selhala", c.id)
+            # Stránky podžánrů připnutých žánrů dopředu (první otevření jinak ~10 s).
+            from app.tags import SUBGENRES, tag_page
+
+            for sub in SUBGENRES.get(c.id, ()):
+                try:
+                    await tag_page(sub)
+                except Exception:  # noqa: BLE001
+                    logging.getLogger(__name__).exception("podžánr %s selhal", sub)
     return built
 
 
@@ -680,42 +688,60 @@ def _artist_card(artist: Artist) -> dict[str, Any]:
 
 async def _resolve_artists(names: list[str], limit: int, skip: set[str]) -> list[str]:
     """Jména (Last.fm / vlastní výběr) -> naši interpreti přes Deezer, jen
-    přesná shoda jména."""
+    přesná shoda jména. Hledání souběžně, pořadí podle vstupu."""
     from app.catalog.artwork import _normalize
     from app.catalog.deezer_ingest import ingest_artist
 
     dz = get_deezer_client()
-    ids: list[str] = []
+    unique: list[str] = []
     seen_names: set[str] = set()
     for name in names:
         key = _normalize(name)
-        if key in seen_names:
-            continue
-        seen_names.add(key)
-        hits = await dz.search_artist(name, limit=5)
-        hit = next((h for h in hits if _normalize(h.get("name") or "") == key), None)
-        if hit is None:
-            continue
-        with Session(engine) as session:
+        if key and key not in seen_names:
+            seen_names.add(key)
+            unique.append(name)
+    unique = unique[: limit * 2]
+    sem = asyncio.Semaphore(6)
+
+    async def look(name: str) -> dict[str, Any] | None:
+        async with sem:
+            try:
+                hits = await dz.search_artist(name, limit=5)
+            except Exception:  # noqa: BLE001
+                return None
+        return next((h for h in hits if _normalize(h.get("name") or "") == _normalize(name)), None)
+
+    hits = await asyncio.gather(*(look(n) for n in unique))
+    ids: list[str] = []
+    with Session(engine) as session:
+        for hit in hits:
+            if hit is None:
+                continue
             artist = ingest_artist(session, hit)
-            session.commit()
             if artist is not None and artist.id not in ids and artist.id not in skip:
                 ids.append(artist.id)
-        if len(ids) >= limit:
-            break
+            if len(ids) >= limit:
+                break
+        session.commit()
     return ids
 
 
 async def _resolve_albums(items: list[dict[str, str]], limit: int) -> list[str]:
-    """(interpret, album) z Last.fm -> naše vydání přes Deezer (přesný název)."""
+    """(interpret, album) z Last.fm -> naše vydání přes Deezer (přesný název).
+    Hledání souběžně, pořadí podle vstupu."""
     from app.catalog.artwork import _normalize
     from app.catalog.deezer_ingest import ingest_album, ingest_artist
 
     dz = get_deezer_client()
-    ids: list[str] = []
-    for item in items:
-        hits = await dz.search_album(item["artist"], item["title"])
-        hit = next(
+    sem = asyncio.Semaphore(6)
+
+    async def look(item: dict[str, str]) -> dict[str, Any] | None:
+        async with sem:
+            try:
+                hits = await dz.search_album(item["artist"], item["title"])
+            except Exception:  # noqa: BLE001
+                return None
+        return next(
             (
                 h
                 for h in hits
@@ -724,16 +750,20 @@ async def _resolve_albums(items: list[dict[str, str]], limit: int) -> list[str]:
             ),
             None,
         )
-        if hit is None:
-            continue
-        with Session(engine) as session:
+
+    hits = await asyncio.gather(*(look(i) for i in items[: limit * 2]))
+    ids: list[str] = []
+    with Session(engine) as session:
+        for hit in hits:
+            if hit is None:
+                continue
             artist = ingest_artist(session, hit.get("artist") or {})
             release = ingest_album(session, hit, artist) if artist else None
-            session.commit()
             if release is not None and release.id not in ids:
                 ids.append(release.id)
-        if len(ids) >= limit:
-            break
+            if len(ids) >= limit:
+                break
+        session.commit()
     return ids
 
 
@@ -948,6 +978,9 @@ async def category_page(c: Category) -> dict[str, Any]:
         page = {**page, **extras_cards(await genre_extras(c))}
         new_id = await genre_new_releases(c) if c.id in SEED_ARTISTS else None
         page["mixes"] = genre_mixes(c, page.get("playlistId"), new_id)
+        from app.tags import SUBGENRES, title_of
+
+        page["subgenres"] = [{"tag": t, "title": title_of(t)} for t in SUBGENRES.get(c.id, ())]
     return page
 
 

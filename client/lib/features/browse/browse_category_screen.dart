@@ -18,6 +18,7 @@ import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import 'browse_grid.dart' show BrowseTile, categoryIcon;
+import 'tag_screen.dart' show TagChips;
 import '../../widgets/collection_actions.dart';
 import '../../core/cz_plural.dart';
 import '../../data/home_repository.dart';
@@ -131,6 +132,16 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
         ),
         // 1. Hlavní mix žánru (stejný jako na Domů) -- velká karta nahoře.
         if (data.mixes.isNotEmpty) SliverToBoxAdapter(child: _HeroMix(card: data.mixes.first, accent: c.color)),
+        // Podžánry -- každý má vlastní stránku (mix, interpreti, alba).
+        if (data.subgenres.isNotEmpty) ...[
+          const SliverToBoxAdapter(child: SectionHeader('Podžánry')),
+          SliverToBoxAdapter(
+            child: TagChips(
+              tags: [for (final s in data.subgenres) s.tag],
+              titles: [for (final s in data.subgenres) s.title],
+            ),
+          ),
+        ],
         // 2. Pro tebe -- tvůj mix žánru, alba od tvých interpretů, koho ještě neznáš.
         SliverToBoxAdapter(child: _YourMix(categoryId: c.id)),
         if (c.group == 'genre') SliverToBoxAdapter(child: _ForYou(categoryId: c.id)),

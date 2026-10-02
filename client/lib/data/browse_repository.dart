@@ -81,7 +81,11 @@ class BrowsePage {
     this.topArtists = const [],
     this.about,
     this.related = const [],
+    this.subgenres = const [],
   });
+
+  /// Podžánry (štítky Last.fm) -- (štítek, zobrazovaný název).
+  final List<({String tag, String title})> subgenres;
 
   final BrowseCategory category;
   final List<BrowsePlaylist> playlists;
@@ -122,6 +126,7 @@ class BrowsePage {
       topArtists: list('topArtists').map(BrowseArtist.fromJson).toList(),
       about: json['about'] as String?,
       related: list('related').map(BrowseCategory.fromJson).toList(),
+      subgenres: [for (final s in list('subgenres')) (tag: s['tag'] as String, title: s['title'] as String)],
     );
   }
 }
