@@ -367,6 +367,15 @@ def build_home(user_id: str) -> dict[str, Any]:
 
         worldwide = next((p for p in by_section.get("charts", []) if p.source == "deezer:playlist:3155776842"), None)
         for key, title, kind in _SECTION_ORDER:
+            if key == "genres":
+                # Žánry na Domů = PŘESNĚ dlaždice z Hledat (stejné názvy, barvy,
+                # ikony, otevřou stejnou stránku žánru) -- dřív karty playlistů.
+                from app.browse import list_categories
+
+                tiles = [c for c in list_categories() if c["group"] == "genre"]
+                if tiles:
+                    sections.append({"id": "genres", "title": title, "type": "category_tiles", "items": tiles})
+                continue
             if key in ("new_releases", "top_albums"):
                 snapshot = session.get(HomeSnapshot, key)
                 albums = []

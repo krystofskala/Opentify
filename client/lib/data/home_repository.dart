@@ -1,6 +1,7 @@
 import '../core/api_client.dart';
 import '../core/media_url.dart';
 import '../models/recording_model.dart';
+import 'browse_repository.dart' show BrowseCategory;
 
 /// Karta playlistu na Domů (žebříček, žánr, výběr, osobní mix).
 class HomePlaylistCard {
@@ -96,13 +97,14 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, unknown }
+enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'quick_picks' => HomeSectionType.quickPicks,
       'playlist_cards' => HomeSectionType.playlistCards,
       'album_cards' => HomeSectionType.albumCards,
       'track_rail' => HomeSectionType.trackRail,
+      'category_tiles' => HomeSectionType.categoryTiles,
       _ => HomeSectionType.unknown,
     };
 
@@ -115,6 +117,7 @@ class HomeSection {
     this.playlists = const [],
     this.albums = const [],
     this.tracks = const [],
+    this.categories = const [],
     this.playlistId,
   });
 
@@ -124,6 +127,9 @@ class HomeSection {
   final List<HomePlaylistCard> playlists;
   final List<HomeAlbumCard> albums;
   final List<RecordingModel> tracks;
+
+  /// Dlaždice žánrů -- stejné jako v Hledat (`BrowseTile`).
+  final List<BrowseCategory> categories;
 
   /// Track rail z playlistu (např. Top Worldwide) -- "Zobrazit vše" ho otevře.
   final String? playlistId;
@@ -141,6 +147,7 @@ class HomeSection {
           : const [],
       albums: type == HomeSectionType.albumCards ? items.map(HomeAlbumCard.fromJson).toList() : const [],
       tracks: type == HomeSectionType.trackRail ? items.map(RecordingModel.fromJson).toList() : const [],
+      categories: type == HomeSectionType.categoryTiles ? items.map(BrowseCategory.fromJson).toList() : const [],
     );
   }
 }

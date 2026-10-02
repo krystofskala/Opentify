@@ -22,6 +22,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../../widgets/collection_actions.dart';
 import '../blend/blend_screen.dart' show BlendInviteBanner;
+import '../browse/browse_grid.dart' show BrowseTile;
 
 /// Domů -- celá obrazovka z `GET /home` (žebříčky, mixy, nová a populární
 /// alba, žánry, nálady), sekce se vykreslují podle `type`. Prázdné sekce
@@ -317,6 +318,35 @@ class _HomeSectionView extends StatelessWidget {
               onSeeAll: section.playlistId != null ? () => context.push('/playlists/${section.playlistId}') : null,
             ),
             _TrackCardRow(recordings: section.tracks, sourceLabel: section.title),
+          ],
+        );
+      case HomeSectionType.categoryTiles:
+        // Stejné dlaždice jako v Hledat (BrowseTile), ne karty playlistů.
+        const tileWidth = 168.0;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(
+              section.title,
+              onSeeAll: () => _showGrid(
+                context,
+                section.title,
+                section.categories.length,
+                (context, index) => BrowseTile(category: section.categories[index]),
+                1.75,
+              ),
+            ),
+            SizedBox(
+              height: tileWidth / 1.75,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: section.categories.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) =>
+                    SizedBox(width: tileWidth, child: BrowseTile(category: section.categories[index])),
+              ),
+            ),
           ],
         );
       case HomeSectionType.unknown:
