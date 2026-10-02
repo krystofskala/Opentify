@@ -6,6 +6,7 @@ import '../core/config.dart';
 import '../core/realtime_event.dart';
 import 'audio_player_controller.dart';
 import 'providers.dart';
+import 'package:flutter/widgets.dart';
 
 /// Jiné zařízení stejného profilu (Opentify Connect).
 class RemoteDevice {
@@ -56,8 +57,9 @@ final remotePlayingProvider = Provider<RemoteDevice?>((ref) {
   return ref.watch(connectProvider).where((d) => d.isPlaying && d.hasTrack).firstOrNull;
 });
 
-class ConnectController extends StateNotifier<List<RemoteDevice>> {
+class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBindingObserver {
   ConnectController(this._ref) : super(const []) {
+    WidgetsBinding.instance.addObserver(this);
     final client = _ref.read(realtimeClientProvider);
     client.onConnected = () => _publish(force: true);
     _events = _ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
@@ -155,7 +157,20 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    if (lifecycle != AppLifecycleState.resumed) return;
+    final client = _ref.read(realtimeClientProvider);
+    if (client.isConnected) {
+      _publish(force: true);
+      client.send('devices.list', {});
+    } else {
+      client.reconnectNow(); // hello + stav pošle onConnected
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _events.close();
     _player.close();
     _tick.cancel();

@@ -108,6 +108,7 @@ class ConnectionManager:
             me.device_id = str(payload.get("deviceId") or "")[:64] or None
             me.name = str(payload.get("name") or "Zařízení")[:60]
             me.updated = time.time()
+            logger.info("connect %s: hello %s (%s), zařízení: %d", user_id[:8], me.name, (me.device_id or "")[:16], len(self._devices(user_id)))
             await self.broadcast_devices(user_id)
         elif kind == "device.state":
             allowed = ("nowPlaying", "isPlaying", "positionMs", "durationMs", "sourceLabel")
@@ -120,9 +121,12 @@ class ConnectionManager:
             # Jen pozice -> nerozesílat při každém tiku (zařízení posílá
             # stav při změně skladby/přehrávání + občas kvůli pozici).
             if changed or payload.get("broadcast"):
+                np = new_state.get("nowPlaying") or {}
+                logger.info("connect %s: %s %s %s", user_id[:8], me.name, "hraje" if new_state.get("isPlaying") else "stojí", np.get("title"))
                 await self.broadcast_devices(user_id)
         elif kind in ("remote.command", "handoff.request", "handoff.state"):
             target = self._target(user_id, payload.get("target") or payload.get("to"))
+            logger.info("connect %s: %s od %s -> %s", user_id[:8], kind, me.name, target.name if target else "NENALEZENO")
             if target is None or target is me:
                 return
             forward = {k: v for k, v in payload.items() if k not in ("target", "to")}

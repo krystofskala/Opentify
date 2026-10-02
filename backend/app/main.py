@@ -82,6 +82,8 @@ class _MaskTokenInLog(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(_MaskTokenInLog())
+# WebSocket řádky ("WebSocket /ws?...&t=...") loguje uvicorn.error -- maskovat i tam.
+logging.getLogger("uvicorn.error").addFilter(_MaskTokenInLog())
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if _cors_origins == "*" else _cors_origins.split(","),

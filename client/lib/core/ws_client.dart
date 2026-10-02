@@ -85,6 +85,18 @@ class RealtimeClient {
     }
   }
 
+  /// Hned znovu připojit (appka se vrátila do popředí -- iOS spojení na
+  /// pozadí zavírá a čekat na další pokus by mohlo trvat až 30 s).
+  void reconnectNow() {
+    if (_disposed || _channel != null) return;
+    _reconnectTimer?.cancel();
+    _reconnectAttempt = 0;
+    connect();
+  }
+
+  /// Je spojení otevřené (diagnostika v seznamu zařízení).
+  bool get isConnected => _channel != null;
+
   void _handleDisconnect() {
     _channelSub?.cancel();
     _channelSub = null;

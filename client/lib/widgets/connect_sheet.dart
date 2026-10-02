@@ -12,6 +12,7 @@ import '../theme/shapes.dart';
 import 'glass/glass.dart';
 import 'glass_container.dart';
 import 'media_card.dart' show ArtworkImage;
+import '../state/providers.dart' show realtimeClientProvider;
 
 IconData _deviceIcon(String name) => name.startsWith('iPhone') || name.startsWith('Android')
     ? Symbols.smartphone_rounded
@@ -47,6 +48,23 @@ class _ConnectSheet extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               child: Text('Zařízení', style: theme.textTheme.titleLarge),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.md, 2, AppSpacing.md, 0),
+              child: Builder(builder: (context) {
+                final online = ref.read(realtimeClientProvider).isConnected;
+                return Row(
+                  children: [
+                    Icon(online ? Symbols.wifi_rounded : Symbols.wifi_off_rounded,
+                        size: 14, color: online ? theme.colorScheme.primary : theme.colorScheme.error),
+                    const SizedBox(width: 4),
+                    Text(
+                      online ? 'Spojeno se serverem' : 'Bez spojení – zkouším znovu…',
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                );
+              }),
             ),
             const SizedBox(height: AppSpacing.xs),
             ListTile(
