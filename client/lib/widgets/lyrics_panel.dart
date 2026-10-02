@@ -127,7 +127,6 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
     final immersive = widget.immersive;
     final scrollController = widget.scrollController;
     final lyricsAsync = ref.watch(_lyricsProvider(recordingId));
-    final position = ref.watch(audioPlayerControllerProvider.select((s) => s.position));
     final offset = ref.watch(lyricsOffsetProvider(recordingId));
     final fg = widget.color ?? Theme.of(context).colorScheme.onSurface;
     final muted = TextStyle(color: fg.withValues(alpha: 0.7));
@@ -150,9 +149,24 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
               }
               final follow = !ref.watch(lyricsFollowOffProvider).contains(recordingId);
               if (lyrics.hasSynced && follow) {
+                final lines = lyrics.syncedLines!;
+                // Jen začátek AKTUÁLNÍHO řádku -- text se překreslí, až se řádek
+                // změní, ne 5x za vteřinu s každou pozicí (audit výkonu).
+                final lineStart = ref.watch(audioPlayerControllerProvider.select((s) {
+                  final at = s.position + _lead + offset;
+                  Duration? start;
+                  for (final l in lines) {
+                    if (l.time <= at) {
+                      start = l.time;
+                    } else {
+                      break;
+                    }
+                  }
+                  return start ?? const Duration(microseconds: -1);
+                }));
                 return _SyncedLyricsList(
-                  lines: lyrics.syncedLines!,
-                  position: position + _lead + offset,
+                  lines: lines,
+                  position: lineStart,
                   onSeek: (time) => ref.read(audioPlayerControllerProvider.notifier).seek(time - offset),
                   immersive: immersive,
                   color: fg,
