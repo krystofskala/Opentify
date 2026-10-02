@@ -14,12 +14,12 @@
       "tintColor": "6B3FD6",
       "versions": [
         {
-          "version": "0.1.39",
-          "buildVersion": "39",
-          "localizedDescription": "Noční build Opentify 0.1.39.",
-          "date": "2026-10-02T10:13:06Z",
-          "size": 13687512,
-          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-connect-10021300/Opentify.ipa",
+          "version": "0.1.40",
+          "buildVersion": "40",
+          "localizedDescription": "Noční build Opentify 0.1.40.",
+          "date": "2026-10-02T10:29:57Z",
+          "size": 13709137,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-genreicons-10021400/Opentify.ipa",
           "minOSVersion": "15.0"
         }
       ],
@@ -34,5 +34,5 @@
     }
   ],
   "news": [],
-  "opentifyCommit": "c822e840673d6177cffe7d8a652d4892a77d993c"
+  "opentifyCommit": "ad8a7c7e2fd579a46808583fea11543c01a80cca"
 }
