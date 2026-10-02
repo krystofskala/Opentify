@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/playback_model.dart';
 import 'realtime_event.dart';
+import 'device_token.dart';
 
 /// Klient pro `/ws` (docs/asyncapi.yaml) — jedno perzistentní spojení na
 /// zařízení, s exponenciálním backoffem při výpadku a broadcast Streamem
@@ -15,11 +16,14 @@ import 'realtime_event.dart';
 /// (app/main.py má TODO na náhradu za `?token=<device_jwt>` z asyncapi.yaml)
 /// — klient posílá obojí, aby fungoval s dnešním i budoucím backendem.
 class RealtimeClient {
-  RealtimeClient({required this.wsUrl, required this.userId, required this.deviceId});
+  RealtimeClient({required this.wsUrl, required this.userId, required this.deviceId, this.deviceName = 'Zařízení'});
 
   final String wsUrl;
   final String userId;
   final String deviceId;
+
+  /// Jméno pro ostatní zařízení profilu (Opentify Connect).
+  final String deviceName;
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _channelSub;
@@ -42,16 +46,21 @@ class RealtimeClient {
 
   void connect() {
     if (_disposed || _channel != null) return;
-    final uri = Uri.parse(wsUrl).replace(queryParameters: {
+    // Klíč zařízení v `?t=` -- nativní appka nemá cookie a server spojení
+    // bez přihlášení odmítne (živě: iPhone nedostával žádné živé zprávy).
+    final uri = Uri.parse(withDeviceToken(Uri.parse(wsUrl).replace(queryParameters: {
       'user_id': userId,
-      'token': deviceId, // placeholder dokud backend nemá reálné device JWT
-    });
+    }).toString()));
     try {
       final channel = WebSocketChannel.connect(uri);
       // Selhání spojení chodí i přes `stream.onError` níž (-> reconnect);
       // `ready` future by jinak skončil jako neošetřená výjimka v konzoli
       // při každém výpadku/restartu serveru.
-      channel.ready.catchError((Object _) {});
+      channel.ready.then((_) {
+        // Představit se ostatním zařízením profilu (i po každém reconnectu).
+        send('device.hello', {'deviceId': deviceId, 'name': deviceName});
+        _onConnected?.call();
+      }).catchError((Object _) {});
       _channel = channel;
       _channelSub = channel.stream.listen(
         _onMessage,
@@ -90,6 +99,14 @@ class RealtimeClient {
     final backoffSeconds = min(_maxReconnectDelay.inSeconds, pow(2, _reconnectAttempt).toInt());
     _reconnectTimer = Timer(Duration(seconds: backoffSeconds), connect);
   }
+
+  void Function()? _onConnected;
+
+  /// Po (znovu)připojení -- Connect pošle aktuální stav přehrávání.
+  set onConnected(void Function()? callback) => _onConnected = callback;
+
+  /// Obecná zpráva (Opentify Connect: device.state, remote.command...).
+  void send(String type, Map<String, dynamic> payload) => _send({'type': type, 'payload': payload});
 
   void _send(Map<String, dynamic> message) {
     final channel = _channel;

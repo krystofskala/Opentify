@@ -41,6 +41,8 @@ import '../../widgets/radio_station.dart';
 import '../../widgets/share_sheet.dart';
 import '../share/share_card_screen.dart';
 import '../../widgets/section_app_bar.dart';
+import '../../state/connect_controller.dart';
+import '../../widgets/connect_sheet.dart';
 
 /// Celoobrazovkový přehrávač -- interaktivní "sheet" nad aktuální stránkou
 /// (poloha z `NowPlayingSheetController`: tažení z mini přehrávače nahoru,
@@ -1071,6 +1073,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       case PlayerButton.playlist:
         return plain('Přidat do playlistu', Symbols.playlist_add_rounded,
             np == null ? null : () => showAddToPlaylistSheet(context, recordingId: np.recordingId));
+      case PlayerButton.devices:
+        final others = ref.watch(connectProvider).isNotEmpty;
+        return plain('Zařízení', Symbols.devices_rounded, () => showConnectSheet(context), active: others);
       case PlayerButton.shuffle:
       case PlayerButton.repeat:
         break;

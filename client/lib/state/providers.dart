@@ -19,6 +19,7 @@ import '../data/provisioning_repository.dart';
 import '../data/recommendations_repository.dart';
 import '../data/wrapped_repository.dart';
 import 'audio_player_controller.dart';
+import 'auth_controller.dart' show deviceName;
 
 /// Sdílený `ApiClient` -- jedna instance pro celou appku (connection reuse),
 /// zavřená při dispose containeru (hot-restart v devu, ne v produkci).
@@ -134,6 +135,7 @@ final realtimeClientProvider = Provider<RealtimeClient>((ref) {
     wsUrl: AppConfig.wsBaseUrl,
     userId: AppConfig.userId,
     deviceId: AppConfig.deviceId,
+    deviceName: deviceName(),
   );
   ref.onDispose(client.dispose);
   return client;

@@ -14,7 +14,8 @@ enum PlayerButton {
   later('Na později', Symbols.schedule_rounded),
   radio('Rádio', Symbols.radio_rounded),
   share('Sdílet', Symbols.ios_share_rounded),
-  playlist('Do playlistu', Symbols.playlist_add_rounded);
+  playlist('Do playlistu', Symbols.playlist_add_rounded),
+  devices('Zařízení', Symbols.devices_rounded);
 
   const PlayerButton(this.label, this.icon);
 

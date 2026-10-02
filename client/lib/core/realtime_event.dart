@@ -46,6 +46,10 @@ sealed class RealtimeEvent {
           status: payload['status'] as String,
           pct: payload['pct'] as int?,
         );
+      // Opentify Connect (app/realtime.py): seznam zařízení profilu, povely
+      // a předání přehrávání mezi nimi.
+      case 'devices.update' || 'remote.command' || 'handoff.request' || 'handoff.state':
+        return ConnectEvent(type!, payload);
       default:
         return UnknownEvent(type ?? '<chybí type>', payload);
     }
@@ -104,6 +108,12 @@ final class JobProgressEvent extends RealtimeEvent {
   final String jobId;
   final String status; // PENDING | RUNNING | SUCCEEDED | FAILED
   final int? pct;
+}
+
+final class ConnectEvent extends RealtimeEvent {
+  const ConnectEvent(this.type, this.payload);
+  final String type;
+  final Map<String, dynamic> payload;
 }
 
 final class UnknownEvent extends RealtimeEvent {

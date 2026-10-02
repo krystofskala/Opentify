@@ -19,6 +19,7 @@ import 'state/offline_controller.dart';
 import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
 import 'widgets/toast.dart';
+import 'state/connect_controller.dart';
 
 const _defaultSeed = Colors.deepPurple;
 
@@ -41,6 +42,8 @@ class OpentifyApp extends ConsumerWidget {
     ref.watch(offlineControllerProvider.select((s) => s.tracks.length));
     // Vzhled profilu ze serveru / na server (stejný na všech zařízeních).
     ref.watch(appearanceSyncProvider);
+    // Opentify Connect: ostatní zařízení profilu (seznam, povely, převzetí).
+    ref.watch(connectProvider);
     ref.listen<String?>(playerNoticeProvider, (_, message) {
       if (message == null) return;
       showToast(appMessengerKey.currentState, message);

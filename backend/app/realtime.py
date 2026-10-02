@@ -1,16 +1,29 @@
-"""Minimální realtime hub: WS endpoint + Redis pub/sub listener.
+"""Realtime hub: WS endpoint + Redis pub/sub listener + "Opentify Connect".
 
 Předává eventy publikované workerem (`job.progress`, `track.available`,
-viz app/events.py) na WS spojení daného uživatele. Plný WS protokol
-(playback.state, queue.set/queue.conflict...) je popsaný v
-docs/asyncapi.yaml — sem patří zatím jen tolik, kolik je potřeba k
-end-to-end odzkoušení provisioning flow; zpracování klientských zpráv
-(playback.*, queue.set) je další krok.
+viz app/events.py) na WS spojení daného uživatele.
+
+Opentify Connect (jako Spotify Connect) -- všechna zařízení jednoho profilu
+o sobě vědí:
+  - `device.hello` {deviceId, name}        zařízení se představí,
+  - `device.state` {nowPlaying, isPlaying, positionMs, durationMs, sourceLabel}
+                                            co na něm hraje (při změně),
+  - server rozešle všem `devices.update` {devices: [...]},
+  - `remote.command` {target, action, value} -> cílovému zařízení
+    (play / pause / toggle / next / previous / seek / stop),
+  - `handoff.request` {target} -> cíl pošle `handoff.state` {to, state}
+    (fronta, index, pozice) a ztichne; žadatel pokračuje u sebe.
+Stav je jen v paměti procesu (jeden uvicorn) -- po restartu se zařízení
+znovu představí samy.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import time
+from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -19,28 +32,106 @@ from app.redis_bus import get_redis
 logger = logging.getLogger("vault.realtime")
 
 
+@dataclass
+class _Device:
+    ws: WebSocket
+    device_id: str | None = None
+    name: str = "Zařízení"
+    state: dict[str, Any] = field(default_factory=dict)
+    updated: float = field(default_factory=time.time)
+
+
 class ConnectionManager:
     def __init__(self) -> None:
-        self._connections: dict[str, set[WebSocket]] = {}
+        self._connections: dict[str, dict[int, _Device]] = {}
 
     async def connect(self, user_id: str, ws: WebSocket) -> None:
         await ws.accept()
-        self._connections.setdefault(user_id, set()).add(ws)
+        self._connections.setdefault(user_id, {})[id(ws)] = _Device(ws=ws)
 
     def disconnect(self, user_id: str, ws: WebSocket) -> None:
         conns = self._connections.get(user_id)
         if conns:
-            conns.discard(ws)
+            conns.pop(id(ws), None)
             if not conns:
                 self._connections.pop(user_id, None)
 
     async def send_to_user(self, user_id: str, message: str) -> None:
-        for ws in list(self._connections.get(user_id, ())):
-            try:
-                await ws.send_text(message)
-            except Exception:
-                logger.exception("odeslání na WS selhalo, odpojuji klienta")
-                self.disconnect(user_id, ws)
+        for dev in list(self._connections.get(user_id, {}).values()):
+            await self._send(user_id, dev, message)
+
+    async def _send(self, user_id: str, dev: _Device, message: str) -> None:
+        try:
+            await dev.ws.send_text(message)
+        except Exception:
+            logger.exception("odeslání na WS selhalo, odpojuji klienta")
+            self.disconnect(user_id, dev.ws)
+
+    # --- Opentify Connect -------------------------------------------------
+
+    def _devices(self, user_id: str) -> list[dict[str, Any]]:
+        seen: dict[str, dict[str, Any]] = {}
+        for dev in self._connections.get(user_id, {}).values():
+            if not dev.device_id:
+                continue
+            seen[dev.device_id] = {
+                "deviceId": dev.device_id,
+                "name": dev.name,
+                "updatedAt": dev.updated,
+                **dev.state,
+            }
+        return list(seen.values())
+
+    async def broadcast_devices(self, user_id: str) -> None:
+        message = json.dumps({"type": "devices.update", "payload": {"devices": self._devices(user_id)}})
+        await self.send_to_user(user_id, message)
+
+    def _target(self, user_id: str, device_id: str | None) -> _Device | None:
+        for dev in self._connections.get(user_id, {}).values():
+            if dev.device_id and dev.device_id == device_id:
+                return dev
+        return None
+
+    async def handle(self, user_id: str, ws: WebSocket, raw: str) -> None:
+        try:
+            msg = json.loads(raw)
+        except ValueError:
+            return
+        if not isinstance(msg, dict):
+            return
+        kind = msg.get("type")
+        payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+        me = self._connections.get(user_id, {}).get(id(ws))
+        if me is None:
+            return
+        if kind == "device.hello":
+            me.device_id = str(payload.get("deviceId") or "")[:64] or None
+            me.name = str(payload.get("name") or "Zařízení")[:60]
+            me.updated = time.time()
+            await self.broadcast_devices(user_id)
+        elif kind == "device.state":
+            allowed = ("nowPlaying", "isPlaying", "positionMs", "durationMs", "sourceLabel")
+            new_state = {k: payload.get(k) for k in allowed if k in payload}
+            changed = {k: v for k, v in new_state.items() if k != "positionMs"} != {
+                k: v for k, v in me.state.items() if k != "positionMs"
+            }
+            me.state = new_state
+            me.updated = time.time()
+            # Jen pozice -> nerozesílat při každém tiku (zařízení posílá
+            # stav při změně skladby/přehrávání + občas kvůli pozici).
+            if changed or payload.get("broadcast"):
+                await self.broadcast_devices(user_id)
+        elif kind in ("remote.command", "handoff.request", "handoff.state"):
+            target = self._target(user_id, payload.get("target") or payload.get("to"))
+            if target is None or target is me:
+                return
+            forward = {k: v for k, v in payload.items() if k not in ("target", "to")}
+            forward["from"] = me.device_id
+            await self._send(user_id, target, json.dumps({"type": kind, "payload": forward}))
+        elif kind == "devices.list":
+            await self._send(
+                user_id, me, json.dumps({"type": "devices.update", "payload": {"devices": self._devices(user_id)}})
+            )
 
 
 manager = ConnectionManager()
@@ -50,11 +141,15 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str) -> None:
     await manager.connect(user_id, websocket)
     try:
         while True:
-            # TODO: parsovat playback.play/pause/seek a queue.set podle
-            # docs/asyncapi.yaml; zatím jen držíme spojení otevřené.
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            if len(raw) > 512_000:  # fronta při převzetí je největší zpráva
+                continue
+            await manager.handle(user_id, websocket, raw)
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(user_id, websocket)
+        await manager.broadcast_devices(user_id)
 
 
 async def redis_listener() -> None:

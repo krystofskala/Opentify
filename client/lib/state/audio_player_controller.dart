@@ -1016,6 +1016,45 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
   }
 
+  // --- Opentify Connect ----------------------------------------------------
+
+  /// Co přesně hraje (fronta, index, pozice) -- pro převzetí na jiném zařízení.
+  Map<String, dynamic>? handoffSnapshot() {
+    final s = state;
+    if (s.nowPlaying == null || s.queue.isEmpty) return null;
+    return {
+      'queue': [for (final q in s.queue) _infoToJson(q)],
+      'index': s.queueIndex,
+      'positionMs': s.position.inMilliseconds,
+      'isPlaying': s.isPlaying,
+      if (s.queueSourceLabel != null) 'sourceLabel': s.queueSourceLabel,
+    };
+  }
+
+  /// Převzít přehrávání z jiného zařízení: stejná fronta, stejné místo.
+  Future<void> resumeFromHandoff(Map<String, dynamic> snapshot) async {
+    final queue = [
+      for (final e in (snapshot['queue'] as List<dynamic>? ?? const [])) _infoFromJson(e as Map<String, dynamic>),
+    ];
+    if (queue.isEmpty) return;
+    final index = ((snapshot['index'] as num?)?.toInt() ?? 0).clamp(0, queue.length - 1);
+    await playQueue(
+      queue,
+      index,
+      sourceLabel: snapshot['sourceLabel'] as String?,
+      startPosition: Duration(milliseconds: (snapshot['positionMs'] as num?)?.toInt() ?? 0),
+    );
+  }
+
+  /// Pauza (povel z jiného zařízení / předání přehrávání jinam).
+  Future<void> pauseIfPlaying() async {
+    if (state.isPlaying) await togglePlayPause();
+  }
+
+  Future<void> resumeIfPaused() async {
+    if (!state.isPlaying && state.nowPlaying != null) await togglePlayPause();
+  }
+
   Future<void> next() async {
     final index = state.nextIndex;
     if (index == null) return;

@@ -214,6 +214,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
       case PlaybackStateEvent():
       case QueueUpdatedEvent():
       case QueueConflictEvent():
+      case ConnectEvent():
       case UnknownEvent():
         break; // mimo scope provisioning controlleru, viz PlaybackController
     }

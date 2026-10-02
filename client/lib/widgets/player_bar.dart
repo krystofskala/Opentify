@@ -19,6 +19,7 @@ import 'glass_container.dart';
 import 'net_image.dart';
 import 'now_playing_sheet.dart';
 import 'wavy_seek_bar.dart';
+import 'connect_sheet.dart';
 
 /// Max. šířka plovoucí spodní skupiny (mini přehrávač, tab bar) na širokém
 /// okně -- zarovnaná na střed jako obsahový sloupec detailů.
@@ -177,7 +178,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
     ref.watch(audioPlayerControllerProvider.select(playerChromeKey));
     final playback = ref.read(audioPlayerControllerProvider);
     final nowPlaying = playback.nowPlaying;
-    if (nowPlaying == null) return const SizedBox.shrink();
+    // Tady nic nehraje, jinde ano -> "Hraje na <zařízení>" (Opentify Connect).
+    if (nowPlaying == null) return const RemotePlayingBar();
 
     final theme = Theme.of(context);
     // Barva nové skladby ještě není spočítaná -> drží se předchozí (ne

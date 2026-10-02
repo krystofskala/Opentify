@@ -40,6 +40,7 @@ class PlaybackController extends StateNotifier<PlaybackSession> {
       case TrackAvailableEvent():
       case TrackStreamingEvent():
       case JobProgressEvent():
+      case ConnectEvent():
       case UnknownEvent():
         break; // mimo scope playback controlleru, viz ProvisioningController
     }

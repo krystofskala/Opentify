@@ -19,6 +19,7 @@ import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProvider;
 import '../../widgets/radio_station.dart';
 import 'player_buttons_sheet.dart';
+import '../../widgets/connect_sheet.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -150,6 +151,18 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           if (playback.nowPlaying != null) _shareAllTile(context, playback),
                           const Divider(),
                           const _SectionLabel('Přehrávání'),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Symbols.devices_rounded),
+                            title: const Text('Zařízení'),
+                            subtitle: const Text('Co hraje jinde, převzít nebo pustit na jiném zařízení'),
+                            trailing: const Icon(Symbols.chevron_right_rounded),
+                            onTap: () {
+                              final host = Navigator.of(context).context;
+                              Navigator.of(context).pop();
+                              showConnectSheet(host);
+                            },
+                          ),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Symbols.tune_rounded),
