@@ -41,6 +41,7 @@ import '../../state/favorite_artists_controller.dart';
 import '../../data/library_repository.dart' show LocalArtist;
 import '../../widgets/playlist_removal.dart';
 import '../../state/liked_songs_controller.dart';
+import '../../widgets/edge_fade_scroll.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -430,11 +431,10 @@ class _GridViewBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
       child: Row(
         children: [
-          // Řazení + filtr se na úzkém telefonu posunou do strany (dlouhé
-          // "Počet skladeb" + "Celá alba" by jinak lištu přetekly).
+          // Řazení + filtr jdou na úzkém telefonu posunout prstem do strany
+          // (rozplynutý okraj ukáže, že tam něco je).
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            child: EdgeFadeScroll(
               child: Row(
                 children: [
                   if (sort != null) sort!,
