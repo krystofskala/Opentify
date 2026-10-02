@@ -737,6 +737,29 @@ async def import_spotify(
         plays = read_zip(raw)
     except (zipfile.BadZipFile, ValueError, KeyError):
         plays = []
+    # Google Takeout: historie YouTube Music.
+    from app.library.ytmusic_history import SOURCE as YT_SOURCE, read_upload as read_ytmusic
+
+    yt_plays = None if plays else read_ytmusic(raw)
+    if yt_plays is not None:
+        if not yt_plays:
+            raise HTTPException(
+                status_code=400,
+                detail="V exportu nejsou žádná přehrání z YouTube Music (jen obyčejná videa?).",
+            )
+        from app.home import generators as g
+        from app.library.spotify_history import import_history
+
+        token = g.set_home_user(user_id)
+        try:
+            result = await asyncio.to_thread(import_history, user_id, yt_plays, YT_SOURCE)
+        finally:
+            g.reset_home_user(token)
+        return {
+            "kind": "history",
+            "platform": "ytmusic",
+            **{k: v for k, v in result.items() if isinstance(v, (int, str, float, bool))},
+        }
     if plays:
         from app.home import generators as g
 

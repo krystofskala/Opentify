@@ -13,6 +13,7 @@ from app.catalog.availability import resolve_artist_name
 from app.db import engine, get_session
 from app.home.generators import _covers_for
 from app.models import Artist, Listen, Playlist, PlaylistItem, Recording, Release
+from app.library.spotify_history import IMPORTED_SOURCES
 from app.home.service import _accent_for, _art_style, get_home, run_generators
 
 home_router = APIRouter(prefix="/home", tags=["home"])
@@ -38,7 +39,7 @@ def recent(
     listens = session.exec(
         select(Listen)
         # Importovaná historie ze Spotify sem nepatří -- jen co hrálo v appce.
-        .where(Listen.user_id == user_id, (Listen.source.is_(None)) | (Listen.source != "spotify-history"))  # type: ignore[union-attr]
+        .where(Listen.user_id == user_id, (Listen.source.is_(None)) | (Listen.source.notin_(IMPORTED_SOURCES)))  # type: ignore[union-attr]
         .order_by(Listen.played_at.desc())  # type: ignore[attr-defined]
         .limit(300)
     ).all()

@@ -37,6 +37,8 @@ from app.utils import utcnow
 logger = logging.getLogger("uvicorn.error")
 
 SOURCE = "spotify-history"
+# Importované historie (ne poslechy v appce) -- "Pokračovat v poslechu" je vynechá.
+IMPORTED_SOURCES = (SOURCE, "ytmusic-history")
 MIN_PLAY_MS = 30_000
 YEAR_TOP = 100
 FIRST_YEAR = 2016  # starší roky uživatel nechtěl
@@ -102,11 +104,14 @@ def _resolve(session: Session, plays: Iterable[dict[str, Any]]) -> dict[tuple[st
     return out
 
 
-def import_history(user_id: str, plays: list[dict[str, Any]]) -> dict[str, Any]:
+def import_history(user_id: str, plays: list[dict[str, Any]], source: str = SOURCE) -> dict[str, Any]:
+    """`source`: spotify-history / ytmusic-history -- každá platforma má svoje
+    poslechy, nový import nahradí jen ty z téže platformy (dohromady se pak
+    sčítají ve Wrapped a mixech)."""
     counted = [p for p in plays if p["ms"] >= MIN_PLAY_MS]
     with Session(engine) as session:
         ids = _resolve(session, counted)
-        session.exec(delete(Listen).where(Listen.user_id == user_id, Listen.source == SOURCE))
+        session.exec(delete(Listen).where(Listen.user_id == user_id, Listen.source == source))
         now = utcnow()
         batch = 0
         for play in counted:
@@ -116,7 +121,7 @@ def import_history(user_id: str, plays: list[dict[str, Any]]) -> dict[str, Any]:
                     recording_id=ids[(play["artist"].strip().lower(), play["track"].strip().lower())],
                     played_at=_parse_ts(play["ts"]).replace(tzinfo=None),
                     duration_played_ms=play["ms"],
-                    source=SOURCE,
+                    source=source,
                     lb_submitted_at=now,
                 )
             )

@@ -171,13 +171,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 children: [
                   _ActionRow(
                     icon: Symbols.cloud_upload_rounded,
-                    title: 'Import ze Spotify',
+                    title: 'Import ze Spotify a YouTube Music',
                     description:
-                        'Nahraj export playlistů (ZIP s CSV, např. z Exportify) nebo '
-                        'YourLibrary.json z oficiálního Spotify exportu. Liked Songs se '
-                        'použijí pro tvůj denní mix, ostatní playlisty se naimportují '
-                        'pod svým jménem. ZIP s historií poslechů (Extended streaming history) '
-                        'nahraje poslechy pro Wrapped a mixy.',
+                        'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
+                        'YourLibrary.json z oficiálního exportu -- Liked Songs pro denní mix, '
+                        'ostatní playlisty pod svým jménem. ZIP s historií poslechů (Extended '
+                        'streaming history) nahraje poslechy pro Wrapped a mixy.\n'
+                        'YouTube Music: Google Takeout › YouTube a YouTube Music › historie, '
+                        'formát JSON (v Takeoutu přepnout z HTML) – poslechy se přidají k těm ze Spotify.',
                     buttonLabel: 'Vybrat soubor…',
                     onPressed: () => _importFromSpotify(context),
                   ),
@@ -267,7 +268,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       await showSpotifyImportReport(context, result);
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
-      showToast(messenger, detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify.');
+      showToast(messenger, detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify nebo z Google Takeoutu (JSON).');
     }
   }
 
