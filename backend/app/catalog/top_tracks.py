@@ -15,6 +15,7 @@ název) a převezmou. Výsledek (id skladeb + počty) se cachuje na 24 h.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import httpx
@@ -52,16 +53,45 @@ async def _lb_top(artist_mbid: str) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
-def _find_local(session: Session, artist_id: str, mbid: str | None, title: str) -> Recording | None:
+_VERSION = re.compile(r"\b(live|instrumental|acoustic|remix|demo|karaoke|unplugged|session|edit|version)\b|\d{4}-\d{2}", re.I)
+
+
+def _find_local(
+    session: Session, artist_id: str, mbid: str | None, title: str, release_name: str | None = None
+) -> Recording | None:
     if mbid:
         rec = session.exec(select(Recording).where(Recording.mbid == mbid)).first()
         if rec is not None:
             return rec
+    # Stejné jméno má často desítky nahrávek (koncerty z MusicBrainz) --
+    # `_normalize` závorky zahazuje, takže "Ride (Live In Mexico City)" se
+    # rovnalo "Ride" a vyhrála první v DB. Přednost: stejné album, přesný
+    # název, ne živá/instrumentální verze.
+    from app.models import Release
+
     wanted = _normalize(title)
+    exact = title.strip().casefold()
+    wanted_release = _normalize(release_name or "")
+    best: tuple[int, Recording] | None = None
     for rec in session.exec(select(Recording).where(Recording.artist_id == artist_id)).all():
-        if _normalize(rec.title) == wanted:
-            return rec
-    return None
+        if _normalize(rec.title) != wanted:
+            continue
+        release = session.get(Release, rec.release_id) if rec.release_id else None
+        release_title = release.title if release else ""
+        score = 0
+        if wanted_release and _normalize(release_title) == wanted_release:
+            score += 4
+        if rec.title.strip().casefold() == exact:
+            score += 2
+        if _VERSION.search(rec.title) and not _VERSION.search(title):
+            score -= 3
+        if _VERSION.search(release_title) and not _VERSION.search(release_name or ""):
+            score -= 2
+        if best is None or score > best[0]:
+            best = (score, rec)
+    if best is None or best[0] < 0:
+        return None  # jen jiné verze -- radši dohledat přes Deezer
+    return best[1]
 
 
 async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
@@ -99,7 +129,7 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
             if not title:
                 continue
             with Session(engine) as session:
-                rec = _find_local(session, artist_id, entry.get("recording_mbid"), title)
+                rec = _find_local(session, artist_id, entry.get("recording_mbid"), title, entry.get("release_name"))
                 rec_id = rec.id if rec is not None else None
             if rec_id is None:
                 track = await dz.find_track(primary_artist_name(name), title)
@@ -143,7 +173,7 @@ async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
     async def build() -> dict[str, Any]:
         return {"items": await _ids_and_counts(artist_id)}
 
-    cached = await cached_json(f"artist-top:v1:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
+    cached = await cached_json(f"artist-top:v2:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
     result = []
     with Session(engine) as session:
         for item in cached.get("items", []):
