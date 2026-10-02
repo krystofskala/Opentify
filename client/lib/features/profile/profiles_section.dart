@@ -273,6 +273,7 @@ class ProfilesSection extends ConsumerWidget {
   Future<void> _switch(WidgetRef ref, String? userId) async {
     await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': userId});
     await saveActAs(userId);
+    ref.invalidate(realtimeClientProvider); // nativně se stránka nenačte znovu
     reloadPage();
   }
 
@@ -381,6 +382,7 @@ class ActingAsBanner extends ConsumerWidget {
                 onPressed: () async {
                   await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': null});
                   await saveActAs(null);
+                  ref.invalidate(realtimeClientProvider);
                   reloadPage();
                 },
               ),

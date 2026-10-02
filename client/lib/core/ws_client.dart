@@ -29,8 +29,16 @@ class RealtimeClient {
   StreamSubscription<dynamic>? _channelSub;
   StreamController<RealtimeEvent>? _eventsController;
   Timer? _reconnectTimer;
+  Timer? _pingTimer;
   int _reconnectAttempt = 0;
   bool _disposed = false;
+
+  /// Spojení je opravdu navázané (ne jen rozjeté `connect`).
+  bool _ready = false;
+
+  /// Poslední zpráva ze serveru -- iOS po návratu z pozadí drží "otevřený"
+  /// socket, který je ve skutečnosti mrtvý; podle ticha se pozná.
+  DateTime _lastMessage = DateTime.now();
 
   static const _maxReconnectDelay = Duration(seconds: 30);
 
@@ -48,8 +56,11 @@ class RealtimeClient {
     if (_disposed || _channel != null) return;
     // Klíč zařízení v `?t=` -- nativní appka nemá cookie a server spojení
     // bez přihlášení odmítne (živě: iPhone nedostával žádné živé zprávy).
+    // `act_as`: admin jednající za jiný profil -- nativní WebSocket hlavičku
+    // neumí a bez toho by Connect skončil v jiném profilu než zbytek appky.
     final uri = Uri.parse(withDeviceToken(Uri.parse(wsUrl).replace(queryParameters: {
       'user_id': userId,
+      if (actAsProfile != null) 'act_as': actAsProfile!,
     }).toString()));
     try {
       final channel = WebSocketChannel.connect(uri);
@@ -57,9 +68,15 @@ class RealtimeClient {
       // `ready` future by jinak skončil jako neošetřená výjimka v konzoli
       // při každém výpadku/restartu serveru.
       channel.ready.then((_) {
+        if (!identical(_channel, channel)) return;
+        _ready = true;
+        _reconnectAttempt = 0; // backoff až po skutečném spojení
+        _lastMessage = DateTime.now();
         // Představit se ostatním zařízením profilu (i po každém reconnectu).
         send('device.hello', {'deviceId': deviceId, 'name': deviceName});
         _onConnected?.call();
+        _pingTimer?.cancel();
+        _pingTimer = Timer.periodic(const Duration(seconds: 25), (_) => _ping());
       }).catchError((Object _) {});
       _channel = channel;
       _channelSub = channel.stream.listen(
@@ -68,13 +85,13 @@ class RealtimeClient {
         onDone: _handleDisconnect,
         cancelOnError: true,
       );
-      _reconnectAttempt = 0;
     } catch (_) {
       _handleDisconnect();
     }
   }
 
   void _onMessage(dynamic raw) {
+    _lastMessage = DateTime.now();
     if (raw is! String) return;
     try {
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
@@ -88,19 +105,46 @@ class RealtimeClient {
   /// Hned znovu připojit (appka se vrátila do popředí -- iOS spojení na
   /// pozadí zavírá a čekat na další pokus by mohlo trvat až 30 s).
   void reconnectNow() {
-    if (_disposed || _channel != null) return;
+    if (_disposed) return;
+    if (_channel != null) {
+      // Po pozadí: dlouho nic nepřišlo (server pinguje odpovědí na ping) =
+      // socket je mrtvý, i když se tváří otevřeně.
+      if (_ready && DateTime.now().difference(_lastMessage) < const Duration(seconds: 30)) return;
+      _drop();
+    }
     _reconnectTimer?.cancel();
     _reconnectAttempt = 0;
     connect();
   }
 
-  /// Je spojení otevřené (diagnostika v seznamu zařízení).
-  bool get isConnected => _channel != null;
+  /// Je spojení navázané (diagnostika v seznamu zařízení).
+  bool get isConnected => _ready;
 
-  void _handleDisconnect() {
+  /// Udržovací ping; server odpoví `pong`. Bez odpovědi přes 70 s spojení
+  /// zahodit a navázat znovu.
+  void _ping() {
+    if (!_ready) return;
+    if (DateTime.now().difference(_lastMessage) > const Duration(seconds: 70)) {
+      _handleDisconnect();
+      return;
+    }
+    send('ping', {});
+  }
+
+  void _drop() {
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _ready = false;
     _channelSub?.cancel();
     _channelSub = null;
+    try {
+      _channel?.sink.close();
+    } catch (_) {}
     _channel = null;
+  }
+
+  void _handleDisconnect() {
+    _drop();
     if (_disposed) return;
     _scheduleReconnect();
   }
@@ -122,8 +166,12 @@ class RealtimeClient {
 
   void _send(Map<String, dynamic> message) {
     final channel = _channel;
-    if (channel == null) return; // TODO: fronta odchozích zpráv do reconnectu
-    channel.sink.add(jsonEncode(message));
+    if (channel == null || !_ready) return; // stav se po připojení pošle znovu (onConnected)
+    try {
+      channel.sink.add(jsonEncode(message));
+    } catch (_) {
+      _handleDisconnect();
+    }
   }
 
   void playbackPlay(String recordingId, {int positionMs = 0}) => _send({
@@ -155,6 +203,7 @@ class RealtimeClient {
   void dispose() {
     _disposed = true;
     _reconnectTimer?.cancel();
+    _pingTimer?.cancel();
     _channelSub?.cancel();
     _channel?.sink.close();
     _eventsController?.close();

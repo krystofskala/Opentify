@@ -50,7 +50,10 @@ class RemoteDevice {
 /// Opentify Connect (jako Spotify Connect): ostatní zařízení profilu, co na
 /// nich hraje, ovládání na dálku a převzetí přehrávání. Server viz
 /// backend app/realtime.py.
-final connectProvider = StateNotifierProvider<ConnectController, List<RemoteDevice>>((ref) => ConnectController(ref));
+final connectProvider = StateNotifierProvider<ConnectController, List<RemoteDevice>>((ref) {
+  ref.watch(realtimeClientProvider); // nové spojení (jiný profil) -> nový controller
+  return ConnectController(ref);
+});
 
 /// Zařízení, které právě hraje (jiné než tohle) -- lišta "Hraje na…".
 final remotePlayingProvider = Provider<RemoteDevice?>((ref) {
@@ -61,7 +64,10 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
   ConnectController(this._ref) : super(const []) {
     WidgetsBinding.instance.addObserver(this);
     final client = _ref.read(realtimeClientProvider);
-    client.onConnected = () => _publish(force: true);
+    client.onConnected = () {
+      _publish(force: true);
+      client.send('devices.list', {});
+    };
     _events = _ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
       final event = next.valueOrNull;
       if (event is ConnectEvent) _onEvent(event);
@@ -113,12 +119,14 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
           case 'toggle':
             unawaited(audio.togglePlayPause());
           case 'next':
-            unawaited(audio.next());
+            unawaited(audio.next().catchError((Object _) {}));
           case 'previous':
-            unawaited(audio.previous());
+            unawaited(audio.previous().catchError((Object _) {}));
+          case 'stop':
+            unawaited(audio.pauseIfPlaying());
           case 'seek':
             final ms = (e.payload['value'] as num?)?.toInt();
-            if (ms != null) unawaited(audio.seek(Duration(milliseconds: ms)));
+            if (ms != null) unawaited(audio.seek(Duration(milliseconds: ms)).catchError((Object _) {}));
         }
       case 'handoff.request':
         // Jiné zařízení přebírá: pošli mu frontu a místo, sám ztichni.
@@ -129,7 +137,7 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
         unawaited(audio.pauseIfPlaying());
       case 'handoff.state':
         final snapshot = e.payload['state'] as Map<String, dynamic>?;
-        if (snapshot != null) unawaited(audio.resumeFromHandoff(snapshot));
+        if (snapshot != null) unawaited(audio.resumeFromHandoff(snapshot).catchError((Object _) {}));
     }
   }
 
@@ -150,6 +158,7 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
   /// "Přehrát na X": poslat tohle přehrávání na jiné zařízení. Cíl si o stav
   /// požádá sám -- tady jen řekneme, ať převezme od nás.
   void sendTo(String deviceId) {
+    if (!state.any((d) => d.id == deviceId)) return; // zařízení se mezitím odpojilo
     final snapshot = _ref.read(audioPlayerControllerProvider.notifier).handoffSnapshot();
     if (snapshot == null) return;
     _ref.read(realtimeClientProvider).send('handoff.state', {'to': deviceId, 'state': snapshot});
@@ -160,11 +169,10 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
   void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
     if (lifecycle != AppLifecycleState.resumed) return;
     final client = _ref.read(realtimeClientProvider);
+    client.reconnectNow(); // mrtvý socket po pozadí -> nové spojení (hello + stav v onConnected)
     if (client.isConnected) {
       _publish(force: true);
       client.send('devices.list', {});
-    } else {
-      client.reconnectNow(); // hello + stav pošle onConnected
     }
   }
 

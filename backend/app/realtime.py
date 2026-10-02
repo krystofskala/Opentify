@@ -143,6 +143,9 @@ class ConnectionManager:
             forward = {k: v for k, v in payload.items() if k not in ("target", "to")}
             forward["from"] = me.device_id
             await self._send(user_id, target, json.dumps({"type": kind, "payload": forward}))
+        elif kind == "ping":
+            # Klient podle odpovědi pozná mrtvý socket (iOS po pozadí).
+            await self._send(user_id, me, '{"type": "pong", "payload": {}}')
         elif kind == "devices.list":
             await self._send(
                 user_id, me, json.dumps({"type": "devices.update", "payload": {"devices": self._devices(user_id)}})

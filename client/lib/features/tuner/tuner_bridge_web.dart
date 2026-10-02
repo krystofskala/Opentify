@@ -36,6 +36,7 @@ Future<void> startTuner({
   required void Function(double hz, double clarity, double rms) onData,
   required void Function(String state) onState,
 }) async {
+  final gen = ++_generation;
   await _ensureLoaded();
   final js = _tunerJs;
   if (js == null) throw const TunerStartException('unsupported');
@@ -59,9 +60,19 @@ Future<void> startTuner({
     if (text.contains('unsupported')) throw TunerStartException('unsupported', text);
     throw TunerStartException('other', text);
   }
+  // Zavřeno během čekání na povolení mikrofonu -- jinak by zůstal zapnutý.
+  if (gen != _generation) {
+    try {
+      await js.stop().toDart;
+    } catch (_) {}
+  }
 }
 
+/// Viz tuner_bridge_io.dart.
+int _generation = 0;
+
 Future<void> stopTuner() async {
+  _generation++;
   final js = _tunerJs;
   if (js == null) return;
   try {

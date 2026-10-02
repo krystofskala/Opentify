@@ -363,7 +363,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     try {
       final res = await ref.read(apiClientProvider).postJson('/playlists/${detail.id}/invite');
-      final url = '${AppConfig.sharedOrigin}${res['path']}';
+      final url = '${AppConfig.sharedOrigin}/#${res['path']}'; // router je hashový (jako share_link)
       await Clipboard.setData(ClipboardData(text: url));
       showToast(messenger, 'Odkaz na společný playlist zkopírován – pošli ho, kdo ho otevře, může ho upravovat s tebou');
     } catch (e) {

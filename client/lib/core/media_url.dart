@@ -9,7 +9,9 @@ import 'device_token.dart';
 String? resolveMediaUrl(String? url) {
   if (url == null || url.isEmpty || !url.startsWith('/')) return url;
   final api = Uri.parse(AppConfig.apiBaseUrl);
-  return withDeviceToken(api.replace(path: url, query: null, fragment: null).toString());
+  final rel = Uri.parse(url);
+  // Dotaz zachovat -- `?v=` u vlastního obalu playlistu je cache-busting.
+  return withDeviceToken(api.replace(path: rel.path, query: rel.hasQuery ? rel.query : null, fragment: null).toString());
 }
 
 List<String> resolveMediaUrls(List<String> urls) => urls.map((u) => resolveMediaUrl(u)!).toList();

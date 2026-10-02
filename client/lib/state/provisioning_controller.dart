@@ -161,6 +161,9 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
       if (result.loudnessGainDb != null) {
         _loudnessGains[recordingId] = result.loudnessGainDb!;
       }
+      // `track.available` přes WS mohl přijít dřív než odpověď -- nepřepsat
+      // hotovou skladbu zpátky na PENDING.
+      if (state[recordingId]?.isAvailable == true && result.streamUrl == null) return;
       _update(
         recordingId,
         (_) => TrackProvisioningState(

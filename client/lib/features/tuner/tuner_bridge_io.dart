@@ -25,11 +25,16 @@ StreamSubscription<Uint8List>? _sub;
 void Function(String state)? _onState;
 AudioPlayer? _tonePlayer;
 
+/// Roste s každým start/stop -- stop během rozjíždějícího se startu (zavřená
+/// ladička před povolením mikrofonu) jinak nechal mikrofon otevřený.
+int _generation = 0;
+
 Future<void> startTuner({
   required void Function(double hz, double clarity, double rms) onData,
   required void Function(String state) onState,
 }) async {
   await stopTuner();
+  final gen = ++_generation;
   final recorder = AudioRecorder();
   if (!await recorder.hasPermission()) {
     await recorder.dispose();
@@ -60,12 +65,23 @@ Future<void> startTuner({
     await recorder.dispose();
     throw TunerStartException('unavailable', '$e');
   }
+  if (gen != _generation) {
+    // Mezitím zavřeno -- hned uvolnit.
+    await _sub?.cancel();
+    _sub = null;
+    try {
+      await recorder.stop();
+    } catch (_) {}
+    await recorder.dispose();
+    return;
+  }
   _recorder = recorder;
   _onState = onState;
   onState('running');
 }
 
 Future<void> stopTuner() async {
+  _generation++;
   await _sub?.cancel();
   _sub = null;
   final recorder = _recorder;
