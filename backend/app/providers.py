@@ -969,6 +969,10 @@ class YoutubeProvider:
                 # Nic délkou nesedí (katalog může mít jinou verzi) -- aspoň ne
                 # mixy/streamy: nejkratší rozumný výsledek.
                 sane = [e for e in entries if e.get("duration") and 30 <= e["duration"] <= 15 * 60]
+                if target:
+                    # Známá délka: jen mírně jiný střih/fade, ne 14min video
+                    # místo 4min písně (živě: "Norman fucking Rockwell" 847 s).
+                    sane = [e for e in sane if abs(e["duration"] - target) <= max(45.0, target * 0.35)]
                 if not sane:
                     raise RuntimeError(f"YouTube: žádný výsledek pro '{query}' nemá délku skladby")
                 chosen = sane[0]

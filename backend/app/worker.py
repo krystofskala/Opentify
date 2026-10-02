@@ -38,6 +38,7 @@ from sqlmodel import Session, select
 from app.db import engine, init_db
 from app.events import publish_job_progress, publish_track_available, publish_track_streaming
 from app.loudness import analyze_and_store
+from app.catalog.non_music import is_non_music
 from app.models import (
     Artist,
     MediaAsset,
@@ -45,6 +46,7 @@ from app.models import (
     ProvisioningJob,
     ProvisioningJobStatus,
     Recording,
+    Release,
 )
 from app.providers import (
     CompositeProvider,
@@ -197,6 +199,9 @@ def _start_job(job_id: str) -> dict | None:
             "soundcloud_url": (recording.external_refs or {}).get("soundcloudUrl") if recording else None,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
+            "non_music": is_non_music(session.get(Release, recording.release_id))
+            if recording and recording.release_id
+            else False,
         }
 
 
@@ -674,6 +679,14 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
 
     if not interactive and await r.get(job_escalate_key(job_id)):
         interactive = True  # uživatel na skladbu klikl, než se job dostal na řadu
+
+    if ctx.get("non_music"):
+        # Rozhovor / mluvené slovo (app/catalog/non_music.py): nestahovat
+        # nic -- jinak by se pod názvem písně ("Video Games") přehrál
+        # rozhovor, nebo naopak píseň pod rozhovorem.
+        if await asyncio.to_thread(_finish_failure, job_id, "rozhovor, ne hudba", 1, 1) is not None:
+            await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.FAILED.value, pct=None)
+        return
 
     await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.RUNNING.value, pct=0)
     await asyncio.to_thread(_mark_interactive, job_id, interactive)

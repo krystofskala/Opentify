@@ -36,6 +36,7 @@ from app.catalog.fanart import fill_artist_banner
 from app.recommendations.anti_ai_filter import AntiAIFilter
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError
 from app.catalog.schemas import ArtistBioOut, ArtistOut, DiscographyOut, ReleaseOut, RecordingOut
+from app.catalog.non_music import is_non_music, mark_non_music
 from app.catalog.upsert import upsert_artist, upsert_recording, upsert_release
 from app.catalog.wikimedia import get_wikimedia_client
 from app.models import Artist, Recording, Release
@@ -151,7 +152,7 @@ class CatalogService:
             release_type = "compilation"
         else:
             release_type = _MB_PRIMARY_TYPE_TO_RELEASE_TYPE.get(primary_type, "album")
-        return upsert_release(
+        release = upsert_release(
             self._session,
             mbid=rg.get("id"),
             artist_id=artist.id,
@@ -164,6 +165,9 @@ class CatalogService:
             # hodnotu nepřepíše (viz jeho "nepřepisovat prázdným" komentář).
             genres=[g["name"] for g in rg.get("genres", []) if g.get("name")],
         )
+        if "secondary-types" in rg and mark_non_music(release, secondary_types):
+            self._session.add(release)
+        return release
 
     def _ingest_recording_search_json(self, rec: dict[str, Any]) -> Recording | None:
         if not rec.get("title"):
@@ -600,6 +604,7 @@ class CatalogService:
         if artist.mbid is None:
             # Interpret jen z Deezeru (hledání/žebříček) -- diskografie odtud.
             releases = await self._deezer_discography(artist) + self._youtube_releases(artist)
+            releases = [r for r in releases if not is_non_music(r)]
             if release_type:
                 releases = [r for r in releases if _effective_type(r) == release_type]
             releases.sort(key=lambda r: r.release_date or "9999")
@@ -638,7 +643,11 @@ class CatalogService:
             deezer_releases = await self._deezer_discography(artist)
         except Exception:  # noqa: BLE001 - doplněk, nesmí shodit diskografii
             deezer_releases = []
+        # Rozhovory/mluvené slovo pryč -- ale jejich názvy zůstanou "známé",
+        # ať se nevrátí deezerovou kopií (Deezer je vede jako běžné album).
         known_titles = {norm(r.title) for r in releases}
+        releases = [r for r in releases if not is_non_music(r)]
+        deezer_releases = [r for r in deezer_releases if not is_non_music(r)]
         for extra in deezer_releases:
             if release_type and _effective_type(extra) != release_type:
                 continue
