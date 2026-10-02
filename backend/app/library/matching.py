@@ -46,11 +46,49 @@ def find_or_create_artist(session: Session, name: str) -> Artist:
     if artist is None:
         artist = best(session.exec(select(Artist).where(func.lower(Artist.name) == name.lower())).all())
     if artist is None:
+        # Bez diakritiky a velikosti písmen ("KVETY" z tagu -> "Květy"): dřív
+        # tu vznikal paralelní interpret a v Knihovně byl dvakrát. Jen když
+        # je shoda JEDNOZNAČNÁ (jeden živý kandidát) -- jinak radši nový.
+        ids = _folded_index(session).get(fold_name(name), [])
+        live = [
+            a
+            for a in (session.get(Artist, i) for i in ids)
+            if a is not None and not {"mergedInto", "homonymOf"} & set((a.external_refs or {}).keys())
+        ]
+        if len(live) == 1:
+            artist = live[0]
+    if artist is None:
         artist = Artist(name=name, sort_name=name)
         session.add(artist)
         session.commit()
         session.refresh(artist)
+        _folded_index(session).setdefault(fold_name(name), []).append(artist.id)
     return artist
+
+
+def fold_name(name: str) -> str:
+    """Jméno bez diakritiky, velikosti písmen a interpunkce ("KVĚTY" == "Kvety")."""
+    text = unicodedata.normalize("NFKD", name)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).casefold()
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text).split())
+
+
+_FOLDED: dict[str, list[str]] = {}
+_FOLDED_AT = 0.0
+
+
+def _folded_index(session: Session) -> dict[str, list[str]]:
+    """fold_name -> id interpretů; v paměti, obnova po 10 minutách (sken
+    knihovny volá hledání pro každý soubor)."""
+    import time
+
+    global _FOLDED, _FOLDED_AT
+    if not _FOLDED or time.monotonic() - _FOLDED_AT > 600:
+        index: dict[str, list[str]] = {}
+        for artist_id, artist_name in session.exec(select(Artist.id, Artist.name)).all():
+            index.setdefault(fold_name(artist_name or ""), []).append(artist_id)
+        _FOLDED, _FOLDED_AT = index, time.monotonic()
+    return _FOLDED
 
 
 def find_or_create_release(session: Session, artist: Artist, title: str) -> Release:

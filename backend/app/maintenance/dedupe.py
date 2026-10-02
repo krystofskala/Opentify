@@ -55,6 +55,15 @@ def merge_recording(session: Session, src: Recording, dst: Recording) -> None:
         keep_src = dst_asset is None or (
             dst_asset.status != MediaAssetStatus.AVAILABLE and src_asset.status == MediaAssetStatus.AVAILABLE
         )
+        # Oba stažené: nechat kvalitnější soubor (FLAC před MP3 320 před YouTube).
+        if (
+            not keep_src
+            and dst_asset is not None
+            and src_asset.status == MediaAssetStatus.AVAILABLE
+            and dst_asset.status == MediaAssetStatus.AVAILABLE
+            and _quality(src_asset) > _quality(dst_asset)
+        ):
+            keep_src = True
         if keep_src:
             if dst_asset is not None:
                 session.delete(dst_asset)
@@ -78,6 +87,7 @@ def merge_recording(session: Session, src: Recording, dst: Recording) -> None:
     moved = session.execute(update(Listen).where(Listen.recording_id == src.id).values(recording_id=dst.id))
     stats["listens"] += moved.rowcount or 0
     _move_later(session, "track", src.id, dst.id)
+    _move_per_user(session, src.id, dst.id)
     # Doplnit, co cílové chybí (MBID je unikátní -- nejdřív uvolnit).
     refs = dict(dst.external_refs or {})
     for key, value in (src.external_refs or {}).items():
@@ -98,6 +108,43 @@ def merge_recording(session: Session, src: Recording, dst: Recording) -> None:
     stats["recordings_merged"] += 1
 
 
+def _quality(asset: MediaAsset) -> tuple[int, int]:
+    fmt = (asset.format or "").lower()
+    rank = {"flac": 4, "wav": 4, "alac": 4, "mp3": 2, "m4a": 1, "aac": 1, "opus": 1}.get(fmt, 0)
+    if asset.source_provider in ("local", "musicbrainz-local"):
+        rank += 1  # vlastní soubor
+    return rank, asset.bitrate_kbps or 0
+
+
+def _move_per_user(session: Session, src_id: str, dst_id: str) -> None:
+    """Knihovna, "dohráno celé", "nelíbí se mi" a rozposlouchané kolekce --
+    dřív se nepřesouvaly a skladba po sloučení tiše zmizela z knihovny.
+    Má-li profil záznam u obou, zdrojový se jen smaže."""
+    from app.models import CollectionProgress, HeardFully, LibraryEntry, RecordingDislike
+
+    for model in (LibraryEntry, RecordingDislike):
+        for row in session.exec(select(model).where(model.recording_id == src_id)).all():
+            dup = session.exec(
+                select(model).where(model.user_id == row.user_id, model.recording_id == dst_id)
+            ).first()
+            if dup:
+                session.delete(row)
+            else:
+                row.recording_id = dst_id
+                session.add(row)
+            stats[f"{model.__name__}_moved"] += 1
+    # HeardFully má složený primární klíč (user, recording) -- nový řádek.
+    for row in session.exec(select(HeardFully).where(HeardFully.recording_id == src_id)).all():
+        if session.get(HeardFully, (row.user_id, dst_id)) is None:
+            session.add(HeardFully(user_id=row.user_id, recording_id=dst_id, first_at=row.first_at))
+        session.delete(row)
+        stats["HeardFully_moved"] += 1
+    session.execute(
+        update(CollectionProgress).where(CollectionProgress.recording_id == src_id).values(recording_id=dst_id)
+    )
+    session.flush()
+
+
 def _move_later(session: Session, kind: str, src_id: str, dst_id: str) -> None:
     for item in session.exec(select(ListenLater).where(ListenLater.kind == kind, ListenLater.target_id == src_id)).all():
         dup = session.exec(
@@ -112,13 +159,43 @@ def _move_later(session: Session, kind: str, src_id: str, dst_id: str) -> None:
             session.add(item)
 
 
+def track_key(title: str) -> str:
+    """Název skladby pro párování mezi kopiemi alba: bez diakritiky,
+    interpunkce a "(feat. X)", ale verze v závorce zůstává ("doin' time" ==
+    "doin’ time", "Ride" != "Ride (Live)")."""
+    from app.catalog.deezer_ingest import version_key
+
+    return version_key(title)
+
+
+def find_twin(title: str, candidates: dict[str, Recording]) -> Recording | None:
+    import difflib
+
+    key = track_key(title)
+    if key in candidates:
+        return candidates[key]
+    # Překlep v datech ("nejíip" vs "nejlíp") -- jen velmi podobné a jen pokud
+    # se nijak neliší slova verze (live/remix...).
+    best, best_ratio = None, 0.0
+    for other_key, rec in candidates.items():
+        ratio = difflib.SequenceMatcher(None, key, other_key).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = rec, ratio
+    if best is not None and best_ratio >= 0.9:
+        from app.tools.fix_merged_versions import _versions
+
+        if _versions(title) == _versions(best.title):
+            return best
+    return None
+
+
 def merge_release(session: Session, src: Release, dst: Release) -> None:
     # Skladby: stejný název na cílovém albu -> sloučit, jinak přesunout.
     dst_titles = {
-        _norm(r.title): r for r in session.exec(select(Recording).where(Recording.release_id == dst.id)).all()
+        track_key(r.title): r for r in session.exec(select(Recording).where(Recording.release_id == dst.id)).all()
     }
     for rec in session.exec(select(Recording).where(Recording.release_id == src.id)).all():
-        twin = dst_titles.get(_norm(rec.title))
+        twin = find_twin(rec.title, dst_titles)
         if twin is not None and twin.id != rec.id:
             merge_recording(session, rec, twin)
         else:
