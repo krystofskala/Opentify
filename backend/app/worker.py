@@ -70,6 +70,12 @@ try:
     from logging.handlers import RotatingFileHandler
 
     Path("/data/db/logs").mkdir(parents=True, exist_ok=True)
+    # Každé nasazení = nový kontejner = nový soubor; staré po 14 dnech pryč.
+    import time as _time
+
+    for _old in Path("/data/db/logs").glob("worker-*.log*"):
+        if _time.time() - _old.stat().st_mtime > 14 * 86400:
+            _old.unlink(missing_ok=True)
     _file_log = RotatingFileHandler(
         f"/data/db/logs/worker-{socket.gethostname()}.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8"
     )
