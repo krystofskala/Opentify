@@ -22,9 +22,13 @@ async def get_lyrics(recording_id: str, session: Session = Depends(get_session))
         raise HTTPException(status_code=404, detail="recording nenalezen")
 
     artist_name = None
+    aliases: list[str] = []
     if recording.artist_id:
         artist = session.get(Artist, recording.artist_id)
         artist_name = artist.name if artist else None
+        # Záložní jména pro texty (Tyler Joseph -> twenty one pilots: písně
+        # z jeho sólové desky jsou v databázích textů pod kapelou).
+        aliases = list(((artist.external_refs or {}).get("lyricsAliases") or []) if artist else [])
 
     album_name = None
     if recording.release_id:
@@ -41,6 +45,16 @@ async def get_lyrics(recording_id: str, session: Session = Depends(get_session))
         album_name=album_name,
         duration_s=duration_ms / 1000 if duration_ms else None,
     )
+    for alias in aliases:
+        if result is not None:
+            break
+        # Délka zůstává -- jiná nahrávka dostane text bez časování, ne posunutý.
+        result = await fetch_lyrics(
+            track_name=recording.title,
+            artist_name=alias,
+            album_name=None,
+            duration_s=duration_ms / 1000 if duration_ms else None,
+        )
     if result is None:
         raise HTTPException(status_code=404, detail="text skladby nenalezen")
     return result
