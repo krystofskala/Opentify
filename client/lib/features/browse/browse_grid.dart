@@ -180,16 +180,34 @@ class BrowseTile extends StatelessWidget {
                       padding: const EdgeInsets.all(AppSpacing.sm),
                       child: Align(
                         alignment: Alignment.topLeft,
-                        child: Text(
-                          category.title,
-                          maxLines: 2,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        child: Builder(builder: (context) {
+                          // Úzká dlaždice (4 sloupce na desktopu): nejdelší slovo se
+                          // musí vejít celé -- dřív "Latinskoamer/ická" a "K-/pop".
+                          final title = category.title.replaceAll('-', '‑');
+                          var style = Theme.of(context).textTheme.titleMedium!.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
                             height: 1.1,
                             shadows: const [Shadow(blurRadius: 6, color: Colors.black26)],
-                          ),
-                        ),
+                          );
+                          final available = constraints.maxWidth - 2 * AppSpacing.sm;
+                          final scaler = MediaQuery.textScalerOf(context);
+                          var widest = 0.0;
+                          for (final word in title.split(' ')) {
+                            final tp = TextPainter(
+                              text: TextSpan(text: word, style: style),
+                              textDirection: TextDirection.ltr,
+                              textScaler: scaler,
+                              maxLines: 1,
+                            )..layout();
+                            widest = widest > tp.width ? widest : tp.width;
+                            tp.dispose();
+                          }
+                          if (widest > available && available > 0) {
+                            style = style.copyWith(fontSize: (style.fontSize ?? 16) * available / widest);
+                          }
+                          return Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: style);
+                        }),
                       ),
                     ),
                   ],

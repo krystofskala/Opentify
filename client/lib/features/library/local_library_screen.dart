@@ -226,21 +226,26 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
     if (_collection.isModified && _items.length < _total) _loadAll();
   }
 
+  /// Roste s každým `_refresh` -- stránka z načítání, které běželo před
+  /// obnovou, se zahodí (jinak se do vyčištěného seznamu přidala stará data).
+  int _generation = 0;
+
   Future<void> _loadMore({int pageSize = _pageSize}) async {
     if (_loading) return;
+    final gen = _generation;
     setState(() => _loading = true);
     try {
       final page = await ref.read(libraryRepositoryProvider).localTracks(limit: pageSize, offset: _items.length);
-      if (!mounted) return;
+      if (!mounted || gen != _generation) return;
       setState(() {
         _items.addAll(page.items);
         _total = page.total;
         _error = null;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && gen == _generation) setState(() => _error = e);
     } finally {
-      if (mounted) {
+      if (mounted && gen == _generation) {
         setState(() {
           _loading = false;
           _initialLoadDone = true;
@@ -258,7 +263,9 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   }
 
   Future<void> _refresh() async {
+    _generation++;
     setState(() {
+      _loading = false;
       _items.clear();
       _initialLoadDone = false;
       _error = null;
@@ -323,6 +330,8 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                               ? 'Načítám celou knihovnu… ${_items.length}/$_total'
                               : _likedOnly
                                   ? '${songsCount(visible.length)} se srdíčkem'
+                                      // Oblíbené (playlist) počítá i nestažené -- ať čísla nevypadají rozbitě.
+                                      '${!_collection.isModified && liked.length > visible.length ? ' · ${liked.length - visible.length} ještě nestažené' : ''}'
                                   : songsCount(_total),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),

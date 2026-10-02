@@ -126,7 +126,9 @@ class LiquidCapture {
   DateTime _lastCapture = DateTime.fromMillisecondsSinceEpoch(0);
   bool _disposed = false;
 
-  static const double _margin = 40;
+  // Rezerva kolem skla -- při tahu sheetu se sklo posune dřív, než přijde
+  // nový snímek; víc rezervy = méně často obyčejné rozmazání.
+  static const double _margin = 72;
   // ~24 fps: pozadí se hýbe pomalu a obsah pod lištou je o snímek pozadu
   // tak jako tak. Dřív 32 ms a "moc brzy" si vynucovalo každý snímek
   // (scheduleFrame) -- appka pak kreslila 60 fps i v klidu.
@@ -188,11 +190,15 @@ class LiquidCapture {
     }
     final ui.Image? bg;
     ui.Image? pg;
+    Rect? pgRect;
     try {
-      bg = bgSource.capture(rect, dpr);
+      bg = bgSource.capture(rect, dpr)?.$1;
       for (final source in _pages.reversed) {
-        pg = source.capture(rect, dpr);
-        if (pg != null) break;
+        final got = source.capture(rect, dpr);
+        if (got != null) {
+          (pg, pgRect) = got;
+          break;
+        }
       }
     } finally {
       for (final g in _glasses) {
@@ -212,9 +218,19 @@ class LiquidCapture {
     final r1 = ui.PictureRecorder();
     final c1 = Canvas(r1);
     c1.drawImage(bg, Offset.zero, Paint());
-    if (pg != null) {
-      c1.drawImageRect(pg, Rect.fromLTWH(0, 0, pg.width.toDouble(), pg.height.toDouble()),
-          Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), Paint());
+    if (pg != null && pgRect != null) {
+      // Stránka může pokrývat jen část výřezu (panel přehrávače začíná pod
+      // horním okrajem, sheet fronty vytažený nahoru sahá nad něj) -- na její
+      // skutečné místo, ne roztažená přes celý výřez (obal alba se jinak
+      // natahoval a posouval s tahem sheetu, živě nahlášeno).
+      final sx = w / rect.width, sy = h / rect.height;
+      final dst = Rect.fromLTWH(
+        (pgRect.left - rect.left) * sx,
+        (pgRect.top - rect.top) * sy,
+        pgRect.width * sx,
+        pgRect.height * sy,
+      );
+      c1.drawImageRect(pg, Rect.fromLTWH(0, 0, pg.width.toDouble(), pg.height.toDouble()), dst, Paint());
     }
     final p1 = r1.endRecording();
     final sharp = p1.toImageSync(w, h);
@@ -232,7 +248,9 @@ class LiquidCapture {
     c2.drawImage(
       sharp,
       Offset.zero,
-      Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: sigma * dpr, sigmaY: sigma * dpr, tileMode: TileMode.clamp),
+      // Zrcadlení, ne clamp: clamp na okraji výřezu natahoval krajní řádek
+      // pixelů do pruhů (viditelné "čáry" při pohybu panelu).
+      Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: sigma * dpr, sigmaY: sigma * dpr, tileMode: TileMode.mirror),
     );
     final p2 = r2.endRecording();
     final blurred = p2.toImageSync(bw, bh);
@@ -331,8 +349,9 @@ class RenderLiquidSource extends RenderRepaintBoundary {
     super.detach();
   }
 
-  /// Výřez `global` (logické px) jako obrázek, nebo `null`.
-  ui.Image? capture(Rect global, double pixelRatio) {
+  /// Výřez `global` (logické px) jako obrázek + jaká část `global` to
+  /// skutečně je (globálně), nebo `null`.
+  (ui.Image, Rect)? capture(Rect global, double pixelRatio) {
     final offsetLayer = layer as OffsetLayer?;
     // Nekreslená (offstage/zakrytá) stránka má ve vrstvě starý obraz --
     // nebrat ho.
@@ -341,7 +360,7 @@ class RenderLiquidSource extends RenderRepaintBoundary {
     final local = global.shift(-origin).intersect(Offset.zero & size);
     if (local.isEmpty) return null;
     try {
-      return offsetLayer.toImageSync(local, pixelRatio: pixelRatio);
+      return (offsetLayer.toImageSync(local, pixelRatio: pixelRatio), local.shift(origin));
     } catch (_) {
       return null;
     }
@@ -576,6 +595,22 @@ class RenderLiquidGlass extends RenderBox {
     final canvas = context.canvas;
     final program = _program;
     final sharp = _capture._sharp, blurred = _capture._blurred, rect = _capture._rect;
+    // Sklo vyjelo mimo zachycený výřez (rychlý tah -- obraz je o snímek
+    // pozadu): shader by za okrajem opakoval krajní pixely = pruhy. Do
+    // dalšího zachycení obyčejné rozmazání.
+    final g = globalRect!;
+    final outside = rect != null &&
+        (g.left < rect.left - 0.5 || g.top < rect.top - 0.5 || g.right > rect.right + 0.5 || g.bottom > rect.bottom + 0.5);
+    if (outside) {
+      if (mix >= 1) _paintBlurFallback(context, offset, rrect, 1);
+      if (_calmWhileFast) {
+        // Zpátky k lomu plynule (prolnutí v `_updateMotion`), ne skokem.
+        _fast = true;
+        _calmSince = DateTime.now();
+        _mix = 0;
+      }
+      return;
+    }
     if (program == null || sharp == null || blurred == null || rect == null) {
       // První snímek ještě není zachycený: obyčejné rozmazání se stejnou
       // výplní (dřív 55% šedá plocha -- sheet vyjel tmavě šedý a čiré sklo

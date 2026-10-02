@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -63,6 +64,11 @@ typedef ShareTarget = ({String kind, String id}); // kind: recordings | releases
 /// jen v přímé reakci na klepnutí, ne až po síťovém dotazu.
 final shareLinkProvider = FutureProvider.autoDispose.family<ShareLink, ShareTarget>((ref, target) async {
   final json = await ref.watch(apiClientProvider).getJson('/share/${target.kind}/${target.id}');
+  // Menu -> Sdílet… -> obrázek se otevírají po sobě; bez podržení se odkaz
+  // načítal pokaždé znovu (4 dotazy na jedno sdílení).
+  final keep = ref.keepAlive();
+  final timer = Timer(const Duration(minutes: 5), keep.close);
+  ref.onDispose(timer.cancel);
   return ShareLink(
     url: json['url'] as String?,
     title: json['title'] as String,

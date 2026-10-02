@@ -176,6 +176,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             },
                           ),
                           if (playback.nowPlaying != null) _abRepeatTile(context, playback),
+                          // Oddělit od A-B řádku -- jinak vypadala jako jeho součást.
+                          const SizedBox(height: AppSpacing.sm),
                           const Row(
                             children: [
                               Icon(Symbols.speed_rounded),

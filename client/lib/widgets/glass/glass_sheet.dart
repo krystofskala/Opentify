@@ -9,10 +9,13 @@ import 'liquid_glass.dart';
 /// jednotný vstup pro všechny sheety/menu v appce.
 Future<T?> showGlassSheet<T>(BuildContext context, {required WidgetBuilder builder}) {
   // Lom skla: nad přehrávačem láme přehrávač, jinak stránku pod sebou.
-  final capture =
-      (NowPlayingSheetController.maybeOf(context)?.isOpen ?? false) ? playerLiquidCapture : routeLiquidCapture;
+  final overPlayer = NowPlayingSheetController.maybeOf(context)?.isOpen ?? false;
+  final capture = overPlayer ? playerLiquidCapture : routeLiquidCapture;
   return showModalBottomSheet<T>(
     context: context,
+    // Nad přehrávačem ztmavit -- posuvník a tlačítka přehrávače jinak prosvítaly
+    // průhledným sklem a pletly se s řádky sheetu.
+    barrierColor: overPlayer ? Colors.black.withValues(alpha: 0.45) : null,
     useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,

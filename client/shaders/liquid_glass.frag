@@ -70,13 +70,19 @@ void main() {
   // (živě: "všude kolem, nehýbe se"). Mírně víc shora zleva.
   float rim = pow(1.0 - smoothstep(0.0, 2.2, t), 2.0);
   if (rim > 0.001) {
-    vec3 outside = texture(uSharp, uvOf(p + n * 14.0)).rgb;
+    // Rozmazaný a tónovaný stejně jako zbytek skla -- dřív ostrý obraz bez
+    // tintu, takže světlý prvek venku u hrany svítil víc než celé sklo
+    // (živě nahlášeno).
+    vec3 outside = uBlur < 0.5 ? texture(uSharp, uvOf(p + n * 14.0)).rgb : texture(uBlurred, uvOf(p + n * 14.0)).rgb;
+    float ol = dot(outside, vec3(0.213, 0.715, 0.072));
+    outside = mix(vec3(ol), outside, uSat);
+    outside = mix(outside, uFill.rgb, uFill.a);
     float l = dot(outside, vec3(0.3, 0.59, 0.11));
     float facing = max(0.0, dot(n, normalize(vec2(-0.6, -0.8))));
     // Základ 0.22 -- hrana je vidět i nad tmavým (dřív nad tmavým zrnem
-    // úplně zmizela, živě nahlášeno); světlo zpoza hrany přidává víc.
-    float k = rim * clamp(0.22 + 1.4 * l * l, 0.0, 1.0) * (0.6 + 0.4 * facing);
-    col = mix(col, min(vec3(1.0), outside * 0.6 + 0.55), k);
+    // úplně zmizela, živě nahlášeno); světlo zpoza hrany přidává jen mírně.
+    float k = rim * clamp(0.22 + 0.6 * l * l, 0.0, 0.6) * (0.6 + 0.4 * facing);
+    col = mix(col, min(vec3(1.0), outside * 0.5 + 0.4), k);
   }
   col = clamp(col, 0.0, 1.0);
   fragColor = vec4(col * alpha, alpha);

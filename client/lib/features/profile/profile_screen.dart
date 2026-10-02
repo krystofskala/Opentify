@@ -367,14 +367,21 @@ class _AppearanceSettings extends ConsumerWidget {
       children: [
         Text('Motiv', style: theme.textTheme.titleSmall),
         const SizedBox(height: 6),
-        GlassSegmentedControl<ThemeMode>(
-          selected: ref.watch(themeModeProvider),
-          onChanged: ref.read(themeModeProvider.notifier).set,
-          segments: const [
-            GlassSegment(value: ThemeMode.system, label: 'Systém', icon: Symbols.brightness_auto_rounded),
-            GlassSegment(value: ThemeMode.light, label: 'Světlý', icon: Symbols.light_mode_rounded),
-            GlassSegment(value: ThemeMode.dark, label: 'Tmavý', icon: Symbols.dark_mode_rounded),
-          ],
+        // Na širokém displeji ne přes celou šířku.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints.tightFor(width: 520),
+            child: GlassSegmentedControl<ThemeMode>(
+              selected: ref.watch(themeModeProvider),
+              onChanged: ref.read(themeModeProvider.notifier).set,
+              segments: const [
+                GlassSegment(value: ThemeMode.system, label: 'Systém', icon: Symbols.brightness_auto_rounded),
+                GlassSegment(value: ThemeMode.light, label: 'Světlý', icon: Symbols.light_mode_rounded),
+                GlassSegment(value: ThemeMode.dark, label: 'Tmavý', icon: Symbols.dark_mode_rounded),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 16),
         Text('Styl', style: theme.textTheme.titleSmall),
@@ -385,13 +392,20 @@ class _AppearanceSettings extends ConsumerWidget {
           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 6),
-        GlassSegmentedControl<bool>(
-          selected: glassOff,
-          onChanged: ref.read(glassOffProvider.notifier).set,
-          segments: const [
-            GlassSegment(value: false, label: 'Liquid Glass', icon: Symbols.blur_on_rounded),
-            GlassSegment(value: true, label: 'Bez skla', icon: Symbols.crop_square_rounded),
-          ],
+        // Na širokém displeji ne přes celou šířku.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints.tightFor(width: 520),
+            child: GlassSegmentedControl<bool>(
+              selected: glassOff,
+              onChanged: ref.read(glassOffProvider.notifier).set,
+              segments: const [
+                GlassSegment(value: false, label: 'Liquid Glass', icon: Symbols.blur_on_rounded),
+                GlassSegment(value: true, label: 'Bez skla', icon: Symbols.crop_square_rounded),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 12),
         _SwitchRow(
