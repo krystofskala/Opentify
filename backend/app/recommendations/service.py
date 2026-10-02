@@ -115,6 +115,7 @@ class RecommendationService:
             availability=compute_availability(self._session, recording.id),
             preview_url=recording.external_refs.get("previewUrl"),
             listen_count=listen_count,
+            listen_source="listenbrainz" if listen_count else None,
         )
 
     # ------------------------------------------------------------------

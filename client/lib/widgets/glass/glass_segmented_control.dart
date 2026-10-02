@@ -30,6 +30,8 @@ class GlassSegment<T> {
 /// - přepíná mezi příbuznými pohledy/filtry, ne akce.
 /// V obsahu je stopa plochá (tertiary fill); `floating: true` = skleněná
 /// stopa pro plovoucí vrstvu (lišta). Výška 36, dotyková plocha 44.
+int _flex(GlassSegment<Object?> segment) => segment.label.length + 6;
+
 class GlassSegmentedControl<T> extends StatelessWidget {
   const GlassSegmentedControl({
     super.key,
@@ -199,6 +201,9 @@ class _ConnectedSegments<T> extends StatelessWidget {
       final fg = isSelected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
       if (i > 0) children.add(const SizedBox(width: _gap));
       children.add(Expanded(
+        // Delší popisek = širší segment ("Interpreti" se při stejných
+        // šířkách na telefonu usekával).
+        flex: _flex(segment),
         child: GlassPressable(
           onPressed: isSelected ? () {} : () => onChanged(segment.value),
           shape: RoundedRectangleBorder(borderRadius: radius),

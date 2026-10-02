@@ -297,7 +297,7 @@ final artistTopTracksProvider = FutureProvider.autoDispose.family<List<Recording
 });
 
 /// "8 691 poslechů" -- tisíce oddělené úzkou nezlomitelnou mezerou.
-String _listensLabel(int count) {
+String _listensLabel(int count, [String? source]) {
   final digits = count.toString();
   final buffer = StringBuffer();
   for (var i = 0; i < digits.length; i++) {
@@ -309,7 +309,13 @@ String _listensLabel(int count) {
       : count >= 2 && count <= 4
           ? 'poslechy'
           : 'poslechů';
-  return '$buffer $word';
+  final from = switch (source) {
+    'lastfm' => ' · Last.fm',
+    'listenbrainz' => ' · ListenBrainz',
+    'opentify' => ' · v Opentify',
+    _ => '',
+  };
+  return '$buffer $word$from';
 }
 
 /// "Populární" jako na Spotify/Apple Music -- nejposlouchanější skladby
@@ -357,7 +363,7 @@ class _PopularTracksSectionState extends ConsumerState<_PopularTracksSection> {
                       TrackTile(
                         recording: recording,
                         leadingIndex: i + 1,
-                        subtitle: recording.listenCount == null ? null : _listensLabel(recording.listenCount!),
+                        subtitle: recording.listenCount == null ? null : _listensLabel(recording.listenCount!, recording.listenSource),
                         queueRecordings: all,
                         artistName: widget.artistName,
                         sourceLabel: widget.artistName,

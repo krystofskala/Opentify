@@ -17,6 +17,7 @@ class RecordingModel {
     required this.availability,
     this.previewUrl,
     this.listenCount,
+    this.listenSource,
   });
 
   final String id;
@@ -40,6 +41,9 @@ class RecordingModel {
   /// počet poslechů z veřejného ListenBrainz API, viz docs/openapi.yaml.
   final int? listenCount;
 
+  /// Odkud je `listenCount`: "lastfm" | "listenbrainz" | "opentify".
+  final String? listenSource;
+
   String get durationLabel {
     if (durationMs == null) return '--:--';
     final totalSeconds = (durationMs! / 1000).round();
@@ -61,6 +65,7 @@ class RecordingModel {
         availability: availabilityFromJson(json['availability'] as String?),
         previewUrl: json['previewUrl'] as String?,
         listenCount: json['listenCount'] as int?,
+        listenSource: json['listenSource'] as String?,
       );
 
   RecordingModel copyWith({Availability? availability}) => RecordingModel(
@@ -76,5 +81,6 @@ class RecordingModel {
         availability: availability ?? this.availability,
         previewUrl: previewUrl,
         listenCount: listenCount,
+        listenSource: listenSource,
       );
 }

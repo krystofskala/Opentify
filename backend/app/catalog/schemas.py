@@ -72,6 +72,8 @@ class RecordingOut(CamelModel):
     availability: Availability
     preview_url: str | None = None  # Deezer 30s náhled, doplňkové pole mimo strict OpenAPI schéma
     listen_count: int | None = None  # jen /recommendations/trending|community, viz RecommendationService
+    # Odkud `listen_count` je ("lastfm" | "listenbrainz" | "opentify") -- klient to píše k číslu.
+    listen_source: str | None = None
 
 
 class DiscographyOut(CamelModel):

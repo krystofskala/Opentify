@@ -5,6 +5,8 @@ Zdroje:
   1. ListenBrainz `popularity/top-recordings-for-artist/{mbid}` -- pořadí a
      počty poslechů komunity ListenBrainz (menší čísla než Spotify, ale
      pořadí oblíbenosti sedí). Vyžaduje token (LISTENBRAINZ_TOKEN).
+  0. Last.fm `artist.getTopTracks` (je-li LASTFM_API_KEY) -- větší komunita
+     než ListenBrainz, čísla blíž tomu, co lidé znají ze Spotify.
   2. Bez MBID nebo když LB nic nemá: Deezer `/artist/{id}/top` -- pořadí
      oblíbenosti bez počtů.
 
@@ -32,6 +34,44 @@ TOP_TTL_S = 24 * 60 * 60
 LIMIT = 10
 
 _http = httpx.AsyncClient(timeout=10.0)
+
+
+def _lastfm_key() -> str | None:
+    return os.environ.get("LASTFM_API_KEY") or None
+
+
+async def _lastfm_top(name: str) -> list[dict[str, Any]]:
+    """[{title, listens}] seřazené podle oblíbenosti, nebo []."""
+    key = _lastfm_key()
+    if not key:
+        return []
+    try:
+        resp = await _http.get(
+            "https://ws.audioscrobbler.com/2.0/",
+            params={
+                "method": "artist.gettoptracks",
+                "artist": name,
+                "autocorrect": "1",
+                "limit": str(LIMIT * 3),
+                "api_key": key,
+                "format": "json",
+            },
+        )
+        data = resp.json() if resp.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        return []
+    tracks = ((data or {}).get("toptracks") or {}).get("track") or []
+    out = []
+    for t in tracks if isinstance(tracks, list) else []:
+        title = t.get("name") or ""
+        if not title or _VERSION.search(title):
+            continue  # "(Live)", "- Acoustic"... -- chceme hlavní verze
+        try:
+            listens = int(t.get("playcount") or 0) or None
+        except ValueError:
+            listens = None
+        out.append({"title": title, "listens": listens})
+    return out
 
 
 def _token() -> str | None:
@@ -121,15 +161,33 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
                 .order_by(func.count(Listen.id).desc())
                 .limit(LIMIT)
             ).all()
-        return [{"id": rid, "listens": count or None} for rid, count in rows]
+        return [{"id": rid, "listens": count or None, "source": "opentify"} for rid, count in rows]
 
-    if mbid:
-        for entry in (await _lb_top(mbid))[: LIMIT * 2]:
-            title = entry.get("recording_name") or ""
+    entries: list[dict[str, Any]] = []
+    source: str | None = None
+    lastfm = await _lastfm_top(primary_artist_name(name))
+    if len(lastfm) >= 5:
+        entries = [{"title": e["title"], "listens": e["listens"]} for e in lastfm]
+        source = "lastfm"
+    elif mbid:
+        entries = [
+            {
+                "title": e.get("recording_name") or "",
+                "mbid": e.get("recording_mbid"),
+                "release": e.get("release_name"),
+                "listens": e.get("total_listen_count"),
+            }
+            for e in await _lb_top(mbid)
+        ]
+        source = "listenbrainz"
+
+    if entries:
+        for entry in entries[: LIMIT * 2]:
+            title = entry["title"]
             if not title:
                 continue
             with Session(engine) as session:
-                rec = _find_local(session, artist_id, entry.get("recording_mbid"), title, entry.get("release_name"))
+                rec = _find_local(session, artist_id, entry.get("mbid"), title, entry.get("release"))
                 rec_id = rec.id if rec is not None else None
             if rec_id is None:
                 track = await dz.find_track(primary_artist_name(name), title)
@@ -140,7 +198,7 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
                         rec_id = rec.id if rec is not None else None
             if rec_id and rec_id not in seen:
                 seen.add(rec_id)
-                out.append({"id": rec_id, "listens": entry.get("total_listen_count")})
+                out.append({"id": rec_id, "listens": entry.get("listens"), "source": source})
             if len(out) >= LIMIT:
                 break
 
@@ -173,7 +231,7 @@ async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
     async def build() -> dict[str, Any]:
         return {"items": await _ids_and_counts(artist_id)}
 
-    cached = await cached_json(f"artist-top:v2:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
+    cached = await cached_json(f"artist-top:v3:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
     result = []
     with Session(engine) as session:
         for item in cached.get("items", []):
@@ -182,5 +240,6 @@ async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
                 continue
             out = _recording_out(session, rec)
             out.listen_count = item.get("listens")
+            out.listen_source = item.get("source") if item.get("listens") else None
             result.append(out.model_dump(mode="json", by_alias=True))
     return result

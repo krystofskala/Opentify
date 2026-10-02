@@ -445,13 +445,22 @@ class _RowTileState extends State<_RowTile> {
                           ),
                         // Stahování vlevo od srdíčka, srdíčko u pravé hrany --
                         // stažené skladby ikonu nemají a srdíčka pořád lícují.
-                        _Trailing(
-                          isAvailable: w.isAvailable,
-                          isInFlight: w.isInFlight,
-                          isFailed: w.isFailed,
-                          pct: w.pct,
-                          onTap: w.onTap,
-                          onRetry: w.onRetry,
+                        // Na širokém pevný slot -- jinak ikona stahování
+                        // posouvala sloupec délek (nelícovaly pod sebou).
+                        SizedBox(
+                          width: wide ? 48 : null,
+                          child: Center(
+                            widthFactor: wide ? null : 1,
+                            heightFactor: 1,
+                            child: _Trailing(
+                              isAvailable: w.isAvailable,
+                              isInFlight: w.isInFlight,
+                              isFailed: w.isFailed,
+                              pct: w.pct,
+                              onTap: w.onTap,
+                              onRetry: w.onRetry,
+                            ),
+                          ),
                         ),
                         LikeHeart(recordingId: w.recording.id),
                         // ⋯ i na telefonu (audit UI: menu šlo otevřít jen
