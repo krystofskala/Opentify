@@ -89,15 +89,21 @@ def ingest_artist(session: Session, dz: dict[str, Any]) -> Artist | None:
         # Stejné jméno + stejná fotka ještě NENÍ tentýž interpret (fake profil
         # může fotku převzít) -- sloučení až po ověření diskografie, viz
         # `CatalogService._merge_verified_duplicates`.
+    changed = artist is None
     if artist is None:
         artist = Artist(name=name, sort_name=name, deezer_id=dzid)
-    else:
-        artist.deezer_id = artist.deezer_id or dzid
-        artist.updated_at = utcnow()
+    elif not artist.deezer_id:
+        artist.deezer_id = dzid
+        changed = True
     has_photo = bool(artist.images) and not is_placeholder_picture(artist.images[0])
     if not has_photo and not is_placeholder_picture(picture):
         artist.images = [picture]
-    session.add(artist)
+        changed = True
+    # Jen když se opravdu něco změnilo -- dřív každé hledání (i z cache)
+    # zapisovalo ~20 UPDATE a soupeřilo s workery o zámek databáze.
+    if changed:
+        artist.updated_at = utcnow()
+        session.add(artist)
     return artist
 
 

@@ -359,18 +359,18 @@ class CatalogService:
         if len(wanted) < 2:
             return []
         out: list[dict[str, Any]] = []
-        own = Artist.mbid.like("own:%")  # type: ignore[union-attr]
+        own = (Artist.mbid >= "own:") & (Artist.mbid < "own;")  # type: ignore[union-attr]
         if "artist" in types:
             for artist in self._session.exec(select(Artist).where(own)).all():
                 if wanted in norm(artist.name):
                     out.append({"entityType": "artist", **self._to_artist_out(artist).model_dump(by_alias=True)})
         if "release" in types:
-            for release in self._session.exec(select(Release).where(Release.mbid.like("own:%"))).all():  # type: ignore[union-attr]
+            for release in self._session.exec(select(Release).where((Release.mbid >= "own:") & (Release.mbid < "own;"))).all():  # type: ignore[union-attr]
                 artist = self._session.get(Artist, release.artist_id)
                 if wanted in norm(release.title) or (artist and wanted in norm(artist.name)):
                     out.append({"entityType": "release", **self._to_release_out(release).model_dump(by_alias=True)})
         if "recording" in types:
-            for rec in self._session.exec(select(Recording).where(Recording.mbid.like("own:%"))).all():  # type: ignore[union-attr]
+            for rec in self._session.exec(select(Recording).where((Recording.mbid >= "own:") & (Recording.mbid < "own;"))).all():  # type: ignore[union-attr]
                 if wanted in norm(rec.title):
                     out.append({"entityType": "recording", **self._to_recording_out(rec).model_dump(by_alias=True)})
         return out
@@ -782,7 +782,7 @@ class CatalogService:
         nahradí stejného člověka z MusicBrainz (Tyler Joseph u Pilotů vede na
         jeho vlastní profil)."""
         aliases: dict[str, Artist] = {}
-        for own in self._session.exec(select(Artist).where(Artist.mbid.like("own:%"))).all():  # type: ignore[union-attr]
+        for own in self._session.exec(select(Artist).where((Artist.mbid >= "own:") & (Artist.mbid < "own;"))).all():  # type: ignore[union-attr]
             alias = (own.external_refs or {}).get("mbidAlias")
             if alias:
                 aliases[alias] = own

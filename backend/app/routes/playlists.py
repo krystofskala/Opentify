@@ -13,7 +13,7 @@ from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.auth import get_current_user
 from app.catalog.availability import compute_availability, resolve_artist_name
@@ -78,14 +78,44 @@ def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) ->
     if (playlist.source or "").startswith(("spotify-link:", "apple-link:")) and playlist.cover_urls:
         covers = list(playlist.cover_urls)
     else:
-        covers = _covers_for(ids[:40]) or list(playlist.cover_urls or [])
-    counts: Counter[str] = Counter()
-    for recording_id in ids:
-        recording = session.get(Recording, recording_id)
-        if recording is not None and recording.artist_id:
-            counts[recording.artist_id] += 1
-    names = [name for artist_id, _ in counts.most_common(4) if (name := resolve_artist_name(session, artist_id))]
+        covers = _fast_covers(session, ids[:40]) or list(playlist.cover_urls or [])
+    # Interpreti jedním seskupeným dotazem (dřív get na každou skladbu --
+    # seznam playlistů měl 4 342 dotazů / 1,5 s).
+    counts = session.exec(
+        select(Recording.artist_id, func.count())
+        .join(PlaylistItem, PlaylistItem.recording_id == Recording.id)
+        .where(PlaylistItem.playlist_id == playlist.id, Recording.artist_id.is_not(None))  # type: ignore[union-attr]
+        .group_by(Recording.artist_id)
+        .order_by(func.count().desc())
+        .limit(4)
+    ).all()
+    names = [name for artist_id, _n in counts if (name := resolve_artist_name(session, artist_id))]
     return covers, names[:3]
+
+
+def _fast_covers(session: Session, recording_ids: list[str]) -> list[str]:
+    """Jako `_covers_for` (první 4 různé obaly, jinak fotka interpreta), ale
+    jedním dotazem."""
+    from app.models import Artist, Release
+
+    if not recording_ids:
+        return []
+    rows = session.exec(
+        select(Recording.id, Release.images, Artist.images)
+        .outerjoin(Release, Release.id == Recording.release_id)
+        .outerjoin(Artist, Artist.id == Recording.artist_id)
+        .where(Recording.id.in_(recording_ids))  # type: ignore[attr-defined]
+    ).all()
+    by_id = {rid: (rel_imgs, art_imgs) for rid, rel_imgs, art_imgs in rows}
+    covers: list[str] = []
+    for rid in recording_ids:
+        rel_imgs, art_imgs = by_id.get(rid, (None, None))
+        cover = (rel_imgs or [None])[0] or (art_imgs or [None])[0]
+        if cover and cover not in covers:
+            covers.append(cover)
+        if len(covers) == 4:
+            break
+    return covers
 
 
 def _member_ids(session: Session, playlist_id: str) -> list[str]:
@@ -105,6 +135,9 @@ def _user_name(session: Session, user_id: str | None) -> str | None:
 
 def _playlist_detail(session: Session, playlist: Playlist, user_id: str | None = None) -> PlaylistDetailOut:
     items = _playlist_items(session, playlist.id)
+    from app.catalog.availability import prefetch_recordings
+
+    _loaded = prefetch_recordings(session, [i.recording_id for i in items])  # noqa: F841 -- drží objekty v session
     recordings = [r for item in items if (r := _to_recording_out(session, item.recording_id)) is not None]
     members = _member_ids(session, playlist.id)
     collab = bool(members)
@@ -233,7 +266,10 @@ def list_playlists(
             "description": p.description,
             "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
             "collab": True,
-            "ownerName": _user_name(session, p.owner_user_id),
+            # Jsem jen člen (ne vlastník) -- "Opustit", ne "Smazat", i když
+            # vlastník mezitím zmizel a jméno není.
+            "member": True,
+            "ownerName": _user_name(session, p.owner_user_id) or "smazaný profil",
         })
     # Vlastní, které jsou sdílené (štítek "Společný").
     for r in results:

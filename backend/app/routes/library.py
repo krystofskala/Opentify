@@ -271,11 +271,7 @@ def local_albums(
     for release_id, rec_title in session.exec(
         select(Recording.release_id, Recording.title)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .outerjoin(
-            LibraryEntry,
-            (LibraryEntry.recording_id == Recording.id) & (LibraryEntry.user_id == current[0]),  # type: ignore[arg-type]
-        )
-        .where(_in_library(current[0]))
+        .where(_in_library(current[0]))  # (zbytečný join na LibraryEntry pryč -- půlka z 2 s)
     ).all():
         owned_titles.setdefault(release_id, set()).add((rec_title or "").strip().lower())
 
@@ -489,18 +485,19 @@ def local_by_genre(
 ):
     """Lokální skladby, jejichž album nese daný žánr -- `genre` je přesný
     MusicBrainz genre název (viz `/library/genres`), ne fulltextové hledání."""
-    matching_release_ids = {r.id for r in session.exec(select(Release)).all() if genre in (r.genres or [])}
-    if not matching_release_ids:
-        return {"total": 0, "items": []}
-
-    recordings = session.exec(
-        select(Recording)
+    # Jen alba skladeb v knihovně (dřív celá tabulka 39k alb do Pythonu, ~1 s).
+    candidates = session.exec(
+        select(Recording, Release.genres)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .where(
-            _in_library(current[0]),
-            Recording.release_id.in_(matching_release_ids),
-        )
+        .join(Release, Release.id == Recording.release_id)
+        .where(_in_library(current[0]))
     ).all()
+    recordings = [rec for rec, genres in candidates if genre in (genres or [])]
+    if not recordings:
+        return {"total": 0, "items": []}
+    from app.catalog.availability import prefetch_recordings
+
+    _loaded = prefetch_recordings(session, [r.id for r in recordings])  # noqa: F841
     items = [_local_recording_out(session, r) for r in recordings]
     return {"total": len(items), "items": [i.model_dump(by_alias=True) for i in items]}
 
@@ -899,6 +896,9 @@ def liked_songs(
         select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position)
     ).all()
     recordings: list[RecordingOut] = []
+    from app.catalog.availability import prefetch_recordings
+
+    _loaded = prefetch_recordings(session, [i.recording_id for i in items])  # noqa: F841 -- drží objekty v session
     for item in items:
         recording = session.get(Recording, item.recording_id)
         if recording is None:
@@ -1346,6 +1346,12 @@ async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(ge
             refs["youtubeSkip"] = int(refs.get("youtubeSkip", 0)) + 1
         refs.pop("sourceKey", None)
         refs.pop("youtubeUrl", None)
+        # Přesný odkaz z importu (YouTube video / SoundCloud skladba) byl ten
+        # špatný -- zapomenout ho, jinak by worker stáhl znovu totéž.
+        if key and refs.get("youtubeId") and key.endswith(str(refs["youtubeId"])):
+            refs.pop("youtubeId", None)
+        if key and refs.get("soundcloudUrl") and key == f"soundcloud:{refs['soundcloudUrl']}":
+            refs.pop("soundcloudUrl", None)
         rec.external_refs = refs
         session.add(rec)
         session.commit()

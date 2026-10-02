@@ -84,8 +84,17 @@ def _ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_release_deezer_id ON release (deezer_id)",
             "CREATE INDEX IF NOT EXISTS ix_recording_deezer_id ON recording (deezer_id)",
             "CREATE INDEX IF NOT EXISTS ix_playlist_section ON playlist (section)",
+            # Audit výkonu 2026-10-02 (změřeno na kopii DB):
+            # knihovna/hledání v knihovně 2-3 s -> ~30 ms (SQLite bral jen user_id),
+            "CREATE INDEX IF NOT EXISTS ix_libraryentry_user_rec ON libraryentry (user_id, recording_id)",
+            # "Pokračovat v poslechu" a mixy: 143 ms -> 1 ms,
+            "CREATE INDEX IF NOT EXISTS ix_listen_user_played ON listen (user_id, played_at)",
+            # porovnání jmen interpretů bez velikosti písmen (každé hledání).
+            "CREATE INDEX IF NOT EXISTS ix_artist_lower_name ON artist (lower(name))",
         ):
             conn.exec_driver_sql(index_sql)
+        # Statistiky pro plánovač dotazů (nikdy nebyly) -- levné, jen co je potřeba.
+        conn.exec_driver_sql("PRAGMA optimize")
         conn.commit()
 
 

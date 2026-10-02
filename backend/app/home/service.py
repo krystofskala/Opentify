@@ -282,6 +282,9 @@ def _playlist_tracks(session: Session, playlist_id: str, limit: int) -> list[Rec
     items = session.exec(
         select(PlaylistItem).where(PlaylistItem.playlist_id == playlist_id).order_by(PlaylistItem.position).limit(limit)
     ).all()
+    from app.catalog.availability import prefetch_recordings
+
+    _loaded = prefetch_recordings(session, [i.recording_id for i in items])  # noqa: F841
     out = []
     for item in items:
         recording = session.get(Recording, item.recording_id)

@@ -80,7 +80,9 @@ class DeezerClient:
         async def fetch() -> dict[str, Any] | None:
             return await self._get(f"/track/isrc:{isrc}")
 
-        return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        # `None` = nenalezeno NEBO výpadek -- jen na krátko (10 min), ať
+        # výpadek Deezeru nevydrží v cache celý den.
+        return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch, is_empty=lambda v: v is None)
 
     async def search(self, query: str, limit: int) -> dict[str, Any] | None:
         cache_key = f"dz:search:{query}:{limit}"
@@ -88,7 +90,7 @@ class DeezerClient:
         async def fetch() -> dict[str, Any] | None:
             return await self._get("/search", {"q": query, "limit": limit})
 
-        return await cached_json(cache_key, SEARCH_TTL_SECONDS, fetch)
+        return await cached_json(cache_key, SEARCH_TTL_SECONDS, fetch, is_empty=lambda v: v is None)
 
     async def search_artist(self, name: str, limit: int = 5, *, trust_name: bool = True) -> list[dict[str, Any]]:
         """`trust_name=False`: interpret známý jen z vlastních souborů se
@@ -104,7 +106,7 @@ class DeezerClient:
         async def fetch() -> dict[str, Any] | None:
             return await self._get("/search/artist", {"q": name, "limit": limit})
 
-        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch, is_empty=lambda v: not (v or {}).get("data"))
         return (data or {}).get("data") or []
 
     async def search_album(self, artist: str, title: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -114,7 +116,7 @@ class DeezerClient:
         async def fetch() -> dict[str, Any] | None:
             return await self._get("/search/album", {"q": query, "limit": limit})
 
-        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch, is_empty=lambda v: not (v or {}).get("data"))
         return (data or {}).get("data") or []
 
     async def _cached_data(self, cache_key: str, ttl: int, path: str, params: dict[str, Any]) -> list[dict[str, Any]] | None:

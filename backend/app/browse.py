@@ -1032,9 +1032,13 @@ def _known_artists(user_id: str) -> set[str]:
     from app.models import FavoriteArtist, Listen, PlaylistItem
 
     with Session(engine) as session:
+        # DISTINCT v SQL (dřív 119k řádků do Pythonu, 250 ms).
         known = set(
             session.exec(
-                select(Recording.artist_id).join(Listen, Listen.recording_id == Recording.id).where(Listen.user_id == user_id)
+                select(Recording.artist_id)
+                .distinct()
+                .join(Listen, Listen.recording_id == Recording.id)
+                .where(Listen.user_id == user_id)
             ).all()
         )
         known |= set(

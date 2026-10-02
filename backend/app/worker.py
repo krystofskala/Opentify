@@ -741,7 +741,16 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         final_status = ProvisioningJobStatus.PENDING.value if should_retry else ProvisioningJobStatus.FAILED.value
         await publish_job_progress(ctx["user_id"], job_id, final_status, pct=None)
         if should_retry:
-            await r.xadd(stream, {"job_id": job_id})
+            # Prodleva podle pokusu (30 s, 60 s, ...) -- okamžitý nový pokus
+            # narážel na stejný výpadek / bot-blok. Kdyby worker mezitím
+            # skončil, job visí PENDING a vrátí ho úklid (requeue_orphaned_jobs).
+            delay = 30 * ctx["attempts"]
+
+            async def requeue_later() -> None:
+                await asyncio.sleep(delay)
+                await r.xadd(stream, {"job_id": job_id})
+
+            _keep(asyncio.create_task(requeue_later()))
 
 
 _running: dict[str, set[asyncio.Task]] = {PROVISIONING_PRIORITY_STREAM: set(), PROVISIONING_STREAM: set()}
