@@ -40,6 +40,7 @@ import '../../widgets/sort_button.dart';
 import '../../state/favorite_artists_controller.dart';
 import '../../data/library_repository.dart' show LocalArtist;
 import '../../widgets/playlist_removal.dart';
+import '../../state/liked_songs_controller.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -201,6 +202,9 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   Object? _error;
   ViewMode _viewMode = ViewMode.list;
 
+  /// "Oblíbené" -- jen skladby se srdíčkem (jako "Oblíbení" u interpretů).
+  bool _likedOnly = false;
+
   @override
   void initState() {
     super.initState();
@@ -285,8 +289,10 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
       child: ListenableBuilder(
         listenable: _collection,
         builder: (context, _) {
-          final visible = _collection.apply(_items);
-          final hasMore = !_collection.isModified && _items.length < _total;
+          final liked = ref.watch(likedSongsControllerProvider).valueOrNull ?? const <String>{};
+          final applied = _collection.apply(_items);
+          final visible = _likedOnly ? [for (final r in applied) if (liked.contains(r.id)) r] : applied;
+          final hasMore = !_collection.isModified && !_likedOnly && _items.length < _total;
           return CustomScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
@@ -307,16 +313,43 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xxs),
-                  child: Text(
-                    _collection.isModified && _items.length < _total
-                        ? 'Načítám celou knihovnu… ${_items.length}/$_total'
-                        : songsCount(_total),
-                    style: Theme.of(context).textTheme.bodySmall,
+                  // Počet + filtr "Oblíbené" (na liště nad tím už není místo).
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          (_collection.isModified || _likedOnly) && _items.length < _total
+                              ? 'Načítám celou knihovnu… ${_items.length}/$_total'
+                              : _likedOnly
+                                  ? '${songsCount(visible.length)} se srdíčkem'
+                                  : songsCount(_total),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                      FilterChip(
+                        avatar: const Icon(Symbols.favorite_rounded, size: 16),
+                        label: const Text('Oblíbené'),
+                        tooltip: 'Jen skladby se srdíčkem',
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        selected: _likedOnly,
+                        onSelected: (on) {
+                          setState(() => _likedOnly = on);
+                          // Filtr nad celou knihovnou, ne jen první stránkou.
+                          if (on && _items.length < _total) _loadAll();
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ),
               if (visible.isEmpty)
-                const SliverToBoxAdapter(child: EmptyState(compact: true, message: 'Filtru nic neodpovídá.'))
+                SliverToBoxAdapter(
+                  child: EmptyState(
+                    compact: true,
+                    message: _likedOnly ? 'Zatím žádné oblíbené – dej skladbě srdíčko.' : 'Filtru nic neodpovídá.',
+                  ),
+                )
               else if (_viewMode == ViewMode.list || _collection.selecting)
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
@@ -397,9 +430,20 @@ class _GridViewBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
       child: Row(
         children: [
-          if (sort != null) sort!,
-          if (filter != null) ...[const SizedBox(width: AppSpacing.xs), filter!],
-          const Spacer(),
+          // Řazení + filtr se na úzkém telefonu posunou do strany (dlouhé
+          // "Počet skladeb" + "Celá alba" by jinak lištu přetekly).
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  if (sort != null) sort!,
+                  if (filter != null) ...[const SizedBox(width: AppSpacing.xs), filter!],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
           ViewModeToggle(mode: viewMode, onChanged: onViewMode),
         ],
       ),
