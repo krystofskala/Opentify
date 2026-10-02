@@ -147,6 +147,11 @@ class ProvisioningJob(SQLModel, table=True):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error_message: str | None = None
+    # Pro statistiky (app/tools/download_stats.py): odkud se to vzalo,
+    # interaktivně (uživatel čeká) / na pozadí.
+    source_provider: str | None = None
+    audio_format: str | None = None
+    interactive: bool | None = None
 
 
 class Playlist(SQLModel, table=True):

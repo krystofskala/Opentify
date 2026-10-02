@@ -44,12 +44,43 @@ from app.routes.playlists import playlists_router
 from app.routes.provisioning import jobs_router, tracks_router
 from app.routes.recommendations import recommendations_router
 
+def _api_file_log() -> None:
+    import logging
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
+    try:
+        Path("/data/db/logs").mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler("/data/db/logs/api.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    except OSError:
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.setLevel(logging.INFO)
+    logging.getLogger("uvicorn.error").addHandler(handler)
+
+
+_api_file_log()
+
 app = FastAPI(title="Vault API", version="0.1.0")
 
 
 # Výpadek/limit cizí služby (MusicBrainz 503, Deezer timeout...) není chyba
 # serveru: 502/504 s českou hláškou místo holé 500, ať klient ukáže
 # "zkus to znovu" a ne "něco se rozbilo".
+
+@app.middleware("http")
+async def _log_slow_requests(request, call_next):  # type: ignore[no-untyped-def]
+    """Požadavky nad 1,5 s do logu (bez dotazu -- `?t=` je klíč zařízení)."""
+    import logging
+    import time
+
+    started = time.monotonic()
+    response = await call_next(request)
+    took = time.monotonic() - started
+    if took > 1.5 and not request.url.path.endswith("/stream"):
+        logging.getLogger("uvicorn.error.slow").info("pomalé %.1f s %s %s", took, request.method, request.url.path)
+    return response
+
 @app.exception_handler(httpx.HTTPStatusError)
 async def _upstream_status(_request: Request, exc: httpx.HTTPStatusError) -> JSONResponse:
     logging.getLogger(__name__).warning("upstream %s: HTTP %s", exc.request.url.host, exc.response.status_code)

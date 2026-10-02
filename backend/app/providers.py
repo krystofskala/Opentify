@@ -299,7 +299,9 @@ class SlskdProvider:
     PREFERRED_EXTENSIONS = (".flac", ".mp3", ".m4a", ".ogg")
 
     INTERACTIVE = _SlskdProfile(search_cap_s=8.0, settle_s=1.0, start_timeout_s=8.0, stall_timeout_s=10.0, max_peers=3)
-    BACKGROUND = _SlskdProfile(search_cap_s=15.0, settle_s=3.0, start_timeout_s=45.0, stall_timeout_s=30.0, max_peers=3)
+    # Na pozadí nikdo nečeká (a kliknutí přidá YouTube závod) -- víc peerů,
+    # ať se víc stahuje z Soulseeku (týden: 62 % YouTube).
+    BACKGROUND = _SlskdProfile(search_cap_s=15.0, settle_s=3.0, start_timeout_s=45.0, stall_timeout_s=30.0, max_peers=6)
     # Složka celého alba od jednoho člověka: posílá skladbu po skladbě, ostatní
     # čekají v jeho frontě -- trpělivě (živě: 45 s limit poslal 11/16 jinam).
     ALBUM = _SlskdProfile(search_cap_s=15.0, settle_s=3.0, start_timeout_s=600.0, stall_timeout_s=60.0, max_peers=1)
@@ -613,7 +615,10 @@ class SlskdProvider:
                     f"/api/v0/transfers/downloads/{username}",
                     json=[{"filename": filename, "size": peer.get("size", 0)}],
                 )
-                queued.raise_for_status()
+                # 409 = ten soubor od toho peeru už ve frontě je (dřívější
+                # pokus) -- navázat na něj, ne vzdát (5 selhání za týden).
+                if queued.status_code != 409:
+                    queued.raise_for_status()
             except httpx.HTTPError as exc:
                 # 429/5xx od slskd -- zkusit dalšího peera, ne shodit celý slskd.
                 raise _PeerFailed(f"slskd nezafrontil ({exc})") from exc

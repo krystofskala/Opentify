@@ -66,6 +66,7 @@ def _ensure_columns() -> None:
             ("lastfm_connected_at", "DATETIME"),
         ],
         "playlistitem": [("added_by", "VARCHAR")],
+        "provisioningjob": [("source_provider", "VARCHAR"), ("audio_format", "VARCHAR"), ("interactive", "BOOLEAN")],
         "playlist": [
             ("description", "VARCHAR"),
             ("cover_urls", "JSON"),

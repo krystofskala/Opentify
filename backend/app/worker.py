@@ -66,6 +66,18 @@ from app.redis_bus import (
 from app.utils import sha256_file, utcnow
 
 logging.basicConfig(level=logging.INFO)
+try:
+    from logging.handlers import RotatingFileHandler
+
+    Path("/data/db/logs").mkdir(parents=True, exist_ok=True)
+    _file_log = RotatingFileHandler(
+        f"/data/db/logs/worker-{socket.gethostname()}.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+    )
+    _file_log.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _file_log.setLevel(logging.INFO)
+    logging.getLogger().addHandler(_file_log)
+except OSError:
+    pass  # mimo Docker (testy) -- jen konzole
 logger = logging.getLogger("vault.worker")
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/data/media"))
@@ -204,6 +216,15 @@ _TERMINAL_JOB_STATUSES = (
 )
 
 
+def _mark_interactive(job_id: str, interactive: bool) -> None:
+    with Session(engine) as session:
+        job = session.get(ProvisioningJob, job_id)
+        if job is not None:
+            job.interactive = interactive
+            session.add(job)
+            session.commit()
+
+
 def _finish_success(
     job_id: str,
     storage_path: str,
@@ -225,6 +246,8 @@ def _finish_success(
 
         job.status = ProvisioningJobStatus.SUCCEEDED
         job.finished_at = utcnow()
+        job.source_provider = source_provider
+        job.audio_format = audio_format
 
         asset.status = MediaAssetStatus.AVAILABLE
         asset.storage_path = storage_path
@@ -647,6 +670,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         interactive = True  # uživatel na skladbu klikl, než se job dostal na řadu
 
     await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.RUNNING.value, pct=0)
+    await asyncio.to_thread(_mark_interactive, job_id, interactive)
 
     track = TrackMetadata(
         recording_id=ctx["recording_id"],
