@@ -16,6 +16,7 @@ import '../../widgets/spotify_link_import.dart';
 import '../../widgets/state_views.dart';
 import '../../core/cz_plural.dart';
 import 'pinned_tile.dart';
+import '../../widgets/playlist_removal.dart';
 
 String _playlists(int n) => n == 1
     ? 'playlist'
@@ -99,6 +100,7 @@ class SharedPlaylistsScreen extends ConsumerWidget {
                     id: p.id,
                     title: p.title,
                     imageUrl: p.coverUrls.firstOrNull,
+                    onDelete: () => confirmDeletePlaylist(context, ref, id: p.id, title: p.title),
                   ),
                 ),
             ],

@@ -39,6 +39,7 @@ import '../../widgets/toast.dart';
 import '../../widgets/sort_button.dart';
 import '../../state/favorite_artists_controller.dart';
 import '../../data/library_repository.dart' show LocalArtist;
+import '../../widgets/playlist_removal.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -807,13 +808,18 @@ class _PlaylistsTab extends ConsumerWidget {
                 ? '${playlist.description} · ${songsCount(playlist.itemCount)}'
                 : '$who · ${songsCount(playlist.itemCount)}',
         onTap: () => context.push('/playlists/${playlist.id}'),
-        onLongPress: () => showCollectionActions(
-          context,
-          kind: CollectionKind.playlist,
-          id: playlist.id,
-          title: playlist.title,
-          imageUrl: playlist.coverUrls.firstOrNull,
-        ),
+        onLongPress: () {
+          final removal = removalFor(context, ref, playlist);
+          showCollectionActions(
+            context,
+            kind: CollectionKind.playlist,
+            id: playlist.id,
+            title: playlist.title,
+            imageUrl: playlist.coverUrls.firstOrNull,
+            onDelete: removal.run,
+            deleteLabel: removal.label,
+          );
+        },
       );
     }
 

@@ -25,6 +25,7 @@ import '../../theme/shapes.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import '../../core/config.dart';
+import '../../widgets/playlist_removal.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -545,25 +546,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Smazat playlist?'),
-        content: const Text('Tohle nejde vrátit zpátky.'),
-        actions: [
-          GlassButton(
-              label: 'Zrušit',
-              style: GlassButtonStyle.plain,
-              compact: true,
-              onPressed: () => Navigator.of(context).pop(false)),
-          GlassButton(
-              label: 'Smazat', destructive: true, compact: true, onPressed: () => Navigator.of(context).pop(true)),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await ref.read(playlistsRepositoryProvider).delete(widget.playlistId);
-    ref.invalidate(myPlaylistsProvider);
-    if (context.mounted) Navigator.of(context).pop();
+    final title = ref.read(playlistDetailProvider(widget.playlistId)).valueOrNull?.title ?? 'playlist';
+    final deleted = await confirmDeletePlaylist(context, ref, id: widget.playlistId, title: title);
+    if (deleted && context.mounted) Navigator.of(context).pop();
   }
 }

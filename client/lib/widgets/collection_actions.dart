@@ -54,6 +54,7 @@ Future<void> showCollectionActions(
   VoidCallback? onEdit,
   VoidCallback? onInvite,
   VoidCallback? onLeave,
+  String? deleteLabel,
 }) {
   HapticFeedback.selectionClick();
   return showGlassSheet<void>(
@@ -77,6 +78,7 @@ Future<void> showCollectionActions(
       onEdit: onEdit,
       onInvite: onInvite,
       onLeave: onLeave,
+      deleteLabel: deleteLabel,
     ),
   );
 }
@@ -101,6 +103,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
     this.onEdit,
     this.onInvite,
     this.onLeave,
+    this.deleteLabel,
   });
 
   final BuildContext hostContext;
@@ -140,6 +143,9 @@ class _CollectionActionsSheet extends ConsumerWidget {
 
   /// Člen společného playlistu: opustit.
   final VoidCallback? onLeave;
+
+  /// Vlastní text pro `onDelete` (Odebrat z knihovny / Opustit...).
+  final String? deleteLabel;
 
   // Přes kontejner appky -- načítá se až po zavření sheetu, jeho `ref` už
   // v tu chvíli neplatí.
@@ -416,7 +422,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
             if (onDelete != null)
               _Row(
                 icon: Symbols.delete_rounded,
-                label: kind == CollectionKind.album ? 'Smazat album' : 'Smazat playlist',
+                label: deleteLabel ?? (kind == CollectionKind.album ? 'Smazat album' : 'Smazat playlist'),
                 destructive: true,
                 onTap: () {
                   Navigator.of(context).pop();

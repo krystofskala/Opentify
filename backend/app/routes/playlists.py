@@ -405,8 +405,14 @@ def delete_playlist(
 ):
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    from app.models import PinnedPlaylist, PlaylistMember
+
     for item in _playlist_items(session, playlist.id):
         session.delete(item)
+    # Členové společného playlistu a připnutí -- ať nezůstanou osiřelé.
+    for model in (PlaylistMember, PinnedPlaylist):
+        for row in session.exec(select(model).where(model.playlist_id == playlist.id)).all():
+            session.delete(row)
     session.delete(playlist)
     session.commit()
     return {"deleted": True}
