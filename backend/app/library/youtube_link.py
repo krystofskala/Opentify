@@ -1,4 +1,5 @@
-"""Import z odkazu na YouTube (video nebo playlist).
+"""Import z odkazu na YouTube (video nebo playlist) nebo SoundCloud
+(skladba, set, profil) -- obojí přes yt-dlp, stejný postup.
 
 Na rozdíl od Spotify/Apple Music YouTube nic neříká o tom, CO odkaz je --
 proto dva kroky:
@@ -72,21 +73,38 @@ def _extract(url: str) -> dict[str, Any]:
 
 def _normalized_url(text: str) -> str:
     """Playlist má přednost (odkaz z playlistu nese i `v=`)."""
+    from app.soundcloud import normalized_url as sc_url
+
+    if sc := sc_url(text):
+        return sc
     lst = _LIST.search(text or "")
     if lst and not lst.group(1).startswith(("RD", "UL")):  # RD* = automatický mix, ne playlist
         return f"https://www.youtube.com/playlist?list={lst.group(1)}"
     video = _VIDEO.search(text or "")
     if video:
         return f"https://www.youtube.com/watch?v={video.group(1)}"
-    raise YoutubeLinkError("Tohle nevypadá jako odkaz na YouTube video nebo playlist.")
+    raise YoutubeLinkError("Tohle nevypadá jako odkaz na YouTube nebo SoundCloud.")
+
+
+def _source(url: str) -> str:
+    return "soundcloud" if "soundcloud.com" in url else "youtube"
+
+
+def _ref(source: str, video: dict) -> dict[str, str]:
+    """Kde worker skladbu přesně vezme."""
+    return {"soundcloudUrl": video["url"]} if source == "soundcloud" else {"youtubeId": video["id"]}
+
+
+_FROM = {"youtube": "z YouTube", "soundcloud": "ze SoundCloudu"}
 
 
 async def inspect_youtube_link(text: str) -> dict[str, Any]:
     url = _normalized_url(text)
+    source = _source(url)
     try:
         info = await asyncio.to_thread(_extract, url)
     except Exception as exc:  # noqa: BLE001 -- yt-dlp chyby jsou různé
-        raise YoutubeLinkError("YouTube odkaz se nepodařilo načíst (soukromé nebo smazané video?).") from exc
+        raise YoutubeLinkError("Odkaz se nepodařilo načíst (soukromé nebo smazané?).") from exc
     is_playlist = info.get("_type") == "playlist" or bool(info.get("entries"))
     channel = _clean_channel(info.get("channel") or info.get("uploader"))
     entries = [e for e in (info.get("entries") or []) if e and e.get("id")] if is_playlist else [info]
@@ -94,13 +112,20 @@ async def inspect_youtube_link(text: str) -> dict[str, Any]:
     for e in entries:
         e_channel = _clean_channel(e.get("channel") or e.get("uploader")) or channel
         artist, title = _split_title(e.get("title") or "", e_channel)
+        if source == "soundcloud":
+            sc_url = e.get("webpage_url") or e.get("url")
+            if not sc_url or (e.get("duration") is not None and e["duration"] <= 31):
+                continue  # Go+ skladba (jen 30s ukázka)
+            videos.append({"id": str(e.get("id")), "url": sc_url, "title": title, "artist": artist, "duration": e.get("duration")})
+            continue
         videos.append({"id": e["id"], "title": title, "artist": artist, "duration": e.get("duration")})
     thumbs = info.get("thumbnails") or []
     thumb = thumbs[-1].get("url") if thumbs else info.get("thumbnail")
-    if not thumb and videos:
+    if not thumb and videos and source == "youtube":
         thumb = f"https://i.ytimg.com/vi/{videos[0]['id']}/hqdefault.jpg"
     return {
         "url": url,
+        "source": source,
         "kind": "playlist" if is_playlist else "video",
         "title": info.get("title") or "",
         "channel": channel,
@@ -204,10 +229,11 @@ async def import_youtube_link(
     if kind not in ("track", "playlist", "album", "live", "soundtrack"):
         raise YoutubeLinkError("Neznámý druh importu.")
     info = await inspect_youtube_link(text)
+    source = info["source"]
     videos = info["videos"]
     if not videos:
-        raise YoutubeLinkError("V odkazu nejsou žádná videa.")
-    source_id = re.sub(r".*[?&](?:list|v)=", "", info["url"])
+        raise YoutubeLinkError("V odkazu nejsou žádné skladby (u SoundCloudu jen pro Go+?).")
+    source_id = re.sub(r".*[?&](?:list|v)=", "", info["url"]) if source == "youtube" else info["url"]
 
     if kind == "track":
         v = videos[0]
@@ -216,14 +242,15 @@ async def import_youtube_link(
             session, artist, title or v["title"], duration_ms=int(v["duration"] * 1000) if v.get("duration") else None
         )
         if not _has_file(session, recording.id):
-            recording.external_refs = {**(recording.external_refs or {}), "youtubeId": v["id"]}
+            recording.external_refs = {**(recording.external_refs or {}), **_ref(source, v)}
             session.add(recording)
         session.commit()
         return {"kind": "track", "recordingId": recording.id}
 
     if kind == "playlist":
-        playlist = _get_or_create_playlist(session, user_id, f"youtube-link:playlist:{source_id}", title or info["title"])
-        playlist.description = f"Z YouTube · {info['channel']}" if info["channel"] else "Z YouTube"
+        playlist = _get_or_create_playlist(session, user_id, f"{source}-link:playlist:{source_id}", title or info["title"])
+        label = _FROM[source][0].upper() + _FROM[source][1:]
+        playlist.description = f"{label} · {info['channel']}" if info["channel"] else label
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
         matched = 0
@@ -239,7 +266,7 @@ async def import_youtube_link(
                     session, artist, v["title"], duration_ms=int(v["duration"] * 1000) if v.get("duration") else None
                 )
                 if not _has_file(session, recording.id):
-                    recording.external_refs = {**(recording.external_refs or {}), "youtubeId": v["id"]}
+                    recording.external_refs = {**(recording.external_refs or {}), **_ref(source, v)}
                     session.add(recording)
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording.id, position=position))
         cover = await _fetch_cover(info["thumbnail"])
@@ -261,7 +288,7 @@ async def import_youtube_link(
             for r in session.exec(
                 select(Release).where(Release.artist_id == artist.id, Release.title == release_title)
             ).all()
-            if (r.external_refs or {}).get("source") == "youtube"
+            if (r.external_refs or {}).get("source") == source
         ),
         None,
     )
@@ -271,15 +298,15 @@ async def import_youtube_link(
         session.flush()
     release.external_refs = {
         **(release.external_refs or {}),
-        "source": "youtube",
+        "source": source,
         "youtubeSource": source_id,
         "unofficial": True,
         "live": kind == "live",
         "soundtrack": kind == "soundtrack",
         "notes": {
-            "live": "Živě · z YouTube",
-            "soundtrack": "Soundtrack · z YouTube",
-        }.get(kind, "Neoficiální vydání · jen na YouTube"),
+            "live": f"Živě · {_FROM[source]}",
+            "soundtrack": f"Soundtrack · {_FROM[source]}",
+        }.get(kind, "Neoficiální vydání · jen " + ("na YouTube" if source == "youtube" else "na SoundCloudu")),
     }
     if year and 1900 <= year <= 2100:
         release.release_date = str(year)  # neoficiální album: rok zadaný ručně
@@ -294,7 +321,7 @@ async def import_youtube_link(
         recording.artist_id = track_artist.id
         recording.title = v["title"]
         recording.duration_ms = int(v["duration"] * 1000) if v.get("duration") else recording.duration_ms
-        recording.external_refs = {**(recording.external_refs or {}), "youtubeId": v["id"]}
+        recording.external_refs = {**(recording.external_refs or {}), **_ref(source, v)}
         session.add(recording)
     cover = await _fetch_cover(info["thumbnail"])
     if cover and _save_resized(cover, artwork_path(release.id)):

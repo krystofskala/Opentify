@@ -1276,7 +1276,7 @@ async def delete_imported_release(release_id: str, current: tuple[str, str] = De
         release = session.get(Release, release_id)
         if release is None:
             raise HTTPException(status_code=404, detail="Album neexistuje.")
-        if (release.external_refs or {}).get("source") not in ("youtube", "manual"):
+        if (release.external_refs or {}).get("source") not in ("youtube", "soundcloud", "manual"):
             raise HTTPException(status_code=400, detail="Smazat jde jen album přidané z YouTube.")
         artist_id = release.artist_id
         deleted = kept = 0

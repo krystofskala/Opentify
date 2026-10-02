@@ -24,6 +24,7 @@ import '../state/provisioning_controller.dart';
 import '../state/auth_controller.dart';
 import '../state/listen_later_controller.dart' show listenLaterProvider;
 import '../data/listen_later_repository.dart' show LaterKind;
+import 'report_problem.dart';
 import 'toast.dart';
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
@@ -427,6 +428,15 @@ class _CollectionActionsSheet extends ConsumerWidget {
                 onTap: () {
                   Navigator.of(context).pop();
                   onDelete!();
+                },
+              ),
+            if (kind == CollectionKind.album)
+              _Row(
+                icon: Symbols.hide_image_rounded,
+                label: 'Nahlásit špatný obal',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  reportWrongCover(container, messenger, releaseId: id);
                 },
               ),
             if (kind == CollectionKind.album &&

@@ -23,6 +23,7 @@ import '../state/auth_controller.dart';
 import '../state/providers.dart' show apiClientProvider;
 import 'verify_track_sheet.dart';
 import 'share_sheet.dart';
+import 'report_problem.dart';
 import 'toast.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
@@ -303,22 +304,26 @@ class _TrackActionsSheet extends ConsumerWidget {
               ),
               // Stáhla se jiná verze (live, cover, úplně jiná píseň): zdroj se
               // zapamatuje jako špatný a stáhne se jiný.
-              if (inLibrary)
+              if (inLibrary || recording.availability.name == 'available')
                 _Item(
                   icon: Symbols.sync_problem_rounded,
-                  label: 'Špatná verze – stáhnout jinou',
-                  onTap: () => run(() async {
-                    try {
-                      await ref.read(apiClientProvider).postJson('/library/tracks/${recording.id}/wrong-version');
-                      ref.invalidate(libraryIdsProvider);
-                      toast('Stahuju jinou verzi „${recording.title}“');
-                      if (ref.read(audioPlayerControllerProvider).nowPlaying?.recordingId == recording.id) {
-                        await controller.retryCurrent();
-                      }
-                    } catch (e) {
-                      toast('Nepodařilo se: $e');
-                    }
-                  }),
+                  label: 'Nahlásit špatné audio – stáhnout správné',
+                  onTap: () => run(() => reportWrongAudio(
+                        ProviderScope.containerOf(context, listen: false),
+                        messenger,
+                        recordingId: recording.id,
+                        title: recording.title,
+                      )),
+                ),
+              if (recording.releaseId != null)
+                _Item(
+                  icon: Symbols.hide_image_rounded,
+                  label: 'Nahlásit špatný obal alba',
+                  onTap: () => run(() => reportWrongCover(
+                        ProviderScope.containerOf(context, listen: false),
+                        messenger,
+                        releaseId: recording.releaseId!,
+                      )),
                 ),
               if (inLibrary)
                 _Item(

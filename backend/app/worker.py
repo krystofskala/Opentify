@@ -50,6 +50,7 @@ from app.providers import (
     CompositeProvider,
     FetchResult,
     SlskdProvider,
+    SoundcloudProvider,
     TrackMetadata,
     YoutubeProvider,
     build_provider,
@@ -90,6 +91,7 @@ provider = build_provider()
 # `composite` -- ostatní MEDIA_PROVIDER režimy jedou po staru přes `provider`.
 _slskd: SlskdProvider | None = None
 _youtube: YoutubeProvider | None = None
+_soundcloud = SoundcloudProvider()
 if isinstance(provider, CompositeProvider):
     for _p in provider.providers:
         if isinstance(_p, SlskdProvider):
@@ -174,6 +176,7 @@ def _start_job(job_id: str) -> dict | None:
             "skip_candidates": int((recording.external_refs or {}).get("youtubeSkip", 0)) if recording else 0,
             "rejected_sources": list((recording.external_refs or {}).get("rejectedSources") or []) if recording else [],
             "youtube_id": (recording.external_refs or {}).get("youtubeId") if recording else None,
+            "soundcloud_url": (recording.external_refs or {}).get("soundcloudUrl") if recording else None,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
         }
@@ -423,6 +426,10 @@ async def _acquire(
     přijde eskalace (uživatel zmáčkl Přehrát na prefetchované skladbě),
     YouTube se přidá hned."""
     dest_stem = MEDIA_ROOT / track.recording_id
+    if track.soundcloud_url and not track.preferred_source:
+        # Přesná skladba ze SoundCloudu (odkaz / nevydaná věc) -- rovnou ona.
+        candidate = await _soundcloud.resolve(track)
+        return await _soundcloud.fetch(track, candidate, dest_stem, on_progress, on_file_located)
     if track.youtube_id and _youtube is not None and not track.preferred_source:
         # Přesné YouTube video (odkaz / album jen na YouTube) -- rovnou ono.
         # Když je album ale nalezené jako složka na Soulseeku (preferredSource),
@@ -514,6 +521,16 @@ async def _acquire(
                         logger.info("job %s: vyhrál YouTube za %.1f s", job_id, time.monotonic() - started)
                         return result
                 elif s_task.done():
+                    # Poslední záloha: SoundCloud (dema, remixy, nevydané věci).
+                    try:
+                        sc_candidate = await _soundcloud.resolve(track)
+                        if sc_candidate is not None:
+                            logger.info("job %s: slskd i YouTube nevyšly -> SoundCloud", job_id)
+                            return await _soundcloud.fetch(track, sc_candidate, dest_stem, progress, _no_file_located)
+                    except Exception as sc_exc:  # noqa: BLE001
+                        raise RuntimeError(
+                            f"slskd: {s_task.exception()}; youtube: {y_exc}; soundcloud: {sc_exc}"
+                        ) from sc_exc
                     raise RuntimeError(f"slskd: {s_task.exception()}; youtube: {y_exc}")
 
             if y_task is None and not s_task.done() and await r.get(escalate_key):
@@ -639,6 +656,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         duration_ms=ctx.get("recording_duration_ms"),
         skip_candidates=ctx.get("skip_candidates", 0),
         youtube_id=ctx.get("youtube_id"),
+        soundcloud_url=ctx.get("soundcloud_url"),
         rejected_sources=tuple(ctx.get("rejected_sources") or ()),
         album_title=ctx.get("album_title"),
         preferred_source=ctx.get("preferred_source"),

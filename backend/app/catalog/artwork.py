@@ -112,19 +112,32 @@ def _titles_close(a: str, b: str) -> bool:
 
 
 async def resolve_release_cover(
-    release_mbid: str | None, artist_name: str, title: str, deezer_id: str | None = None
+    release_mbid: str | None,
+    artist_name: str,
+    title: str,
+    deezer_id: str | None = None,
+    rejected: set[str] | None = None,
 ) -> str | None:
+    """`rejected` -- obaly, které uživatel nahlásil jako špatné ("Špatný
+    obal"); hledá se další zdroj."""
+    bad = rejected or set()
+
+    def ok(url: str | None) -> bool:
+        return bool(url) and url not in bad
+
     if release_mbid:
         for kind in ("release-group", "release"):
             cover = await _caa_front(kind, release_mbid)
-            if cover:
+            if ok(cover):
                 return cover
     client = get_deezer_client()
     if deezer_id:
         # Deezer id už známe (tracklist ho dohledal) -- obal rovnou.
         album = await client.album(deezer_id)
         if album and (album.get("cover_xl") or album.get("cover_big")):
-            return deezer_image(album.get("cover_xl") or album.get("cover_big"))
+            cover = deezer_image(album.get("cover_xl") or album.get("cover_big"))
+            if ok(cover):
+                return cover
     artist = primary_artist_name(artist_name)
     queries = [title]
     if clean_album_title(title) != title:
@@ -138,7 +151,9 @@ async def resolve_release_cover(
             if _titles_match(album.get("title", ""), title) and _names_match(
                 (album.get("artist") or {}).get("name", ""), artist
             ):
-                return deezer_image(album.get("cover_xl") or album.get("cover_big"))
+                cover = deezer_image(album.get("cover_xl") or album.get("cover_big"))
+                if ok(cover):
+                    return cover
     # Poslední pokus: volné hledání a tolerantní shoda názvu (překlepy, "s").
     try:
         loose = await client.search_typed("album", f"{artist} {clean_album_title(title)}", 5) or []
@@ -148,7 +163,9 @@ async def resolve_release_cover(
         if _titles_close(album.get("title", ""), title) and _names_match(
             (album.get("artist") or {}).get("name", ""), artist
         ):
-            return deezer_image(album.get("cover_xl") or album.get("cover_big"))
+            cover = deezer_image(album.get("cover_xl") or album.get("cover_big"))
+            if ok(cover):
+                return cover
     return None
 
 
@@ -248,6 +265,7 @@ async def fill_release(release_id: str, *, force: bool = False) -> bool:
         artist = session.get(Artist, release.artist_id)
         mbid, title, artist_name = release.mbid, release.title, artist.name if artist else ""
         deezer_id = release.deezer_id
+        rejected = set((release.external_refs or {}).get("rejectedCovers") or [])
 
     # Album z vlastních souborů (bez id): obal vložený v souborech má
     # přednost; online jen podle interpreta i názvu alba zároveň.
@@ -255,11 +273,15 @@ async def fill_release(release_id: str, *, force: bool = False) -> bool:
     cover = await asyncio.to_thread(extract_release_art, release_id) if own else None
     if cover is None and not (mbid or "").startswith("own:"):
         # Vlastní album (own:) online nehledat -- našlo by stejnojmenné cizí.
-        cover = await resolve_release_cover(mbid, artist_name, title, deezer_id)
+        cover = await resolve_release_cover(mbid, artist_name, title, deezer_id, rejected)
+    if cover in rejected:
+        cover = None
     if cover is None:
         # Poslední záchrana jen pro alba z knihovny: obal vložený v lokálních
         # souborech (u alb bez lokálních souborů vrátí rovnou `None`).
         cover = await asyncio.to_thread(extract_release_art, release_id)
+    if cover in rejected:
+        cover = None
 
     with Session(engine) as session:
         release = session.get(Release, release_id)

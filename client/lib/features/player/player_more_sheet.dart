@@ -20,6 +20,7 @@ import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProv
 import '../../widgets/radio_station.dart';
 import 'player_buttons_sheet.dart';
 import '../../widgets/connect_sheet.dart';
+import '../../widgets/report_problem.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -176,6 +177,33 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             },
                           ),
                           if (playback.nowPlaying != null) _abRepeatTile(context, playback),
+                          if (playback.nowPlaying != null)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Symbols.sync_problem_rounded),
+                              title: const Text('Nahlásit špatné audio'),
+                              subtitle: const Text('Jiná verze nebo píseň – stáhne se správná'),
+                              onTap: () {
+                                final np = playback.nowPlaying!;
+                                final container = ProviderScope.containerOf(context, listen: false);
+                                final messenger = ScaffoldMessenger.maybeOf(context);
+                                Navigator.of(context).pop();
+                                reportWrongAudio(container, messenger, recordingId: np.recordingId, title: np.title);
+                              },
+                            ),
+                          if (playback.nowPlaying?.releaseId != null)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Symbols.hide_image_rounded),
+                              title: const Text('Nahlásit špatný obal'),
+                              onTap: () {
+                                final releaseId = playback.nowPlaying!.releaseId!;
+                                final container = ProviderScope.containerOf(context, listen: false);
+                                final messenger = ScaffoldMessenger.maybeOf(context);
+                                Navigator.of(context).pop();
+                                reportWrongCover(container, messenger, releaseId: releaseId);
+                              },
+                            ),
                           // Oddělit od A-B řádku -- jinak vypadala jako jeho součást.
                           const SizedBox(height: AppSpacing.sm),
                           const Row(

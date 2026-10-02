@@ -138,6 +138,42 @@ async def get_artist_stats(artist_id: str, _current=Depends(get_current_user)):
     }
 
 
+@catalog_router.post("/releases/{release_id}/wrong-cover")
+async def wrong_cover(release_id: str, _current=Depends(get_current_user)):
+    """"Špatný obal": současný obrázek se zapamatuje jako špatný a hledá se
+    jiný (Cover Art Archive, Deezer, obal ze souborů). Nenajde-li se žádný,
+    album má neutrální obal -- radši žádný než cizí."""
+    from sqlmodel import Session
+
+    from app.catalog.artwork import fill_release
+    from app.db import engine
+    from app.models import Release
+
+    with Session(engine) as session:
+        release = session.get(Release, release_id)
+        if release is None:
+            raise HTTPException(status_code=404, detail="album nenalezeno")
+        refs = dict(release.external_refs or {})
+        rejected = list(refs.get("rejectedCovers") or [])
+        for url in release.images or []:
+            if url not in rejected:
+                rejected.append(url)
+        refs["rejectedCovers"] = rejected
+        release.external_refs = refs
+        release.images = []
+        session.add(release)
+        session.commit()
+    found = await fill_release(release_id, force=True)
+    with Session(engine) as session:
+        release = session.get(Release, release_id)
+        images = list(release.images or []) if release else []
+    # Karty alb (Domů, žánry) si obal drží v cache -- ať se nový ukáže hned.
+    from app.home.service import invalidate_home_cache
+
+    await invalidate_home_cache()
+    return {"found": found, "images": images}
+
+
 @catalog_router.get("/artists/{artist_id}/rarities")
 async def get_rarities(
     artist_id: str,

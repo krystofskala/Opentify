@@ -74,7 +74,61 @@ def _title_tokens(title: str) -> set[str]:
     return {t for t in _normalize(core).split() if len(t) >= 2}
 
 
-_VERSION_MARKERS = ("live", "acoustic", "cover", "remix", "karaoke", "instrumental", "piano", "ukulele", "reaction", "sped", "slowed", "nightcore", "concert")
+# Obecná slova v závorkách, která verzi nemění ("(Remastered 2011)",
+# "(feat. X)", "- Single Version").
+_GENERIC_QUALIFIER = {
+    "version", "remaster", "remastered", "mix", "edit", "original", "radio", "single", "album", "mono",
+    "stereo", "feat", "ft", "featuring", "with", "deluxe", "bonus", "track", "explicit", "clean", "from",
+    "the", "and", "of", "official", "audio", "video", "lyric", "lyrics", "hd", "hq", "digital",
+}
+
+
+def _qualifier_tokens(title: str) -> set[str]:
+    """Slova verze z názvu skladby -- obsah závorek a část za pomlčkou
+    ("Car Radio (Ned's Version)" -> {"ned"}, "Ride - Live in Mexico City"
+    -> {"live", "mexico", "city"}). Stahovaný soubor je MUSÍ obsahovat,
+    jinak je to jiná verze (živě: celé album "Ned's Version" se stáhlo
+    v původních verzích, "Trees" dokonce jako jiná píseň)."""
+    parts = re.findall(r"[\(\[]([^\)\]]*)[\)\]]", title)
+    dash = re.split(r"\s+[-–—]\s+", title, maxsplit=1)
+    if len(dash) == 2:
+        parts.append(dash[1])
+    words: set[str] = set()
+    for part in parts:
+        low = part.lower().strip()
+        if low.startswith(("feat", "ft.", "ft ", "with ", "from ")):
+            continue
+        words |= {w for w in _normalize(part).split() if len(w) >= 2 and not w.isdigit()}
+    # "ned's" -> "ned s" po normalizaci; jednopísmenné části odpadly výš.
+    return words - _GENERIC_QUALIFIER
+
+
+def _album_match(album_title: str | None, have: set[str]) -> bool:
+    """Kandidát nese název právě toho alba, ke kterému skladba patří."""
+    words = _title_tokens(album_title or "") - _GENERIC_QUALIFIER
+    return bool(words) and words <= have
+
+
+def _matches_title(title: str, candidate_text: str, album_title: str | None = None) -> bool:
+    """Přísná shoda: celý název skladby (bez závorek) i slova verze musí
+    v kandidátovi být; jiná verze, kterou název nenese, ne. Výjimka: soubor
+    přímo ze správného alba (složka/název alba) -- to je přesně ta skladba,
+    i když verzi v názvu souboru nemá ("Dance of the Dream Man
+    (Instrumental)" ze "Soundtrack From Twin Peaks")."""
+    have = set(_normalize(candidate_text).split())
+    core = _title_tokens(title)
+    if core and not core <= have:
+        return False
+    if not _qualifier_tokens(title) <= have and not _album_match(album_title, have):
+        return False
+    asked = set(_normalize(title).split())
+    return not any(m in have and m not in asked for m in _VERSION_MARKERS)
+
+
+_VERSION_MARKERS = (
+    "live", "acoustic", "cover", "remix", "karaoke", "instrumental", "piano", "ukulele", "reaction", "sped",
+    "slowed", "nightcore", "concert", "demo", "unplugged", "orchestral", "lullaby", "8bit", "tribute", "mashup",
+)
 
 
 @dataclass
@@ -94,6 +148,8 @@ class TrackMetadata:
     # Přesné YouTube video (skladba z odkazu na YouTube / album jen na
     # YouTube) -- stáhne se přímo ono, žádné hledání ani Soulseek.
     youtube_id: str | None = None
+    # Přesná skladba ze SoundCloudu (import odkazem, "Nevydané a vzácné").
+    soundcloud_url: str | None = None
     # Zdroje, které uživatel označil jako špatnou verzi ("Špatná verze --
     # stáhnout jinou"): `slskd:{user}|{soubor}`, `youtube:{id}`.
     rejected_sources: tuple[str, ...] = ()
@@ -416,6 +472,8 @@ class SlskdProvider:
         takže "nejlepší" kandidát často visel v "Queued, Remotely" až do
         300s timeoutu, než se spadlo na YouTube."""
         wanted = _title_tokens(track.title)
+        qualifier = _qualifier_tokens(track.title)
+        asked_words = set(_normalize(track.title).split())
         album_words = _title_tokens(track.album_title or "")
         out: list[tuple[float, str, dict]] = []
         seen: set[tuple[str, str]] = set()
@@ -447,6 +505,14 @@ class SlskdProvider:
                     have = set(_normalize(filename.rsplit("\\", 1)[-1]).split())
                     if len(wanted & have) < max(1, round(len(wanted) * 0.8)):
                         continue  # jiná skladba ze stejného alba/interpreta
+                # Verze z názvu ("Ned's Version", "Live in ...") musí být
+                # v cestě (soubor nebo složka alba); jiná verze ne.
+                path_words = set(_normalize(filename.replace("\\", " ")).split())
+                if not qualifier <= path_words and not _album_match(track.album_title, path_words):
+                    continue
+                base_words = set(_normalize(filename.rsplit("\\", 1)[-1]).split())
+                if any(m in base_words and m not in asked_words for m in _VERSION_MARKERS):
+                    continue
                 size = int(f.get("size") or 0)
                 bitrate = f.get("bitRate")
                 if ext == ".flac":
@@ -873,6 +939,12 @@ class YoutubeProvider:
                 title = _normalize(e.get("title") or "")
                 return any(m in title.split() and m not in asked.split() for m in _VERSION_MARKERS)
 
+            # Přísně: celý název, slova verze, žádná jiná verze -- radši
+            # "nemáme" než jiná píseň/verze (živě: "Trees (Ned's Version)"
+            # se stáhlo jako ukulele Heathens).
+            entries = [e for e in entries if _matches_title(track.title, e.get("title") or "", track.album_title)]
+            if not entries:
+                raise RuntimeError(f"YouTube nemá '{track.title}' v téhle verzi")
             ok = [e for e in entries if acceptable(e)]
             album_words = _title_tokens(track.album_title or "")
 
@@ -989,6 +1061,110 @@ def _tag_mp3(path: Path, *, mbid: str | None, title: str, artist: str | None) ->
             [TXXX(encoding=3, desc="MusicBrainz Track Id", text=[mbid])],
         )
         id3.save(path)
+
+
+class SoundcloudProvider:
+    """SoundCloud přes yt-dlp -- přesný odkaz (import, vzácné skladby), nebo
+    poslední záloha hledáním, když Soulseek i YouTube selžou (dema, remixy,
+    nevydané věci). Kvalita jen ~128 kbps MP3, proto až na konec. Skladby
+    jen pro Go+ (30s ukázka, formát `*_preview`) se neberou."""
+
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        query = track.search_query
+        if not track.soundcloud_url and not query:
+            return None
+        return ProviderCandidate(source_provider="soundcloud", source_ref=track.soundcloud_url or query, extra={})
+
+    async def fetch(
+        self,
+        track: TrackMetadata,
+        candidate: ProviderCandidate,
+        dest_stem: Path,
+        on_progress: ProgressCallback,
+        on_file_located: OnFileLocated,
+    ) -> FetchResult:
+        import yt_dlp
+
+        dest_stem.parent.mkdir(parents=True, exist_ok=True)
+        loop = asyncio.get_running_loop()
+
+        def hook(d: dict) -> None:
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            if d.get("status") == "downloading" and total:
+                asyncio.run_coroutine_threadsafe(on_progress(int(d.get("downloaded_bytes", 0) / total * 95)), loop)
+
+        base = {
+            "outtmpl": f"{dest_stem}.%(ext)s",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "socket_timeout": 20,
+            "retries": 2,
+            "continuedl": False,
+            "progress_hooks": [hook],
+            **_ytdlp_proxy_opts(),
+        }
+
+        def pick() -> str:
+            if track.soundcloud_url:
+                return track.soundcloud_url
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", **_ytdlp_proxy_opts()}) as ydl:
+                info = ydl.extract_info(f"scsearch8:{candidate.source_ref}", download=False) or {}
+            wanted = _title_tokens(track.title)
+            target = track.duration_ms / 1000 if track.duration_ms else None
+            asked = _normalize(track.title)
+            for e in info.get("entries") or []:
+                if not e or not e.get("url"):
+                    continue
+                d = e.get("duration")
+                if d is not None and d <= 31:
+                    continue  # Go+ ukázka
+                if target and d and abs(d - target) > max(20.0, target * 0.15):
+                    continue
+                if not _matches_title(track.title, e.get("title") or "", track.album_title):
+                    continue
+                if f"soundcloud:{e['url']}" in track.rejected_sources:
+                    continue
+                return e["url"]
+            raise RuntimeError(f"SoundCloud nic vhodného pro '{candidate.source_ref}'")
+
+        chosen: list[str] = []
+
+        def run() -> Path:
+            url = pick()
+            chosen[:] = [url]
+            # Napřed přímo MP3 (bez překódování), jinak cokoli -> M4A (AAC).
+            try:
+                with yt_dlp.YoutubeDL({**base, "format": "bestaudio[ext=mp3][format_id!*=preview]"}) as ydl:
+                    ydl.extract_info(url, download=True)
+                if dest_stem.with_suffix(".mp3").exists():
+                    return dest_stem.with_suffix(".mp3")
+            except yt_dlp.utils.DownloadError as exc:
+                if "format is not available" not in str(exc):
+                    raise
+            opts = {
+                **base,
+                "format": "bestaudio[format_id!*=preview]",
+                "final_ext": "m4a",
+                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(url, download=True)
+            return dest_stem.with_suffix(".m4a")
+
+        path = await asyncio.to_thread(run)
+        if not path.exists():
+            raise RuntimeError(f"yt-dlp (SoundCloud) nevytvořil {path}")
+        await asyncio.to_thread(_tag_file, path, mbid=track.mbid, title=track.title, artist=track.artist_name)
+        await on_progress(100)
+        return FetchResult(
+            path=path,
+            format=path.suffix.lstrip("."),
+            source_provider="soundcloud",
+            bitrate_kbps=128 if path.suffix == ".mp3" else None,
+            source_url=chosen[0] if chosen else None,
+            source_key=f"soundcloud:{chosen[0]}" if chosen else None,
+        )
 
 
 class CompositeProvider:
