@@ -128,6 +128,11 @@ def _matches_title(title: str, candidate_text: str, album_title: str | None = No
 _VERSION_MARKERS = (
     "live", "acoustic", "cover", "remix", "karaoke", "instrumental", "piano", "ukulele", "reaction", "sped",
     "slowed", "nightcore", "concert", "demo", "unplugged", "orchestral", "lullaby", "8bit", "tribute", "mashup",
+    # Nehudební videa se stejným názvem písně (živě: u vzácných nahrávek
+    # Lany se stahoval rozhovor).
+    "interview", "podcast", "talks", "talking", "explains", "explained", "documentary", "trailer", "teaser",
+    "snippet", "tutorial", "lesson", "chords", "tabs", "unboxing", "vlog", "react", "reacts", "breakdown",
+    "analysis", "review", "speech", "rozhovor",
 )
 
 
