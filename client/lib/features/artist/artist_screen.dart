@@ -307,6 +307,7 @@ class _ArtistBody extends ConsumerWidget {
               // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru
               // slučuje do kanonického interpreta s MBID.
               SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id)),
+              SliverToBoxAdapter(child: _SoundcloudSection(artistId: artist.id, artistName: artist.name)),
               SliverToBoxAdapter(child: ArtistSupportSection(artistId: artist.id, artistName: artist.name)),
               const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
             ]),
@@ -620,6 +621,55 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
           ],
         );
       },
+    );
+  }
+}
+
+
+final artistSoundcloudProvider = FutureProvider.autoDispose.family<List<RecordingModel>, String>((ref, artistId) async {
+  final json = await ref.watch(apiClientProvider).getJson('/catalog/artists/$artistId/soundcloud');
+  return (json['items'] as List<dynamic>? ?? const [])
+      .map((e) => RecordingModel.fromJson(e as Map<String, dynamic>))
+      .toList();
+});
+
+/// Ze SoundCloudu -- z OFICIÁLNÍHO profilu interpreta (odkaz z MusicBrainz),
+/// jen co není v oficiální diskografii: dema, živáky, remixy. Bez profilu
+/// se neukáže (žádné hledání podle jména -- cizí jmenovci).
+class _SoundcloudSection extends ConsumerStatefulWidget {
+  const _SoundcloudSection({required this.artistId, required this.artistName});
+  final String artistId;
+  final String artistName;
+
+  @override
+  ConsumerState<_SoundcloudSection> createState() => _SoundcloudSectionState();
+}
+
+class _SoundcloudSectionState extends ConsumerState<_SoundcloudSection> {
+  bool _all = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = ref.watch(artistSoundcloudProvider(widget.artistId)).valueOrNull ?? const [];
+    if (items.isEmpty) return const SizedBox.shrink();
+    final shown = _all ? items : items.take(5).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          'Ze SoundCloudu',
+          onSeeAll: items.length > 5 && !_all ? () => setState(() => _all = true) : null,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          child: Column(
+            children: [
+              for (final r in shown)
+                TrackTile(recording: r, queueRecordings: items, artistName: widget.artistName, sourceLabel: 'SoundCloud'),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

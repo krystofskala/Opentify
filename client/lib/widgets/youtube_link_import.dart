@@ -10,7 +10,8 @@ import 'glass/glass.dart';
 import 'track_actions.dart' show nowPlayingInfoFor;
 import 'toast.dart';
 
-bool isYoutubeLink(String text) => RegExp(r'(youtube\.com|youtu\.be)/', caseSensitive: false).hasMatch(text);
+bool isYoutubeLink(String text) =>
+    RegExp(r'(youtube\.com|youtu\.be|soundcloud\.com)/', caseSensitive: false).hasMatch(text);
 
 /// Odkaz na YouTube: nejdřív zjistit, co to je (název, kanál, videa), pak se
 /// zeptat -- skladba, playlist, album interpreta (neoficiální / jen na
@@ -20,7 +21,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
   final messenger = ScaffoldMessenger.maybeOf(context);
   final router = GoRouter.of(context);
   final api = ref.read(apiClientProvider);
-  showToast(messenger, 'Načítám odkaz z YouTube…', duration: const Duration(minutes: 2));
+  showToast(messenger, 'Načítám odkaz…', duration: const Duration(minutes: 2));
   Map<String, dynamic> info;
   try {
     info = await api.postJson('/library/import/youtube-inspect', body: {'url': url.trim()});
@@ -61,7 +62,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
         if (json != null) {
           ref
               .read(audioPlayerControllerProvider.notifier)
-              .playTrack(nowPlayingInfoFor(RecordingModel.fromJson(json)), sourceLabel: 'Z YouTube');
+              .playTrack(nowPlayingInfoFor(RecordingModel.fromJson(json)), sourceLabel: url.contains('soundcloud') ? 'Ze SoundCloudu' : 'Z YouTube');
         }
       case 'playlist':
         ref.invalidate(myPlaylistsProvider);
@@ -119,7 +120,7 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
     final options = [
       if (widget.isPlaylist) ('playlist', 'Playlist', 'Do Knihovny › Sdílené')
       else ('track', 'Skladba', 'Jen ji pustit'),
-      ('album', 'Album interpreta', 'Neoficiální / jen na YouTube – do jeho diskografie'),
+      ('album', 'Album interpreta', 'Neoficiální / jen na YouTube či SoundCloudu – do jeho diskografie'),
       ('live', 'Koncert', 'Živé vystoupení – k interpretovi'),
       ('soundtrack', 'Soundtrack', 'Hudba k filmu, seriálu nebo hře – jako album'),
     ];

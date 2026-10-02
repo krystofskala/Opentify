@@ -178,6 +178,75 @@ async def wrong_cover(release_id: str, _current=Depends(get_current_user)):
     return {"found": found, "images": images}
 
 
+@catalog_router.get("/artists/{artist_id}/soundcloud")
+async def get_artist_soundcloud(
+    artist_id: str,
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    """"Nevydané a vzácné" ze SoundCloudu: skladby z OFICIÁLNÍHO profilu
+    interpreta (odkaz z MusicBrainz / ručně zadaný), které nejsou v jeho
+    oficiální diskografii -- dema, živáky, remixy."""
+    from sqlmodel import Session
+
+    from app import soundcloud
+    from app.catalog.deezer_ingest import version_key
+    from app.db import engine
+    from app.home.service import _recording_out
+    from app.models import Artist
+
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        if artist is None:
+            raise HTTPException(status_code=404, detail="interpret nenalezen")
+        mbid = artist.mbid
+    relations: list = []
+    if mbid and not mbid.startswith("own:"):
+        try:
+            relations = (await service._mb.get_artist(mbid)).get("relations") or []
+        except MusicBrainzError:
+            relations = []
+    with Session(engine) as session:
+        profile = soundcloud.artist_profile(session, artist_id, relations)
+    if not profile:
+        return {"profile": None, "items": []}
+    items = await soundcloud.profile_tracks(profile)
+    out = []
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        official = soundcloud.official_titles(session, artist_id)
+        for item in items:
+            title = soundcloud.clean_title(item["title"], artist.name)
+            if version_key(title) in official:
+                continue  # oficiálně vydaná skladba -- je v diskografii
+            rec = soundcloud.recording_for(session, artist, {**item, "title": title})
+            out.append(_recording_out(session, rec).model_dump(mode="json", by_alias=True))
+            if len(out) >= 40:
+                break
+        session.commit()
+    return {"profile": profile, "items": out}
+
+
+@catalog_router.get("/soundcloud/search")
+async def search_soundcloud(q: str = Query(..., min_length=2, max_length=200), _current=Depends(get_current_user)):
+    """Filtr SoundCloud v Hledat -- věci, které jinde nejsou."""
+    from sqlmodel import Session
+
+    from app import soundcloud
+    from app.db import engine
+    from app.home.service import _recording_out
+
+    items = await soundcloud.search(q, 15)
+    out = []
+    with Session(engine) as session:
+        for item in items:
+            title = soundcloud.clean_title(item["title"], item["uploader"])
+            rec = soundcloud.recording_for(session, item["uploader"], {**item, "title": title})
+            out.append(_recording_out(session, rec).model_dump(mode="json", by_alias=True))
+        session.commit()
+    return {"items": out}
+
+
 @catalog_router.get("/artists/{artist_id}/rarities")
 async def get_rarities(
     artist_id: str,

@@ -29,13 +29,14 @@ import '../../widgets/collection_actions.dart';
 
 const _searchSourceLabel = 'Výsledky hledání';
 
-enum SearchFilter { all, tracks, artists, albums }
+enum SearchFilter { all, tracks, artists, albums, soundcloud }
 
 const _filterLabels = {
   SearchFilter.all: 'Vše',
   SearchFilter.tracks: 'Skladby',
   SearchFilter.artists: 'Interpreti',
   SearchFilter.albums: 'Alba',
+  SearchFilter.soundcloud: 'SoundCloud',
 };
 
 const _entityTypeFor = {
@@ -60,6 +61,7 @@ const _libraryScopeFor = {
   SearchFilter.tracks: LibrarySearchScope.tracks,
   SearchFilter.artists: LibrarySearchScope.artists,
   SearchFilter.albums: LibrarySearchScope.albums,
+  SearchFilter.soundcloud: LibrarySearchScope.tracks,
 };
 
 typedef _SectionKey = ({String query, String type, int limit});
@@ -234,7 +236,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   )
                 : filter == SearchFilter.all
                     ? _AllResults(key: ValueKey('all-$query'), query: query)
-                    : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
+                    : filter == SearchFilter.soundcloud
+                        ? _SoundcloudResults(key: ValueKey('sc-$query'), query: query)
+                        : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
       ),
     );
   }
@@ -615,6 +619,7 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.artists:
           case SearchFilter.albums:
           case SearchFilter.all:
+          case SearchFilter.soundcloud: // vlastní pohled (_SoundcloudResults), sem nedojde
             final columns = (MediaQuery.sizeOf(context).width / 170).floor().clamp(2, 8);
             return GridView.builder(
               padding: EdgeInsets.fromLTRB(
@@ -635,6 +640,43 @@ class _FilteredResults extends ConsumerWidget {
       error: (error, stack) => ErrorState(
         message: _errorMessage(error),
         onRetry: () => ref.invalidate(searchSectionProvider(key)),
+      ),
+    );
+  }
+}
+
+
+final soundcloudSearchProvider = FutureProvider.autoDispose.family<List<RecordingModel>, String>((ref, query) async {
+  final json = await ref.watch(apiClientProvider).getJson('/catalog/soundcloud/search', query: {'q': query});
+  return (json['items'] as List<dynamic>? ?? const [])
+      .map((e) => RecordingModel.fromJson(e as Map<String, dynamic>))
+      .toList();
+});
+
+/// Hledat › SoundCloud -- dema, remixy, živáky a věci, které jinde nejsou.
+class _SoundcloudResults extends ConsumerWidget {
+  const _SoundcloudResults({super.key, required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final results = ref.watch(soundcloudSearchProvider(query));
+    return results.when(
+      data: (items) => items.isEmpty
+          ? EmptyState(icon: Symbols.search_off_rounded, message: 'Na SoundCloudu nic pro „$query“.')
+          : ListView.builder(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(
+                  AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
+              itemCount: items.length,
+              itemBuilder: (context, i) =>
+                  TrackTile(recording: items[i], queueRecordings: items, sourceLabel: 'SoundCloud'),
+            ),
+      loading: () => const LoadingState(),
+      error: (e, _) => ErrorState(
+        message: 'SoundCloud teď neodpovídá.',
+        error: e,
+        onRetry: () => ref.invalidate(soundcloudSearchProvider(query)),
       ),
     );
   }

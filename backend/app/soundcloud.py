@@ -94,13 +94,14 @@ async def profile_tracks(profile_url: str, limit: int = 60) -> list[dict[str, An
     return await cached_json(f"sc:profile:{profile_url}", DAY, fetch, is_empty=lambda v: not v)
 
 
-def recording_for(session: Session, artist_name: str, item: dict[str, Any]) -> Any:
+def recording_for(session: Session, artist: Any, item: dict[str, Any]) -> Any:
     """Skladba ze SoundCloudu jako naše nahrávka (worker ji stáhne přesně
-    z toho odkazu)."""
+    z toho odkazu). `artist` = náš interpret, nebo jméno (uploader)."""
     from app.library.matching import find_or_create_artist, find_or_create_recording
     from app.models import MediaAsset, MediaAssetStatus
 
-    artist = find_or_create_artist(session, artist_name)
+    if isinstance(artist, str):
+        artist = find_or_create_artist(session, artist or "SoundCloud")
     recording = find_or_create_recording(
         session, artist, item["title"], duration_ms=int(item["duration"] * 1000) if item.get("duration") else None
     )
@@ -138,3 +139,11 @@ def official_titles(session: Session, artist_id: str) -> set[str]:
         for r in session.exec(select(Recording).where(Recording.artist_id == artist_id)).all()
         if r.deezer_id or r.mbid
     }
+
+
+def clean_title(title: str, artist_name: str) -> str:
+    """"Billy Strings - Live to Tell" na jeho profilu -> "Live to Tell"."""
+    parts = re.split(r"\s+[-–—]\s+", title, maxsplit=1)
+    if len(parts) == 2 and parts[0].strip().lower() == artist_name.strip().lower():
+        return parts[1].strip()
+    return title.strip()
