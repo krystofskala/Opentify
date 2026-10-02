@@ -49,6 +49,17 @@ def _match(rec_title: str, duration_ms: int | None, files: list[dict]) -> dict |
     return best[1] if best else None
 
 
+def _clear_plan(recording_ids: list[str]) -> None:
+    """Starý plán (jiná / špatná složka) pryč -- skladba se pak hledá sama."""
+    with Session(engine) as session:
+        for rid in recording_ids:
+            rec = session.get(Recording, rid)
+            if rec is not None and (rec.external_refs or {}).get("preferredSource"):
+                rec.external_refs = {k: v for k, v in rec.external_refs.items() if k != "preferredSource"}
+                session.add(rec)
+        session.commit()
+
+
 async def plan_album(release_id: str) -> dict[str, Any]:
     """Najde nejlepší složku alba a skladbám uloží `preferredSource`."""
     with Session(engine) as session:
@@ -84,8 +95,14 @@ async def plan_album(release_id: str) -> dict[str, Any]:
             )
             entry["files"].append({**f, "_q": _EXT_QUALITY[ext]})
 
+    # Skladby alba bez duplicit (katalog má občas stejnou skladbu 2x).
+    distinct = len({_normalize(title) for _rid, title, _dur in recs}) or 1
     best: tuple[float, tuple[str, str], dict[str, dict]] | None = None
     for key, entry in folders.items():
+        # Složka s celou diskografií ("music/twenty one pilots") není album --
+        # podle názvu by z ní šla "Trees" z jiné desky (živě: Trench 28/28).
+        if len(entry["files"]) > distinct * 1.6 + 3:
+            continue
         matches = {rid: m for rid, title, dur in recs if (m := _match(title, dur, entry["files"]))}
         coverage = len(matches) / len(recs)
         if coverage < MIN_COVERAGE:
@@ -95,10 +112,12 @@ async def plan_album(release_id: str) -> dict[str, Any]:
         if best is None or score > best[0]:
             best = (score, key, matches)
     if best is None:
+        _clear_plan([rid for rid, _t, _d in recs])
         logger.info("album %s ('%s'): žádná složka nepokryla %.0f %% skladeb", release_id, query, MIN_COVERAGE * 100)
         return {"found": False, "reason": "složka s celým albem nenalezena", "total": len(recs)}
 
     _score, (user, folder), matches = best
+    _clear_plan([rid for rid, _t, _d in recs if rid not in matches])
     with Session(engine) as session:
         for rid, f in matches.items():
             rec = session.get(Recording, rid)

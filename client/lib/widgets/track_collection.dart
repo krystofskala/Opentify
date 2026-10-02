@@ -10,6 +10,7 @@ import 'glass/glass.dart';
 import 'queue_action_bar.dart';
 import 'track_actions.dart';
 import '../core/cz_plural.dart';
+import 'sort_button.dart';
 
 enum TrackSort { original, title, artist, duration }
 
@@ -316,19 +317,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
                   ),
                 ),
               const SizedBox(width: AppSpacing.xs),
-              PopupMenuButton<TrackSort>(
-                tooltip: 'Řazení',
-                initialValue: c.sort,
-                onSelected: (value) => c.sort = value,
-                itemBuilder: (context) => [
-                  for (final entry in _sortLabels.entries)
-                    CheckedPopupMenuItem(value: entry.key, checked: entry.key == c.sort, child: Text(entry.value)),
-                ],
-                child: Chip(
-                  avatar: const Icon(Symbols.sort_rounded, size: 18),
-                  label: Text(_sortLabels[c.sort]!),
-                ),
-              ),
+              SortButton<TrackSort>(value: c.sort, labels: _sortLabels, onChanged: (value) => c.sort = value),
               IconButton(
                 icon: const Icon(Symbols.checklist_rounded),
                 tooltip: 'Vybrat více',

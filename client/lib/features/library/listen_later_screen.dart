@@ -379,7 +379,7 @@ class ListenLaterReminder extends ConsumerWidget {
                 if (track != null)
                   IconButton(
                     tooltip: 'Přehrát',
-                    icon: Icon(Symbols.play_circle_rounded, fill: 1, size: 32, color: scheme.onSecondaryContainer),
+                    icon: Icon(Symbols.play_arrow_rounded, fill: 1, size: 32, color: scheme.onSecondaryContainer),
                     onPressed: () => ref
                         .read(audioPlayerControllerProvider.notifier)
                         .playTrack(nowPlayingInfoFor(track), sourceLabel: _sourceLabel),

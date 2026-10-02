@@ -182,7 +182,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     onPressed: () => _importFromSpotify(context),
                   ),
                   _ActionRow(
-                    icon: Symbols.ios_share_rounded,
+                    icon: Symbols.download_rounded,
                     title: 'Exportovat moje data',
                     description: 'Oblíbené, playlisty, historie poslechů a seznam „Na později“ v jednom ZIPu. '
                         'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',

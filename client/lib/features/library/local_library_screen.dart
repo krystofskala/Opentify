@@ -36,6 +36,7 @@ import '../../state/library_scope.dart';
 import 'offline_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/toast.dart';
+import '../../widgets/sort_button.dart';
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -425,24 +426,10 @@ class _SortButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final current = ref.watch(_librarySortProvider(tab));
-    return PopupMenuButton<LibrarySort>(
-      tooltip: 'Řadit',
-      initialValue: current,
-      onSelected: (value) => ref.read(_librarySortProvider(tab).notifier).state = value,
-      itemBuilder: (context) => [
-        for (final option in options) PopupMenuItem(value: option, child: Text(_librarySortLabels[option]!)),
-      ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Symbols.sort_rounded, size: 20),
-            const SizedBox(width: 6),
-            Text(_librarySortLabels[current]!, style: Theme.of(context).textTheme.labelLarge),
-          ],
-        ),
-      ),
+    return SortButton<LibrarySort>(
+      value: current,
+      labels: {for (final option in options) option: _librarySortLabels[option]!},
+      onChanged: (value) => ref.read(_librarySortProvider(tab).notifier).state = value,
     );
   }
 }

@@ -237,7 +237,7 @@ class _VerifyRow extends ConsumerWidget {
                     runSpacing: AppSpacing.xs,
                     children: [
                       // Dvě jasné volby: soubor sedí, nebo Shazam má pravdu (= špatný soubor).
-                      GlassButton(label: 'Je to dobře', icon: Symbols.check_rounded, compact: true, onPressed: onOk),
+                      GlassButton(label: 'Je to dobře', icon: Symbols.graphic_eq_rounded, compact: true, onPressed: onOk),
                       if (onRedownload != null)
                         GlassButton(
                           label: 'Shazam má pravdu',
