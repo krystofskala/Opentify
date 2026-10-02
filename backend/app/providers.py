@@ -743,6 +743,9 @@ class YoutubeProvider:
             "no_warnings": True,
             "socket_timeout": 15,
             "retries": 2,
+            # Vždy od začátku: zbytek .part z přerušeného pokusu (restart
+            # workeru) dával "HTTP Error 416: Requested range not satisfiable".
+            "continuedl": False,
             "progress_hooks": [progress_hook],
             **_ytdlp_proxy_opts(),
         }
