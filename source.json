@@ -14,12 +14,12 @@
       "tintColor": "6B3FD6",
       "versions": [
         {
-          "version": "0.1.35",
-          "buildVersion": "35",
-          "localizedDescription": "Noční build Opentify 0.1.35.",
-          "date": "2026-10-02T09:01:02Z",
-          "size": 13668241,
-          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-share1-10020900/Opentify.ipa",
+          "version": "0.1.36",
+          "buildVersion": "36",
+          "localizedDescription": "Noční build Opentify 0.1.36.",
+          "date": "2026-10-02T09:34:10Z",
+          "size": 13668468,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-ytmusic-10021000/Opentify.ipa",
           "minOSVersion": "15.0"
         }
       ],
@@ -34,5 +34,5 @@
     }
   ],
   "news": [],
-  "opentifyCommit": "fab2f9fcaff9b522f5c218246da3037ceecb0f81"
+  "opentifyCommit": "db114310ab024dbb1eaa3687fee394327c1a2db1"
 }
