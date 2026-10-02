@@ -2,6 +2,7 @@ services:
   api:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    networks: [default, edge]
     ports:
       # Jen na tomhle PC: zvenku se k API jde výhradně přes `tailscale serve`
       # (ten přidává hlavičky Tailscale-User-*, podle kterých se určuje
@@ -223,6 +224,7 @@ services:
       - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "127.0.0.1:5000:80"
+    networks: [edge]
     mem_limit: 64m
     restart: unless-stopped
 
@@ -243,6 +245,9 @@ services:
       - tailscale-state:/var/lib/tailscale
       - ./tailscale/serve.json:/config/serve.json:ro
     depends_on: [api, web]
+    # Jen síť `edge` (web + api) -- uzel pro kamarády nevidí Redis, gluetun
+    # ani worker (dřív sdílel síť `default` se vším).
+    networks: [edge]
     mem_limit: 128m
     restart: unless-stopped
 
@@ -276,3 +281,5 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
+  # Okraj: Tailscale uzel `opentify` + web + api.
+  edge:
