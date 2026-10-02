@@ -68,6 +68,7 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:discover-weekly", timedelta(hours=1), pm.build_discover_weekly))
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
+    registry.append(("personal:styles", g.DAILY_TTL, pm.build_styles))
     # Společné mixy dvojic (app/blends.py) -- denně.
     from app.blends import TTL as BLEND_TTL, build_for_current_user
 
@@ -173,6 +174,7 @@ _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
     ("blends", "Společné mixy", "playlist_cards"),
     ("category_mixes", "Tvoje žánry", "playlist_cards"),
+    ("styles", "Tvé styly", "tag_chips"),
     ("years", "Tvoje roky", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),
     ("new_releases", "Nová vydání", "album_cards"),
@@ -376,6 +378,17 @@ def build_home(user_id: str) -> dict[str, Any]:
 
         worldwide = next((p for p in by_section.get("charts", []) if p.source == "deezer:playlist:3155776842"), None)
         for key, title, kind in _SECTION_ORDER:
+            if key == "styles":
+                # Tvé styly (štítky Last.fm tvých interpretů) -> stránky stylů.
+                snap = session.get(HomeSnapshot, pm.styles_key(user_id))
+                tags = (snap.payload or {}).get("tags") if snap else None
+                if tags:
+                    from app.tags import title_of
+
+                    sections.append(
+                        {"id": "styles", "title": title, "type": "tag_chips", "items": [{"tag": t, "title": title_of(t)} for t in tags]}
+                    )
+                continue
             if key == "genres":
                 # Žánry na Domů = PŘESNĚ dlaždice z Hledat (stejné názvy, barvy,
                 # ikony, otevřou stejnou stránku žánru) -- dřív karty playlistů.

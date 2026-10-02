@@ -12,6 +12,20 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 # a zasekla se celá appka (živě). Kratší timeout = rychlé selhání místo 30 s.
 engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_size=20, max_overflow=20, pool_timeout=10)
 
+if DATABASE_URL.startswith("sqlite"):
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record) -> None:  # type: ignore[no-untyped-def]
+        # WAL: čtení neblokuje zápis (dřív "database is locked" při souběhu
+        # API, workerů a nástrojů na pozadí). busy_timeout: chvíli počkat,
+        # místo okamžité chyby. Svazek je ext4 (Docker), WAL je tam bezpečný.
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=15000")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.close()
+
 
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)

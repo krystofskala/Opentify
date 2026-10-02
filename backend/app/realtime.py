@@ -84,6 +84,15 @@ class ConnectionManager:
             }
         return list(seen.values())
 
+    async def _store_playing(self, user_id: str) -> None:
+        """Hraje profilu něco? Pro `app.tools.activity` (nerestartovat API,
+        když poslouchá někdo jiný). Zařízení posílá stav každých ~15 s."""
+        playing = any(d.state.get("isPlaying") for d in self._connections.get(user_id, {}).values())
+        try:
+            await get_redis().set(f"connect:playing:{user_id}", "1" if playing else "0", ex=20 * 60)
+        except Exception:  # noqa: BLE001 -- jen informace pro nasazování
+            pass
+
     async def broadcast_devices(self, user_id: str) -> None:
         message = json.dumps({"type": "devices.update", "payload": {"devices": self._devices(user_id)}})
         await self.send_to_user(user_id, message)
@@ -129,6 +138,7 @@ class ConnectionManager:
             }
             me.state = new_state
             me.updated = time.time()
+            await self._store_playing(user_id)
             # Jen pozice -> nerozesílat při každém tiku (zařízení posílá
             # stav při změně skladby/přehrávání + občas kvůli pozici).
             if changed or payload.get("broadcast"):
@@ -167,6 +177,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str) -> None:
         pass
     finally:
         manager.disconnect(user_id, websocket)
+        await manager._store_playing(user_id)
         await manager.broadcast_devices(user_id)
 
 

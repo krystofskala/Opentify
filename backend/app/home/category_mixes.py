@@ -170,9 +170,16 @@ async def artist_shares(taste: pm.Taste, budget: int) -> dict[str, dict[str, flo
             classified += 1
             await asyncio.sleep(0.05)
     mb = _mb_shares(taste)
+    # Štítky Last.fm (cache týden): Deezer nezná bluegrass ani podžánry,
+    # štítky posluchačů ano -- interpret patří do žánru podle silnějšího.
+    from app.home import lastfm_taste as lt
+
+    lf: dict[str, dict[str, float]] = {}
+    for artist_id in ranked[: max(budget * 4, 150)]:
+        lf[artist_id] = await lt.tag_category_shares(taste.artist_name.get(artist_id, ""))
     out: dict[str, dict[str, float]] = {}
     for artist_id in ranked:
-        shares = stored.get(artist_id) or mb.get(artist_id)
+        shares = lt.merge_shares(stored.get(artist_id) or mb.get(artist_id) or {}, lf.get(artist_id) or {})
         if shares:
             out[artist_id] = shares
     if classified:

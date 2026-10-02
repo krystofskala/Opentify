@@ -1,3 +1,4 @@
+import '../browse/tag_screen.dart' show TagChips;
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -318,6 +319,15 @@ class _HomeSectionView extends StatelessWidget {
               onSeeAll: section.playlistId != null ? () => context.push('/playlists/${section.playlistId}') : null,
             ),
             _TrackCardRow(recordings: section.tracks, sourceLabel: section.title),
+          ],
+        );
+      case HomeSectionType.tagChips:
+        // Tvé styly (štítky Last.fm tvých interpretů) -> stránky stylů.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(section.title),
+            TagChips(tags: [for (final t in section.tags) t.tag], titles: [for (final t in section.tags) t.title]),
           ],
         );
       case HomeSectionType.genreShowcase:

@@ -35,6 +35,7 @@ from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.db import engine
 from app.home import generators as g
+from app.home import lastfm_taste as lt
 from app.library.spotify_import import get_or_create_liked_songs_playlist
 from app.models import Artist, Listen, MediaAsset, MediaAssetStatus, Playlist, PlaylistItem, PlaylistKind, Recording, Release
 from app.utils import utcnow
@@ -211,7 +212,12 @@ async def build_clusters(taste: Taste) -> list[Cluster]:
         if dz is None:
             continue
         rel = await _related(dz)
-        related[artist_id] = {dz} | {str(r["id"]) for r in rel if r.get("id")}
+        signature = {dz} | {str(r["id"]) for r in rel if r.get("id")}
+        # + podobní podle posluchačů Last.fm (jako "lf:<jméno>") -- Deezer
+        # "related" je u menších žánrů slabý.
+        name = taste.artist_name.get(artist_id, "")
+        signature |= {f"lf:{lt.norm(name)}"} | {f"lf:{lt.norm(n)}" for n, _m in await lt.similar_artist_names(name)}
+        related[artist_id] = signature
         await asyncio.sleep(0.05)
 
     def similarity(a: set[str], b: set[str]) -> float:
@@ -248,7 +254,8 @@ async def build_clusters(taste: Taste) -> list[Cluster]:
         dz = await _deezer_id(taste, artist_id)
         if dz is None:
             continue
-        direct = next((c for c in clusters if dz in c.signature), None)
+        lf_key = f"lf:{lt.norm(taste.artist_name.get(artist_id, ''))}"
+        direct = next((c for c in clusters if dz in c.signature or lf_key in c.signature), None)
         if direct is not None:
             direct.artists.append(artist_id)
             continue
@@ -417,7 +424,17 @@ async def build_daily_mixes() -> int:
         # Poměr ~70/30 drží i u menších skupin -- málo známých skladeb se
         # nezaplácne novými (dřív tak vznikaly mixy s 85 % neznámé hudby).
         new_target = min(DAILY_MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
-        new = await _new_tracks_from(cluster.radio_seeds, known, rng, new_target)
+        # Půlka nových z Last.fm (co posluchači pouštějí spolu s tvými
+        # nejhranějšími ze skupiny), půlka z Deezer rádia interpretů.
+        seed_tracks = sorted(
+            (r for r in familiar if r in liked_or_played),
+            key=lambda r: -(taste.listen_counts.get(r, 0) + (3 if r in set(taste.liked) else 0)),
+        )[:4]
+        from_lastfm = await lt.similar_track_ids(seed_tracks, known, rng, new_target // 2 + 1)
+        new = from_lastfm + [
+            r for r in await _new_tracks_from(cluster.radio_seeds, known | set(from_lastfm), rng, new_target)
+            if r not in from_lastfm
+        ][: new_target - len(from_lastfm)]
         tracks = _interleave(familiar, new)
         if len(tracks) < MIN_MIX_SIZE:
             continue
@@ -484,6 +501,23 @@ async def build_discover_weekly() -> int:
                 continue
             candidates[rid] += 1
         await asyncio.sleep(0.05)
+    # + podobní podle posluchačů Last.fm (shoda váží; víc tvých interpretů =
+    # výš), převedení na Deezer přes přesné jméno.
+    lf_scores: Counter = Counter()
+    for artist_id, _ in taste.artist_weight.most_common(15):
+        for name, match in await lt.similar_artist_names(taste.artist_name.get(artist_id, ""), 25):
+            if primary_artist_name(name).casefold() not in known_names:
+                lf_scores[name] += match
+    dzc_lookup = get_deezer_client()
+    for name, score in lf_scores.most_common(40):
+        try:
+            hits = await dzc_lookup.search_artist(name, limit=5)
+        except Exception:  # noqa: BLE001
+            continue
+        hit = next((h for h in hits if _names_match(h.get("name", ""), name)), None)
+        rid = str(hit["id"]) if hit and hit.get("id") else ""
+        if rid and rid not in known_dz:
+            candidates[rid] += 2 * score
     ranked = [rid for rid, _ in candidates.most_common(40)]
     tail = ranked[10:]
     rng.shuffle(tail)  # nejdoporučovanější napřed, zbytek každý týden jinak
@@ -573,3 +607,26 @@ async def build_throwback() -> int:
         ttl=g.DAILY_TTL,
     )
     return len(ids)
+
+
+
+def styles_key(user_id: str) -> str:
+    return f"styles:{user_id}"
+
+
+async def build_styles() -> int:
+    """"Tvé styly" na Domů: nejposlouchanější styly profilu (štítky Last.fm
+    jeho interpretů vážené poslechy a oblíbenými) -> zkratky na stránky stylů."""
+    from app.models import HomeSnapshot
+
+    user_id = g.home_user()
+    taste = await asyncio.to_thread(load_taste, user_id)
+    top = [(taste.artist_name[a], w) for a, w in taste.artist_weight.most_common(40) if a in taste.artist_name]
+    styles = await lt.user_styles(top, 12)
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, styles_key(user_id)) or HomeSnapshot(key=styles_key(user_id))
+        row.payload = {"tags": styles}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    return len(styles)

@@ -97,7 +97,7 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, unknown }
+enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, tagChips, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'quick_picks' => HomeSectionType.quickPicks,
@@ -106,6 +106,7 @@ HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'track_rail' => HomeSectionType.trackRail,
       'category_tiles' => HomeSectionType.categoryTiles,
       'genre_showcase' => HomeSectionType.genreShowcase,
+      'tag_chips' => HomeSectionType.tagChips,
       _ => HomeSectionType.unknown,
     };
 
@@ -122,7 +123,11 @@ class HomeSection {
     this.playlistId,
     this.showcase = const [],
     this.categoryId,
+    this.tags = const [],
   });
+
+  /// "Tvé styly": (štítek, název) -> stránka stylu.
+  final List<({String tag, String title})> tags;
 
   /// Vitrína žánru: mix, novinky, alba, interpreti na přeskáčku.
   final List<ShowcaseItem> showcase;
@@ -153,6 +158,9 @@ class HomeSection {
       playlistId: json['playlistId'] as String?,
       categoryId: json['categoryId'] as String?,
       showcase: type == HomeSectionType.genreShowcase ? items.map(ShowcaseItem.fromJson).toList() : const [],
+      tags: type == HomeSectionType.tagChips
+          ? [for (final t in items) (tag: t['tag'] as String, title: t['title'] as String)]
+          : const [],
       playlists: type == HomeSectionType.playlistCards || type == HomeSectionType.quickPicks
           ? items.map(HomePlaylistCard.fromJson).toList()
           : const [],

@@ -92,6 +92,22 @@ async def _deezer_id(artist_id: str) -> str | None:
     return None
 
 
+def _seed_recordings(kind: str, target_id: str, rng: random.Random, limit: int = 5) -> list[str]:
+    """Pár skladeb, od kterých se rádio odrazí (Last.fm podobné skladby)."""
+    with Session(engine) as session:
+        if kind == "album":
+            ids = [r.id for r in session.exec(select(Recording).where(Recording.release_id == target_id)).all()]
+        elif kind == "artist":
+            ids = [r.id for r in session.exec(select(Recording).where(Recording.artist_id == target_id)).all()]
+        else:
+            ids = [
+                i.recording_id
+                for i in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == target_id)).all()
+            ]
+    rng.shuffle(ids)
+    return ids[:limit]
+
+
 async def _lastfm_similar(recording_id: str, rng: random.Random, limit: int = 25) -> list[dict[str, Any]]:
     from app.catalog import lastfm
     from app.catalog.artwork import _normalize
@@ -155,6 +171,14 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     if kind == "track":
         raw = await _lastfm_similar(first[0], rng) + raw
     ids = await asyncio.to_thread(g._ingest_tracks, raw)
+    if kind != "track":
+        # Interpret / album / playlist: napřed skladby, které posluchači
+        # Last.fm pouštějí spolu s jeho skladbami.
+        from app.home import lastfm_taste as lt
+
+        seeds = await asyncio.to_thread(_seed_recordings, kind, target_id, rng)
+        lf_ids = await lt.similar_track_ids(seeds, set(seeds), rng, 25, per_seed=15)
+        ids = lf_ids + [i for i in ids if i not in lf_ids]
     ids = [i for i in ids if i not in first]
     artist_of = await asyncio.to_thread(_artists_of, ids + first)
     ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
