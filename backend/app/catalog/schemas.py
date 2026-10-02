@@ -51,6 +51,8 @@ class ReleaseOut(CamelModel):
     notes: str | None = None
     # Přidané ručně (odkaz z YouTube / ručně přiřazené) -- jde smazat.
     imported: bool = False
+    # Jen z YouTube (neoficiální / ztracené album) -- štítek v diskografii.
+    youtube_only: bool = False
 
 
 class RecordingOut(CamelModel):

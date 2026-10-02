@@ -217,6 +217,7 @@ class CatalogService:
             images=release.images,
             notes=(release.external_refs or {}).get("notes"),
             imported=(release.external_refs or {}).get("source") in ("youtube", "manual"),
+            youtube_only=(release.external_refs or {}).get("source") == "youtube",
         )
 
     def _to_recording_out(self, recording: Recording) -> RecordingOut:

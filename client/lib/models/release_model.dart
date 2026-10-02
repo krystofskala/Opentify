@@ -12,6 +12,7 @@ class ReleaseModel {
     this.images = const [],
     this.notes,
     this.imported = false,
+    this.youtubeOnly = false,
   });
 
   final String id;
@@ -27,6 +28,9 @@ class ReleaseModel {
 
   /// Přidané z YouTube / ručně -- jde smazat (⋯ › Smazat album).
   final bool imported;
+
+  /// Album jen z YouTube (neoficiální / ztracené).
+  final bool youtubeOnly;
 
   String? get coverImageUrl => images.isEmpty ? null : images.first;
 
@@ -46,5 +50,6 @@ class ReleaseModel {
         images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
         notes: json['notes'] as String?,
         imported: json['imported'] as bool? ?? false,
+        youtubeOnly: json['youtubeOnly'] as bool? ?? false,
       );
 }

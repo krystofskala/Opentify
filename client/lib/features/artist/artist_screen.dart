@@ -547,7 +547,9 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
                         children: [
                           MediaCard(
                             title: release.title,
-                            subtitle: release.yearLabel,
+                            subtitle: release.youtubeOnly
+                                ? [if (release.yearLabel != '—') release.yearLabel, 'jen YouTube'].join(' · ')
+                                : release.yearLabel,
                             imageUrl: release.coverImageUrl,
                             artworkKey: (releaseId: release.id, artistId: release.artistId),
                             onTap: () => context.push('/releases/${release.id}'),
