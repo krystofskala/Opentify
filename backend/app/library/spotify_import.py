@@ -108,6 +108,17 @@ def _get_or_create_playlist(
     return playlist
 
 
+def _unique_name(name: str, seen: set[str]) -> str:
+    """Spotify dovoluje stejně pojmenované playlisty -- druhý by přepsal
+    první (stejný klíč zdroje). V rámci jednoho importu "Mix (2)"."""
+    candidate, n = name, 2
+    while candidate.lower() in seen:
+        candidate = f"{name} ({n})"
+        n += 1
+    seen.add(candidate.lower())
+    return candidate
+
+
 def _import_source_key(name: str) -> str:
     # Exportify pojmenuje soubor "Moje_oblibene.csv", oficiální export nese
     # "Moje oblibene" -- stejný klíč pro oba, ať se playlist nezdvojí, když
@@ -246,9 +257,10 @@ def _library_liked(data: dict[str, Any]) -> list[TrackRow]:
 
 def _import_json_document(session: Session, user_id: str, data: dict[str, Any]) -> list[PlaylistReport]:
     reports = []
+    seen_names: set[str] = set()
     if "playlists" in data:
         for name, tracks in _official_playlists(data):
-            reports.append(_import_named_playlist(session, user_id, name, tracks))
+            reports.append(_import_named_playlist(session, user_id, _unique_name(name, seen_names), tracks))
     if "tracks" in data and isinstance(data["tracks"], list):
         playlist = get_or_create_liked_songs_playlist(session, user_id)
         reports.append(_import_tracks_into_playlist(session, playlist, _library_liked(data), mirror=False))
@@ -268,6 +280,7 @@ def _zip_entry_name(info: zipfile.ZipInfo) -> str:
 
 def _import_zip(session: Session, user_id: str, raw: bytes) -> ImportResult:
     result = ImportResult()
+    seen_names: set[str] = set()
     from app.uploads import check_zip
 
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
@@ -281,7 +294,9 @@ def _import_zip(session: Session, user_id: str, raw: bytes) -> ImportResult:
             if lower.endswith(".csv"):
                 text = zf.read(info).decode("utf-8-sig", errors="replace")
                 title = (stem or "Playlist").replace("_", " ")
-                result.playlists.append(_import_named_playlist(session, user_id, title, _csv_tracks(text)))
+                result.playlists.append(
+                    _import_named_playlist(session, user_id, _unique_name(title, seen_names), _csv_tracks(text))
+                )
             elif lower.endswith(".json") and (stem.lower().startswith("playlist") or stem.lower() == "yourlibrary"):
                 try:
                     data = json.loads(zf.read(info).decode("utf-8-sig"))

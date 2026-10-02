@@ -143,6 +143,25 @@ def _readable_playlist_or_404(session: Session, playlist_id: str, user_id: str) 
     return playlist
 
 
+def _drop_invites(session: Session, playlist_id: str) -> None:
+    """Pozvánky do společného playlistu (HomeSnapshot playlist-invite:*)."""
+    from app.models import HomeSnapshot
+
+    for snap in session.exec(select(HomeSnapshot).where(HomeSnapshot.key.startswith("playlist-invite:"))).all():  # type: ignore[union-attr]
+        if (snap.payload or {}).get("playlistId") == playlist_id:
+            session.delete(snap)
+
+
+def _drop_pins(session: Session, playlist_id: str, user_ids: list[str] | None = None) -> None:
+    from app.models import PinnedPlaylist
+
+    q = select(PinnedPlaylist).where(PinnedPlaylist.playlist_id == playlist_id)
+    if user_ids is not None:
+        q = q.where(PinnedPlaylist.user_id.in_(user_ids))  # type: ignore[attr-defined]
+    for row in session.exec(q).all():
+        session.delete(row)
+
+
 def _editable_playlist_or_404(session: Session, playlist_id: str, user_id: str) -> Playlist:
     """Skladby mění vlastník i členové společného playlistu."""
     playlist = session.get(Playlist, playlist_id)
@@ -221,10 +240,14 @@ def list_playlists(
         if r["id"] in owned_ids and _member_ids(session, r["id"]):
             r["collab"] = True
 
+    listed = {r["id"] for r in results}
     for pin in session.exec(select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id)).all():
         p = session.get(Playlist, pin.playlist_id)
-        if p is None:
+        if p is None or p.id in listed:
             continue
+        if p.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER) and user_id not in _member_ids(session, p.id):
+            continue  # už nemá přístup (zrušené sdílení)
+        listed.add(p.id)
         items = _playlist_items(session, p.id)
         covers, artist_names = _preview(session, p, items)
         out = PlaylistOut(
@@ -288,7 +311,9 @@ async def upload_playlist_cover(
     raw = await read_limited(file, 15 * 1024 * 1024, "Obrázek")
     if not await asyncio.to_thread(_save_resized, raw, artwork_path(playlist.id)):
         raise HTTPException(status_code=400, detail="Tohle není obrázek (nebo je moc malý).")
-    playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id)]
+    # Verze v URL -- obrázek se servíruje jako immutable na týden, nový by
+    # se jinak neukázal.
+    playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id) + f"?v={int(utcnow().timestamp())}"]
     playlist.updated_at = utcnow()
     session.add(playlist)
     session.commit()
@@ -409,10 +434,11 @@ def delete_playlist(
 
     for item in _playlist_items(session, playlist.id):
         session.delete(item)
-    # Členové společného playlistu a připnutí -- ať nezůstanou osiřelé.
+    # Členové společného playlistu, připnutí a pozvánky -- ať nezůstanou osiřelé.
     for model in (PlaylistMember, PinnedPlaylist):
         for row in session.exec(select(model).where(model.playlist_id == playlist.id)).all():
             session.delete(row)
+    _drop_invites(session, playlist.id)
     session.delete(playlist)
     session.commit()
     return {"deleted": True}
@@ -436,7 +462,8 @@ def add_item(
         )
     ).first()
     if existing is None:
-        position = len(_playlist_items(session, playlist.id))
+        # Za poslední (po odebrání můžou v pozicích být díry -- len() by dal duplicitu).
+        position = max((i.position for i in _playlist_items(session, playlist.id)), default=-1) + 1
         session.add(
             PlaylistItem(playlist_id=playlist.id, recording_id=body.recording_id, position=position, added_by=user_id)
         )
@@ -555,6 +582,7 @@ def leave_playlist(
         select(PlaylistMember).where(PlaylistMember.playlist_id == playlist_id, PlaylistMember.user_id == user_id)
     ).all():
         session.delete(row)
+    _drop_pins(session, playlist_id, [user_id])
     session.commit()
     return {"left": True}
 
@@ -570,7 +598,11 @@ def stop_sharing(
 
     user_id, _device_id = current
     _owned_playlist_or_404(session, playlist_id, user_id)
+    members = []
     for row in session.exec(select(PlaylistMember).where(PlaylistMember.playlist_id == playlist_id)).all():
+        members.append(row.user_id)
         session.delete(row)
+    _drop_pins(session, playlist_id, members)
+    _drop_invites(session, playlist_id)  # starým odkazem se už nikdo nepřipojí
     session.commit()
     return {"shared": False}

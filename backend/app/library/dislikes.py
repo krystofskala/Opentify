@@ -65,15 +65,17 @@ async def send_feedback(recording_id: str, score: int, user_id: str) -> None:
         logger.warning("LB feedback nešel: %s", exc)
 
 
-def purge_from_snapshots(session: Session, recording_id: str) -> int:
+def purge_from_snapshots(session: Session, recording_id: str, user_id: str) -> int:
     """Zlomené srdce platí hned, ne až při dalším přegenerování: skladba
-    zmizí z už uložených mixů, rádií a žebříčků. Vlastní playlisty a
-    historie (roční top skladby, dekáda) zůstávají, jak jsou."""
+    zmizí z už uložených mixů a rádií TOHOTO profilu (ne z mixů ostatních
+    ani ze společných žebříčků). Vlastní playlisty a historie (roční top
+    skladby, dekáda) zůstávají, jak jsou."""
     rows = session.exec(
         select(PlaylistItem)
         .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
         .where(
             PlaylistItem.recording_id == recording_id,
+            Playlist.owner_user_id == user_id,
             Playlist.kind != PlaylistKind.USER,
             ~Playlist.source.startswith("personal:year:"),
             ~Playlist.source.startswith("personal:decade:"),

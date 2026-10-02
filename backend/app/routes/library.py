@@ -407,9 +407,9 @@ def search_library(
         key=lambda pair: (-pair[0][0], -pair[0][1], pair[1].title.casefold()),
     )[:limit]
 
-    albums = [a for a in local_albums(session=session, _current=current) if _match_score(tokens, a["title"], a["artistName"])]
+    albums = [a for a in local_albums(session=session, current=current) if _match_score(tokens, a["title"], a["artistName"])]
     albums.sort(key=lambda a: (-_match_score(tokens, a["title"], a["artistName"]), a["title"].casefold()))
-    artists = [a for a in local_artists(session=session, _current=current) if _match_score(tokens, a["name"])]
+    artists = [a for a in local_artists(session=session, current=current) if _match_score(tokens, a["name"])]
     artists.sort(key=lambda a: (-_match_score(tokens, a["name"]), -a["trackCount"]))
 
     playlists = session.exec(
@@ -580,6 +580,17 @@ def _remove_for(session: Session, user_id: str, recording_id: str, dry_run: bool
     others = session.exec(
         select(LibraryEntry).where(LibraryEntry.recording_id == recording_id, LibraryEntry.user_id != user_id)
     ).first()
+    if others is None:
+        # Oblíbená skladba jiného profilu je taky v jeho knihovně -- soubor nemazat.
+        others = session.exec(
+            select(PlaylistItem)
+            .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+            .where(
+                PlaylistItem.recording_id == recording_id,
+                Playlist.source == "liked-songs",
+                Playlist.owner_user_id != user_id,
+            )
+        ).first()
     if user_id == ADMIN_ID and others is None:
         return _remove_from_library(session, recording_id, dry_run)
     return {"recordingId": recording_id, "result": "hidden", "freedBytes": 0}
@@ -604,6 +615,8 @@ def heard_fully(
             .where(
                 Listen.user_id == user_id,
                 Listen.duration_played_ms.is_not(None),  # type: ignore[union-attr]
+                # YouTube Takeout délku poslechu nezná (odhad 3 min) -- nepočítat.
+                (Listen.source.is_(None)) | (Listen.source != "ytmusic-history"),  # type: ignore[union-attr]
                 Recording.duration_ms.is_not(None),  # type: ignore[union-attr]
                 Listen.duration_played_ms >= Recording.duration_ms * 0.9,  # type: ignore[operator]
             )
@@ -796,7 +809,7 @@ async def import_spotify(
                 return import_spotify_library(own, user_id, raw)
 
         result = await asyncio.to_thread(run)
-    except (json.JSONDecodeError, zipfile.BadZipFile) as exc:
+    except (ValueError, zipfile.BadZipFile) as exc:  # i UnicodeDecodeError
         raise HTTPException(
             status_code=400,
             detail="Nepodařilo se rozpoznat formát -- očekává se Spotify export (ZIP, Playlist1.json nebo YourLibrary.json).",
@@ -979,7 +992,7 @@ async def dislike_song(
         raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
     if recording_id not in disliked_ids(session, user_id):
         session.add(RecordingDislike(user_id=user_id, recording_id=recording_id))
-    purge_from_snapshots(session, recording_id)
+    purge_from_snapshots(session, recording_id, current[0])
     session.commit()
     unlike_song(recording_id, session=session, current=current)
     # ListenBrainz účet TOHO profilu (jeho token, viz app/listens.token_for).
@@ -1251,7 +1264,7 @@ async def download_album(release_id: str, current: tuple[str, str] = Depends(get
 
 
 @library_router.delete("/imported-releases/{release_id}")
-async def delete_imported_release(release_id: str, current: tuple[str, str] = Depends(get_current_user)):
+async def delete_imported_release(release_id: str, current: tuple[str, str] = Depends(require_admin)):
     """Smaže album přidané z odkazu na YouTube (nebo ručně přiřazené): stažené
     soubory, skladby i album. Skladby s historií poslechů zůstanou (bez alba),
     ať se nesmaže Wrapped. Oficiální alba z katalogu takhle smazat nejde."""
@@ -1274,6 +1287,12 @@ async def delete_imported_release(release_id: str, current: tuple[str, str] = De
                     session.delete(row)
             for row in session.exec(select(ListenLater).where(ListenLater.target_id == rec.id)).all():
                 session.delete(row)
+            # Ostatní tabulky odkazující na skladbu (cizí klíče SQLite nehlídá).
+            from app.models import HeardFully, ProvisioningJob, RecordingDislike
+
+            for model in (HeardFully, RecordingDislike, ProvisioningJob):
+                for row in session.exec(select(model).where(model.recording_id == rec.id)).all():
+                    session.delete(row)
             if session.exec(select(Listen).where(Listen.recording_id == rec.id)).first() is not None:
                 rec.release_id = None  # historie poslechů zůstává
                 session.add(rec)

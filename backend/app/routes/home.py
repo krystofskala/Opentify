@@ -180,6 +180,7 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
             c = browse.get_category(i)
             if c is not None:
                 await browse.genre_rail(c)
+                await browse.genre_new_releases(c)  # novinky (bluegrass) hned, ne až za hodinu
         await invalidate_home_cache()
 
     asyncio.create_task(warm())
@@ -187,9 +188,28 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
     return {"selected": ids}
 
 
+_refresh_running = False
+
+
 @home_router.post("/refresh")
-async def refresh_home(force: bool = True, _current=Depends(get_current_user)):
+async def refresh_home(force: bool = False, current=Depends(get_current_user)):
     """Ruční přegenerování (jinak běží samo na pozadí, viz home_refresh_loop).
-    Všechny generátory trvají ~3 min -- běží na pozadí, request hned vrátí."""
-    asyncio.create_task(run_generators(force=force))
+    Všechny generátory trvají ~3 min -- běží na pozadí, request hned vrátí.
+    Vynucené (všechno znovu) jen admin; nikdy dvakrát souběžně."""
+    global _refresh_running
+    from app.auth import ADMIN_ID
+
+    force = force and current[0] == ADMIN_ID
+    if _refresh_running:
+        return {"started": False, "running": True}
+
+    async def run() -> None:
+        global _refresh_running
+        _refresh_running = True
+        try:
+            await run_generators(force=force)
+        finally:
+            _refresh_running = False
+
+    asyncio.create_task(run())
     return {"started": True, "force": force}

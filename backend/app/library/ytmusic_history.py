@@ -105,7 +105,8 @@ def _parse_date(text: str) -> str | None:
         mon, d, y, h, mi, s, ampm, tz = m.groups()
         hour = int(h) % 12 + (12 if ampm == "PM" else 0) if ampm else int(h)
         local = datetime(int(y), _EN_MONTHS.get(mon, 1), int(d), hour, int(mi), int(s))
-    offset = _TZ.get((tz or "").upper(), 1)
+    # Bez zóny: letní čas podle měsíce (duben-říjen +2), jinak +1.
+    offset = _TZ.get((tz or "").upper(), 2 if 4 <= local.month <= 10 else 1)
     return (local - timedelta(hours=offset)).replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -153,7 +154,10 @@ def read_takeout(raw: bytes) -> TakeoutImport:
                 check_zip(zf)
                 names = [i.filename for i in zf.infolist()]
                 lower = [n.lower() for n in names]
-                out.is_takeout = any(n.startswith("takeout/") or "youtube" in n for n in lower)
+                out.is_takeout = any(
+                    n.startswith("takeout/") or "youtube and youtube music/" in n or "youtube a youtube music/" in n
+                    for n in lower
+                )
                 if not out.is_takeout:
                     return out
                 for name, low in zip(names, lower):

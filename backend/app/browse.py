@@ -197,7 +197,12 @@ async def _genre_recording_ids(c: Category) -> list[str]:
         playlist = session.exec(
             select(Playlist).where(Playlist.owner_user_id == GLOBAL_PLAYLIST_OWNER, Playlist.source == source)
         ).first()
-        if playlist is not None:
+        expired = (
+            playlist is not None
+            and playlist.expires_at is not None
+            and _aware(playlist.expires_at) < utcnow()
+        )
+        if playlist is not None and not expired:
             from app.models import PlaylistItem
 
             ids = session.exec(
@@ -564,7 +569,7 @@ async def open_deezer_playlist(deezer_id: str, title_hint: str | None = None) ->
         existing = session.exec(
             select(Playlist).where(Playlist.owner_user_id == GLOBAL_PLAYLIST_OWNER, Playlist.source == source)
         ).first()
-        if existing is not None and existing.generated_at and utcnow() - existing.generated_at < PLAYLIST_FRESH:
+        if existing is not None and existing.generated_at and utcnow() - _aware(existing.generated_at) < PLAYLIST_FRESH:
             return existing.id
     dz = get_deezer_client()
     meta = await dz.playlist(deezer_id)

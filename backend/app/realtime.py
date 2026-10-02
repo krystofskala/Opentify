@@ -108,6 +108,15 @@ class ConnectionManager:
             return
         if kind == "device.hello":
             me.device_id = str(payload.get("deviceId") or "")[:64] or None
+            # Stejné zařízení po znovupřipojení: staré (napůl mrtvé) spojení pryč,
+            # jinak by povely šly do něj (iOS po návratu z pozadí).
+            for key, other in list(self._connections.get(user_id, {}).items()):
+                if other is not me and other.device_id == me.device_id:
+                    self._connections[user_id].pop(key, None)
+                    try:
+                        await other.ws.close()
+                    except Exception:  # noqa: BLE001
+                        pass
             me.name = str(payload.get("name") or "Zařízení")[:60]
             me.updated = time.time()
             logger.info("connect %s: hello %s (%s), zařízení: %d", user_id[:8], me.name, (me.device_id or "")[:16], len(self._devices(user_id)))
@@ -159,13 +168,27 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str) -> None:
 
 
 async def redis_listener() -> None:
-    r = get_redis()
-    pubsub = r.pubsub()
-    await pubsub.psubscribe("vault:events:user:*")
-    logger.info("realtime hub poslouchá Redis pub/sub")
-    async for message in pubsub.listen():
-        if message["type"] != "pmessage":
-            continue
-        channel: str = message["channel"]
-        user_id = channel.rsplit(":", 1)[-1]
-        await manager.send_to_user(user_id, message["data"])
+    """Události workeru (stažení hotové...) -> zařízení. Při výpadku Redisu
+    se znovu připojí -- dřív jeden výpadek umlčel živé zprávy do restartu API."""
+    import asyncio
+
+    delay = 1.0
+    while True:
+        try:
+            r = get_redis()
+            pubsub = r.pubsub()
+            await pubsub.psubscribe("vault:events:user:*")
+            logger.info("realtime hub poslouchá Redis pub/sub")
+            delay = 1.0
+            async for message in pubsub.listen():
+                if message["type"] != "pmessage":
+                    continue
+                channel: str = message["channel"]
+                user_id = channel.rsplit(":", 1)[-1]
+                await manager.send_to_user(user_id, message["data"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("realtime: Redis pub/sub spadl (%s), znovu za %.0f s", exc, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30.0)

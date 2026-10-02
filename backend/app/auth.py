@@ -138,7 +138,13 @@ def resolve_user(request: Request) -> tuple[AppUser | None, AppUser | None]:
         if user is None:
             return None, None
         acting = user
-        act_as = request.headers.get("x-act-as") or request.cookies.get(ACT_AS_COOKIE)
+        # `act_as` v dotazu: WebSocket z nativní appky hlavičky poslat neumí
+        # (Opentify Connect jinak skončil v jiném profilu než HTTP).
+        act_as = (
+            request.headers.get("x-act-as")
+            or request.query_params.get("act_as")
+            or request.cookies.get(ACT_AS_COOKIE)
+        )
         if user.role == "admin" and act_as and act_as != user.id:
             other = session.get(AppUser, act_as)
             if other is not None:

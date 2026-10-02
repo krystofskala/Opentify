@@ -253,9 +253,18 @@ async def import_youtube_link(
     # na tohle vydání (stejný název jako studiová verze != stejná nahrávka).
     artist = find_or_create_artist(session, artist_name or info["artist"])
     release_title = title or info["title"]
-    release = session.exec(
-        select(Release).where(Release.artist_id == artist.id, Release.title == release_title)
-    ).first()
+    # Jen dřívější YouTube import téhož alba -- oficiální vydání stejného
+    # jména se nesmí přepsat (a pak smazat jako "z YouTube").
+    release = next(
+        (
+            r
+            for r in session.exec(
+                select(Release).where(Release.artist_id == artist.id, Release.title == release_title)
+            ).all()
+            if (r.external_refs or {}).get("source") == "youtube"
+        ),
+        None,
+    )
     if release is None:
         release = Release(artist_id=artist.id, title=release_title, release_type="album")
         session.add(release)
