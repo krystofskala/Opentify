@@ -823,6 +823,10 @@ async def _recent_albums(artist_ids: list[str], limit: int) -> list[str]:
                 if first is not None and first < date.today().year - 1:
                     continue
             release = ingest_album(session, album, session.get(Artist, aid))
+            # Vydání, které už známe se starým datem (MusicBrainz), není novinka.
+            known_year = (release.release_date or "")[:4] if release is not None else ""
+            if known_year.isdigit() and int(known_year) < date.today().year - 1:
+                continue
             if release is not None and release.id not in ids:
                 ids.append(release.id)
             if len(ids) >= limit:
@@ -879,7 +883,7 @@ async def genre_extras(c: Category) -> dict[str, Any]:
             "related": [r for r in RELATED_GENRES.get(c.id, ()) if r in _BY_ID],
         }
 
-    return await cached_json(f"browse:extras:v6:{c.id}", EXTRAS_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    return await cached_json(f"browse:extras:v7:{c.id}", EXTRAS_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
 
 
 def extras_cards(extras: dict[str, Any]) -> dict[str, Any]:

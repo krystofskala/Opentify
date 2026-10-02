@@ -4,7 +4,7 @@ se párovalo podle názvu bez závorek. Pro každou nahrávku s Deezer id porovn
 název u Deezeru s naším (i s verzí v závorce); nesedí-li, Deezer id se
 z řádku odebere -- příští hledání/žebříček pak založí správnou nahrávku.
 
-    python -m app.tools.fix_merged_versions [--dry-run]
+    python -m app.tools.fix_merged_versions [--dry-run] [--from=N]
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import asyncio
 import re
 import sys
 
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.catalog.deezer import get_deezer_client
@@ -36,12 +37,17 @@ async def main(dry_run: bool) -> None:
     with Session(engine) as session:
         rows = [
             (r.id, r.title, r.deezer_id)
-            for r in session.exec(select(Recording).where(Recording.deezer_id.is_not(None))).all()  # type: ignore[union-attr]
+            for r in session.exec(
+                select(Recording).where(Recording.deezer_id.is_not(None)).order_by(Recording.id)  # type: ignore[union-attr]
+            ).all()
         ]
     print(f"kontroluji {len(rows)} nahrávek", flush=True)
     dz = get_deezer_client()
     fixed = 0
+    start = next((int(a.split("=", 1)[1]) for a in sys.argv if a.startswith("--from=")), 0)
     for i, (rec_id, title, dzid) in enumerate(rows):
+        if i < start:
+            continue
         if i and i % 500 == 0:
             print(f"  {i}/{len(rows)}, opraveno {fixed}", flush=True)
         try:
@@ -56,16 +62,22 @@ async def main(dry_run: bool) -> None:
         print(f"  {title!r} != Deezer {track['title']!r} ({dzid})", flush=True)
         if dry_run:
             continue
-        with Session(engine) as session:
-            rec = session.get(Recording, rec_id)
-            if rec is None:
-                continue
-            rec.deezer_id = None
-            refs = dict(rec.external_refs or {})
-            refs.pop("previewUrl", None)  # ukázka byla té druhé verze
-            rec.external_refs = refs
-            session.add(rec)
-            session.commit()
+        for attempt in range(10):
+            try:
+                with Session(engine) as session:
+                    rec = session.get(Recording, rec_id)
+                    if rec is None:
+                        break
+                    rec.deezer_id = None
+                    refs = dict(rec.external_refs or {})
+                    refs.pop("previewUrl", None)  # ukázka byla té druhé verze
+                    rec.external_refs = refs
+                    session.add(rec)
+                    session.commit()
+                break
+            except OperationalError:
+                # DB zamčená jiným zápisem (API, worker) -- chvíli počkat.
+                await asyncio.sleep(2 * (attempt + 1))
     print(f"hotovo, rozpojeno {fixed}", flush=True)
 
 
