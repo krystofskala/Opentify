@@ -17,6 +17,7 @@ class PlaylistSummaryModel {
     this.artistNames = const [],
     this.description,
     this.updatedAt,
+    this.pinned = false,
   });
 
   /// Naposledy změněno (ISO) -- řazení „Přidáno / upraveno".
@@ -32,6 +33,9 @@ class PlaylistSummaryModel {
   /// Playlist z tvé staré vlastní hudby (výběry, soundtracky) -- značka
   /// "před 2016" na náhledu.
   bool get isLegacy => source == 'own-music:legacy';
+
+  /// Automatický mix připnutý do Knihovny -- dál se aktualizuje.
+  final bool pinned;
 
   final String id;
   final String title;
@@ -55,6 +59,7 @@ class PlaylistSummaryModel {
         artistNames: (json['artistNames'] as List<dynamic>? ?? const []).cast<String>(),
         description: json['description'] as String?,
         updatedAt: json['updatedAt'] as String?,
+        pinned: json['pinned'] as bool? ?? false,
       );
 }
 
@@ -105,6 +110,10 @@ class PlaylistsRepository {
   }
 
   /// "Přidat do knihovny" -- vlastní kopie žebříčku/mixu z Domů.
+  Future<void> pin(String playlistId) => _api.postJson('/playlists/$playlistId/pin');
+
+  Future<void> unpin(String playlistId) => _api.deleteJson('/playlists/$playlistId/pin');
+
   Future<PlaylistDetailModel> copy(String playlistId) async {
     final json = await _api.postJson('/playlists/$playlistId/copy');
     return PlaylistDetailModel.fromJson(json);

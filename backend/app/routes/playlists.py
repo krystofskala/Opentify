@@ -155,7 +155,64 @@ def list_playlists(
             "description": p.description,
             "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
         })
+    # Připnuté automatické mixy (aktualizují se) -- za vlastními.
+    from app.models import PinnedPlaylist
+
+    for pin in session.exec(select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id)).all():
+        p = session.get(Playlist, pin.playlist_id)
+        if p is None:
+            continue
+        items = _playlist_items(session, p.id)
+        covers, artist_names = _preview(session, p, items)
+        out = PlaylistOut(
+            id=p.id, title=p.title, kind=p.kind, source=p.source, generated_at=p.generated_at, item_count=len(items)
+        ).model_dump(by_alias=True)
+        results.append({
+            **out,
+            "coverUrls": covers,
+            "artistNames": artist_names,
+            "description": p.description,
+            "updatedAt": pin.added_at.isoformat() if pin.added_at else None,
+            "pinned": True,
+        })
     return results
+
+
+@playlists_router.post("/{playlist_id}/pin")
+def pin_playlist(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """"Přidat a nechat aktualizovat": mix zůstane živý, jen je v Knihovně."""
+    from app.models import PinnedPlaylist
+
+    user_id, _device_id = current
+    _readable_playlist_or_404(session, playlist_id, user_id)
+    exists = session.exec(
+        select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id, PinnedPlaylist.playlist_id == playlist_id)
+    ).first()
+    if exists is None:
+        session.add(PinnedPlaylist(user_id=user_id, playlist_id=playlist_id))
+        session.commit()
+    return {"playlistId": playlist_id, "pinned": True}
+
+
+@playlists_router.delete("/{playlist_id}/pin")
+def unpin_playlist(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    from app.models import PinnedPlaylist
+
+    user_id, _device_id = current
+    for row in session.exec(
+        select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id, PinnedPlaylist.playlist_id == playlist_id)
+    ).all():
+        session.delete(row)
+    session.commit()
+    return {"playlistId": playlist_id, "pinned": False}
 
 
 @playlists_router.post("")

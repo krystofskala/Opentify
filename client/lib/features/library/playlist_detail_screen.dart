@@ -21,6 +21,7 @@ import '../../widgets/track_tile.dart';
 import '../../widgets/glass/glass.dart';
 import '../../core/cz_plural.dart';
 import '../../widgets/toast.dart';
+import '../../theme/shapes.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -79,6 +80,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   Widget _buildBody(BuildContext context, PlaylistDetailModel detail, List<RecordingModel> items) {
     final first = items.isEmpty ? null : items.first;
     final readOnly = detail.isReadOnly;
+    // Mix už připnutý do Knihovny (živě aktualizovaný)?
+    final pinned = ref.watch(myPlaylistsProvider
+        .select((s) => s.valueOrNull?.any((p) => p.id == detail.id && p.pinned) ?? false));
     final cover = detail.coverUrls.isNotEmpty
         ? detail.coverUrls.first
         : first == null
@@ -124,9 +128,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               actions: [
                 if (readOnly)
                   HeroAction(
-                    icon: Symbols.library_add_rounded,
-                    tooltip: 'Uložit do mých playlistů',
-                    onPressed: () => _copyToLibrary(context, detail),
+                    icon: pinned ? Symbols.library_add_check_rounded : Symbols.library_add_rounded,
+                    tooltip: pinned ? 'V knihovně (aktualizuje se)' : 'Uložit do knihovny',
+                    onPressed: () => pinned ? _unpin(context, detail) : _saveToLibrary(context, detail),
                   ),
                 HeroAction(
                   icon: Symbols.more_horiz_rounded,
@@ -139,7 +143,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     subtitle: detail.description,
                     imageUrl: detail.coverUrls.firstOrNull,
                     isRadio: detail.source?.startsWith('radio:') ?? false,
-                    onSaveCopy: readOnly ? () => _copyToLibrary(context, detail) : null,
+                    onSaveCopy: readOnly && !pinned ? () => _saveToLibrary(context, detail) : null,
                     onDelete: readOnly ? null : () => _confirmDelete(context),
                   ),
                 ),
@@ -339,6 +343,62 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final top =
         (counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).map((e) => e.key).take(2).toList();
     return counts.length > top.length ? '${top.join(', ')} a další' : top.join(' a ');
+  }
+
+  /// Uložit mix / žebříček: zachytit dnešní stav (kopie), nebo připnout živý.
+  Future<void> _saveToLibrary(BuildContext context, PlaylistDetailModel detail) async {
+    final choice = await showGlassSheet<String>(
+      context,
+      builder: (sheet) {
+        Widget option(String value, IconData icon, String title, String subtitle) => ListTile(
+              shape: AppShapes.md,
+              leading: Icon(icon),
+              title: Text(title),
+              subtitle: Text(subtitle),
+              onTap: () => Navigator.of(sheet).pop(value),
+            );
+        return GlassSheet(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.sm, AppSpacing.xs, AppSpacing.sm),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+                  child: Text('Uložit „${detail.title}“', style: Theme.of(sheet).textTheme.titleMedium),
+                ),
+                option('live', Symbols.autorenew_rounded, 'Nechat aktualizovat',
+                    'V knihovně, ale dál se mění jako tady'),
+                option('copy', Symbols.photo_camera_rounded, 'Zachytit tenhle stav',
+                    'Vlastní playlist se dnešními skladbami, už se nezmění'),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (!context.mounted || choice == null) return;
+    if (choice == 'copy') return _copyToLibrary(context, detail);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await ref.read(playlistsRepositoryProvider).pin(detail.id);
+      ref.invalidate(myPlaylistsProvider);
+      showToast(messenger, '„${detail.title}“ je v knihovně a dál se aktualizuje');
+    } catch (e) {
+      showToast(messenger, 'Uložení selhalo: $e');
+    }
+  }
+
+  Future<void> _unpin(BuildContext context, PlaylistDetailModel detail) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await ref.read(playlistsRepositoryProvider).unpin(detail.id);
+      ref.invalidate(myPlaylistsProvider);
+      showToast(messenger, '„${detail.title}“ odebrán z knihovny');
+    } catch (e) {
+      showToast(messenger, 'Nepodařilo se: $e');
+    }
   }
 
   Future<void> _copyToLibrary(BuildContext context, PlaylistDetailModel detail) async {

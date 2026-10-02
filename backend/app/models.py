@@ -277,6 +277,16 @@ class LibraryEntry(SQLModel, table=True):
     added_at: datetime = Field(default_factory=utcnow)
 
 
+class PinnedPlaylist(SQLModel, table=True):
+    """Automatický mix (Denní mix, Tvůj mix, žebříček...) připnutý do Knihovny
+    "živě" -- dál se přegenerovává, jen je vidět mezi Mými playlisty."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    playlist_id: str = Field(index=True)
+    added_at: datetime = Field(default_factory=utcnow)
+
+
 class FavoriteArtist(SQLModel, table=True):
     """Oblíbený interpret profilu (srdíčko na stránce interpreta) -- filtr
     "Oblíbení" v Knihovně › Interpreti."""
