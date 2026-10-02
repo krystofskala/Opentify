@@ -7,6 +7,8 @@ v `app.catalog.service.CatalogService`, routy jen validují vstup a mapují
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
@@ -41,7 +43,22 @@ async def search_catalog(
     _current=Depends(get_current_user),
 ):
     try:
-        return await service.search(q, type, limit, offset)
+        found = await service.search(q, type, limit, offset)
+        # Překlep ("bily strngs"): Deezer skoro nic -- Last.fm opraví jméno
+        # interpreta a hledá se znovu (cache 7 dní, takže 3 typy = 1 dotaz).
+        if offset == 0 and len(q.strip()) >= 3 and len(found.get("results") or []) < 3:
+            from app.catalog.lastfm import artist_correction
+            from app.catalog.service import _normalize_query
+
+            fixed = await artist_correction(q)
+            if fixed and _normalize_query(fixed) != _normalize_query(q):
+                better = await service.search(fixed, type, limit, 0)
+                ids = {r.get("id") for r in better.get("results") or []}
+                merged = (better.get("results") or []) + [
+                    r for r in found.get("results") or [] if r.get("id") not in ids
+                ]
+                return {**better, "query": q, "results": merged[:limit], "total": len(merged), "didYouMean": fixed}
+        return found
     except MusicBrainzError:
         # Odlišuje "MusicBrainz momentálně nedostupný/rate-limit" od
         # skutečného "nic takového neexistuje" (prázdný `results`) -- klient
@@ -69,6 +86,56 @@ async def get_artist_top_tracks(artist_id: str, _current=Depends(get_current_use
     from app.catalog.top_tracks import artist_top_tracks
 
     return await artist_top_tracks(artist_id)
+
+
+def _exact(title: str) -> str:
+    """Název pro přesné porovnání: jen velikost písmen, diakritika a mezery."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode().casefold()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+@catalog_router.get("/artists/{artist_id}/stats")
+async def get_artist_stats(artist_id: str, _current=Depends(get_current_user)):
+    """Last.fm: počet posluchačů + nejposlouchanější vydání (id našich
+    vydání v pořadí oblíbenosti) -- "Populární vydání" jako na Spotify."""
+    from sqlmodel import Session, select
+
+    from app.catalog import lastfm
+    from app.catalog.artwork import primary_artist_name
+    from app.db import engine
+    from app.models import Artist, Release
+
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        if artist is None:
+            raise HTTPException(status_code=404, detail="interpret nenalezen")
+        if (artist.mbid or "").startswith("own:"):
+            return {"listeners": None, "playcount": None, "popularReleaseIds": []}
+        name = primary_artist_name(artist.name)
+        releases = session.exec(select(Release).where(Release.artist_id == artist_id)).all()
+        # Přesný název (i se závorkami) -- Last.fm počítá každou verzi zvlášť
+        # ("Heathens" vs "Heathens (DISTO Remix)"), bere se přesně ta, která
+        # je nejposlouchanější.
+        by_title: dict[str, list[Release]] = {}
+        for r in releases:
+            by_title.setdefault(_exact(r.title), []).append(r)
+    info = await lastfm.artist_info(name)
+    albums = await lastfm.top_albums(name, limit=40)
+    popular: list[str] = []
+    for album in albums:
+        # Stejný přesný název víckrát (duplicitní záznam) -- nejstarší.
+        candidates = sorted(by_title.get(_exact(album["title"])) or [], key=lambda r: r.release_date or "9999")
+        if candidates and candidates[0].id not in popular:
+            popular.append(candidates[0].id)
+        if len(popular) >= 10:
+            break
+    return {
+        "listeners": (info or {}).get("listeners"),
+        "playcount": (info or {}).get("playcount"),
+        "popularReleaseIds": popular,
+    }
 
 
 @catalog_router.get("/artists/{artist_id}/rarities")

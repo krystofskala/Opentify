@@ -52,6 +52,19 @@ def norm(text: str | None) -> str:
     return _NON_ALNUM_RE.sub("", text)
 
 
+_FEAT_PARENS_RE = re.compile(r"[\(\[]\s*(feat\.?|ft\.?|featuring|with)(?=[\s.])[^\)\]]*[\)\]]", re.IGNORECASE)
+
+
+def version_key(text: str | None) -> str:
+    """Jako `norm`, ale verze v závorce ("Live", "Remix", "Acoustic"...)
+    zůstává -- jen "(feat. X)" se zahodí."""
+    if not text:
+        return ""
+    text = _FEAT_PARENS_RE.sub(" ", text)
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
+    return _NON_ALNUM_RE.sub("", text)
+
+
 def is_placeholder_picture(url: str | None) -> bool:
     return not url or "/artist//" in url or "/cover//" in url
 
@@ -150,11 +163,14 @@ def ingest_track(
     if recording is None and isrc:
         recording = session.exec(select(Recording).where(Recording.isrc == isrc)).first()
     if recording is None and artist is not None:
-        wanted = {norm(title), norm(dz.get("title_short"))} - {""}
+        # Název i s verzí v závorce -- "Heathens" a "Heathens (Live In Mexico
+        # City)" jsou různé nahrávky (dřív `norm` závorky zahodil a živá verze
+        # se zapsala do řádku studiové). Ignoruje se jen "(feat. ...)".
+        wanted = version_key(title)
         same_title = [
             r
             for r in session.exec(select(Recording).where(Recording.artist_id == artist.id)).all()
-            if r.deezer_id in (None, dzid) and norm(r.title) in wanted
+            if r.deezer_id in (None, dzid) and version_key(r.title) == wanted
         ]
         # Stejné album má přednost (jinak "Creep" ze singlu i z alba splyne).
         same_title.sort(key=lambda r: not (release is not None and r.release_id == release.id))

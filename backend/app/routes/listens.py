@@ -50,6 +50,9 @@ async def create_listen(body: ListenIn, current: tuple[str, str] = Depends(get_c
 async def playing_now(body: PlayingNowIn, current: tuple[str, str] = Depends(get_current_user)):
     # "Právě hraje" na ListenBrainz -- jen s tokenem TOHO profilu.
     asyncio.create_task(submit_playing_now(body.recording_id, current[0]))
+    from app.lastfm_scrobble import now_playing
+
+    asyncio.create_task(now_playing(current[0], body.recording_id))
     return {"ok": True}
 
 

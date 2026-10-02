@@ -107,15 +107,19 @@ class SearchResultItem {
 }
 
 class CatalogSearchResult {
-  const CatalogSearchResult({required this.query, required this.total, required this.results});
+  const CatalogSearchResult({required this.query, required this.total, required this.results, this.didYouMean});
 
   final String query;
+
+  /// Opravený dotaz (Last.fm), když se původní skoro nic nenašlo.
+  final String? didYouMean;
   final int total;
   final List<SearchResultItem> results;
 
   factory CatalogSearchResult.fromJson(Map<String, dynamic> json) => CatalogSearchResult(
         query: json['query'] as String,
         total: json['total'] as int,
+        didYouMean: json['didYouMean'] as String?,
         results: (json['results'] as List<dynamic>)
             .map((e) => SearchResultItem.fromJson(e as Map<String, dynamic>))
             .toList(),

@@ -198,6 +198,9 @@ class Listen(SQLModel, table=True):
     lb_submitted_at: datetime | None = Field(default=None, index=True)
     lb_attempts: int = 0
     lb_error: str | None = None
+    # Last.fm scrobble -- jen profil s připojeným vlastním účtem.
+    lastfm_submitted_at: datetime | None = None
+    lastfm_attempts: int | None = None
 
 
 class RecordingDislike(SQLModel, table=True):
@@ -244,6 +247,12 @@ class AppUser(SQLModel, table=True):
     # Vzhled profilu (sklo, zrno, motiv) -- klíče `appearance.*` z appky,
     # ať má profil stejný vzhled na každém zařízení.
     appearance: dict | None = Field(default=None, sa_column=Column(JSON))
+    # Vlastní Last.fm účet profilu (session klíč z přihlášení na last.fm).
+    # Scrobbluje se jen s ním a jen poslechy od připojení -- jiné profily
+    # bez vlastního účtu na Last.fm nic neposílají.
+    lastfm_session: str | None = None
+    lastfm_user: str | None = None
+    lastfm_connected_at: datetime | None = None
 
 
 class AuthToken(SQLModel, table=True):

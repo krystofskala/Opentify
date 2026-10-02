@@ -77,6 +77,15 @@ class CatalogRepository {
 
   /// Nejposlouchanější skladby interpreta s `listenCount` (ListenBrainz),
   /// nebo pořadí oblíbenosti z Deezeru bez počtů.
+  /// Last.fm: posluchači + id vydání v pořadí oblíbenosti.
+  Future<({int? listeners, List<String> popularReleaseIds})> getArtistStats(String artistId) async {
+    final json = await _api.getJson('/catalog/artists/$artistId/stats');
+    return (
+      listeners: json['listeners'] as int?,
+      popularReleaseIds: (json['popularReleaseIds'] as List<dynamic>? ?? const []).cast<String>(),
+    );
+  }
+
   Future<List<RecordingModel>> getArtistTopTracks(String artistId) async {
     final json = await _api.getJsonList('/catalog/artists/$artistId/top-tracks');
     return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();

@@ -26,6 +26,7 @@ typedef AuthInfo = ({
   Profile? acting,
   String mode,
   String? listenbrainzUser,
+  String? lastfmUser,
   String? inviteCode,
 });
 
@@ -54,6 +55,7 @@ final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) asy
     acting: _profile(json['acting']),
     mode: mode,
     listenbrainzUser: (json['acting'] as Map<String, dynamic>?)?['listenbrainzUser'] as String?,
+    lastfmUser: (json['acting'] as Map<String, dynamic>?)?['lastfmUser'] as String?,
     inviteCode: user == null && mode == 'login' ? code : null,
   );
 });

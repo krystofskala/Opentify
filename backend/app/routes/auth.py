@@ -51,6 +51,7 @@ def _user_out(u: AppUser | None) -> dict | None:
         "tailscaleLogin": u.tailscale_login,
         "username": u.username,
         "hasPassword": u.password_hash is not None,
+        "lastfmUser": u.lastfm_user,
         "listenbrainzUser": u.listenbrainz_user
         or (os.environ.get("LISTENBRAINZ_USERNAME") if u.id == ADMIN_ID and os.environ.get("LISTENBRAINZ_TOKEN") else None),
     }
@@ -314,6 +315,52 @@ async def connect_listenbrainz(body: ListenBrainzIn, request: Request):
     # Osobní mixy z ListenBrainz (Daily Jams, Objevuj...) hned, ne až zítra.
     asyncio.create_task(_build_listenbrainz_mixes(acting.id))
     return {"listenbrainzUser": data.get("user_name")}
+
+
+class LastfmFinishIn(BaseModel):
+    token: str
+
+
+@auth_router.post("/me/lastfm/start")
+async def lastfm_start(request: Request):
+    """Připojení vlastního Last.fm účtu profilu: vrátí odkaz na last.fm, kde
+    ho uživatel schválí; pak `/me/lastfm/finish` s tokenem."""
+    from app.catalog.lastfm import LastfmError
+    from app.lastfm_scrobble import start_connect
+
+    _user, acting = resolve_user(request)
+    if acting is None:
+        raise HTTPException(status_code=401, detail="Nepřihlášené zařízení.")
+    try:
+        return await start_connect()
+    except LastfmError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@auth_router.post("/me/lastfm/finish")
+async def lastfm_finish(body: LastfmFinishIn, request: Request):
+    from app.catalog.lastfm import LastfmError
+    from app.lastfm_scrobble import finish_connect
+
+    _user, acting = resolve_user(request)
+    if acting is None:
+        raise HTTPException(status_code=401, detail="Nepřihlášené zařízení.")
+    try:
+        name = await finish_connect(acting.id, body.token.strip())
+    except LastfmError as exc:
+        raise HTTPException(status_code=400, detail=f"Last.fm: {exc}") from exc
+    return {"lastfmUser": name}
+
+
+@auth_router.delete("/me/lastfm")
+async def lastfm_disconnect(request: Request):
+    from app.lastfm_scrobble import disconnect
+
+    _user, acting = resolve_user(request)
+    if acting is None:
+        raise HTTPException(status_code=401, detail="Nepřihlášené zařízení.")
+    disconnect(acting.id)
+    return {"lastfmUser": None}
 
 
 async def _build_listenbrainz_mixes(user_id: str) -> None:

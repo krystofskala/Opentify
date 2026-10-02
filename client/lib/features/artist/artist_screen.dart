@@ -145,6 +145,12 @@ class _ArtistBody extends ConsumerWidget {
     final topRelease = sortedReleases.isEmpty ? null : sortedReleases.first;
     final topTracks = topRelease == null ? null : ref.watch(releaseTracksProvider(topRelease.id));
     final bio = ref.watch(artistBioProvider(artist.id));
+    final stats = ref.watch(artistStatsProvider(artist.id)).valueOrNull;
+    final byId = {for (final r in discography.releases) r.id: r};
+    final popularReleases = [
+      for (final id in stats?.popularReleaseIds ?? const <String>[])
+        if (byId[id] case final r?) r,
+    ];
 
     return ScreenAccent(
       imageUrl: artist.coverImageUrl,
@@ -193,6 +199,8 @@ class _ArtistBody extends ConsumerWidget {
                 HeroMetaItem(Symbols.library_music_rounded, '${discography.releases.length} vydání'),
                 if (_activeYears(discography.releases) case final years?)
                   HeroMetaItem(Symbols.calendar_today_rounded, years),
+                if (stats?.listeners case final listeners?)
+                  HeroMetaItem(Symbols.headphones_rounded, '${_compactCount(listeners)} posluchačů'),
               ],
             ),
             ...detailContentSlivers(context, [
@@ -258,6 +266,11 @@ class _ArtistBody extends ConsumerWidget {
                         ),
                 ),
               ),
+              // Jako "Populární vydání" na Spotify -- pořadí podle Last.fm.
+              if (popularReleases.length >= 3) ...[
+                const SliverToBoxAdapter(child: SectionHeader('Populární vydání')),
+                SliverToBoxAdapter(child: _ReleaseRail(releases: popularReleases)),
+              ],
               SliverToBoxAdapter(
                 child: bio.maybeWhen(
                   data: (data) => _RelatedArtistsSection(bio: data),
@@ -290,6 +303,16 @@ class _ArtistBody extends ConsumerWidget {
       ),
     );
   }
+}
+
+final artistStatsProvider = FutureProvider.autoDispose.family<({int? listeners, List<String> popularReleaseIds}), String>(
+    (ref, artistId) => ref.watch(catalogRepositoryProvider).getArtistStats(artistId));
+
+/// "1,2 mil." / "345 tis." -- počet posluchačů do hlavičky.
+String _compactCount(int n) {
+  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(n >= 10000000 ? 0 : 1).replaceAll('.', ',')} mil.';
+  if (n >= 1000) return '${(n / 1000).round()} tis.';
+  return '$n';
 }
 
 final artistTopTracksProvider = FutureProvider.autoDispose.family<List<RecordingModel>, String>((ref, artistId) {

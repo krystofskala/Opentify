@@ -92,6 +92,35 @@ async def _deezer_id(artist_id: str) -> str | None:
     return None
 
 
+async def _lastfm_similar(recording_id: str, rng: random.Random, limit: int = 25) -> list[dict[str, Any]]:
+    from app.catalog import lastfm
+    from app.catalog.artwork import _normalize
+
+    with Session(engine) as session:
+        rec = session.get(Recording, recording_id)
+        artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
+        if rec is None or artist is None:
+            return []
+        title, name = rec.title, primary_artist_name(artist.name)
+    similar = await lastfm.similar_tracks(name, title, limit=limit * 2)
+    rng.shuffle(similar)
+    dz = get_deezer_client()
+    out: list[dict[str, Any]] = []
+    for item in similar:
+        try:
+            found = await dz.find_track(item["artist"], item["title"])
+        except Exception:  # noqa: BLE001
+            continue
+        if not found or not found.get("id") or _is_junk(found):
+            continue
+        if _normalize((found.get("artist") or {}).get("name", "")) != _normalize(item["artist"]):
+            continue
+        out.append(found)
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, Any]:
     if kind not in KINDS:
         raise StationError("neznámý druh")
@@ -120,6 +149,11 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
             continue
     raw = [t for t in raw if not _is_junk(t)]
     rng.shuffle(raw)
+    # Rádio od skladby: navrch podobné skladby z Last.fm (podle toho, co
+    # posluchači pouštějí po sobě) -- Deezer "artist radio" je jen podle
+    # interpreta a opakuje se.
+    if kind == "track":
+        raw = await _lastfm_similar(first[0], rng) + raw
     ids = await asyncio.to_thread(g._ingest_tracks, raw)
     ids = [i for i in ids if i not in first]
     artist_of = await asyncio.to_thread(_artists_of, ids + first)

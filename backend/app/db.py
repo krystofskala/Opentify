@@ -37,7 +37,7 @@ def _ensure_columns() -> None:
             ("waveform_duration_ms", "INTEGER"),
         ],
         "recording": [("deezer_id", "VARCHAR")],
-        "listen": [("context", "VARCHAR")],
+        "listen": [("context", "VARCHAR"), ("lastfm_submitted_at", "DATETIME"), ("lastfm_attempts", "INTEGER")],
         "listenlater": [("source", "VARCHAR")],
         "appuser": [
             ("tailscale_login", "VARCHAR"),
@@ -47,6 +47,9 @@ def _ensure_columns() -> None:
             ("password_hash", "VARCHAR"),
             ("home_genres", "JSON"),
             ("appearance", "JSON"),
+            ("lastfm_session", "VARCHAR"),
+            ("lastfm_user", "VARCHAR"),
+            ("lastfm_connected_at", "DATETIME"),
         ],
         "playlistitem": [("added_by", "VARCHAR")],
         "playlist": [

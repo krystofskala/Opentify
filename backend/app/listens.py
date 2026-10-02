@@ -218,6 +218,16 @@ async def lb_submit_loop(interval_s: float = 60.0) -> None:
             raise
         except Exception:  # noqa: BLE001 - smyčka nesmí umřít
             logger.exception("ListenBrainz: odesílací smyčka selhala")
+        try:
+            # Last.fm jen za profily s vlastním připojeným účtem.
+            from app import lastfm_scrobble
+
+            while await lastfm_scrobble.submit_pending() >= lastfm_scrobble._BATCH:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("Last.fm: odesílací smyčka selhala")
         _wakeup.clear()
         try:
             await asyncio.wait_for(_wakeup.wait(), timeout=interval_s)

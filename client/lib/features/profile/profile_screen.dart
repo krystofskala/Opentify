@@ -31,6 +31,7 @@ import '../../core/share_image.dart' show shareFile;
 import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import '../../widgets/toast.dart';
+import '../artist/artist_support.dart' show openExternal;
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -192,6 +193,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     onPressed: () => _export(context),
                   ),
                   const _ListenBrainzRow(),
+                  const _LastfmRow(),
                   if (isAdmin) ...[
                     _ActionRow(
                       icon: Symbols.fact_check_rounded,
@@ -861,6 +863,99 @@ class _AppVersion extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// Vlastní Last.fm účet profilu: scrobbly jen tohohle profilu a jen od
+/// připojení. Ostatní profily bez vlastního účtu na Last.fm nic neposílají.
+class _LastfmRow extends ConsumerWidget {
+  const _LastfmRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider).valueOrNull;
+    if (auth?.acting == null) return const SizedBox.shrink();
+    final user = auth!.lastfmUser;
+    return _ActionRow(
+      icon: Symbols.graphic_eq_rounded,
+      title: user == null ? 'Last.fm' : 'Last.fm · $user',
+      description: user == null
+          ? 'Připoj svůj Last.fm a poslechy z Opentify se ti budou zapisovat (scrobblovat) do tvého profilu.'
+          : 'Poslechy tohohle profilu se scrobblují do účtu $user.',
+      buttonLabel: user == null ? 'Připojit…' : 'Odpojit',
+      onPressed: () => user == null ? _connect(context, ref) : _disconnect(context, ref),
+    );
+  }
+
+  Future<void> _connect(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final api = ref.read(apiClientProvider);
+    final String token;
+    final String url;
+    try {
+      final start = await api.postJson('/auth/me/lastfm/start');
+      token = start['token'] as String;
+      url = start['url'] as String;
+    } catch (e) {
+      showToast(messenger, e is ApiException ? (e.detail ?? 'Last.fm teď nejde připojit.') : 'Last.fm teď nejde připojit.');
+      return;
+    }
+    if (!context.mounted) return;
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Připojit Last.fm'),
+        // Odkaz otevře až klepnutí (Safari jinak okno po síťovém dotazu zablokuje).
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('1. Otevři last.fm a klepni na „Yes, allow access“.\n2. Vrať se sem a dej Hotovo.'),
+            const SizedBox(height: AppSpacing.sm),
+            GlassButton(
+              label: 'Otevřít last.fm',
+              icon: Symbols.open_in_new_rounded,
+              style: GlassButtonStyle.tonal,
+              compact: true,
+              onPressed: () => openExternal(url),
+            ),
+          ],
+        ),
+        actions: [
+          GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(false),
+          ),
+          GlassButton(
+            label: 'Hotovo',
+            style: GlassButtonStyle.prominent,
+            compact: true,
+            onPressed: () => Navigator.of(context).pop(true),
+          ),
+        ],
+      ),
+    );
+    if (done != true) return;
+    try {
+      final json = await api.postJson('/auth/me/lastfm/finish', body: {'token': token});
+      ref.invalidate(authProvider);
+      showToast(messenger, 'Last.fm připojen jako ${json['lastfmUser']}.');
+    } catch (e) {
+      showToast(messenger, e is ApiException ? (e.detail ?? 'Připojení se nepodařilo.') : 'Připojení se nepodařilo.');
+    }
+  }
+
+  Future<void> _disconnect(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(apiClientProvider).deleteJson('/auth/me/lastfm');
+      ref.invalidate(authProvider);
+      showToast(messenger, 'Last.fm odpojen, poslechy se tam už neposílají.');
+    } catch (_) {
+      showToast(messenger, 'Odpojení se nepodařilo.');
+    }
   }
 }
 

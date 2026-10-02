@@ -322,6 +322,51 @@ async def _lb_tag_tracks(c: Category, limit: int) -> list[str]:
     return await asyncio.to_thread(g._ingest_tracks, tracks) if tracks else []
 
 
+# Last.fm štítky (posluchači) -- jinak pojmenované než MusicBrainz.
+LASTFM_TAGS: dict[str, tuple[str, ...]] = {
+    **LB_TAGS,
+    "hiphop": ("hip-hop", "rap"), "rnb": ("rnb",), "kids": ("childrens music",),
+    "asian": ("k-pop", "j-pop"), "brazil": ("mpb", "bossa nova"), "african": ("afrobeats", "afrobeat"),
+}
+LASTFM_EXTRA = 40
+
+
+async def _lastfm_tag_tracks(c: Category, limit: int) -> list[str]:
+    """Skladby žánru podle štítků posluchačů Last.fm, spárované s Deezerem
+    (interpret + název, jen přesná shoda interpreta). Denně jiný výběr --
+    u menších žánrů (bluegrass, country) víc než Deezer i ListenBrainz."""
+    import random
+
+    from app.catalog import lastfm
+    from app.catalog.artwork import _normalize
+
+    if not lastfm.api_key():
+        return []
+    rows: list[dict[str, Any]] = []
+    for tag in LASTFM_TAGS.get(c.id, ()):
+        rows += await lastfm.tag_top_tracks(tag, limit=150)
+    seen: set[tuple[str, str]] = set()
+    unique = []
+    for r in rows:
+        key = (_normalize(r["artist"]), _normalize(r["title"]))
+        if key not in seen:
+            seen.add(key)
+            unique.append(r)
+    random.Random(f"lastfm:{c.id}:{utcnow().date().isoformat()}").shuffle(unique)
+    dz = get_deezer_client()
+    tracks: list[dict[str, Any]] = []
+    for r in unique[: limit * 3]:
+        found = await dz.find_track(r["artist"], r["title"])
+        if not found or not found.get("id"):
+            continue
+        if _normalize((found.get("artist") or {}).get("name", "")) != _normalize(r["artist"]):
+            continue
+        tracks.append(found)
+        if len(tracks) >= limit:
+            break
+    return await asyncio.to_thread(g._ingest_tracks, tracks) if tracks else []
+
+
 async def _base_tracks(c: Category) -> list[str]:
     """Základ řady: Deezer žebříček žánru, u bluegrassu vlastní výběr
     interpretů, jinak playlisty se žánrem v názvu."""
@@ -346,8 +391,8 @@ async def _base_tracks(c: Category) -> list[str]:
 
 async def genre_rail(c: Category, *, force: bool = False) -> str | None:
     """Jedna řada skladeb žánru -- ta samá na Domů (Žánry, připnuté žánry)
-    i na stránce žánru v Hledat. Základ (`_base_tracks`) + skladby z tagů
-    ListenBrainz, bez duplicit (stejná nahrávka ani stejný interpret+název).
+    i na stránce žánru v Hledat. Základ (`_base_tracks`) + skladby ze štítků
+    Last.fm a tagů ListenBrainz, bez duplicit (stejná nahrávka ani stejný interpret+název).
     Id playlistu se pamatuje v `HomeSnapshot`, obnova denně."""
     from app.models import HomeSnapshot
 
@@ -356,6 +401,7 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
         if snap is not None and not force and utcnow() - _aware(snap.generated_at) < RAIL_FRESH:
             return snap.payload.get("playlistId")
     base = await _base_tracks(c)
+    from_lastfm = await _lastfm_tag_tracks(c, LASTFM_EXTRA)
     extra = await _lb_tag_tracks(c, LB_EXTRA)
     combined: list[str] = []
     seen: set[tuple[str, str]] = set()
@@ -368,9 +414,9 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
             seen.add(key)
             combined.append(rid)
 
-        # Napřed Deezer (žebříček / výběr), ListenBrainz jen doplní, co Deezer
-        # neměl (přání: Deezer výsledky první).
-        for rid in [*base, *extra]:
+        # Napřed Deezer (žebříček / výběr), pak Last.fm a ListenBrainz jen
+        # doplní, co Deezer neměl (přání: Deezer výsledky první).
+        for rid in [*base, *from_lastfm, *extra]:
             if len(combined) >= RAIL_SIZE:
                 break
             take(rid)

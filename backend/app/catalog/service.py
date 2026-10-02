@@ -741,13 +741,16 @@ class CatalogService:
         if (artist.mbid or "").startswith("own:"):
             # Vlastní interpret: vlastní text (členové kapely...), nic online.
             return ArtistBioOut(bio=(artist.external_refs or {}).get("bio"), related_artists=[])
+        # "Podobní" z Last.fm (podobnost podle posluchačů) -- MusicBrainz
+        # vztahy (členové, spolupráce) jsou jen záloha.
+        similar = await self._lastfm_similar(artist)
         if artist.mbid is None:
-            return ArtistBioOut(bio=None, related_artists=[])
+            return ArtistBioOut(bio=None, related_artists=[self._to_artist_out(a) for a in similar])
 
         try:
             data = await self._mb.get_artist(artist.mbid)
         except MusicBrainzError:
-            return ArtistBioOut(bio=None, related_artists=[])
+            return ArtistBioOut(bio=None, related_artists=[self._to_artist_out(a) for a in similar])
 
         relations = data.get("relations") or []
 
@@ -757,8 +760,38 @@ class CatalogService:
             wiki = get_wikimedia_client()
             bio = await wiki.get_bio_from_wikidata(wikidata_qid)
 
-        related = self._upsert_related_artists(relations)
+        related = similar or self._upsert_related_artists(relations)
         return ArtistBioOut(bio=bio, related_artists=[self._to_artist_out(a) for a in related])
+
+    _SIMILAR_LIMIT = 12
+
+    async def _lastfm_similar(self, artist: Artist) -> list[Artist]:
+        from app.catalog import lastfm
+
+        found = await lastfm.similar_artists(artist.name, limit=self._SIMILAR_LIMIT * 2)
+        out: list[Artist] = []
+        seen: set[str] = {artist.id}
+        for item in found:
+            row: Artist | None = None
+            if item.get("mbid"):
+                row = self._session.exec(select(Artist).where(Artist.mbid == item["mbid"])).first()
+            if row is None:
+                # Přes Deezer (fotka, diskografie), jen přesná shoda jména.
+                hits = await self._dz.search_artist(item["name"])
+                hit = next((h for h in hits if norm(h.get("name") or "") == norm(item["name"])), None)
+                if hit is not None:
+                    row = ingest_artist(self._session, hit)
+            if row is None and item.get("mbid"):
+                row = upsert_artist(self._session, mbid=item["mbid"], name=item["name"], sort_name=None)
+            if row is None or row.id in seen:
+                continue
+            seen.add(row.id)
+            out.append(row)
+            if len(out) >= self._SIMILAR_LIMIT:
+                break
+        if out:
+            self._session.commit()
+        return out
 
     async def get_artist_support(self, artist_id: str) -> dict[str, Any] | None:
         """Jak interpreta podpořit (sekce "Podpořit" na jeho stránce): odkazy

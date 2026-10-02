@@ -70,8 +70,12 @@ typedef _SectionKey = ({String query, String type, int limit});
 /// se navíc načítají a zobrazují nezávisle na sobě.
 final searchSectionProvider = FutureProvider.autoDispose.family<List<SearchResultItem>, _SectionKey>((ref, key) async {
   final result = await ref.watch(catalogRepositoryProvider).search(key.query, entityType: key.type, limit: key.limit);
+  if (result.didYouMean != null) ref.read(searchCorrectionProvider(key.query).notifier).state = result.didYouMean;
   return result.results;
 });
+
+/// "Výsledky pro …" -- dotaz opravený přes Last.fm (překlep ve jménu).
+final searchCorrectionProvider = StateProvider.autoDispose.family<String?, String>((ref, query) => null);
 
 /// Hledání v globálním katalogu -- živé výsledky s debounce, sekce podle
 /// typu (Skladby / Interpreti / Alba) + filtrovací čipy, našeptávání z
@@ -389,10 +393,22 @@ class _AllResults extends ConsumerWidget {
       );
     }
 
+    final corrected = ref.watch(searchCorrectionProvider(query));
     return ListView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
       children: [
+        if (corrected != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+            child: Text.rich(
+              TextSpan(children: [
+                const TextSpan(text: 'Výsledky pro '),
+                TextSpan(text: '„$corrected“', style: const TextStyle(fontWeight: FontWeight.w700)),
+              ]),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
         _Section(
           title: 'Skladby',
           value: tracks,

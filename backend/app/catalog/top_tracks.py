@@ -16,6 +16,7 @@ název) a převezmou. Výsledek (id skladeb + počty) se cachuje na 24 h.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from typing import Any
@@ -96,6 +97,13 @@ async def _lb_top(artist_mbid: str) -> list[dict[str, Any]]:
 _VERSION = re.compile(r"\b(live|instrumental|acoustic|remix|demo|karaoke|unplugged|session|edit|version)\b|\d{4}-\d{2}", re.I)
 
 
+def _exact(text: str) -> str:
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _find_local(
     session: Session, artist_id: str, mbid: str | None, title: str, release_name: str | None = None
 ) -> Recording | None:
@@ -103,35 +111,25 @@ def _find_local(
         rec = session.exec(select(Recording).where(Recording.mbid == mbid)).first()
         if rec is not None:
             return rec
-    # Stejné jméno má často desítky nahrávek (koncerty z MusicBrainz) --
-    # `_normalize` závorky zahazuje, takže "Ride (Live In Mexico City)" se
-    # rovnalo "Ride" a vyhrála první v DB. Přednost: stejné album, přesný
-    # název, ne živá/instrumentální verze.
+    # Přesně ta verze, kterou zdroj uvádí: stejný název (i se závorkami) a
+    # stejné album. Stejné jméno má často desítky nahrávek (koncerty
+    # z MusicBrainz) -- dřív vyhrála první v DB ("Ride (Live In Mexico City)").
     from app.models import Release
 
-    wanted = _normalize(title)
-    exact = title.strip().casefold()
-    wanted_release = _normalize(release_name or "")
-    best: tuple[int, Recording] | None = None
-    for rec in session.exec(select(Recording).where(Recording.artist_id == artist_id)).all():
-        if _normalize(rec.title) != wanted:
-            continue
+    exact_title = _exact(title)
+    exact_release = _exact(release_name) if release_name else None
+    same_title = [
+        rec
+        for rec in session.exec(select(Recording).where(Recording.artist_id == artist_id)).all()
+        if _exact(rec.title) == exact_title
+    ]
+    if exact_release is None:
+        return same_title[0] if len(same_title) == 1 else None
+    for rec in same_title:
         release = session.get(Release, rec.release_id) if rec.release_id else None
-        release_title = release.title if release else ""
-        score = 0
-        if wanted_release and _normalize(release_title) == wanted_release:
-            score += 4
-        if rec.title.strip().casefold() == exact:
-            score += 2
-        if _VERSION.search(rec.title) and not _VERSION.search(title):
-            score -= 3
-        if _VERSION.search(release_title) and not _VERSION.search(release_name or ""):
-            score -= 2
-        if best is None or score > best[0]:
-            best = (score, rec)
-    if best is None or best[0] < 0:
-        return None  # jen jiné verze -- radši dohledat přes Deezer
-    return best[1]
+        if release is not None and _exact(release.title) == exact_release:
+            return rec
+    return None  # ta verze tu ještě není -- dohledá se přes Deezer
 
 
 async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
@@ -167,7 +165,15 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
     source: str | None = None
     lastfm = await _lastfm_top(primary_artist_name(name))
     if len(lastfm) >= 5:
-        entries = [{"title": e["title"], "listens": e["listens"]} for e in lastfm]
+        from app.catalog.lastfm import track_album
+
+        # Album každé skladby z Last.fm -- vybere se přesně ta verze, která se
+        # poslouchá (ne živá nahrávka se stejným názvem).
+        albums = await asyncio.gather(*(track_album(primary_artist_name(name), e["title"]) for e in lastfm[:LIMIT * 2]))
+        entries = [
+            {"title": e["title"], "listens": e["listens"], "release": album}
+            for e, album in zip(lastfm[:LIMIT * 2], albums)
+        ]
         source = "lastfm"
     elif mbid:
         entries = [
@@ -190,7 +196,35 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
                 rec = _find_local(session, artist_id, entry.get("mbid"), title, entry.get("release"))
                 rec_id = rec.id if rec is not None else None
             if rec_id is None:
-                track = await dz.find_track(primary_artist_name(name), title)
+                track = None
+                if entry.get("release"):
+                    # Přesně ta verze: Deezer s názvem alba.
+                    found = await dz.search(
+                        f'artist:"{primary_artist_name(name)}" track:"{title}" album:"{entry["release"]}"', 5
+                    )
+                    track = next(
+                        (
+                            t
+                            for t in (found or {}).get("data") or []
+                            if _exact(t.get("title") or "") == _exact(title)
+                            and _exact((t.get("album") or {}).get("title") or "") == _exact(entry["release"])
+                        ),
+                        None,
+                    )
+                if track is None:
+                    # Přesně stejný název skladby od toho interpreta (ne "(Live in ...)").
+                    found = await dz.search(f"{primary_artist_name(name)} {title}", 10)
+                    track = next(
+                        (
+                            t
+                            for t in (found or {}).get("data") or []
+                            if _exact(t.get("title") or "") == _exact(title)
+                            and _exact((t.get("artist") or {}).get("name") or "") == _exact(primary_artist_name(name))
+                        ),
+                        None,
+                    )
+                if track is None:
+                    track = await dz.find_track(primary_artist_name(name), title)
                 if track:
                     with Session(engine) as session:
                         rec = ingest_track_with_context(session, track)
@@ -231,7 +265,7 @@ async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
     async def build() -> dict[str, Any]:
         return {"items": await _ids_and_counts(artist_id)}
 
-    cached = await cached_json(f"artist-top:v3:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
+    cached = await cached_json(f"artist-top:v5:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
     result = []
     with Session(engine) as session:
         for item in cached.get("items", []):
