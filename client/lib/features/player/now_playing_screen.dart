@@ -883,10 +883,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               ),
             ),
           ],
-          if (isProvisioning) ...[
+          // Načítání bez známého stavu stahování (stav ještě nedorazil) --
+          // jinak jen nekonečný spinner bez vysvětlení (nález vizuálního auditu).
+          if (isProvisioning || (playback.isBuffering && playback.position == Duration.zero)) ...[
             const SizedBox(height: 8),
             Text(
-              provisioningState!.statusLabel,
+              isProvisioning ? provisioningState!.statusLabel : 'Načítám…',
               textAlign: TextAlign.center,
               style: TextStyle(color: playerFg(context).withValues(alpha: 0.6), fontSize: 13),
             ),

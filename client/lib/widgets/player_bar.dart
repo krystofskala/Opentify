@@ -370,6 +370,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                 statusColor = Theme.of(context).colorScheme.error;
               } else if (isProvisioning) {
                 status = provisioningState!.statusLabel;
+              } else if (playback.isBuffering && playback.position == Duration.zero) {
+                status = 'Načítám…';
               }
               return Stack(
                 children: [
