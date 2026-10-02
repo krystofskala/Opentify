@@ -665,6 +665,25 @@ async def _add_and_fetch(user_id: str, device_id: str, recording_ids: list[str])
     return added
 
 
+# Před `/tracks/{recording_id}` -- jinak by "remove" bralo jako id skladby
+# (živě: Odebrat z knihovny -> 404 "skladba nenalezena").
+@library_router.post("/tracks/remove")
+def remove_tracks(
+    body: RemoveTracksBody,
+    dry_run: bool = Query(default=False, alias="dryRun"),
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """`?dryRun=true` -- jen spočítá, co by se stalo (kolik MB se uvolní, co
+    se jen skryje), pro potvrzovací sheet v klientovi. Nic nemění."""
+    results = [_remove_for(session, current[0], rid, dry_run) for rid in body.recording_ids[:500]]
+    return {
+        "removed": sum(1 for r in results if r["result"] != "not_in_library"),
+        "freedBytes": sum(r["freedBytes"] for r in results),
+        "results": results,
+    }
+
+
 @library_router.post("/tracks/{recording_id}")
 async def add_track(recording_id: str, current: tuple[str, str] = Depends(get_current_user)):
     """"Přidat do knihovny" -- skladba."""
@@ -698,23 +717,6 @@ def remove_track(
     jsou samostatné akce), jen z "Moje knihovna". Jiný profil než admin
     maže jen svou položku, sdílený soubor zůstává."""
     return _remove_for(session, current[0], recording_id)
-
-
-@library_router.post("/tracks/remove")
-def remove_tracks(
-    body: RemoveTracksBody,
-    dry_run: bool = Query(default=False, alias="dryRun"),
-    session: Session = Depends(get_session),
-    current: tuple[str, str] = Depends(get_current_user),
-):
-    """`?dryRun=true` -- jen spočítá, co by se stalo (kolik MB se uvolní, co
-    se jen skryje), pro potvrzovací sheet v klientovi. Nic nemění."""
-    results = [_remove_for(session, current[0], rid, dry_run) for rid in body.recording_ids[:500]]
-    return {
-        "removed": sum(1 for r in results if r["result"] != "not_in_library"),
-        "freedBytes": sum(r["freedBytes"] for r in results),
-        "results": results,
-    }
 
 
 @library_router.post("/import/spotify")

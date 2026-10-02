@@ -109,7 +109,7 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         # podle jména (našlo by cizí kapelu).
         return {"url": None, "title": recording.title, "artistName": artist_name or None, "spotifySearchUrl": None}
     release_row = session.get(Release, recording.release_id) if recording.release_id else None
-    if release_row is not None and (release_row.external_refs or {}).get("source") == "youtube":
+    if release_row is not None and (release_row.external_refs or {}).get("source") in ("youtube", "manual"):
         # Album jen na YouTube -- Spotify/Apple ho nemají, jen zdrojové video.
         return {
             "url": None,
@@ -183,7 +183,14 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
     if release is None:
         raise HTTPException(status_code=404, detail="album nenalezeno")
     artist_name = _artist_name(session, release.artist_id)
-    if is_own_id(release.deezer_id):
+    artist_row = session.get(Artist, release.artist_id) if release.artist_id else None
+    # Vlastní / ručně přiřazené / jen z YouTube: venku pod tímhle jménem není
+    # (hledání podle jména by našlo cizího interpreta) -- jen odkaz v Opentify.
+    if (
+        is_own_id(release.deezer_id)
+        or (artist_row is not None and is_own_id(artist_row.deezer_id))
+        or (release.external_refs or {}).get("source") in ("youtube", "manual")
+    ):
         return {"url": None, "title": release.title, "artistName": artist_name or None, "spotifySearchUrl": None}
     artist = primary_artist_name(artist_name)
     refs = dict(release.external_refs or {})
