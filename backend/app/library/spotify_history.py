@@ -38,7 +38,7 @@ logger = logging.getLogger("uvicorn.error")
 
 SOURCE = "spotify-history"
 # Importované historie (ne poslechy v appce) -- "Pokračovat v poslechu" je vynechá.
-IMPORTED_SOURCES = (SOURCE, "ytmusic-history")
+IMPORTED_SOURCES = (SOURCE, "ytmusic-history", "applemusic-history")
 MIN_PLAY_MS = 30_000
 YEAR_TOP = 100
 FIRST_YEAR = 2016  # starší roky uživatel nechtěl

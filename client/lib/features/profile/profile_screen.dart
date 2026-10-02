@@ -182,6 +182,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     buttonLabel: 'Vybrat soubor…',
                     onPressed: () => _importFromSpotify(context),
                   ),
+                  const _ImportedHistoryLine(),
                   _ActionRow(
                     icon: Symbols.download_rounded,
                     title: 'Exportovat moje data',
@@ -256,8 +257,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       messenger.hideCurrentSnackBar();
       if (!context.mounted) return;
       if (imported.historyListens != null) {
-        showToast(messenger, 'Historie poslechů nahraná (${imported.historyListens} poslechů) – Wrapped a mixy '
-              'se podle ní přepočítají.');
+        ref.invalidate(importedHistoryProvider);
+        final yt = imported.platform == 'ytmusic';
+        showToast(
+          messenger,
+          [
+            if (imported.historyListens! > 0)
+              '${yt ? 'YouTube Music' : 'Spotify'}: ${imported.historyListens} poslechů nahráno – Wrapped a mixy se přepočítají',
+            if ((imported.libraryTracks ?? 0) > 0)
+              'knihovna YouTube Music (${imported.libraryTracks} skladeb) je v playlistu „YouTube Music · Knihovna“',
+          ].join('; '),
+        );
         return;
       }
       final result = imported.result!;
@@ -700,6 +710,36 @@ class _GlassSlider extends ConsumerWidget {
 }
 
 /// Položka ve skupině Profilu: ikona, název, popis a tlačítko.
+/// Kolik poslechů je nahraných z které služby (rozlišení Spotify / YouTube
+/// Music / Apple Music -- dohromady se sčítají ve Wrapped a mixech).
+final importedHistoryProvider = FutureProvider.autoDispose<Map<String, int>>((ref) async {
+  final json = await ref.read(apiClientProvider).getJson('/library/history-imports');
+  return {for (final e in json.entries) e.key: (e.value as num).toInt()};
+});
+
+class _ImportedHistoryLine extends ConsumerWidget {
+  const _ImportedHistoryLine();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final counts = ref.watch(importedHistoryProvider).valueOrNull ?? const {};
+    const names = {'spotify': 'Spotify', 'ytmusic': 'YouTube Music', 'applemusic': 'Apple Music'};
+    final parts = [
+      for (final e in names.entries)
+        if ((counts[e.key] ?? 0) > 0) '${e.value}: ${counts[e.key]} poslechů',
+    ];
+    if (parts.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 30, bottom: AppSpacing.xs),
+      child: Text(
+        'Nahraná historie – ${parts.join(' · ')}',
+        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      ),
+    );
+  }
+}
+
 class _ActionRow extends StatelessWidget {
   const _ActionRow({
     required this.icon,

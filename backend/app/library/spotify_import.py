@@ -88,12 +88,16 @@ def get_or_create_liked_songs_playlist(session: Session, user_id: str) -> Playli
     return _get_or_create_playlist(session, user_id, LIKED_SONGS_SOURCE, LIKED_SONGS_TITLE)
 
 
-def _get_or_create_playlist(session: Session, user_id: str, source: str, title: str) -> Playlist:
+def _get_or_create_playlist(
+    session: Session, user_id: str, source: str, title: str, description: str | None = None
+) -> Playlist:
     playlist = session.exec(
         select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == source)
     ).first()
     if playlist is None:
-        playlist = Playlist(owner_user_id=user_id, title=title, kind=PlaylistKind.USER, source=source)
+        playlist = Playlist(
+            owner_user_id=user_id, title=title, kind=PlaylistKind.USER, source=source, description=description
+        )
         session.add(playlist)
         session.commit()
         session.refresh(playlist)
@@ -179,11 +183,14 @@ def _import_tracks_into_playlist(
     )
 
 
-def _import_named_playlist(session: Session, user_id: str, name: str, tracks: list[TrackRow]) -> PlaylistReport:
+def _import_named_playlist(
+    session: Session, user_id: str, name: str, tracks: list[TrackRow], description: str = "Import ze Spotify"
+) -> PlaylistReport:
+    """`description` -- odkud playlist je (Spotify / YouTube Music / Apple Music)."""
     if name.replace(" ", "_").lower() == "liked_songs":
         playlist = get_or_create_liked_songs_playlist(session, user_id)
         return _import_tracks_into_playlist(session, playlist, tracks, mirror=False)
-    playlist = _get_or_create_playlist(session, user_id, _import_source_key(name), name)
+    playlist = _get_or_create_playlist(session, user_id, _import_source_key(name), name, description)
     return _import_tracks_into_playlist(session, playlist, tracks, mirror=True)
 
 

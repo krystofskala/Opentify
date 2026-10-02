@@ -252,7 +252,7 @@ class LibraryRepository {
 
   /// Playlisty/knihovna, NEBO historie poslechů (ZIP "Extended streaming
   /// history" -- server ho pozná sám; pak `historyListens`).
-  Future<({SpotifyImportResult? result, int? historyListens})> importSpotifyLibrary(
+  Future<({SpotifyImportResult? result, int? historyListens, int? libraryTracks, String? platform})> importSpotifyLibrary(
       List<int> bytes, String filename) async {
     final json = await _api.postMultipart(
       '/library/import/spotify',
@@ -260,8 +260,15 @@ class LibraryRepository {
       bytes: bytes,
       filename: filename,
     );
-    if (json['kind'] == 'history') return (result: null, historyListens: json['listens'] as int? ?? 0);
-    return (result: SpotifyImportResult.fromJson(json), historyListens: null);
+    if (json['kind'] == 'history') {
+      return (
+        result: null,
+        historyListens: json['listens'] as int? ?? 0,
+        libraryTracks: json['libraryTracks'] as int?,
+        platform: json['platform'] as String?,
+      );
+    }
+    return (result: SpotifyImportResult.fromJson(json), historyListens: null, libraryTracks: null, platform: null);
   }
 
   Future<LibrarySearchResult> searchLibrary(String query, {int limit = 20}) async {

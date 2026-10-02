@@ -737,29 +737,49 @@ async def import_spotify(
         plays = read_zip(raw)
     except (zipfile.BadZipFile, ValueError, KeyError):
         plays = []
-    # Google Takeout: historie YouTube Music.
-    from app.library.ytmusic_history import SOURCE as YT_SOURCE, read_upload as read_ytmusic
+    # Google Takeout (YouTube / YouTube Music): NIKDY do Spotify importu --
+    # dřív z celého Takeoutu vzniklo 22 prázdných playlistů (kanál, komentáře...).
+    from app.library.ytmusic_history import LIBRARY_PLAYLIST, SOURCE as YT_SOURCE, read_takeout
 
-    yt_plays = None if plays else read_ytmusic(raw)
-    if yt_plays is not None:
-        if not yt_plays:
+    takeout = None if plays else await asyncio.to_thread(read_takeout, raw)
+    if takeout is not None and takeout.is_takeout:
+        if not takeout.plays and not takeout.library:
             raise HTTPException(
                 status_code=400,
-                detail="V exportu nejsou žádná přehrání z YouTube Music (jen obyčejná videa?).",
+                detail=(
+                    "V exportu z Google Takeoutu není historie YouTube Music."
+                    if not takeout.history_found
+                    else "Historie v exportu nemá žádná přehrání z YouTube Music (jen obyčejná videa)."
+                )
+                + " V Takeoutu vyber YouTube a YouTube Music › historie.",
             )
-        from app.home import generators as g
-        from app.library.spotify_history import import_history
+        out: dict = {"kind": "history", "platform": "ytmusic", "listens": 0}
+        if takeout.plays:
+            from app.home import generators as g
+            from app.library.spotify_history import import_history
 
-        token = g.set_home_user(user_id)
-        try:
-            result = await asyncio.to_thread(import_history, user_id, yt_plays, YT_SOURCE)
-        finally:
-            g.reset_home_user(token)
-        return {
-            "kind": "history",
-            "platform": "ytmusic",
-            **{k: v for k, v in result.items() if isinstance(v, (int, str, float, bool))},
-        }
+            token = g.set_home_user(user_id)
+            try:
+                result = await asyncio.to_thread(import_history, user_id, takeout.plays, YT_SOURCE)
+            finally:
+                g.reset_home_user(token)
+            out.update({k: v for k, v in result.items() if isinstance(v, (int, str, float, bool))})
+        if takeout.library:
+            from app.library.spotify_import import _import_named_playlist
+
+            def run_library():
+                with Session(engine) as own:
+                    report = _import_named_playlist(
+                        own, user_id, LIBRARY_PLAYLIST, takeout.library, description="Import z YouTube Music"
+                    )
+                    own.commit()
+                    return report
+
+            report = await asyncio.to_thread(run_library)
+            out["libraryTracks"] = len(takeout.library)
+            out["libraryPlaylist"] = LIBRARY_PLAYLIST
+            del report
+        return out
     if plays:
         from app.home import generators as g
 
@@ -1131,6 +1151,23 @@ async def verify_redownload(
         entry["review"] = "redownload"
         _write_verify_report(report)
     return {"recordingId": recording_id, "review": "redownload"}
+
+
+@library_router.get("/history-imports")
+def history_imports(
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Kolik poslechů profil nahrál z které služby (Profil › Moje hudba)."""
+    from app.models import Listen
+
+    rows = session.exec(
+        select(Listen.source, func.count())
+        .where(Listen.user_id == current[0], Listen.source.in_(["spotify-history", "ytmusic-history", "applemusic-history"]))  # type: ignore[union-attr]
+        .group_by(Listen.source)
+    ).all()
+    names = {"spotify-history": "spotify", "ytmusic-history": "ytmusic", "applemusic-history": "applemusic"}
+    return {names[src]: count for src, count in rows}
 
 
 @library_router.get("/favorite-artists")
