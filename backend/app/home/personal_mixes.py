@@ -622,11 +622,12 @@ async def build_styles() -> int:
     user_id = g.home_user()
     taste = await asyncio.to_thread(load_taste, user_id)
     top = [(taste.artist_name[a], w) for a, w in taste.artist_weight.most_common(40) if a in taste.artist_name]
-    styles = await lt.user_styles(top, 12)
+    styles = await lt.user_styles(top, 40)
     with Session(engine) as session:
         row = session.get(HomeSnapshot, styles_key(user_id)) or HomeSnapshot(key=styles_key(user_id))
-        row.payload = {"tags": styles}
+        # Na Domů 12 nejsilnějších, celý seznam pro "tvé podžánry" u žánrů.
+        row.payload = {"tags": styles[:12], "all": styles}
         row.generated_at = utcnow()
         session.add(row)
         session.commit()
-    return len(styles)
+    return len(styles[:12])

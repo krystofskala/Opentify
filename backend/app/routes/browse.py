@@ -72,7 +72,21 @@ async def category_for_you(category_id: str, current: tuple[str, str] = Depends(
     c = browse.get_category(category_id)
     if c is None or c.group != "genre":
         raise HTTPException(status_code=404, detail="žánr neexistuje")
-    return await browse.genre_for_you(c, current[0])
+    out = await browse.genre_for_you(c, current[0])
+    # Tvé podžánry: styly, které posloucháš, a patří pod tenhle žánr.
+    from app.home import personal_mixes as pm
+    from app.models import HomeSnapshot
+    from app.tags import SUBGENRES
+    from sqlmodel import Session
+
+    from app.db import engine
+
+    with Session(engine) as session:
+        snap = session.get(HomeSnapshot, pm.styles_key(current[0]))
+        payload = (snap.payload or {}) if snap else {}
+        mine = set(payload.get("all") or payload.get("tags") or [])
+    out["yourSubgenres"] = [t for t in SUBGENRES.get(c.id, ()) if t in mine]
+    return out
 
 
 @browse_router.post("/deezer-playlists/{deezer_id}")

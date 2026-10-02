@@ -976,6 +976,14 @@ async def category_page(c: Category) -> dict[str, Any]:
     page = await cached_json(f"browse:v3:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
     if c.group == "genre":
         page = {**page, **extras_cards(await genre_extras(c))}
+        # Česky (vlastní text) místo anglického popisu z Last.fm.
+        from app.genre_about import ABOUT_CS
+
+        if c.id in ABOUT_CS:
+            page["about"] = ABOUT_CS[c.id]
+            page["aboutSource"] = None
+        elif page.get("about"):
+            page["aboutSource"] = "Last.fm"
         new_id = await genre_new_releases(c) if c.id in SEED_ARTISTS else None
         page["mixes"] = genre_mixes(c, page.get("playlistId"), new_id)
         from app.tags import SUBGENRES, title_of

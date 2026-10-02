@@ -80,6 +80,7 @@ class BrowsePage {
     this.classics = const [],
     this.topArtists = const [],
     this.about,
+    this.aboutSource,
     this.related = const [],
     this.subgenres = const [],
   });
@@ -105,8 +106,11 @@ class BrowsePage {
   /// Hlavní interpreti žánru (Last.fm štítky, u bluegrassu vlastní výběr).
   final List<BrowseArtist> topArtists;
 
-  /// Krátký popis žánru (Last.fm, anglicky).
+  /// Krátký popis žánru (vlastní český, u ostatních Last.fm).
   final String? about;
+
+  /// Odkud popis je (null = vlastní text).
+  final String? aboutSource;
 
   /// Podobné žánry.
   final List<BrowseCategory> related;
@@ -125,6 +129,7 @@ class BrowsePage {
       classics: list('classics').map(HomeAlbumCard.fromJson).toList(),
       topArtists: list('topArtists').map(BrowseArtist.fromJson).toList(),
       about: json['about'] as String?,
+      aboutSource: json['aboutSource'] as String?,
       related: list('related').map(BrowseCategory.fromJson).toList(),
       subgenres: [for (final s in list('subgenres')) (tag: s['tag'] as String, title: s['title'] as String)],
     );
@@ -133,7 +138,15 @@ class BrowsePage {
 
 /// Stránka žánru › Pro tebe (`GET /browse/{id}/for-you`).
 class GenreForYou {
-  const GenreForYou({this.albums = const [], this.discover = const [], this.yourArtists = const []});
+  const GenreForYou({
+    this.albums = const [],
+    this.discover = const [],
+    this.yourArtists = const [],
+    this.yourSubgenres = const [],
+  });
+
+  /// Podžánry, které posloucháš.
+  final List<String> yourSubgenres;
 
   /// Alba žánru od interpretů, které posloucháš.
   final List<HomeAlbumCard> albums;
@@ -151,6 +164,7 @@ class GenreForYou {
       albums: list('albums').map(HomeAlbumCard.fromJson).toList(),
       discover: list('discover').map(BrowseArtist.fromJson).toList(),
       yourArtists: list('yourArtists').map(BrowseArtist.fromJson).toList(),
+      yourSubgenres: (json['yourSubgenres'] as List<dynamic>? ?? const []).cast<String>(),
     );
   }
 }

@@ -135,12 +135,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
         // Podžánry -- každý má vlastní stránku (mix, interpreti, alba).
         if (data.subgenres.isNotEmpty) ...[
           const SliverToBoxAdapter(child: SectionHeader('Podžánry')),
-          SliverToBoxAdapter(
-            child: TagChips(
-              tags: [for (final s in data.subgenres) s.tag],
-              titles: [for (final s in data.subgenres) s.title],
-            ),
-          ),
+          SliverToBoxAdapter(child: _Subgenres(categoryId: c.id, subgenres: data.subgenres)),
         ],
         // 2. Pro tebe -- tvůj mix žánru, alba od tvých interpretů, koho ještě neznáš.
         SliverToBoxAdapter(child: _YourMix(categoryId: c.id)),
@@ -234,7 +229,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
           ),
         ],
         // 7. O žánru (Last.fm, anglicky) a podobné žánry.
-        if (data.about != null) SliverToBoxAdapter(child: _About(text: data.about!)),
+        if (data.about != null) SliverToBoxAdapter(child: _About(text: data.about!, source: data.aboutSource)),
         if (data.related.isNotEmpty) ...[
           const SliverToBoxAdapter(child: SectionHeader('Podobné žánry')),
           SliverToBoxAdapter(
@@ -579,8 +574,9 @@ class _ForYou extends ConsumerWidget {
 
 /// O žánru -- krátký popis (Last.fm), rozbalitelný.
 class _About extends StatefulWidget {
-  const _About({required this.text});
+  const _About({required this.text, this.source});
   final String text;
+  final String? source;
 
   @override
   State<_About> createState() => _AboutState();
@@ -612,11 +608,34 @@ class _AboutState extends State<_About> {
             ),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.md, 4, AppSpacing.md, 0),
-          child: Text('Zdroj: Last.fm', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
-        ),
+        if (widget.source != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.md, 4, AppSpacing.md, 0),
+            child: Text('Zdroj: ${widget.source}',
+                style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
+          ),
       ],
+    );
+  }
+}
+
+
+/// Podžánry -- ty, které posloucháš, napřed a s hvězdičkou.
+class _Subgenres extends ConsumerWidget {
+  const _Subgenres({required this.categoryId, required this.subgenres});
+  final String categoryId;
+  final List<({String tag, String title})> subgenres;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mine = ref.watch(browseForYouProvider(categoryId)).valueOrNull?.yourSubgenres.toSet() ?? const <String>{};
+    final ordered = [
+      ...subgenres.where((s) => mine.contains(s.tag)),
+      ...subgenres.where((s) => !mine.contains(s.tag)),
+    ];
+    return TagChips(
+      tags: [for (final s in ordered) s.tag],
+      titles: [for (final s in ordered) mine.contains(s.tag) ? '★ ${s.title}' : s.title],
     );
   }
 }
