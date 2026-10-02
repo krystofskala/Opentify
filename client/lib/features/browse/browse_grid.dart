@@ -100,6 +100,16 @@ IconData _genreIcon(String id) => switch (id) {
       'folk' => Symbols.forest_rounded,
       'metal' => Symbols.skull_rounded,
       'soul' => Symbols.radio_rounded,
+      'country' => Symbols.agriculture_rounded,
+      'bluegrass' => Symbols.grass_rounded,
+      'blues' => Symbols.nightlight_rounded,
+      'reggae' => Symbols.beach_access_rounded,
+      'latin' => Symbols.festival_rounded,
+      'brazil' => Symbols.surfing_rounded,
+      'african' => Symbols.public_rounded,
+      'asian' => Symbols.stars_rounded,
+      'indian' => Symbols.theaters_rounded,
+      'kids' => Symbols.toys_rounded,
       _ => Symbols.music_note_rounded,
     };
 
