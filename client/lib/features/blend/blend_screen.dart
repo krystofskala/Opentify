@@ -169,7 +169,7 @@ class BlendScreen extends ConsumerWidget {
                   leading: const Icon(Symbols.person_add_rounded),
                   title: Text(p.name),
                   trailing: GlassButton(
-                    label: 'Pozvat',
+                    label: 'Pozvat do Blendu',
                     compact: true,
                     onPressed: () => _call(context, ref, () => api.postJson('/blends', body: {'partner_id': p.id}),
                         'Pozvánka odeslána – ${p.name} ji uvidí na Domů'),

@@ -1,3 +1,4 @@
+import 'core/app_restart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -43,5 +44,11 @@ Future<void> main() async {
     if (reports++ < 20) diagReport('dart-error', short(error, stack));
     return false;
   };
-  runApp(const ProviderScope(child: WebSafeAreaInsets(child: OpentifyApp())));
+  // Klíč podle `appRestartTick` -- přepnutí profilu / odhlášení v nativní
+  // appce zahodí celý stav a začne znovu (web znovu načte stránku).
+  runApp(ValueListenableBuilder<int>(
+    valueListenable: appRestartTick,
+    builder: (context, tick, _) =>
+        ProviderScope(key: ValueKey(tick), child: const WebSafeAreaInsets(child: OpentifyApp())),
+  ));
 }
