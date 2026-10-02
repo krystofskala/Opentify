@@ -816,16 +816,26 @@ class CatalogService:
         from app.catalog import lastfm
 
         found = await lastfm.similar_artists(artist.name, limit=self._SIMILAR_LIMIT * 2)
+        # Deezer hledání souběžně (dřív jedno po druhém -- studená stránka 3 s).
+        sem = asyncio.Semaphore(5)
+
+        async def look(name: str) -> dict[str, Any] | None:
+            async with sem:
+                try:
+                    hits = await self._dz.search_artist(name)
+                except Exception:  # noqa: BLE001
+                    return None
+            return next((h for h in hits if norm(h.get("name") or "") == norm(name)), None)
+
+        dz_hits = await asyncio.gather(*(look(item["name"]) for item in found))
         out: list[Artist] = []
         seen: set[str] = {artist.id}
-        for item in found:
+        for item, hit in zip(found, dz_hits):
             row: Artist | None = None
             if item.get("mbid"):
                 row = self._session.exec(select(Artist).where(Artist.mbid == item["mbid"])).first()
             if row is None:
                 # Přes Deezer (fotka, diskografie), jen přesná shoda jména.
-                hits = await self._dz.search_artist(item["name"])
-                hit = next((h for h in hits if norm(h.get("name") or "") == norm(item["name"])), None)
                 if hit is not None:
                     row = ingest_artist(self._session, hit)
             if row is None and item.get("mbid"):

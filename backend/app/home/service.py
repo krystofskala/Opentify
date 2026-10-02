@@ -69,6 +69,9 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
     registry.append(("personal:styles", g.DAILY_TTL, pm.build_styles))
+    from app.home.warm_artists import warm_artist_pages
+
+    registry.append(("personal:warm-artists", g.DAILY_TTL, warm_artist_pages))
     # Společné mixy dvojic (app/blends.py) -- denně.
     from app.blends import TTL as BLEND_TTL, build_for_current_user
 

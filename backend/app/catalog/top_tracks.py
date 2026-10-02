@@ -169,10 +169,10 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
 
         # Album každé skladby z Last.fm -- vybere se přesně ta verze, která se
         # poslouchá (ne živá nahrávka se stejným názvem).
-        albums = await asyncio.gather(*(track_album(primary_artist_name(name), e["title"]) for e in lastfm[:LIMIT * 2]))
+        albums = await asyncio.gather(*(track_album(primary_artist_name(name), e["title"]) for e in lastfm[: LIMIT + 3]))
         entries = [
             {"title": e["title"], "listens": e["listens"], "release": album}
-            for e, album in zip(lastfm[:LIMIT * 2], albums)
+            for e, album in zip(lastfm[: LIMIT + 3], albums)
         ]
         source = "lastfm"
     elif mbid:
@@ -188,20 +188,23 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
         source = "listenbrainz"
 
     if entries:
-        for entry in entries[: LIMIT * 2]:
+        entries = [e for e in entries[: LIMIT * 2] if e.get("title")]
+        # Napřed místní katalog (rychlé), pak chybějící na Deezeru SOUBĚŽNĚ --
+        # dřív jedna po druhé, studená stránka interpreta 6 s.
+        local_ids: list[str | None] = []
+        with Session(engine) as session:
+            for entry in entries:
+                rec = _find_local(session, artist_id, entry.get("mbid"), entry["title"], entry.get("release"))
+                local_ids.append(rec.id if rec is not None else None)
+        artist_q = primary_artist_name(name)
+        sem = asyncio.Semaphore(5)
+
+        async def lookup(entry: dict[str, Any]) -> dict[str, Any] | None:
             title = entry["title"]
-            if not title:
-                continue
-            with Session(engine) as session:
-                rec = _find_local(session, artist_id, entry.get("mbid"), title, entry.get("release"))
-                rec_id = rec.id if rec is not None else None
-            if rec_id is None:
-                track = None
+            async with sem:
                 if entry.get("release"):
                     # Přesně ta verze: Deezer s názvem alba.
-                    found = await dz.search(
-                        f'artist:"{primary_artist_name(name)}" track:"{title}" album:"{entry["release"]}"', 5
-                    )
+                    found = await dz.search(f'artist:"{artist_q}" track:"{title}" album:"{entry["release"]}"', 5)
                     track = next(
                         (
                             t
@@ -211,25 +214,31 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
                         ),
                         None,
                     )
-                if track is None:
-                    # Přesně stejný název skladby od toho interpreta (ne "(Live in ...)").
-                    found = await dz.search(f"{primary_artist_name(name)} {title}", 10)
-                    track = next(
-                        (
-                            t
-                            for t in (found or {}).get("data") or []
-                            if _exact(t.get("title") or "") == _exact(title)
-                            and _exact((t.get("artist") or {}).get("name") or "") == _exact(primary_artist_name(name))
-                        ),
-                        None,
-                    )
-                if track is None:
-                    track = await dz.find_track(primary_artist_name(name), title)
+                    if track:
+                        return track
+                # Přesně stejný název skladby od toho interpreta (ne "(Live in ...)").
+                found = await dz.search(f"{artist_q} {title}", 10)
+                track = next(
+                    (
+                        t
+                        for t in (found or {}).get("data") or []
+                        if _exact(t.get("title") or "") == _exact(title)
+                        and _exact((t.get("artist") or {}).get("name") or "") == _exact(artist_q)
+                    ),
+                    None,
+                )
+                return track or await dz.find_track(artist_q, title)
+
+        missing = [i for i, rid in enumerate(local_ids) if rid is None]
+        found_tracks = await asyncio.gather(*(lookup(entries[i]) for i in missing))
+        with Session(engine) as session:
+            for i, track in zip(missing, found_tracks):
                 if track:
-                    with Session(engine) as session:
-                        rec = ingest_track_with_context(session, track)
-                        session.commit()
-                        rec_id = rec.id if rec is not None else None
+                    rec = ingest_track_with_context(session, track)
+                    session.flush()
+                    local_ids[i] = rec.id if rec is not None else None
+            session.commit()
+        for entry, rec_id in zip(entries, local_ids):
             if rec_id and rec_id not in seen:
                 seen.add(rec_id)
                 out.append({"id": rec_id, "listens": entry.get("listens"), "source": source})
