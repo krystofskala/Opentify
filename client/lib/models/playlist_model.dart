@@ -16,6 +16,9 @@ class PlaylistDetailModel {
     required this.items,
     this.description,
     this.coverUrls = const [],
+    this.role,
+    this.members = const [],
+    this.addedBy = const {},
   });
 
   final String id;
@@ -34,6 +37,16 @@ class PlaylistDetailModel {
   /// udělá vlastní kopii). Upravovat jde jen `USER` playlist.
   bool get isReadOnly => kind != 'USER';
 
+  /// Společný playlist: "owner" / "member", jinak null.
+  final String? role;
+  final List<String> members;
+
+  /// Kdo kterou skladbu přidal (recording id -> jméno).
+  final Map<String, String> addedBy;
+
+  bool get isCollab => members.isNotEmpty;
+  bool get isMember => role == 'member';
+
   factory PlaylistDetailModel.fromJson(Map<String, dynamic> json) => PlaylistDetailModel(
         id: json['id'] as String,
         title: json['title'] as String,
@@ -46,6 +59,9 @@ class PlaylistDetailModel {
             .map((e) => RecordingModel.fromJson(e as Map<String, dynamic>))
             .toList(),
         description: json['description'] as String?,
+        role: json['role'] as String?,
+        members: (json['members'] as List<dynamic>? ?? const []).cast<String>(),
+        addedBy: (json['addedBy'] as Map<String, dynamic>? ?? const {}).cast<String, String>(),
         coverUrls: resolveMediaUrls((json['coverUrls'] as List<dynamic>? ?? const []).cast<String>()),
       );
 }

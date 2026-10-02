@@ -801,7 +801,9 @@ class _PlaylistsTab extends ConsumerWidget {
         // Sdílené: autor ze Spotify ("Ze Spotify · jméno").
         subtitle: playlist.pinned
             ? 'Aktualizuje se · ${songsCount(playlist.itemCount)}'
-            : playlist.isShared && playlist.description != null
+            : playlist.collab
+                ? 'Společný${playlist.ownerName != null ? ' · od ${playlist.ownerName}' : ''} · ${songsCount(playlist.itemCount)}'
+                : playlist.isShared && playlist.description != null
                 ? '${playlist.description} · ${songsCount(playlist.itemCount)}'
                 : '$who · ${songsCount(playlist.itemCount)}',
         onTap: () => context.push('/playlists/${playlist.id}'),

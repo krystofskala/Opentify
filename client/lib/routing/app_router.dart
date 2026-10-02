@@ -27,6 +27,7 @@ import '../features/share/track_link_screen.dart';
 import '../features/blend/blend_screen.dart';
 import '../core/native_nav.dart';
 import '../features/profile/verify_downloads_screen.dart';
+import '../features/library/playlist_join_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
@@ -92,6 +93,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/library/liked',
         builder: (context, state) => const LikedSongsScreen(),
+      ),
+      GoRoute(
+        path: '/playlist-join/:code',
+        builder: (context, state) => PlaylistJoinScreen(code: state.pathParameters['code']!),
       ),
       GoRoute(
         path: '/playlists/:playlistId',

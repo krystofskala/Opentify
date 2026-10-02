@@ -172,6 +172,8 @@ class PlaylistItem(SQLModel, table=True):
     recording_id: str = Field(foreign_key="recording.id", index=True)
     position: int = 0
     added_at: datetime = Field(default_factory=utcnow)
+    # Kdo skladbu přidal (společné playlisty).
+    added_by: str | None = None
 
 
 GLOBAL_PLAYLIST_OWNER = "__global__"
@@ -274,6 +276,16 @@ class LibraryEntry(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     user_id: str = Field(index=True)
     recording_id: str = Field(index=True)
+    added_at: datetime = Field(default_factory=utcnow)
+
+
+class PlaylistMember(SQLModel, table=True):
+    """Člen společného playlistu -- přidává, odebírá a přeřazuje skladby.
+    Vlastník zůstává `Playlist.owner_user_id` (jen on maže a mění obal)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    playlist_id: str = Field(index=True)
+    user_id: str = Field(index=True)
     added_at: datetime = Field(default_factory=utcnow)
 
 

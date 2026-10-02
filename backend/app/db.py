@@ -48,6 +48,7 @@ def _ensure_columns() -> None:
             ("home_genres", "JSON"),
             ("appearance", "JSON"),
         ],
+        "playlistitem": [("added_by", "VARCHAR")],
         "playlist": [
             ("description", "VARCHAR"),
             ("cover_urls", "JSON"),

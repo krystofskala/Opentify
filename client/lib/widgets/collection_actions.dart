@@ -52,6 +52,8 @@ Future<void> showCollectionActions(
   VoidCallback? onSaveCopy,
   VoidCallback? onDelete,
   VoidCallback? onEdit,
+  VoidCallback? onInvite,
+  VoidCallback? onLeave,
 }) {
   HapticFeedback.selectionClick();
   return showGlassSheet<void>(
@@ -73,6 +75,8 @@ Future<void> showCollectionActions(
       onSaveCopy: onSaveCopy,
       onDelete: onDelete,
       onEdit: onEdit,
+      onInvite: onInvite,
+      onLeave: onLeave,
     ),
   );
 }
@@ -95,6 +99,8 @@ class _CollectionActionsSheet extends ConsumerWidget {
     this.onSaveCopy,
     this.onDelete,
     this.onEdit,
+    this.onInvite,
+    this.onLeave,
   });
 
   final BuildContext hostContext;
@@ -128,6 +134,12 @@ class _CollectionActionsSheet extends ConsumerWidget {
 
   /// Vlastní playlist: název, popis, obal.
   final VoidCallback? onEdit;
+
+  /// Vlastní playlist: pozvat do společného (odkaz).
+  final VoidCallback? onInvite;
+
+  /// Člen společného playlistu: opustit.
+  final VoidCallback? onLeave;
 
   // Přes kontejner appky -- načítá se až po zavření sheetu, jeho `ref` už
   // v tu chvíli neplatí.
@@ -241,6 +253,15 @@ class _CollectionActionsSheet extends ConsumerWidget {
               }),
             ),
             const _MenuDivider(),
+            if (onInvite != null)
+              _Row(
+                icon: Symbols.group_add_rounded,
+                label: 'Pozvat do společného playlistu…',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onInvite!();
+                },
+              ),
             if (onEdit != null)
               _Row(
                 icon: Symbols.edit_rounded,
@@ -380,6 +401,16 @@ class _CollectionActionsSheet extends ConsumerWidget {
                     final tracks = await container.read(catalogRepositoryProvider).getReleaseTracks(id);
                     if (hostContext.mounted) await confirmRemoveFromLibrary(hostContext, tracks);
                   });
+                },
+              ),
+            if (onLeave != null)
+              _Row(
+                icon: Symbols.logout_rounded,
+                label: 'Opustit společný playlist',
+                destructive: true,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onLeave!();
                 },
               ),
             if (onDelete != null)

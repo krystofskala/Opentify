@@ -23,6 +23,8 @@ import '../../core/cz_plural.dart';
 import '../../widgets/toast.dart';
 import '../../theme/shapes.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
+import '../../core/config.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
   return ref.watch(playlistsRepositoryProvider).get(playlistId);
@@ -108,6 +110,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               eyebrowIcon: _eyebrowIconFor(detail.kind, detail.source),
               placeholderIcon: _eyebrowIconFor(detail.kind, detail.source),
               subtitle: [
+                if (detail.isCollab) HeroMeta('Společný · ${detail.members.join(', ')}'),
                 if ((detail.description ?? _artistsLine(items)) case final line?) HeroMeta(line),
               ],
               meta: [
@@ -145,8 +148,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     imageUrl: detail.coverUrls.firstOrNull,
                     isRadio: detail.source?.startsWith('radio:') ?? false,
                     onSaveCopy: readOnly && !pinned ? () => _saveToLibrary(context, detail) : null,
-                    onDelete: readOnly ? null : () => _confirmDelete(context),
-                    onEdit: readOnly ? null : () => _editPlaylist(context, detail),
+                    onDelete: readOnly || detail.isMember ? null : () => _confirmDelete(context),
+                    onEdit: readOnly || detail.isMember ? null : () => _editPlaylist(context, detail),
+                    onInvite: readOnly || detail.isMember ? null : () => _invite(context, detail),
+                    onLeave: detail.isMember ? () => _leave(context, detail) : null,
                   ),
                 ),
               ],
@@ -199,6 +204,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
 
     TrackTile tileFor(RecordingModel r, List<RecordingModel> queue) => TrackTile(
           recording: r,
+          // Společný playlist: kdo skladbu přidal.
+          subtitle: (detail.addedBy[r.id] ?? '').isNotEmpty
+              ? '${r.artistName ?? ''} · přidal(a) ${detail.addedBy[r.id]}'
+              : null,
           queueRecordings: queue,
           sourceLabel: detail.title,
           selectionMode: _collection.selecting,
@@ -345,6 +354,32 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final top =
         (counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).map((e) => e.key).take(2).toList();
     return counts.length > top.length ? '${top.join(', ')} a další' : top.join(' a ');
+  }
+
+  /// Pozvat do společného playlistu: odkaz s kódem (seznam profilů se
+  /// nikomu neukazuje). Kdo ho otevře, může přidávat a odebírat skladby.
+  Future<void> _invite(BuildContext context, PlaylistDetailModel detail) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final res = await ref.read(apiClientProvider).postJson('/playlists/${detail.id}/invite');
+      final url = '${AppConfig.sharedOrigin}${res['path']}';
+      await Clipboard.setData(ClipboardData(text: url));
+      showToast(messenger, 'Odkaz na společný playlist zkopírován – pošli ho, kdo ho otevře, může ho upravovat s tebou');
+    } catch (e) {
+      showToast(messenger, 'Pozvánku se nepodařilo vytvořit: $e');
+    }
+  }
+
+  Future<void> _leave(BuildContext context, PlaylistDetailModel detail) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await ref.read(apiClientProvider).deleteJson('/playlists/${detail.id}/members/me');
+      ref.invalidate(myPlaylistsProvider);
+      showToast(messenger, 'Opustil(a) jsi „${detail.title}“');
+      if (context.mounted) context.pop();
+    } catch (e) {
+      showToast(messenger, 'Nepodařilo se: $e');
+    }
   }
 
   /// ⋯ › Upravit: název, krátký popis a vlastní obal (místo mozaiky).

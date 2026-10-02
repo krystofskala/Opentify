@@ -24,6 +24,11 @@ class PlaylistDetailOut(PlaylistOut):
     items: list[RecordingOut]
     description: str | None = None
     cover_urls: list[str] = []
+    # Společný playlist: "owner" / "member" (u ostatních None), jména členů
+    # a kdo kterou skladbu přidal (recording id -> jméno).
+    role: str | None = None
+    members: list[str] = []
+    added_by: dict[str, str] = {}
 
 
 class YearInReviewOut(CamelModel):

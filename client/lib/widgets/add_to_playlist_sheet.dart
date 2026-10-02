@@ -119,7 +119,8 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                 ),
                 const SizedBox(height: 8),
                 playlists.when(
-                  data: (items) => items.isEmpty
+                  // Připnuté mixy se mění samy -- do nich přidávat nejde.
+                  data: (all) => [for (final p in all) if (!p.pinned) p].isEmpty
                       ? const Padding(
                           padding: EdgeInsets.symmetric(vertical: 16),
                           child: Text('Zatím žádné playlisty – založ první výš.'),
@@ -128,13 +129,14 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                           constraints: const BoxConstraints(maxHeight: 320),
                           child: ListView.builder(
                             shrinkWrap: true,
-                            itemCount: items.length,
+                            itemCount: all.where((p) => !p.pinned).length,
                             itemBuilder: (context, index) {
-                              final playlist = items[index];
+                              final playlist = all.where((p) => !p.pinned).elementAt(index);
                               return ListTile(
-                                leading: const Icon(Symbols.queue_music_rounded),
+                                leading: Icon(playlist.collab ? Symbols.group_rounded : Symbols.queue_music_rounded),
                                 title: Text(playlist.title),
-                                subtitle: Text(songsCount(playlist.itemCount)),
+                                subtitle: Text(
+                                    '${playlist.collab ? 'Společný · ' : ''}${songsCount(playlist.itemCount)}'),
                                 onTap: () => _addTo(playlist.id, playlist.title),
                               );
                             },

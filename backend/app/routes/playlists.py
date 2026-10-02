@@ -88,10 +88,38 @@ def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) ->
     return covers, names[:3]
 
 
-def _playlist_detail(session: Session, playlist: Playlist) -> PlaylistDetailOut:
+def _member_ids(session: Session, playlist_id: str) -> list[str]:
+    from app.models import PlaylistMember
+
+    return [
+        m.user_id for m in session.exec(select(PlaylistMember).where(PlaylistMember.playlist_id == playlist_id)).all()
+    ]
+
+
+def _user_name(session: Session, user_id: str | None) -> str | None:
+    from app.models import AppUser
+
+    user = session.get(AppUser, user_id) if user_id else None
+    return user.name if user else None
+
+
+def _playlist_detail(session: Session, playlist: Playlist, user_id: str | None = None) -> PlaylistDetailOut:
     items = _playlist_items(session, playlist.id)
     recordings = [r for item in items if (r := _to_recording_out(session, item.recording_id)) is not None]
+    members = _member_ids(session, playlist.id)
+    collab = bool(members)
+    role = None
+    if collab and user_id:
+        role = "owner" if playlist.owner_user_id == user_id else ("member" if user_id in members else None)
+    names = {uid: _user_name(session, uid) for uid in {playlist.owner_user_id, *members}} if collab else {}
     return PlaylistDetailOut(
+        role=role,
+        members=[n for uid in [playlist.owner_user_id, *members] if (n := names.get(uid))],
+        added_by={
+            item.recording_id: names.get(item.added_by) or (_user_name(session, item.added_by) or "")
+            for item in items
+            if collab and item.added_by
+        },
         id=playlist.id,
         title=playlist.title,
         kind=playlist.kind,
@@ -108,7 +136,17 @@ def _readable_playlist_or_404(session: Session, playlist_id: str, user_id: str) 
     """Čtení: vlastní playlisty + globální snapshoty z Domů (žebříčky,
     žánry, výběry). Úpravy dál jen přes `_owned_playlist_or_404`."""
     playlist = session.get(Playlist, playlist_id)
-    if playlist is None or playlist.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER):
+    if playlist is None or (
+        playlist.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER) and user_id not in _member_ids(session, playlist_id)
+    ):
+        raise HTTPException(status_code=404, detail="playlist nenalezen")
+    return playlist
+
+
+def _editable_playlist_or_404(session: Session, playlist_id: str, user_id: str) -> Playlist:
+    """Skladby mění vlastník i členové společného playlistu."""
+    playlist = session.get(Playlist, playlist_id)
+    if playlist is None or (playlist.owner_user_id != user_id and user_id not in _member_ids(session, playlist_id)):
         raise HTTPException(status_code=404, detail="playlist nenalezen")
     return playlist
 
@@ -156,8 +194,32 @@ def list_playlists(
             "description": p.description,
             "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
         })
-    # Připnuté automatické mixy (aktualizují se) -- za vlastními.
-    from app.models import PinnedPlaylist
+    # Společné playlisty, kde je profil členem.
+    from app.models import PinnedPlaylist, PlaylistMember
+
+    owned_ids = {r["id"] for r in results}
+    for m in session.exec(select(PlaylistMember).where(PlaylistMember.user_id == user_id)).all():
+        p = session.get(Playlist, m.playlist_id)
+        if p is None or p.id in owned_ids:
+            continue
+        items = _playlist_items(session, p.id)
+        covers, artist_names = _preview(session, p, items)
+        out = PlaylistOut(
+            id=p.id, title=p.title, kind=p.kind, source=p.source, generated_at=p.generated_at, item_count=len(items)
+        ).model_dump(by_alias=True)
+        results.append({
+            **out,
+            "coverUrls": covers,
+            "artistNames": artist_names,
+            "description": p.description,
+            "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
+            "collab": True,
+            "ownerName": _user_name(session, p.owner_user_id),
+        })
+    # Vlastní, které jsou sdílené (štítek "Společný").
+    for r in results:
+        if r["id"] in owned_ids and _member_ids(session, r["id"]):
+            r["collab"] = True
 
     for pin in session.exec(select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id)).all():
         p = session.get(Playlist, pin.playlist_id)
@@ -312,7 +374,7 @@ def get_playlist(
 ):
     user_id, _device_id = current
     playlist = _readable_playlist_or_404(session, playlist_id, user_id)
-    return _playlist_detail(session, playlist).model_dump(by_alias=True)
+    return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
 
 
 @playlists_router.post("/{playlist_id}/copy")
@@ -358,7 +420,7 @@ def add_item(
     current: tuple[str, str] = Depends(get_current_user),
 ):
     user_id, _device_id = current
-    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    playlist = _editable_playlist_or_404(session, playlist_id, user_id)
     if session.get(Recording, body.recording_id) is None:
         raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
 
@@ -369,9 +431,13 @@ def add_item(
     ).first()
     if existing is None:
         position = len(_playlist_items(session, playlist.id))
-        session.add(PlaylistItem(playlist_id=playlist.id, recording_id=body.recording_id, position=position))
+        session.add(
+            PlaylistItem(playlist_id=playlist.id, recording_id=body.recording_id, position=position, added_by=user_id)
+        )
+        playlist.updated_at = utcnow()
+        session.add(playlist)
         session.commit()
-    return _playlist_detail(session, playlist).model_dump(by_alias=True)
+    return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
 
 
 @playlists_router.patch("/{playlist_id}/items/reorder")
@@ -386,7 +452,7 @@ def reorder_items(
     tudy (na to `add_item`/`remove_item`), ať omylem neztratíme položku kvůli
     zastaralému seznamu na klientovi (např. mezitím smazané jinde)."""
     user_id, _device_id = current
-    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    playlist = _editable_playlist_or_404(session, playlist_id, user_id)
     items = _playlist_items(session, playlist.id)
     current_ids = {item.recording_id for item in items}
     if set(body.recording_ids) != current_ids or len(body.recording_ids) != len(items):
@@ -397,7 +463,7 @@ def reorder_items(
         by_recording[recording_id].position = position
         session.add(by_recording[recording_id])
     session.commit()
-    return _playlist_detail(session, playlist).model_dump(by_alias=True)
+    return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
 
 
 @playlists_router.delete("/{playlist_id}/items/{recording_id}")
@@ -408,7 +474,7 @@ def remove_item(
     current: tuple[str, str] = Depends(get_current_user),
 ):
     user_id, _device_id = current
-    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    playlist = _editable_playlist_or_404(session, playlist_id, user_id)
     existing = session.exec(
         select(PlaylistItem).where(
             PlaylistItem.playlist_id == playlist.id, PlaylistItem.recording_id == recording_id
@@ -417,4 +483,88 @@ def remove_item(
     if existing is not None:
         session.delete(existing)
         session.commit()
-    return _playlist_detail(session, playlist).model_dump(by_alias=True)
+    return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
+
+
+# --- Společné playlisty ------------------------------------------------------
+# Sdílí se odkazem s kódem (ne výběrem ze seznamu profilů -- kamarádi nemají
+# vidět ostatní profily). Kdo odkaz otevře, stane se členem.
+
+
+@playlists_router.post("/{playlist_id}/invite")
+def invite_to_playlist(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    import secrets
+
+    user_id, _device_id = current
+    playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    code = secrets.token_urlsafe(8)
+    from app.models import HomeSnapshot
+
+    session.add(HomeSnapshot(key=f"playlist-invite:{code}", payload={"playlistId": playlist.id}))
+    session.commit()
+    return {"code": code, "path": f"/playlist-join/{code}"}
+
+
+@playlists_router.post("/join/{code}")
+def join_playlist(
+    code: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    from datetime import timedelta
+
+    from app.models import HomeSnapshot, PlaylistMember
+
+    user_id, _device_id = current
+    invite = session.get(HomeSnapshot, f"playlist-invite:{code}")
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Pozvánka neplatí.")
+    created = invite.generated_at if invite.generated_at.tzinfo else invite.generated_at.replace(tzinfo=utcnow().tzinfo)
+    if utcnow() - created > timedelta(days=30):
+        raise HTTPException(status_code=410, detail="Pozvánka už vypršela, požádej o novou.")
+    playlist = session.get(Playlist, (invite.payload or {}).get("playlistId"))
+    if playlist is None:
+        raise HTTPException(status_code=404, detail="Playlist už neexistuje.")
+    if playlist.owner_user_id != user_id and user_id not in _member_ids(session, playlist.id):
+        session.add(PlaylistMember(playlist_id=playlist.id, user_id=user_id))
+        session.commit()
+    return {"playlistId": playlist.id, "title": playlist.title}
+
+
+@playlists_router.delete("/{playlist_id}/members/me")
+def leave_playlist(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Člen opustí společný playlist (vlastník ho jen smaže)."""
+    from app.models import PlaylistMember
+
+    user_id, _device_id = current
+    for row in session.exec(
+        select(PlaylistMember).where(PlaylistMember.playlist_id == playlist_id, PlaylistMember.user_id == user_id)
+    ).all():
+        session.delete(row)
+    session.commit()
+    return {"left": True}
+
+
+@playlists_router.delete("/{playlist_id}/members")
+def stop_sharing(
+    playlist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Vlastník zruší sdílení -- playlist zůstane jen jemu."""
+    from app.models import PlaylistMember
+
+    user_id, _device_id = current
+    _owned_playlist_or_404(session, playlist_id, user_id)
+    for row in session.exec(select(PlaylistMember).where(PlaylistMember.playlist_id == playlist_id)).all():
+        session.delete(row)
+    session.commit()
+    return {"shared": False}

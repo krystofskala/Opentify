@@ -18,6 +18,8 @@ class PlaylistSummaryModel {
     this.description,
     this.updatedAt,
     this.pinned = false,
+    this.collab = false,
+    this.ownerName,
   });
 
   /// Naposledy změněno (ISO) -- řazení „Přidáno / upraveno".
@@ -36,6 +38,10 @@ class PlaylistSummaryModel {
 
   /// Automatický mix připnutý do Knihovny -- dál se aktualizuje.
   final bool pinned;
+
+  /// Společný playlist (sdílený s dalšími profily); `ownerName` u cizího.
+  final bool collab;
+  final String? ownerName;
 
   final String id;
   final String title;
@@ -60,6 +66,8 @@ class PlaylistSummaryModel {
         description: json['description'] as String?,
         updatedAt: json['updatedAt'] as String?,
         pinned: json['pinned'] as bool? ?? false,
+        collab: json['collab'] as bool? ?? false,
+        ownerName: json['ownerName'] as String?,
       );
 }
 
