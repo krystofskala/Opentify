@@ -37,6 +37,8 @@ import 'offline_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/toast.dart';
 import '../../widgets/sort_button.dart';
+import '../../state/favorite_artists_controller.dart';
+import '../../data/library_repository.dart' show LocalArtist;
 
 const _pageSize = 100;
 const _fullLoadPageSize = 500;
@@ -416,6 +418,9 @@ const _librarySortLabels = {
 
 final _librarySortProvider = StateProvider.family<LibrarySort, String>((ref, tab) => LibrarySort.added);
 
+/// Knihovna › Interpreti › "Oblíbení": jen interpreti se srdíčkem.
+final _favoriteArtistsOnlyProvider = StateProvider<bool>((ref) => false);
+
 /// Knihovna › Alba › "Celá alba": jen alba, ze kterých má uživatel všechny skladby.
 final _completeAlbumsOnlyProvider = StateProvider<bool>((ref) => false);
 
@@ -598,14 +603,25 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
     super.build(context);
     final artists = ref.watch(_localArtistsProvider);
     final sort = ref.watch(_librarySortProvider('artists'));
+    final favoritesOnly = ref.watch(_favoriteArtistsOnlyProvider);
+    final favorites = ref.watch(favoriteArtistsProvider).valueOrNull ?? const [];
     return artists.when(
       data: (loaded) {
-        final items = [...loaded]..sort((a, b) => switch (sort) {
+        final byId = {for (final a in loaded) a.id: a};
+        // Oblíbení i bez skladeb v knihovně (srdíčko dané ze stránky interpreta).
+        final source = favoritesOnly
+            ? [
+                for (final f in favorites)
+                  byId[f.id] ??
+                      LocalArtist(id: f.id, name: f.name, imageUrl: f.imageUrl, trackCount: 0, addedAt: f.addedAt),
+              ]
+            : loaded;
+        final items = [...source]..sort((a, b) => switch (sort) {
               LibrarySort.added => _byAddedDesc(a.addedAt, b.addedAt),
               LibrarySort.count => b.trackCount.compareTo(a.trackCount),
               _ => _byName(a.name, b.name),
             });
-        if (items.isEmpty) {
+        if (loaded.isEmpty && favorites.isEmpty) {
           return const EmptyState(
               icon: Symbols.person_rounded, message: 'Zatím žádní interpreti – spusť sken v Profilu.');
         }
@@ -622,10 +638,23 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                     tab: 'artists',
                     options: [LibrarySort.added, LibrarySort.name, LibrarySort.count],
                   ),
+                  filter: FilterChip(
+                    label: const Text('Oblíbení'),
+                    tooltip: 'Jen interpreti se srdíčkem',
+                    selected: favoritesOnly,
+                    onSelected: (on) => ref.read(_favoriteArtistsOnlyProvider.notifier).state = on,
+                  ),
                 ),
               ),
               if (items.isEmpty)
-                const SliverToBoxAdapter(child: EmptyState(compact: true, message: 'Filtru nic neodpovídá.'))
+                SliverToBoxAdapter(
+                  child: EmptyState(
+                    compact: true,
+                    message: favoritesOnly
+                        ? 'Zatím žádní oblíbení – dej srdíčko na stránce interpreta.'
+                        : 'Filtru nic neodpovídá.',
+                  ),
+                )
               else if (_viewMode == ViewMode.grid)
                 SliverPadding(
                   padding: const EdgeInsets.all(AppSpacing.sm),

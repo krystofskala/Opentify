@@ -24,6 +24,7 @@ import '../../widgets/track_tile.dart';
 import '../release/release_screen.dart' show releaseTracksProvider;
 import '../../widgets/collection_actions.dart';
 import 'artist_support.dart';
+import '../../state/favorite_artists_controller.dart';
 
 final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getDiscography(artistId);
@@ -167,6 +168,16 @@ class _ArtistBody extends ConsumerWidget {
               thumbnailCircle: true,
               // Audit UI: jen ⋯ (rádio, na později, sdílení v menu interpreta).
               actions: [
+                // Hlavní "uložit" akce interpreta (jako + Do knihovny u alba).
+                HeroAction(
+                  icon: Symbols.favorite_rounded,
+                  filled: ref.watch(favoriteArtistsProvider
+                      .select((s) => s.valueOrNull?.any((a) => a.id == artist.id) ?? false)),
+                  tooltip: 'Oblíbený interpret',
+                  onPressed: () => ref
+                      .read(favoriteArtistsProvider.notifier)
+                      .toggle(context, id: artist.id, name: artist.name, imageUrl: artist.coverImageUrl),
+                ),
                 HeroAction(
                   icon: Symbols.more_horiz_rounded,
                   tooltip: 'Další možnosti',

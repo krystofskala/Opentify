@@ -94,9 +94,12 @@ class _ScreenAccentState extends ConsumerState<ScreenAccent> {
 
 /// Akce v pravém horním rohu hlavičky (skleněný kroužek).
 class HeroAction {
-  const HeroAction({required this.icon, required this.tooltip, required this.onPressed});
+  const HeroAction({required this.icon, required this.tooltip, required this.onPressed, this.filled = false});
 
   final IconData icon;
+
+  /// Vyplněná ikona = zapnutý stav (oblíbený interpret).
+  final bool filled;
   final String tooltip;
   final VoidCallback onPressed;
 }
@@ -236,7 +239,8 @@ class DetailHeroAppBar extends StatelessWidget {
         for (final action in actions)
           Padding(
             padding: const EdgeInsets.only(right: AppSpacing.xs),
-            child: _HeroCircleButton(icon: action.icon, tooltip: action.tooltip, onPressed: action.onPressed),
+            child: _HeroCircleButton(
+                icon: action.icon, tooltip: action.tooltip, onPressed: action.onPressed, filled: action.filled),
           ),
         SizedBox(width: AppSpacing.xs + side),
       ],
@@ -1406,9 +1410,10 @@ String heroTrackCount(int n) => songsCount(n);
 /// světlé fotce i na skleněné liště). Bez vlastního rozmazání: leží nad
 /// jinou skleněnou vrstvou, dvojitý BackdropFilter by byl drahý.
 class _HeroCircleButton extends StatelessWidget {
-  const _HeroCircleButton({required this.icon, required this.tooltip, required this.onPressed});
+  const _HeroCircleButton({required this.icon, required this.tooltip, required this.onPressed, this.filled = false});
 
   final IconData icon;
+  final bool filled;
   final String tooltip;
   final VoidCallback onPressed;
 
@@ -1425,7 +1430,7 @@ class _HeroCircleButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadii.lg),
             rim: true,
             liquid: true,
-            child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),
+            child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22, fill: filled ? 1 : 0)),
           ),
         ),
       );
@@ -1438,7 +1443,7 @@ class _HeroCircleButton extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
-          child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22)),
+          child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22, fill: filled ? 1 : 0)),
         ),
       ),
     );

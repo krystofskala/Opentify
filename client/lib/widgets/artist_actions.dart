@@ -11,6 +11,7 @@ import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'radio_station.dart';
 import 'share_sheet.dart';
+import '../state/favorite_artists_controller.dart';
 
 /// Menu interpreta -- stejné z ⋯ v hlavičce i dlouhým stiskem karty
 /// interpreta kdekoli (Hledání, Knihovna, Podobní, Pokračovat). Audit UI:
@@ -35,6 +36,8 @@ class _ArtistActionsSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final later = ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.artist, id) != null));
+    final favorite =
+        ref.watch(favoriteArtistsProvider.select((s) => s.valueOrNull?.any((a) => a.id == id) ?? false));
 
     Widget row(IconData icon, String label, VoidCallback onTap) => ListTile(
           dense: true,
@@ -73,6 +76,13 @@ class _ArtistActionsSheet extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpacing.xs),
             const Divider(height: 1),
+            row(
+              favorite ? Symbols.heart_minus_rounded : Symbols.favorite_rounded,
+              favorite ? 'Odebrat z oblíbených' : 'Přidat do oblíbených',
+              () => ref
+                  .read(favoriteArtistsProvider.notifier)
+                  .toggle(hostContext, id: id, name: name, imageUrl: imageUrl),
+            ),
             row(
               later ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
               later ? 'Odebrat z „Na později“' : 'Uložit na později',

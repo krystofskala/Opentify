@@ -1108,6 +1108,67 @@ async def verify_redownload(
     return {"recordingId": recording_id, "review": "redownload"}
 
 
+@library_router.get("/favorite-artists")
+def favorite_artists(
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Oblíbení interpreti profilu, nejnověji přidaní první."""
+    from app.models import FavoriteArtist
+
+    rows = session.exec(
+        select(FavoriteArtist).where(FavoriteArtist.user_id == current[0]).order_by(FavoriteArtist.added_at.desc())  # type: ignore[attr-defined]
+    ).all()
+    out = []
+    for row in rows:
+        artist = session.get(Artist, row.artist_id)
+        if artist is not None:
+            out.append(
+                {
+                    "id": artist.id,
+                    "name": artist.name,
+                    "imageUrl": artist.images[0] if artist.images else None,
+                    "addedAt": _iso(row.added_at),
+                }
+            )
+    return out
+
+
+@library_router.post("/favorite-artists/{artist_id}")
+def add_favorite_artist(
+    artist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    from app.models import FavoriteArtist
+
+    if session.get(Artist, artist_id) is None:
+        raise HTTPException(status_code=404, detail="Interpret neexistuje.")
+    exists = session.exec(
+        select(FavoriteArtist).where(FavoriteArtist.user_id == current[0], FavoriteArtist.artist_id == artist_id)
+    ).first()
+    if exists is None:
+        session.add(FavoriteArtist(user_id=current[0], artist_id=artist_id))
+        session.commit()
+    return {"artistId": artist_id, "favorite": True}
+
+
+@library_router.delete("/favorite-artists/{artist_id}")
+def remove_favorite_artist(
+    artist_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    from app.models import FavoriteArtist
+
+    for row in session.exec(
+        select(FavoriteArtist).where(FavoriteArtist.user_id == current[0], FavoriteArtist.artist_id == artist_id)
+    ).all():
+        session.delete(row)
+    session.commit()
+    return {"artistId": artist_id, "favorite": False}
+
+
 @library_router.post("/albums/{release_id}/download")
 async def download_album(release_id: str, current: tuple[str, str] = Depends(get_current_user)):
     """"Stáhnout celé album": nejdřív složka alba ze Soulseeku (jedna verze

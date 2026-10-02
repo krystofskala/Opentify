@@ -277,6 +277,16 @@ class LibraryEntry(SQLModel, table=True):
     added_at: datetime = Field(default_factory=utcnow)
 
 
+class FavoriteArtist(SQLModel, table=True):
+    """Oblíbený interpret profilu (srdíčko na stránce interpreta) -- filtr
+    "Oblíbení" v Knihovně › Interpreti."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    artist_id: str = Field(index=True)
+    added_at: datetime = Field(default_factory=utcnow)
+
+
 class CollectionProgress(SQLModel, table=True):
     """Kde uživatel v albu/playlistu skončil -- sdílené mezi zařízeními
     ("Pokračovat" na mobilu po přehrávání na PC). `route` = stránka alba /
