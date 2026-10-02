@@ -44,14 +44,17 @@ class ShareLink {
   String get _services => [
         if ((spotifyUrl ?? spotifySearchUrl) != null) 'Spotify: ${spotifyUrl ?? spotifySearchUrl}',
         if (appleUrl != null) 'Apple Music: $appleUrl',
-        if (youtubeUrl != null) 'YouTube: $youtubeUrl',
+        // Bez univerzálního odkazu jde YouTube jako hlavní odkaz -- ne ještě
+        // jednou v řádku (živě: odkaz dvakrát za sebou).
+        if (youtubeUrl != null && url != null) 'YouTube: $youtubeUrl',
       ].join('\n');
 
   /// Text ke sdílení (univerzální odkaz jde zvlášť jako url).
   String get text => _services.isEmpty ? _name : '$_name\n$_services';
 
   /// Do schránky (na PC): univerzální odkaz + Spotify + Apple Music.
-  String get clipboardText => [if (url != null) url!, if (_services.isNotEmpty) _services].join('\n');
+  String get clipboardText =>
+      [if ((url ?? youtubeUrl) != null) (url ?? youtubeUrl)!, if (_services.isNotEmpty) _services].join('\n');
 }
 
 typedef ShareTarget = ({String kind, String id}); // kind: recordings | releases
