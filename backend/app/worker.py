@@ -402,8 +402,10 @@ async def _acquire(
     přijde eskalace (uživatel zmáčkl Přehrát na prefetchované skladbě),
     YouTube se přidá hned."""
     dest_stem = MEDIA_ROOT / track.recording_id
-    if track.youtube_id and _youtube is not None:
+    if track.youtube_id and _youtube is not None and not track.preferred_source:
         # Přesné YouTube video (odkaz / album jen na YouTube) -- rovnou ono.
+        # Když je album ale nalezené jako složka na Soulseeku (preferredSource),
+        # má přednost Soulseek (lepší kvalita), video zůstává jako záloha.
         candidate = await _youtube.resolve(track)
         return await _youtube.fetch(track, candidate, dest_stem, on_progress, on_file_located)
     if _slskd is None or _youtube is None:
