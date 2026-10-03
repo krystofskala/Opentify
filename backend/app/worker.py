@@ -1128,6 +1128,16 @@ async def main() -> None:
                     await asyncio.to_thread(slskd_janitor.clean, slskd_janitor.downloads_root())
             except Exception:  # noqa: BLE001
                 logger.exception("úklid meziskladu slskd selhal")
+            # Plné tagy do stažených souborů + sdílená složka s čitelnými
+            # jmény pro Soulseek -- po dávkách každých 15 min.
+            try:
+                if await r.set("maintenance:file-tags", CONSUMER_NAME, nx=True, ex=15 * 60):
+                    from app.library import file_tags, share_view
+
+                    await file_tags.sweep(150)
+                    await asyncio.to_thread(share_view.sync)
+            except Exception:  # noqa: BLE001
+                logger.exception("tagy / sdílená složka selhaly")
             try:
                 await _process_due_upgrades(r)
             except Exception:  # noqa: BLE001
