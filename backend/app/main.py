@@ -4,6 +4,7 @@ zatím jde o provisioning flow + minimální WS realtime hub."""
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import os
 import re
 
@@ -62,7 +63,15 @@ def _api_file_log() -> None:
 
 _api_file_log()
 
-app = FastAPI(title="Vault API", version="0.1.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):  # noqa: ANN202
+    # Starlette 1.x už nemá on_event -- start/konec přes lifespan.
+    await on_startup()
+    yield
+    await on_shutdown()
+
+
+app = FastAPI(title="Vault API", version="0.1.0", lifespan=_lifespan)
 
 
 # Výpadek/limit cizí služby (MusicBrainz 503, Deezer timeout...) není chyba
@@ -148,7 +157,6 @@ app.include_router(recognize_router, prefix="/api/v1")
 app.include_router(blends_router, prefix="/api/v1")
 
 
-@app.on_event("startup")
 async def on_startup() -> None:
     init_db()
     from app.auth import bind_admin_tailscale
@@ -165,7 +173,6 @@ async def on_startup() -> None:
     asyncio.create_task(lb_submit_loop())
 
 
-@app.on_event("shutdown")
 async def on_shutdown() -> None:
     await close_musicbrainz_client()
     await close_deezer_client()

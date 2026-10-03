@@ -1,0 +1,62 @@
+# Bezpečnostní kontroly při každém pushi (a jednou týdně kvůli novým CVE).
+# Když se změní, jak appka funguje (nová veřejná/admin routa), uprav seznamy
+# v backend/tests/test_route_auth.py -- test to jinak zastaví.
+# Repo je veřejné: logy jsou vidět, proto gitleaks s --redact.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Závislosti
+        working-directory: backend
+        run: pip install -r requirements.txt pytest
+      - name: Testy (vč. přihlášení na všech routách)
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:///./ci.db
+        run: python -m pytest -q tests -p no:warnings
+
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Známé díry v Python knihovnách (pip-audit)
+        run: pip install pip-audit && pip-audit -r backend/requirements.txt --progress-spinner off
+      - name: Známé díry ve Flutter knihovnách (OSV)
+        run: |
+          curl -sSL -o osv-scanner https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64
+          chmod +x osv-scanner
+          ./osv-scanner scan source --lockfile=client/pubspec.lock
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Klíče a hesla v gitu (gitleaks, celá historie)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo --redact --no-banner -v
