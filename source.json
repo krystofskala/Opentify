@@ -14,12 +14,12 @@
       "tintColor": "6B3FD6",
       "versions": [
         {
-          "version": "0.1.51",
-          "buildVersion": "51",
-          "localizedDescription": "Noční build Opentify 0.1.51.",
-          "date": "2026-10-03T14:56:34Z",
-          "size": 13812715,
-          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-nav-10031651/Opentify.ipa",
+          "version": "0.1.52",
+          "buildVersion": "52",
+          "localizedDescription": "Noční build Opentify 0.1.52.",
+          "date": "2026-10-03T20:07:15Z",
+          "size": 13842779,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-sound-10032201/Opentify.ipa",
           "minOSVersion": "15.0"
         }
       ],
@@ -34,5 +34,5 @@
     }
   ],
   "news": [],
-  "opentifyCommit": "516d37cb363be1de2959a3dfff48dc0448266f99"
+  "opentifyCommit": "f8a62036706140d4bbc96b36d54400e7a7504885"
 }
