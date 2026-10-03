@@ -330,8 +330,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           // s lomem nad appkou: obsah pod ním je vidět, s výškou se víc
           // rozmazává a těsně před horní hranou se rozplyne do pozadí
           // přehrávače (`veil`). Úplně nahoře už jen neprůhledné pozadí.
-          final veil = Curves.easeInCubic.transform(((v - 0.55) / 0.45).clamp(0.0, 1.0));
-          final glassy = v < 0.999;
+          // "Bez skla": sklo se nekreslí -- panel má plné pozadí hned od
+          // začátku vysouvání (jinak prosvítala stránka i lišty pod ním).
+          final solid = GlassSettings.solidOf(context);
+          final veil = solid ? 1.0 : Curves.easeInCubic.transform(((v - 0.55) / 0.45).clamp(0.0, 1.0));
+          final glassy = v < 0.999 && !solid;
           return Stack(
             children: [
               // Ztmavení appky jen NAD panelem -- pod panelem by ho sklo při
