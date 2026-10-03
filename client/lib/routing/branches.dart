@@ -33,6 +33,7 @@ const detailHeads = {
   'year-in-review',
   'games',
   'movies',
+  'franchise',
 };
 
 // Dřívější cesty sbírek v Knihovně -> název detailu (`/shazam` je rozpoznávání).

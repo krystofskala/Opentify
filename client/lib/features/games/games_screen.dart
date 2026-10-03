@@ -6,7 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../../data/home_repository.dart' show HomePlaylistCard;
+import '../../data/home_repository.dart' show HomeAlbumCard, HomePlaylistCard;
+import '../../models/recording_model.dart';
 import '../../routing/branches.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/providers.dart';
@@ -17,9 +18,9 @@ import '../../widgets/playlist_card.dart';
 import '../../widgets/queue_action_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
+import '../../widgets/detail_hero.dart';
 import '../../widgets/track_tile.dart';
 import '../library/playlist_detail_screen.dart' show playlistDetailProvider;
-import '../release/release_screen.dart' show releaseProvider, releaseTracksProvider;
 
 /// Procházet › Herní soundtracky / Filmy a seriály (app/games.py,
 /// app/movies.py): velké obrázky nahoře, mixy, série (jako interpret --
@@ -32,7 +33,19 @@ List<Map<String, dynamic>> _list(Object? value) => (value as List<dynamic>? ?? c
 
 String _composerLine(Map<String, dynamic> game) {
   final composers = (game['composers'] as List<dynamic>? ?? const []).cast<String>();
-  return [if (composers.isNotEmpty) composers.take(2).join(', '), if (game['year'] != null) '${game['year']}'].join(' · ');
+  return [if (composers.isNotEmpty) composers.take(2).join(', '), if (game['year'] != null) '${game['year']}']
+      .join(' · ');
+}
+
+/// Dílo = jeho soundtrack (album). Bez alba (GTA -- jen rádia) franšíza.
+void _openWork(BuildContext context, Map<String, dynamic> work) {
+  final albumId = work['albumId'] as String?;
+  final series = work['series'] as String?;
+  if (albumId != null) {
+    context.push('/releases/$albumId');
+  } else if (series != null) {
+    context.push('/franchise/$series');
+  }
 }
 
 class GamesScreen extends ConsumerWidget {
@@ -47,8 +60,10 @@ class GamesScreen extends ConsumerWidget {
       bottomNavigationBar: const ShellBarSpace(),
       body: page.when(
         loading: () => const LoadingState(),
-        error: (e, _) =>
-            ErrorState(message: 'Stránku se nepodařilo načíst.', error: e, onRetry: () => ref.invalidate(soundtrackApiProvider('/$base'))),
+        error: (e, _) => ErrorState(
+            message: 'Stránku se nepodařilo načíst.',
+            error: e,
+            onRetry: () => ref.invalidate(soundtrackApiProvider('/$base'))),
         data: (data) {
           final heroes = _list(data['heroes']);
           final mixes = _list(data['mixes']).map(HomePlaylistCard.fromJson).toList();
@@ -59,7 +74,8 @@ class GamesScreen extends ConsumerWidget {
             slivers: [
               SliverToBoxAdapter(child: _HeroCarousel(games: heroes, base: base, title: title)),
               if (mixes.isNotEmpty) ...[
-                SliverToBoxAdapter(child: SectionHeader('Mixy', onSeeAll: mixes.length > 2 ? () => seeAll('mixes') : null)),
+                SliverToBoxAdapter(
+                    child: SectionHeader('Mixy', onSeeAll: mixes.length > 2 ? () => seeAll('mixes') : null)),
                 SliverToBoxAdapter(
                   child: _Rail(height: 214, children: [
                     for (final m in mixes) PlaylistCardView(card: m, onTap: () => context.push('/playlists/${m.id}')),
@@ -67,10 +83,12 @@ class GamesScreen extends ConsumerWidget {
                 ),
               ],
               if (series.isNotEmpty) ...[
-                SliverToBoxAdapter(child: SectionHeader('Série', onSeeAll: series.length > 1 ? () => seeAll('series') : null)),
+                SliverToBoxAdapter(
+                    child: SectionHeader('Série', onSeeAll: series.length > 1 ? () => seeAll('series') : null)),
                 SliverToBoxAdapter(
                   child: _Rail(height: 140, children: [
-                    for (final s in series) _SeriesTile(series: s, base: base, unit: data['seriesUnit'] as String? ?? ''),
+                    for (final s in series)
+                      _SeriesTile(series: s, base: base, unit: data['seriesUnit'] as String? ?? ''),
                   ]),
                 ),
               ],
@@ -83,7 +101,8 @@ class GamesScreen extends ConsumerWidget {
                     ),
                   ),
                   SliverToBoxAdapter(
-                    child: _Rail(height: 250, children: [for (final g in _list(row['games'])) GameCover(game: g, base: base)]),
+                    child: _Rail(
+                        height: 250, children: [for (final g in _list(row['games'])) GameCover(game: g, base: base)]),
                   ),
                 ],
               if (composers.isNotEmpty) ...[
@@ -204,7 +223,7 @@ class _HeroCarouselState extends State<_HeroCarousel> {
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
                     child: GestureDetector(
-                      onTap: () => context.push('/${widget.base}/${g['slug']}'),
+                      onTap: () => _openWork(context, g),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(AppRadii.lg),
                         child: Stack(
@@ -240,7 +259,8 @@ class _HeroCarouselState extends State<_HeroCarousel> {
                                           style: theme.textTheme.titleLarge
                                               ?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
                                         ),
-                                        Text(_composerLine(g), maxLines: 1, style: const TextStyle(color: Colors.white70)),
+                                        Text(_composerLine(g),
+                                            maxLines: 1, style: const TextStyle(color: Colors.white70)),
                                       ],
                                     ),
                                   ),
@@ -248,7 +268,7 @@ class _HeroCarouselState extends State<_HeroCarousel> {
                                   GlassIconButton(
                                     icon: Symbols.play_arrow_rounded,
                                     tooltip: 'Soundtrack',
-                                    onPressed: () => context.push('/${widget.base}/${g['slug']}'),
+                                    onPressed: () => _openWork(context, g),
                                   ),
                                 ],
                               ),
@@ -285,22 +305,6 @@ class _HeroCarouselState extends State<_HeroCarousel> {
   }
 }
 
-class _Veil extends StatelessWidget {
-  const _Veil();
-
-  @override
-  Widget build(BuildContext context) => const DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0x66000000), Color(0x00000000), Color(0xDD000000)],
-            stops: [0, 0.4, 1],
-          ),
-        ),
-      );
-}
-
 class _SeriesTile extends StatelessWidget {
   const _SeriesTile({required this.series, required this.base, required this.unit, this.width = 230});
   final Map<String, dynamic> series;
@@ -311,7 +315,7 @@ class _SeriesTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => context.push('/$base/series/${series['id']}'),
+      onTap: () => context.push('/franchise/${series['id']}'),
       child: SizedBox(
         width: width,
         height: 140,
@@ -367,7 +371,7 @@ class GameCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return GestureDetector(
-      onTap: () => context.push('/$base/${game['slug']}'),
+      onTap: () => _openWork(context, game),
       child: SizedBox(
         width: width,
         child: Column(
@@ -381,7 +385,8 @@ class GameCover extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.xxs),
-            Text(game['title'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
+            Text(game['title'] as String,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
             Text(
               game['albumId'] == null ? '${game['year']} · bez soundtracku' : '${game['year']}',
               maxLines: 1,
@@ -426,13 +431,28 @@ class GamesListScreen extends ConsumerWidget {
       appBar: SectionAppBar(_title(page.valueOrNull)),
       body: page.when(
         loading: () => const LoadingState(),
-        error: (e, _) => ErrorState(message: 'Nepodařilo se načíst.', error: e, onRetry: () => ref.invalidate(soundtrackApiProvider('/$base'))),
+        error: (e, _) => ErrorState(
+            message: 'Nepodařilo se načíst.', error: e, onRetry: () => ref.invalidate(soundtrackApiProvider('/$base'))),
         data: (data) {
           final unit = data['seriesUnit'] as String? ?? '';
-          final (List<Map<String, dynamic>> items, double extent, double ratio, Widget Function(Map<String, dynamic>) build) =
-              switch (listId) {
-            'series' => (_list(data['series']), 260, 230 / 140, (s) => _SeriesTile(series: s, base: base, unit: unit, width: double.infinity)),
-            'composers' => (_list(data['composers']), 150, 0.72, (a) => _ComposerCard(artist: a, width: double.infinity)),
+          final (
+            List<Map<String, dynamic>> items,
+            double extent,
+            double ratio,
+            Widget Function(Map<String, dynamic>) build
+          ) = switch (listId) {
+            'series' => (
+                _list(data['series']),
+                260,
+                230 / 140,
+                (s) => _SeriesTile(series: s, base: base, unit: unit, width: double.infinity)
+              ),
+            'composers' => (
+                _list(data['composers']),
+                150,
+                0.72,
+                (a) => _ComposerCard(artist: a, width: double.infinity)
+              ),
             'mixes' => (
                 _list(data['mixes']),
                 180,
@@ -450,7 +470,8 @@ class GamesListScreen extends ConsumerWidget {
               ),
           };
           return GridView.builder(
-            padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xl + navBottomInset(context)),
+            padding: EdgeInsets.fromLTRB(
+                AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xl + navBottomInset(context)),
             gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: extent,
               childAspectRatio: ratio,
@@ -473,278 +494,236 @@ class GamesListScreen extends ConsumerWidget {
       };
 }
 
-/// Stránka díla: velký obrázek, soundtrack se skladbami (Přehrát /
-/// Zamíchat), rádia (GTA), další díly série.
-class GameScreen extends ConsumerWidget {
-  const GameScreen({super.key, required this.slug, this.base = 'games'});
-  final String slug;
-  final String base;
+final franchiseProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, id) {
+  return ref.watch(apiClientProvider).getJson('/browse/franchise/$id');
+});
+
+String _yearRange(List<int> years) {
+  if (years.isEmpty) return '';
+  final lo = years.reduce((a, b) => a < b ? a : b);
+  final hi = years.reduce((a, b) => a > b ? a : b);
+  return lo == hi ? '$lo' : '$lo–$hi';
+}
+
+class FranchiseScreen extends ConsumerWidget {
+  const FranchiseScreen({super.key, required this.franchiseId});
+  final String franchiseId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final game = ref.watch(soundtrackApiProvider('/$base/$slug'));
-    final theme = Theme.of(context);
-    return Scaffold(
-      bottomNavigationBar: const ShellBarSpace(),
-      body: game.when(
-        loading: () => const LoadingState(),
-        error: (e, _) => ErrorState(message: 'Nepodařilo se načíst.', error: e, onRetry: () => ref.invalidate(soundtrackApiProvider('/$base/$slug'))),
-        data: (g) {
-          final others = _list(g['seriesGames']);
-          final stations = _list(g['stations']).map(HomePlaylistCard.fromJson).toList();
-          final albums = _list(g['albums']);
-          return CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(child: _GameHeader(game: g)),
-              if (g['series'] != null)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: ActionChip(
-                        avatar: const Icon(Symbols.collections_bookmark_rounded, size: 18),
-                        label: Text('Série: ${g['seriesTitle']}'),
-                        onPressed: () => context.push('/$base/series/${g['series']}'),
+    final page = ref.watch(franchiseProvider(franchiseId));
+    return page.when(
+      loading: () => const Scaffold(bottomNavigationBar: ShellBarSpace(), body: LoadingState()),
+      error: (e, _) => Scaffold(
+        bottomNavigationBar: const ShellBarSpace(),
+        body: ErrorState(
+            message: 'Nepodařilo se načíst.', error: e, onRetry: () => ref.invalidate(franchiseProvider(franchiseId))),
+      ),
+      data: (f) {
+        final albums = _list(f['albums']).map(HomeAlbumCard.fromJson).toList();
+        final stations = _list(f['stations']).map(HomePlaylistCard.fromJson).toList();
+        final composers = _list(f['composers']);
+        final playlistId = f['playlistId'] as String?;
+        final List<RecordingModel> tracks = playlistId == null
+            ? const []
+            : ref.watch(playlistDetailProvider(playlistId)).valueOrNull?.items ?? const [];
+        final years = (f['years'] as List<dynamic>? ?? const []).cast<int>();
+        final title = f['title'] as String? ?? '';
+        final isGames = f['kind'] == 'games';
+        return ScreenAccent(
+          imageUrl: f['cover'] as String?,
+          builder: (context, accent) => Scaffold(
+            bottomNavigationBar: const ShellBarSpace(),
+            body: CustomScrollView(
+              slivers: [
+                DetailHeroAppBar(
+                  title: title,
+                  imageUrl: f['cover'] as String?,
+                  bannerImageUrl: f['image'] as String?,
+                  accent: accent,
+                  eyebrow: isGames ? 'Herní série' : 'Franšíza',
+                  eyebrowIcon: isGames ? Symbols.sports_esports_rounded : Symbols.movie_rounded,
+                  placeholderIcon: Symbols.movie_rounded,
+                  meta: [
+                    if (albums.isNotEmpty) HeroMetaItem(Symbols.album_rounded, '${albums.length} soundtracků'),
+                    if (stations.isNotEmpty) HeroMetaItem(Symbols.radio_rounded, '${stations.length} rádií'),
+                    if (years.isNotEmpty) HeroMetaItem(Symbols.calendar_today_rounded, _yearRange(years)),
+                  ],
+                ),
+                ...detailContentSlivers(context, [
+                  if (tracks.isNotEmpty) ...[
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+                        child: QueueActionBar(tracks: tracks, sourceLabel: title),
                       ),
                     ),
-                  ),
-                ),
-              if (stations.isNotEmpty) ...[
-                SliverToBoxAdapter(child: SectionHeader(g['stationsTitle'] as String? ?? 'Rádia')),
-                SliverToBoxAdapter(
-                  child: _Rail(height: 214, children: [
-                    for (final s in stations) PlaylistCardView(card: s, onTap: () => context.push('/playlists/${s.id}')),
-                  ]),
-                ),
-              ],
-              if (albums.isEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Text(
-                      stations.isNotEmpty
-                          ? 'Hudba je v rádiích výše.'
-                          : 'Soundtrack zatím na streamovacích službách není (nebo jen jako covery, ty nepouštíme).',
-                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    SliverToBoxAdapter(
+                      child: SectionHeader('Oblíbené skladby', onSeeAll: () => context.push('/playlists/$playlistId')),
                     ),
-                  ),
-                )
-              else
-                for (final album in albums)
-                  SliverToBoxAdapter(
-                    child: _AlbumSection(
-                      albumId: album['id'] as String,
-                      kind: album['kind'] as String? ?? 'score',
-                      sourceLabel: g['title'] as String,
+                    SliverList.builder(
+                      itemCount: tracks.length.clamp(0, 5),
+                      itemBuilder: (context, i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                        child: TrackTile(
+                            recording: tracks[i], leadingIndex: i + 1, queueRecordings: tracks, sourceLabel: title),
+                      ),
                     ),
-                  ),
-              if (others.isNotEmpty) ...[
-                const SliverToBoxAdapter(child: SectionHeader('Další díly série')),
-                SliverToBoxAdapter(child: _Rail(height: 250, children: [for (final o in others) GameCover(game: o, base: base)])),
+                  ],
+                  if (stations.isNotEmpty) ...[
+                    const SliverToBoxAdapter(child: SectionHeader('Rádia')),
+                    SliverToBoxAdapter(
+                      child: _Rail(height: 214, children: [
+                        for (final s in stations)
+                          PlaylistCardView(card: s, onTap: () => context.push('/playlists/${s.id}')),
+                      ]),
+                    ),
+                  ],
+                  if (albums.isNotEmpty) ...[
+                    const SliverToBoxAdapter(child: SectionHeader('Soundtracky')),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                      sliver: SliverGrid.builder(
+                        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 180,
+                          childAspectRatio: 0.74,
+                          crossAxisSpacing: AppSpacing.sm,
+                          mainAxisSpacing: AppSpacing.sm,
+                        ),
+                        itemCount: albums.length,
+                        itemBuilder: (context, i) {
+                          final a = albums[i];
+                          final year = (a.releaseDate ?? '').length >= 4 ? a.releaseDate!.substring(0, 4) : null;
+                          return MediaCard(
+                            title: a.title,
+                            subtitle: [year, a.artistName].whereType<String>().join(' · '),
+                            imageUrl: a.images.firstOrNull,
+                            artworkKey: (releaseId: a.id, artistId: null),
+                            onTap: () => context.push('/releases/${a.id}'),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                  if (composers.isNotEmpty) ...[
+                    const SliverToBoxAdapter(child: SectionHeader('Hudbu složili')),
+                    SliverToBoxAdapter(
+                      child: _Rail(height: 190, children: [
+                        for (final a in composers)
+                          SizedBox(
+                            width: 130,
+                            child: MediaCard(
+                              title: a['name'] as String? ?? '',
+                              imageUrl: (a['images'] as List<dynamic>? ?? const []).cast<String>().firstOrNull,
+                              shape: MediaCardShape.circle,
+                              placeholderIcon: Symbols.person_rounded,
+                              onTap: () => context.push('/artists/${a['id']}'),
+                            ),
+                          ),
+                      ]),
+                    ),
+                  ],
+                  const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl)),
+                ]),
               ],
-              SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl + navBottomInset(context))),
-            ],
-          );
-        },
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-class _GameHeader extends StatelessWidget {
-  const _GameHeader({required this.game, this.subtitle});
-  final Map<String, dynamic> game;
-  final String? subtitle;
+/// Dílo ve výsledcích hledání -- vede na franšízu, jinak rovnou na album.
+class WorkCover extends StatelessWidget {
+  const WorkCover({super.key, required this.work, this.width = 140});
+  final Map<String, dynamic> work;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    return SizedBox(
-      height: 280 + top,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ArtworkImage(url: (game['hero'] ?? game['image']) as String?, icon: Symbols.movie_rounded),
-          const _Veil(),
-          Positioned(
-            top: top + AppSpacing.xs,
-            left: AppSpacing.sm,
-            child: IconButton(
-              tooltip: 'Zpět',
-              icon: const Icon(Symbols.arrow_back_rounded, color: Colors.white),
-              onPressed: () => context.pop(),
-            ),
-          ),
-          Positioned(
-            left: AppSpacing.md,
-            right: AppSpacing.md,
-            bottom: AppSpacing.md,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  game['title'] as String,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: AppSpacing.xxs),
-                Text(subtitle ?? _composerLine(game), style: const TextStyle(color: Colors.white70)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Stránka série -- jako interpret: Přehrát / Zamíchat celou sérii, nejlepší
-/// skladby, díly jako diskografie (klepnutí = soundtrack toho dílu).
-class GameSeriesScreen extends ConsumerWidget {
-  const GameSeriesScreen({super.key, required this.seriesId, this.base = 'games'});
-  final String seriesId;
-  final String base;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = '/$base/series/$seriesId';
-    final series = ref.watch(soundtrackApiProvider(path));
     final theme = Theme.of(context);
-    return Scaffold(
-      bottomNavigationBar: const ShellBarSpace(),
-      body: series.when(
-        loading: () => const LoadingState(),
-        error: (e, _) => ErrorState(message: 'Sérii se nepodařilo načíst.', error: e, onRetry: () => ref.invalidate(soundtrackApiProvider(path))),
-        data: (s) {
-          final games = _list(s['games']);
-          final latest = games.isEmpty ? null : games.last;
-          final playlistId = s['playlistId'] as String?;
-          final playlist = playlistId == null ? null : ref.watch(playlistDetailProvider(playlistId)).valueOrNull;
-          final tracks = playlist?.items ?? const [];
-          final stations = _list(s['stations']).map(HomePlaylistCard.fromJson).toList();
-          final withOst = games.where((g) => g['albumId'] != null).length;
-          return CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: _GameHeader(
-                  game: {'title': s['title'], 'hero': latest?['hero']},
-                  subtitle: '${games.length} ${s['unit'] ?? ''} · $withOst se soundtrackem',
-                ),
+    final franchise = work['franchise'] as String?;
+    final albumId = work['albumId'] as String?;
+    return GestureDetector(
+      onTap: () => context.push(franchise != null ? '/franchise/$franchise' : '/releases/$albumId'),
+      child: SizedBox(
+        width: width,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: ArtworkImage(url: work['cover'] as String?, icon: Symbols.movie_rounded),
               ),
-              if (tracks.isNotEmpty) ...[
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
-                    child: QueueActionBar(tracks: tracks, sourceLabel: s['title'] as String),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: SectionHeader('Skladby ze všech dílů', onSeeAll: () => context.push('/playlists/$playlistId')),
-                ),
-                SliverList.builder(
-                  itemCount: tracks.length.clamp(0, 8),
-                  itemBuilder: (context, i) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                    child: TrackTile(recording: tracks[i], queueRecordings: tracks, sourceLabel: s['title'] as String),
-                  ),
-                ),
-              ],
-              if (stations.isNotEmpty) ...[
-                const SliverToBoxAdapter(child: SectionHeader('Rádia')),
-                SliverToBoxAdapter(
-                  child: _Rail(height: 214, children: [
-                    for (final st in stations) PlaylistCardView(card: st, onTap: () => context.push('/playlists/${st.id}')),
-                  ]),
-                ),
-              ],
-              const SliverToBoxAdapter(child: SectionHeader('Díly')),
-              SliverList.builder(
-                itemCount: games.length,
-                itemBuilder: (context, i) {
-                  final g = games[games.length - 1 - i]; // nejnovější nahoře, jako diskografie
-                  final has = g['albumId'] != null;
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xxs),
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadii.sm),
-                      child: SizedBox(
-                        width: 48,
-                        height: 72,
-                        child: ArtworkImage(url: (g['cover'] ?? g['hero']) as String?, icon: Symbols.movie_rounded),
-                      ),
-                    ),
-                    title: Text(g['title'] as String, maxLines: 2, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      has ? _composerLine(g) : '${g['year']} · soundtrack není ke streamování',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                    trailing: Icon(has ? Symbols.play_circle_rounded : Symbols.chevron_right_rounded,
-                        color: has ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
-                    onTap: () => context.push('/$base/${g['slug']}'),
-                  );
-                },
-              ),
-              SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl + navBottomInset(context))),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-
-/// Jedno album díla (Original Score / Soundtrack s písněmi): název, Přehrát
-/// / Zamíchat a skladby.
-class _AlbumSection extends ConsumerWidget {
-  const _AlbumSection({required this.albumId, required this.kind, required this.sourceLabel});
-  final String albumId;
-  final String kind;
-  final String sourceLabel;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final release = ref.watch(releaseProvider(albumId)).valueOrNull;
-    final tracks = ref.watch(releaseTracksProvider(albumId));
-    final list = tracks.valueOrNull ?? const [];
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SectionHeader(
-          kind == 'songs' ? 'Soundtrack (písně)' : 'Original Score',
-          onSeeAll: () => context.push('/releases/$albumId'),
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(work['title'] as String,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
+            Text(
+              [
+                if ((work['year'] ?? 0) != 0) '${work['year']}',
+                if (work['franchiseTitle'] != null) work['franchiseTitle'] as String,
+              ].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
         ),
-        if (release != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
-            child: Text(release.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+      ),
+    );
+  }
+}
+
+/// Franšíza na stránce soundtracků (dlaždice s obrázkem).
+class FranchiseTile extends StatelessWidget {
+  const FranchiseTile({super.key, required this.franchise, this.width = 230});
+  final Map<String, dynamic> franchise;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => context.push('/franchise/${franchise['id']}'),
+      child: SizedBox(
+        width: width,
+        height: 140,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ArtworkImage(url: franchise['image'] as String?, icon: Symbols.movie_rounded),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00000000), Color(0xCC000000)],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: AppSpacing.sm,
+                right: AppSpacing.sm,
+                bottom: AppSpacing.sm,
+                child: Text(
+                  franchise['title'] as String? ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
           ),
-        if (list.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: QueueActionBar(tracks: list, sourceLabel: sourceLabel, albumArtUrl: release?.coverImageUrl),
-          ),
-        if (tracks.isLoading) const LoadingState(count: 5),
-        for (var i = 0; i < list.length; i++)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-            child: TrackTile(
-              recording: list[i],
-              leadingIndex: list[i].trackNumber ?? i + 1,
-              albumArtUrl: release?.coverImageUrl,
-              queueRecordings: list,
-              sourceLabel: sourceLabel,
-            ),
-          ),
-      ],
+        ),
+      ),
     );
   }
 }

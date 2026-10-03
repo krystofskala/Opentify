@@ -60,7 +60,7 @@ MOVIES: list[Game] = [
     Game("sw-6", "Star Wars: Return of the Jedi", 1983, ("John Williams",), "star-wars", wiki="Return of the Jedi", tags=("epic",)),
     Game("sw-7", "Star Wars: The Force Awakens", 2015, ("John Williams",), "star-wars", wiki="Star Wars: The Force Awakens", tags=("epic",)),
     Game("rogue-one", "Rogue One: A Star Wars Story", 2016, ("Michael Giacchino",), "star-wars", wiki="Rogue One", tags=("epic",)),
-    Game("mandalorian", "The Mandalorian", 2019, ("Ludwig Göransson",), "star-wars", wiki="The Mandalorian", tags=("tv",)),
+    Game("mandalorian", "The Mandalorian", 2019, ("Ludwig Göransson",), "star-wars", wiki="The Mandalorian", album="The Mandalorian: Chapter 1", tags=("tv",)),
     # Marvel
     Game("avengers", "The Avengers", 2012, ("Alan Silvestri",), "marvel", wiki="The Avengers (2012 film)", tags=("epic",)),
     Game("guardians", "Guardians of the Galaxy", 2014, ("Tyler Bates",), "marvel",
@@ -121,7 +121,7 @@ MOVIES: list[Game] = [
     Game("westworld", "Westworld", 2016, ("Ramin Djawadi",), None, wiki="Westworld (TV series)", tags=("tv",)),
     Game("witcher-netflix", "The Witcher", 2019, ("Sonya Belousova", "Giona Ostinelli"), None, wiki="The Witcher (TV series)", tags=("tv", "fantasy")),
     Game("tlou-hbo", "The Last of Us", 2023, ("Gustavo Santaolalla", "David Fleming"), None, wiki="The Last of Us (TV series)", tags=("tv", "new")),
-    Game("twin-peaks", "Twin Peaks", 1990, ("Angelo Badalamenti",), None, wiki="Twin Peaks", tags=("tv", "classic")),
+    Game("twin-peaks", "Twin Peaks", 1990, ("Angelo Badalamenti",), None, wiki="Twin Peaks", album="Soundtrack from Twin Peaks", tags=("tv", "classic")),
     Game("arcane", "Arcane", 2021, ("Various Artists",), None, wiki="Arcane (TV series)", album="Arcane League of Legends", tags=("tv", "animated")),
     # Česká filmová hudba
     Game("popelka", "Tři oříšky pro Popelku", 1973, ("Karel Svoboda",), None, wiki="Three Wishes for Cinderella", tags=("czech", "classic")),
@@ -169,7 +169,7 @@ MOVIES_CATALOG = Catalog(
     ),
     all_title="Všechny filmy a seriály",
     series_unit="filmů",
-    page_version="v7",
+    page_version="v9",
     strict_core=True,
-    ost_version="v7",
+    ost_version="v8",
 )

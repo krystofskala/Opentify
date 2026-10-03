@@ -27,6 +27,7 @@ import '../../routing/home_shell.dart' show navBottomInset;
 import '../../theme/glass_tokens.dart';
 import '../../widgets/collection_actions.dart';
 import '../browse/tag_screen.dart' show tagRoute;
+import '../games/games_screen.dart' show WorkCover;
 
 const _searchSourceLabel = 'Výsledky hledání';
 
@@ -443,6 +444,7 @@ class _AllResults extends ConsumerWidget {
           loading: const SkeletonCardRail(height: 190, cardWidth: 140),
           builder: (items) => _Rail(height: 190, width: 140, children: [for (final a in items) _ReleaseCard(item: a)]),
         ),
+        _WorksSection(query: query),
         _PlaylistsSection(query: query),
         _SoundcloudSection(query: query),
       ],
@@ -683,6 +685,40 @@ class _GenreChips extends ConsumerWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Filmy, seriály a hry (Wikidata) k dotazu -- soundtrack se otevře na stránce díla.
+final worksSearchProvider = FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, query) async {
+  final json = await ref.watch(apiClientProvider).getJson('/works/search', query: {'q': query});
+  return (json['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
+});
+
+class _WorksSection extends ConsumerWidget {
+  const _WorksSection({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final items = ref.watch(worksSearchProvider(query)).valueOrNull ?? const [];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Filmy, seriály a hry'),
+        SizedBox(
+          height: 200,
+          child: ListView.separated(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+            itemBuilder: (context, i) => WorkCover(work: items[i]),
+          ),
+        ),
+      ],
     );
   }
 }

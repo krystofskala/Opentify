@@ -57,6 +57,7 @@ class Game:
     # Nadpis playlistů ze `stations` (GTA: rádia; jinde soundtrack s písněmi,
     # když oficiální album u nás na streamování není).
     stations_title: str = "Rádia"
+    series_title: str | None = None  # díla z Wikidat (série = QID)
 
 
 # Série: id -> (název, barva)
@@ -253,12 +254,28 @@ async def _wiki_image(title: str) -> str | None:
         async with httpx.AsyncClient(timeout=10.0, headers=_UA, follow_redirects=True) as client:
             r = await client.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{title.replace(' ', '_')}")
         data = r.json() if r.status_code == 200 else {}
-        return {"url": ((data.get("originalimage") or data.get("thumbnail") or {}).get("source"))}
+        img = data.get("originalimage") or data.get("thumbnail") or {}
+        return {"url": img.get("source"), "width": int(img.get("width") or 0)}
 
     try:
-        return (await cached_json(f"games:wiki:{title}", MONTH, fetch, is_empty=lambda v: not v.get("url"))).get("url")
+        hit = await cached_json(f"games:wiki2:{title}", MONTH, fetch, is_empty=lambda v: not v.get("url"))
     except Exception:  # noqa: BLE001
         return None
+    # Plakáty na anglické Wikipedii jsou kvůli právům malé (~250 px) -- po
+    # zvětšení rozmazané; takové jen jako nouzovka (viz `game_card`).
+    return hit.get("url") if hit.get("url") else None
+
+
+async def _wiki_width(title: str) -> int:
+    try:
+        hit = await cached_json(f"games:wiki2:{title}", MONTH, lambda: _none(), is_empty=lambda v: not v.get("url"))
+    except Exception:  # noqa: BLE001
+        return 0
+    return int(hit.get("width") or 0)
+
+
+async def _none() -> dict[str, Any]:
+    return {}
 
 
 async def images(game: Game) -> dict[str, str | None]:
@@ -272,10 +289,12 @@ async def images(game: Game) -> dict[str, str | None]:
                 break
         portrait = f"{base}/library_600x900.jpg"
         cover = portrait if await _url_exists(portrait) else hero
+    lowres = False
     if hero is None:
         wiki = await _wiki_image(game.wiki or game.title)
         hero = cover = wiki
-    return {"hero": hero, "cover": cover}
+        lowres = bool(wiki) and await _wiki_width(game.wiki or game.title) < 800
+    return {"hero": hero, "cover": cover, "lowres": lowres}
 
 
 # ----------------------------------------------------------------------
@@ -340,7 +359,7 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
     from app.catalog.deezer_ingest import ingest_album, ingest_artist
 
     cat = cat or GAMES_CATALOG
-    version = "v7" if cat.ns == "games" else cat.ost_version
+    version = "v8" if cat.ns == "games" else cat.ost_version
 
     async def fetch() -> dict[str, Any]:
         dz = get_deezer_client()
@@ -349,8 +368,9 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
         for name, forced in names:
             want = [w for w in _words(name) if w not in ("the", "of", "a", "and")]
             title_words = set(_words(game.title)) | set(_words(name))
-            composers = {fold(c) for c in game.composers}
-            for q in (f"{name} soundtrack", f"{game.composers[0]} {name}", name):
+            composers = {fold(c) for c in game.composers if c}
+            first = next((c for c in game.composers if c), "")
+            for q in dict.fromkeys((f"{name} soundtrack", f"{first} {name}".strip(), name)):
                 hits = await dz._cached_data(f"dz:search_album_q:{q}", MONTH, "/search/album", {"q": q, "limit": 25}) or []
                 for h in hits:
                     title = h.get("title") or ""
@@ -384,7 +404,8 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
                         and (
                             forced == "songs"
                             or any(w in low for w in ("original motion picture soundtrack", "original soundtrack",
-                                                      "music from the motion picture", "original game soundtrack"))
+                                                      "music from the motion picture", "original game soundtrack",
+                                                      "soundtrack from the", "music from the"))
                         )
                     )
                     if not (by_composer or by_label or by_various):
@@ -430,15 +451,19 @@ async def game_card(game: Game, cat: Catalog | None = None) -> dict[str, Any]:
     cat = cat or GAMES_CATALOG
     img, albums = await asyncio.gather(images(game), soundtracks(game, cat))
     album_id = albums[0]["id"] if albums else None
-    if not img["hero"] and album_id:
-        # Bez obrázku díla (Minecraft) aspoň obal soundtracku.
+    hero = (img["hero"] or "").lower()
+    if album_id and (
+        not hero or img.get("lowres") or "logo" in hero or "title_card" in hero or hero.endswith((".svg", ".svg.png"))
+    ):
+        # Bez obrázku díla (Minecraft) nebo jen logo seriálu (Wikipedie):
+        # obal soundtracku.
         from app.models import Release
 
         with Session(engine) as session:
             rel = session.get(Release, album_id)
             cover = (rel.images or [None])[0] if rel else None
         img = {"hero": cover, "cover": cover}
-    series = cat.series.get(game.series or "")
+    series = cat.series.get(game.series or "") or ((game.series_title, "") if game.series_title else None)
     return {
         "slug": game.slug,
         "title": game.title,
@@ -554,7 +579,7 @@ async def page(cat: Catalog | None = None) -> dict[str, Any]:
             ],
         }
 
-    key = "games:page:v10" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
+    key = "games:page:v12" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
     return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("rows"))
 
 
@@ -654,12 +679,12 @@ async def series_page(series_id: str, cat: Catalog | None = None) -> dict[str, A
             "playlistId": await _series_playlist(cat, series_id, cards, station_ids), "stationIds": station_ids,
         }
 
-    key = f"games:series:v8:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
+    key = f"games:series:v10:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
     return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("games"))
 
 
 async def _series_playlist(
-    cat: Catalog, series_id: str, cards: list[dict[str, Any]], station_ids: list[str] | None = None
+    cat: Catalog, series_id: str, cards: list[dict[str, Any]], station_ids: list[str] | None = None, title: str | None = None
 ) -> str | None:
     """Hudba ze všech dílů série jedním playlistem (chronologicky, celé
     soundtracky) -- jako stránka interpreta."""
@@ -685,7 +710,7 @@ async def _series_playlist(
         ids = list(dict.fromkeys(ids))[:800]
     if not ids:
         return None
-    title = cat.series[series_id][0]
+    title = title or cat.series[series_id][0]
     return g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"{cat.ns}:series:{series_id}", title=f"{title} · celá série",
         description="Soundtracky všech dílů série", kind=PlaylistKind.EDITORIAL, section=cat.ns,
@@ -709,3 +734,86 @@ GAMES_CATALOG = Catalog(
     all_title="Všechny hry",
     series_unit="her",
 )
+
+
+# ----------------------------------------------------------------------
+# Díla a série z Wikidat (app/works.py) -- "skoro cokoliv"
+# ----------------------------------------------------------------------
+
+
+def catalog_for(kind: str) -> Catalog:
+    from app.movies import MOVIES_CATALOG
+
+    return GAMES_CATALOG if kind == "game" else MOVIES_CATALOG
+
+
+def base_for(kind: str) -> str:
+    return "games" if kind == "game" else "movies"
+
+
+async def work_page(qid: str) -> dict[str, Any] | None:
+    from app import works
+
+    found = await works.get(qid)
+    if found is None:
+        return None
+    game, kind = found
+    cat = catalog_for(kind)
+    card = await game_card(game, cat)
+    others: list[dict[str, Any]] = []
+    if game.series and works.is_qid(game.series):
+        _title, members = await works.series_members(game.series)
+        others = await _cards([g for g, _k in members if g.slug != qid][:16], cat)
+    return {**card, "kind": kind, "base": base_for(kind), "seriesGames": others, "stationIds": [], "stationsTitle": "Rádia"}
+
+
+async def work_series_page(qid: str) -> dict[str, Any] | None:
+    from app import works
+
+    async def build() -> dict[str, Any]:
+        title, members = await works.series_members(qid)
+        if not members:
+            return {}
+        kinds = [k for _g, k in members]
+        kind = max(set(kinds), key=kinds.count)
+        cat = catalog_for(kind)
+        cards = await _cards([g for g, _k in members][:40], cat)
+        return {
+            "id": qid, "title": title, "color": "", "games": cards, "unit": "her" if kind == "game" else "dílů",
+            "base": base_for(kind), "stationIds": [],
+            "playlistId": await _series_playlist(cat, qid, cards, title=title),
+        }
+
+    out = await cached_json(f"works:series:v2:{qid}", DAY, build, is_empty=lambda v: not v.get("games"))
+    return out or None
+
+
+async def work_search(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Hledání děl (Hledat): plakát, rok a kam vést -- franšíza (jako
+    interpret), jinak rovnou album soundtracku. Bez obojího se neukáže."""
+    from app import works
+
+    found = await works.search(query, limit)
+
+    async def card(item: tuple[Game, str]) -> dict[str, Any] | None:
+        game, kind = item
+        cat = catalog_for(kind)
+        img, albums = await asyncio.gather(images(game), soundtracks(game, cat))
+        franchise = game.series if game.series else None
+        if not albums and not franchise:
+            return None
+        cover = img["cover"]
+        if albums and (not cover or img.get("lowres")):
+            from app.models import Release
+
+            with Session(engine) as session:
+                rel = session.get(Release, albums[0]["id"])
+                cover = (rel.images or [cover])[0] if rel else cover
+        return {
+            "slug": game.slug, "title": game.title, "year": game.year, "kind": kind,
+            "cover": cover, "albumId": albums[0]["id"] if albums else None, "franchise": franchise,
+            "franchiseTitle": game.series_title,
+        }
+
+    cards = await works.gather_limited([card(i) for i in found], 4)
+    return [c for c in cards if c]

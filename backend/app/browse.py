@@ -45,6 +45,8 @@ class Category:
     query: str  # Deezer hledání playlistů
     genre_id: int | None = None
     icon: str = "music"
+    # Podkategorie (Soundtracky › Hry...) -- v mřížce Procházet se nezobrazuje.
+    parent: str | None = None
 
 
 CATEGORIES: list[Category] = [
@@ -123,7 +125,11 @@ def get_category(category_id: str) -> Category | None:
 
 
 def list_categories() -> list[dict[str, Any]]:
-    return [{"id": c.id, "title": c.title, "group": c.group, "color": c.color, "icon": c.icon} for c in CATEGORIES]
+    return [
+        {"id": c.id, "title": c.title, "group": c.group, "color": c.color, "icon": c.icon}
+        for c in CATEGORIES
+        if c.parent is None
+    ]
 
 
 async def _category_playlists(c: Category) -> list[dict[str, Any]]:
@@ -1023,6 +1029,16 @@ async def category_page(c: Category) -> dict[str, Any]:
         return page
 
     page = await cached_json(f"browse:v5:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
+    if c.group == "soundtrack":
+        # Soundtracky jako žánr: alba soundtracků, franšízy (jako interpreti),
+        # skladatelé, mixy, podkategorie (app/soundtracks.py).
+        from app import soundtracks
+
+        try:
+            page = {**page, **await soundtracks.category_extra(c.id)}
+        except Exception:  # noqa: BLE001
+            logger.exception("soundtracky %s", c.id)
+        return page
     if c.group in ("genre", "mood"):
         page = {**page, **extras_cards(await genre_extras(c))}
         # Česky (vlastní text) místo anglického popisu z Last.fm.

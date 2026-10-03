@@ -67,6 +67,17 @@ async def tag_page(tag: str, current: tuple[str, str] = Depends(get_current_user
     return await tags.tag_page(tag, current[0])
 
 
+@browse_router.get("/franchise/{franchise_id}")
+async def franchise(franchise_id: str):
+    """Franšíza soundtracků jako interpret (app/soundtracks.py)."""
+    from app import soundtracks
+
+    out = await soundtracks.franchise(franchise_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="franšíza neexistuje")
+    return out
+
+
 @browse_router.get("/{category_id}")
 async def category(category_id: str):
     c = browse.get_category(category_id)

@@ -38,6 +38,13 @@ async def games_page():
 
 @games_router.get("/series/{series_id}")
 async def series(series_id: str):
+    from app import works
+
+    if works.is_qid(series_id):
+        out = await games.work_series_page(series_id)
+        if out is None:
+            raise HTTPException(status_code=404, detail="série neexistuje")
+        return _cards({**out, "mixIds": {"series": out.get("playlistId")} if out.get("playlistId") else {}})
     out = await games.series_page(series_id)
     if out is None:
         raise HTTPException(status_code=404, detail="série neexistuje")
@@ -46,6 +53,13 @@ async def series(series_id: str):
 
 @games_router.get("/{slug}")
 async def game(slug: str):
+    from app import works
+
+    if works.is_qid(slug):
+        out = await games.work_page(slug)
+        if out is None:
+            raise HTTPException(status_code=404, detail="dílo neexistuje")
+        return _cards(out)
     out = await games.game_page(slug)
     if out is None:
         raise HTTPException(status_code=404, detail="hra neexistuje")
@@ -65,7 +79,11 @@ async def movies_page():
 
 @movies_router.get("/series/{series_id}")
 async def movie_series(series_id: str):
+    from app import works
     from app.movies import MOVIES_CATALOG
+
+    if works.is_qid(series_id):
+        return await series(series_id)
 
     out = await games.series_page(series_id, MOVIES_CATALOG)
     if out is None:
@@ -75,9 +93,22 @@ async def movie_series(series_id: str):
 
 @movies_router.get("/{slug}")
 async def movie(slug: str):
+    from app import works
     from app.movies import MOVIES_CATALOG
+
+    if works.is_qid(slug):
+        return await game(slug)
 
     out = await games.game_page(slug, MOVIES_CATALOG)
     if out is None:
         raise HTTPException(status_code=404, detail="film neexistuje")
     return _cards(out)
+
+
+# Hledání filmů, seriálů a her (Wikidata) -- Hledat › Vše.
+works_router = APIRouter(prefix="/works", tags=["works"])
+
+
+@works_router.get("/search")
+async def works_search(q: str):
+    return {"items": await games.work_search(q)}
