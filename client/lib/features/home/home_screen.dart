@@ -1,5 +1,4 @@
 import '../browse/browse_category_screen.dart' show DeezerPlaylistTile;
-import 'home_layout_sheet.dart';
 import '../browse/tag_screen.dart' show TagChips;
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
@@ -48,17 +47,8 @@ class HomeScreen extends ConsumerWidget {
     final recent = ref.watch(recentContextsProvider).valueOrNull ?? const <RecentContext>[];
 
     return Scaffold(
-      appBar: SectionAppBar(
-        _greeting(),
-        actions: [
-          IconButton(
-            tooltip: 'Upravit Domů',
-            icon: const Icon(Symbols.tune_rounded),
-            onPressed: () => showHomeLayoutSheet(context),
-          ),
-          const SizedBox(width: AppSpacing.xs),
-        ],
-      ),
+      // Úprava sekcí jen v Profil › Domů (na Domů žádná ikona navíc).
+      appBar: SectionAppBar(_greeting()),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(homeProvider);
