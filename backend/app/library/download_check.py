@@ -176,7 +176,9 @@ async def check_recording(recording_id: str, *, manual: bool = False) -> dict | 
     elif off or manual:
         await _shazam(entry)
         # Shazam nepoznal / nedostupný, ale délka nesedí -> pořád podezřelé.
-        if off and entry["verdict"] in ("unknown", "error"):
+        # Timeout / výpadek Shazamu nic neříká o souboru (28 z 93 "podezřelých"
+        # byly jen timeouty) -- podezřelé je jen "Shazam nepoznal".
+        if off and entry["verdict"] == "unknown":
             entry["verdict"] = "suspect"
     else:
         # Po stažení a délka sedí. Byl-li to dřívější nález ("Stáhnout

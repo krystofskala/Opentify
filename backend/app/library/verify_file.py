@@ -39,6 +39,7 @@ logger = logging.getLogger("vault.verify")
 
 MATCH_BER = 0.22  # pod tím = ukázka je v souboru (stejná nahrávka)
 NO_MATCH_BER = 0.33  # nad tím = ukázka v souboru není (jiná nahrávka)
+SURE_NO_MATCH_BER = 0.38  # 0.33-0.38 zamítnout jen s nesedící délkou
 
 _CONTAINER_EXT = {"flac": ".flac", "mp3": ".mp3", "ogg": ".ogg", "mov,mp4,m4a,3gp,3g2,mj2": ".m4a", "wav": ".wav"}
 
@@ -351,7 +352,10 @@ async def verify(path: Path, target: Target, *, full_decode: bool = False, fix_e
                     # Ukázka je uvnitř, ale soubor je mnohem delší (celé album, mix).
                     return Verdict(False, f"obsahuje víc než skladbu ({actual:.0f} s místo {expected:.0f} s)", path=path, details=details)
                 return Verdict(True, "otisk sedí", "high", path=path, details=details)
-            if ber >= NO_MATCH_BER and trusted:
+            # Pásmo těsně nad hranicí (0.33-0.38) může být jen jiný master --
+            # zamítnout jen když nesedí ani délka.
+            borderline = ber < SURE_NO_MATCH_BER and bool(expected) and duration_ok(expected, actual, strict=True)
+            if ber >= NO_MATCH_BER and trusted and not borderline:
                 return Verdict(False, f"jiná nahrávka (otisk {ber:.2f})", path=path, details=details)
 
     # Bez spolehlivé ukázky: délka, tagy, AcoustID.

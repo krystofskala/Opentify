@@ -228,6 +228,8 @@ class FetchResult:
     source_url: str | None = None
     # Přesný zdroj souboru (viz `TrackMetadata.rejected_sources`).
     source_key: str | None = None
+    # Jistota kontroly souboru (worker._acquire_verified): high/medium/low.
+    verified: str | None = None
 
 
 class MediaProvider(Protocol):
