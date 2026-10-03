@@ -196,8 +196,8 @@ services:
       SLSKD_API_KEY: "role=ReadWrite;cidr=0.0.0.0/0,::/0;${SLSKD_API_KEY_SECRET:?vygeneruj: openssl rand -base64 32}"
       # Přihlášení do webového UI slskd (http://127.0.0.1:5030) -- jinak
       # výchozí slskd/slskd (bezpečnostní audit V1). Appka jde přes API klíč.
-      SLSKD_USERNAME: ${SLSKD_WEB_USERNAME:?jméno do webového UI slskd -- nastav v .env}
-      SLSKD_PASSWORD: ${SLSKD_WEB_PASSWORD:?heslo do webového UI slskd -- nastav v .env}
+      SLSKD_USERNAME: ${SLSKD_WEB_USERNAME:-slskd}
+      SLSKD_PASSWORD: ${SLSKD_WEB_PASSWORD:-slskd}
       # BEZ TOHOHLE nás Soulseek síť bere jako "leechera" -- řada peerů
       # stahování rovnou odmítne ("Transfer rejected: File not shared."),
       # živě pozorováno, klidně i u populárních skladeb. Sdílí se zpátky
