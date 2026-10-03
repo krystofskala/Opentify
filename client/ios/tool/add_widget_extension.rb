@@ -16,6 +16,10 @@ if project.targets.any? { |t| t.name == 'OpentifyWidgets' }
 end
 
 version = File.read(File.join(IOS, '..', 'pubspec.yaml'))[/^version:\s*([^\s+]+)/, 1] || '1.0.0'
+# Rozšíření musí mít stejnou verzi jako appka (CI: --build-name=0.1.N
+# --build-number=N, N = číslo běhu) -- jinak 0.1.0 (1) vs 0.1.52 (52).
+build = ENV['GITHUB_RUN_NUMBER']
+version = "0.1.#{build}" if build
 
 ext = project.new_target(:app_extension, 'OpentifyWidgets', :ios, '17.0', nil, :swift)
 
@@ -53,7 +57,7 @@ ext.build_configurations.each do |config|
   s['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
   s['SKIP_INSTALL'] = 'YES'
   s['MARKETING_VERSION'] = version
-  s['CURRENT_PROJECT_VERSION'] = '1'
+  s['CURRENT_PROJECT_VERSION'] = build || '1'
   s['LD_RUNPATH_SEARCH_PATHS'] = ['$(inherited)', '@executable_path/Frameworks', '@executable_path/../../Frameworks']
   s['ENABLE_BITCODE'] = 'NO'
   s['ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME'] = ''
