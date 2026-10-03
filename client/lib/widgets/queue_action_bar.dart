@@ -1,3 +1,4 @@
+import '../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -51,7 +52,7 @@ class QueueActionBar extends ConsumerWidget {
     // Rozposlouchané album/playlist: "Pokračovat" tam, kde uživatel skončil.
     String? route;
     try {
-      route = GoRouterState.of(context).uri.path;
+      route = unbranched(GoRouterState.of(context).uri.path);
     } catch (_) {}
     final progress = route == null ? null : ref.watch(collectionProgressProvider)[route];
     final resumeIndex = progress == null ? -1 : tracks.indexWhere((t) => t.id == progress.recordingId);

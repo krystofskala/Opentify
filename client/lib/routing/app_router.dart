@@ -23,6 +23,7 @@ import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
+import 'branches.dart';
 import 'home_shell.dart';
 import '../features/share/track_link_screen.dart';
 import '../features/blend/blend_screen.dart';
@@ -33,79 +34,29 @@ import '../features/library/playlist_join_screen.dart';
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     initialLocation: '/',
+    // `/artists/x` z kterékoli záložky -> detail v té záložce.
+    redirect: (context, state) => branchRedirect(state.uri),
     routes: [
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => HomeShell(navigationShell: navigationShell),
         branches: [
           StatefulShellBranch(routes: [
-            GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+            GoRoute(path: '/', builder: (context, state) => const HomeScreen(), routes: _detailRoutes()),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
+            GoRoute(path: '/search', builder: (context, state) => const SearchScreen(), routes: _detailRoutes()),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/library', builder: (context, state) => const LocalLibraryScreen()),
+            GoRoute(path: '/library', builder: (context, state) => const LocalLibraryScreen(), routes: _detailRoutes()),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
+            GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen(), routes: _detailRoutes()),
           ]),
         ],
       ),
       GoRoute(
-        path: '/artists/:artistId',
-        builder: (context, state) => ArtistScreen(artistId: state.pathParameters['artistId']!),
-      ),
-      GoRoute(
-        path: '/artists/:artistId/discography',
-        builder: (context, state) => ArtistDiscographyScreen(
-          artistId: state.pathParameters['artistId']!,
-          initialType: state.uri.queryParameters['type'] ?? 'all',
-        ),
-      ),
-      GoRoute(path: '/blends', builder: (context, state) => const BlendScreen()),
-      // „Poslat v Opentify" -- poslaná skladba (features/share).
-      GoRoute(
-        path: '/track/:recordingId',
-        builder: (context, state) => TrackLinkScreen(recordingId: state.pathParameters['recordingId']!),
-      ),
-      GoRoute(
-        path: '/releases/:releaseId',
-        builder: (context, state) => ReleaseScreen(
-          releaseId: state.pathParameters['releaseId']!,
-          highlightTrackId: state.uri.queryParameters['track'],
-        ),
-      ),
-      GoRoute(
-        path: '/browse/tag/:tag',
-        builder: (context, state) => TagScreen(tag: state.pathParameters['tag']!),
-      ),
-      GoRoute(
-        path: '/browse/:categoryId',
-        builder: (context, state) => BrowseCategoryScreen(categoryId: state.pathParameters['categoryId']!),
-      ),
-      GoRoute(
-        path: '/library/later',
-        builder: (context, state) => const ListenLaterScreen(),
-      ),
-      GoRoute(
-        path: '/library/shared',
-        builder: (context, state) => const SharedPlaylistsScreen(),
-      ),
-      GoRoute(
-        path: '/library/shazam',
-        builder: (context, state) => const ShazamCollectionScreen(),
-      ),
-      GoRoute(
-        path: '/library/liked',
-        builder: (context, state) => const LikedSongsScreen(),
-      ),
-      GoRoute(
         path: '/playlist-join/:code',
         builder: (context, state) => PlaylistJoinScreen(code: state.pathParameters['code']!),
-      ),
-      GoRoute(
-        path: '/playlists/:playlistId',
-        builder: (context, state) => PlaylistDetailScreen(playlistId: state.pathParameters['playlistId']!),
       ),
       GoRoute(
         path: '/wrapped',
@@ -120,16 +71,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => ShazamScreen(autoStart: state.uri.queryParameters['start'] == '1'),
       ),
       GoRoute(
-        path: '/verify-downloads',
-        builder: (context, state) => const VerifyDownloadsScreen(),
-      ),
-      GoRoute(
         path: '/tuner',
         builder: (context, state) => const TunerScreen(),
-      ),
-      GoRoute(
-        path: '/year-in-review',
-        builder: (context, state) => const YearInReviewScreen(),
       ),
       GoRoute(
         path: '/now-playing',
@@ -155,3 +98,69 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   NativeNav.attach(router);
   return router;
 });
+
+/// Detaily, které se otevírají uvnitř záložky (viz `branches.dart`) -- každá
+/// záložka je má jako podstránky, takže tab bar zůstává a historie se drží
+/// zvlášť pro každou záložku.
+List<RouteBase> _detailRoutes() => [
+      GoRoute(
+        path: 'artists/:artistId',
+        builder: (context, state) => ArtistScreen(artistId: state.pathParameters['artistId']!),
+      ),
+      GoRoute(
+        path: 'artists/:artistId/discography',
+        builder: (context, state) => ArtistDiscographyScreen(
+          artistId: state.pathParameters['artistId']!,
+          initialType: state.uri.queryParameters['type'] ?? 'all',
+        ),
+      ),
+      GoRoute(path: 'blends', builder: (context, state) => const BlendScreen()),
+      // „Poslat v Opentify" -- poslaná skladba (features/share).
+      GoRoute(
+        path: 'track/:recordingId',
+        builder: (context, state) => TrackLinkScreen(recordingId: state.pathParameters['recordingId']!),
+      ),
+      GoRoute(
+        path: 'releases/:releaseId',
+        builder: (context, state) => ReleaseScreen(
+          releaseId: state.pathParameters['releaseId']!,
+          highlightTrackId: state.uri.queryParameters['track'],
+        ),
+      ),
+      GoRoute(
+        path: 'browse/tag/:tag',
+        builder: (context, state) => TagScreen(tag: state.pathParameters['tag']!),
+      ),
+      GoRoute(
+        path: 'browse/:categoryId',
+        builder: (context, state) => BrowseCategoryScreen(categoryId: state.pathParameters['categoryId']!),
+      ),
+      GoRoute(
+        path: 'later',
+        builder: (context, state) => const ListenLaterScreen(),
+      ),
+      GoRoute(
+        path: 'shared',
+        builder: (context, state) => const SharedPlaylistsScreen(),
+      ),
+      GoRoute(
+        path: 'shazam-list',
+        builder: (context, state) => const ShazamCollectionScreen(),
+      ),
+      GoRoute(
+        path: 'liked',
+        builder: (context, state) => const LikedSongsScreen(),
+      ),
+      GoRoute(
+        path: 'playlists/:playlistId',
+        builder: (context, state) => PlaylistDetailScreen(playlistId: state.pathParameters['playlistId']!),
+      ),
+      GoRoute(
+        path: 'verify-downloads',
+        builder: (context, state) => const VerifyDownloadsScreen(),
+      ),
+      GoRoute(
+        path: 'year-in-review',
+        builder: (context, state) => const YearInReviewScreen(),
+      ),
+    ];

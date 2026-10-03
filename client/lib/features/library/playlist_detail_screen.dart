@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,7 +14,6 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_actions.dart';
 import '../../widgets/track_collection.dart';
@@ -100,7 +100,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       // první skladby.
       color: mixSpec?.accent,
       builder: (context, accent) => Scaffold(
-        bottomNavigationBar: const PlayerBar(),
+        bottomNavigationBar: const ShellBarSpace(),
         body: CustomScrollView(
           slivers: [
             DetailHeroAppBar(

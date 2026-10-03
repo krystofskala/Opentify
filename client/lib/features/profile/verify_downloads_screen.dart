@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -11,7 +12,6 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/net_image.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
@@ -105,7 +105,7 @@ class _VerifyDownloadsScreenState extends ConsumerState<VerifyDownloadsScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: const SectionAppBar('Kontrola stažených'),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: report.when(
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(

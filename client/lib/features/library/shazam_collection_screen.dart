@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +10,6 @@ import '../../models/recording_model.dart';
 import '../../state/listen_later_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
@@ -71,7 +71,7 @@ class ShazamCollectionScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: list.when(
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(

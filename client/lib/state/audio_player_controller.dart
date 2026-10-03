@@ -1,3 +1,4 @@
+import '../routing/branches.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show Random, pow;
@@ -906,8 +907,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // hlásí jen záložku ("/library"); poslechy pak neměly playlist.
       final config = _ref.read(appRouterProvider).routerDelegate.currentConfiguration;
       final last = config.isEmpty ? null : config.last;
-      if (last is ImperativeRouteMatch) return last.matches.uri.path;
-      return config.uri.path;
+      // Bez předpony záložky ("/search/playlists/x" -> "/playlists/x"):
+      // klíč rozposlouchanosti a odkaz "Přehráváno z" platí ve všech záložkách.
+      if (last is ImperativeRouteMatch) return unbranched(last.matches.uri.path);
+      return unbranched(config.uri.path);
     } catch (_) {
       return null;
     }

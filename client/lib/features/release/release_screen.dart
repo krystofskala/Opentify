@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,7 +13,6 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/detail_scaffold_states.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
@@ -212,7 +212,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
     return ScreenAccent(
       imageUrl: release.coverImageUrl,
       builder: (context, accent) => Scaffold(
-        bottomNavigationBar: const PlayerBar(),
+        bottomNavigationBar: const ShellBarSpace(),
         body: CustomScrollView(
           controller: _scroll,
           slivers: [

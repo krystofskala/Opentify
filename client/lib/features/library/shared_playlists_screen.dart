@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +10,6 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/collection_actions.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart' show PlaylistArtwork;
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/spotify_link_import.dart';
@@ -72,7 +72,7 @@ class SharedPlaylistsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: playlists.when(
         data: (all) {
           final shared = [for (final p in all) if (p.isShared) p];

@@ -435,7 +435,7 @@ void openShareCard(BuildContext context) {
   final playback = ProviderScope.containerOf(context, listen: false).read(audioPlayerControllerProvider);
   final np = playback.nowPlaying;
   if (np == null) return;
-  Navigator.of(context).push(MaterialPageRoute<void>(
+  Navigator.of(context, rootNavigator: true).push(MaterialPageRoute<void>(
     fullscreenDialog: true,
     builder: (_) => ShareCardScreen(
       recordingId: np.recordingId,

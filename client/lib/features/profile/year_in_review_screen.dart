@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,7 +9,6 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/media_card.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/queue_action_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -31,7 +31,7 @@ class YearInReviewScreen extends ConsumerWidget {
     final review = ref.watch(yearInReviewProvider);
 
     return Scaffold(
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       appBar: const SectionAppBar('Rok v hudbě'),
       body: review.when(
         data: (data) => data.isEmpty

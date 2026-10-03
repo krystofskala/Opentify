@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,7 +11,6 @@ import '../../theme/design_tokens.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart' show ArtworkImage;
-import '../../widgets/player_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../state/artwork_provider.dart';
@@ -72,7 +72,7 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
           ),
         ],
       ),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: discography.when(
         data: (data) {
           final types = {for (final r in data.releases) r.releaseType};

@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,7 +17,6 @@ import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/glass/glass.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart' show RankBadge;
 import '../../widgets/queue_action_bar.dart';
 import '../../widgets/state_views.dart';
@@ -103,7 +103,7 @@ class _ArtistLoadingBody extends StatelessWidget {
     return ScreenAccent(
       imageUrl: artist.coverImageUrl,
       builder: (context, accent) => Scaffold(
-        bottomNavigationBar: const PlayerBar(),
+        bottomNavigationBar: const ShellBarSpace(),
         body: CustomScrollView(
           slivers: [
             DetailHeroAppBar(
@@ -156,7 +156,7 @@ class _ArtistBody extends ConsumerWidget {
     return ScreenAccent(
       imageUrl: artist.coverImageUrl,
       builder: (context, accent) => Scaffold(
-        bottomNavigationBar: const PlayerBar(),
+        bottomNavigationBar: const ShellBarSpace(),
         body: CustomScrollView(
           slivers: [
             DetailHeroAppBar(

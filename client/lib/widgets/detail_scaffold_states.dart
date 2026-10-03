@@ -1,7 +1,7 @@
+import '../routing/branches.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/design_tokens.dart';
-import 'player_bar.dart';
 import 'state_views.dart';
 import 'section_app_bar.dart';
 
@@ -15,7 +15,7 @@ class DetailLoadingScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const SectionAppBar(''),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: const SingleChildScrollView(
         physics: NeverScrollableScrollPhysics(),
         padding: EdgeInsets.all(AppSpacing.md),
@@ -60,7 +60,7 @@ class DetailErrorScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const SectionAppBar(''),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: ErrorState(message: message, error: error, onRetry: onRetry),
     );
   }

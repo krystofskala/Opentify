@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +14,6 @@ import '../../theme/glass_tokens.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart' show ArtworkImage;
-import '../../widgets/player_bar.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../state/audio_player_controller.dart';
@@ -83,7 +83,7 @@ class _ListenLaterScreenState extends ConsumerState<ListenLaterScreen> {
     final list = ref.watch(listenLaterProvider);
     return Scaffold(
       appBar: const SectionAppBar(_title),
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: list.when(
         data: (data) => _body(context, data),
         loading: () => const LoadingState(),

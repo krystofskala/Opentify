@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,7 +11,6 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/collection_actions.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
 import 'browse_category_screen.dart' show DeezerPlaylistTile;
@@ -142,7 +142,7 @@ class TagScreen extends ConsumerWidget {
     final page = ref.watch(tagPageProvider(tag));
     final theme = Theme.of(context);
     return Scaffold(
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(

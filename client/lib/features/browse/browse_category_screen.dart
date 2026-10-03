@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +14,6 @@ import '../../widgets/glass/expressive_shapes.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/net_image.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
@@ -74,7 +74,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
   Widget build(BuildContext context) {
     final page = ref.watch(browsePageProvider(widget.categoryId));
     return Scaffold(
-      bottomNavigationBar: const PlayerBar(),
+      bottomNavigationBar: const ShellBarSpace(),
       body: page.when(
         data: (data) {
           _setAccent(data.category.color);

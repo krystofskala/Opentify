@@ -43,7 +43,8 @@ class GlassTabBar extends StatefulWidget {
 
 class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin {
   // Poloha kapky v jednotkách tabů (0 = první), pružinou.
-  late final AnimationController _pos = AnimationController.unbounded(vsync: this, value: widget.selectedIndex.toDouble());
+  late final AnimationController _pos =
+      AnimationController.unbounded(vsync: this, value: widget.selectedIndex.toDouble());
   // 0 = v liště, 1 = zvednutá nad lištu (tažení).
   late final AnimationController _lift = AnimationController.unbounded(vsync: this);
   bool _dragging = false;
@@ -169,7 +170,13 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                       child: SizedBox(
                         height: h,
                         width: width,
-                        child: _row(theme, accent: null),
+                        // Pod zvednutou kapkou se šedý tab schová -- jinak
+                        // prosvítal vedle zvětšené barevné kopie dvakrát
+                        // (iPhone: zvětšení pozadí tam nesedí, živě nahlášeno).
+                        child: AnimatedBuilder(
+                          animation: Listenable.merge([_pos, _lift]),
+                          builder: (context, _) => _row(theme, accent: null),
+                        ),
                       ),
                     ),
                     // Kapka výběru nad lištou (smí přesahovat při zvednutí).
@@ -202,38 +209,44 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
   /// Řádek tabů. `accent == null` = běžné barvy (lišta), jinak barevná,
   /// vyplněná verze pro to, co je pod kapkou.
   Widget _row(ThemeData theme, {required Color? accent}) {
+    final lift = _lift.value.clamp(0.0, 1.0);
+    double visible(int i) =>
+        accent != null || lift < 0.01 ? 1 : 1 - lift * (1 - (i - _pos.value).abs()).clamp(0.0, 1.0);
     return Row(
       children: [
         for (var i = 0; i < widget.items.length; i++)
           Expanded(
-            child: Semantics(
-              button: true,
-              selected: i == widget.selectedIndex,
-              label: widget.items[i].label,
-              onTap: accent == null ? () => _select(i) : null,
-              excludeSemantics: true,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    widget.items[i].icon,
-                    size: 24,
-                    fill: accent == null ? 0 : 1,
-                    color: accent ?? theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.items[i].label,
-                    maxLines: 1,
-                    overflow: TextOverflow.fade,
-                    softWrap: false,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontSize: 11,
-                      fontWeight: accent == null ? FontWeight.w500 : FontWeight.w700,
+            child: Opacity(
+              opacity: visible(i),
+              child: Semantics(
+                button: true,
+                selected: i == widget.selectedIndex,
+                label: widget.items[i].label,
+                onTap: accent == null ? () => _select(i) : null,
+                excludeSemantics: true,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      widget.items[i].icon,
+                      size: 24,
+                      fill: accent == null ? 0 : 1,
                       color: accent ?? theme.colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.items[i].label,
+                      maxLines: 1,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 11,
+                        fontWeight: accent == null ? FontWeight.w500 : FontWeight.w700,
+                        color: accent ?? theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -268,7 +281,12 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
           decoration: BoxDecoration(
             borderRadius: radius,
             boxShadow: lift > 0.05
-                ? [BoxShadow(color: Colors.black.withValues(alpha: 0.28 * lift.clamp(0.0, 1.0)), blurRadius: 18, offset: const Offset(0, 6))]
+                ? [
+                    BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.28 * lift.clamp(0.0, 1.0)),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6))
+                  ]
                 : null,
           ),
           child: ClipRRect(
@@ -304,22 +322,25 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                 ),
                 // Světelný lem: nahoře jasnější, zvednutá kapka výraznější.
                 if (!solid)
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: radius,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.18 + 0.32 * math.min(1.0, lift)),
-                        width: 1,
-                      ),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.center,
-                        colors: [Colors.white.withValues(alpha: 0.10 + 0.12 * math.min(1.0, lift)), Colors.transparent],
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.18 + 0.32 * math.min(1.0, lift)),
+                          width: 1,
+                        ),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.center,
+                          colors: [
+                            Colors.white.withValues(alpha: 0.10 + 0.12 * math.min(1.0, lift)),
+                            Colors.transparent
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -328,7 +349,6 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     );
   }
 }
-
 
 /// Zvětšení toho, co je pod kapkou, kolem jejího středu (`BackdropFilter`
 /// s maticí -- na webu jde, shader ne).

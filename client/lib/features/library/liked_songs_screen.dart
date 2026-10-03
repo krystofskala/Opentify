@@ -1,3 +1,4 @@
+import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +11,6 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
-import '../../widgets/player_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_collection.dart';
 import '../../widgets/track_tile.dart';
@@ -100,7 +100,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
       data: (playlist) {
         final items = _liveItems(ref, playlist.items);
         return Scaffold(
-          bottomNavigationBar: const PlayerBar(),
+          bottomNavigationBar: const ShellBarSpace(),
           body: RefreshIndicator(
             onRefresh: () async => ref.invalidate(likedSongsProvider),
             child: CustomScrollView(
