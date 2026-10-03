@@ -150,6 +150,10 @@ def slug(tag: str) -> str:
 
 
 def title_of(tag: str) -> str:
+    from app.home.czech import TAG_TITLES
+
+    if slug(tag) in TAG_TITLES:  # "czech rock" -> "Český rock"
+        return TAG_TITLES[slug(tag)]
     return " ".join(w if w.isupper() else (w[:1].upper() + w[1:]) for w in tag.strip().split())
 
 
@@ -270,7 +274,7 @@ async def tag_for_you(tag: str, user_id: str) -> str | None:
         discovery = discovery[1:]
     ids = list(dict.fromkeys(ids))[:40]
     return g._save_playlist(
-        owner=user_id, source=source, title=f"Pro tebe · {title_of(t)}",
+        owner=user_id, source=source, title=f"Tvůj mix · {title_of(t)}",
         description=f"{title_of(t)} podle tebe -- tvoje oblíbené a objevy od podobných interpretů",
         kind=PlaylistKind.PERSONAL_MIX, section="tag", recording_ids=ids, cover_urls=g._covers_for(ids[:4]),
         ttl=g.DAILY_TTL,
@@ -358,7 +362,7 @@ async def warm_style_pages() -> int:
     user_id = g.home_user()
     with Session(engine) as session:
         snap = session.get(HomeSnapshot, styles_key(user_id))
-        styles = list((snap.payload or {}).get("tags") or [])[:8] if snap else []
+        styles = list((snap.payload or {}).get("tags") or [])[:12] if snap else []
     for tag in styles:
         try:
             await tag_page(tag, None)

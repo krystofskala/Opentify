@@ -1,5 +1,7 @@
+import 'dart:math' as math;
+
 import '../browse/browse_category_screen.dart' show DeezerPlaylistTile;
-import '../browse/tag_screen.dart' show TagChips;
+import '../browse/tag_screen.dart' show TagChips, tagRoute;
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +24,8 @@ import '../../widgets/playlist_card.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
+import '../../state/audio_player_controller.dart' show audioPlayerControllerProvider;
+import '../../widgets/track_actions.dart' show nowPlayingInfoFor;
 import '../../widgets/collection_actions.dart';
 import '../blend/blend_screen.dart' show BlendInviteBanner;
 import '../browse/browse_grid.dart' show BrowseTile;
@@ -323,8 +327,9 @@ class _HomeSectionView extends StatelessWidget {
             SectionHeader(
               section.title,
               onSeeAll: section.playlistId != null ? () => context.push('/playlists/${section.playlistId}') : null,
+              trailing: _PlayAllButton(recordings: section.tracks, sourceLabel: section.title),
             ),
-            _TrackCardRow(recordings: section.tracks, sourceLabel: section.title),
+            _TrackColumns(recordings: section.tracks, sourceLabel: section.title),
           ],
         );
       case HomeSectionType.tagChips:
@@ -392,7 +397,9 @@ class _HomeSectionView extends StatelessWidget {
           children: [
             SectionHeader(
               section.title,
-              onSeeAll: section.categoryId == null ? null : () => context.push('/browse/${section.categoryId}'),
+              onSeeAll: section.categoryId != null
+                  ? () => context.push('/browse/${section.categoryId}')
+                  : (section.tag != null ? () => context.push(tagRoute(section.tag!)) : null),
             ),
             SizedBox(
               height: 214,
@@ -573,34 +580,75 @@ class _QuickPicks extends ConsumerWidget {
   }
 }
 
-class _TrackCardRow extends StatelessWidget {
-  const _TrackCardRow({required this.recordings, required this.sourceLabel});
+/// Sekce, která je jen seznam skladeb ("Mix na teď", "Před rokem",
+/// SoundCloud...): sloupce po 4 řádcích, listují se do strany po celých
+/// sloupcích -- jako seznam, ne karusel obalů (ten patří albům a playlistům).
+class _TrackColumns extends StatelessWidget {
+  const _TrackColumns({required this.recordings, required this.sourceLabel});
+  final List<RecordingModel> recordings;
+  final String sourceLabel;
+
+  static const int _perColumn = 4;
+  static const double _rowHeight = 64;
+
+  @override
+  Widget build(BuildContext context) {
+    final columns = <List<int>>[];
+    for (var i = 0; i < recordings.length; i += _perColumn) {
+      columns.add([for (var j = i; j < math.min(i + _perColumn, recordings.length); j++) j]);
+    }
+    final rows = math.min(_perColumn, recordings.length);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Další sloupec vykukuje -- je vidět, že se dá listovat.
+        final width = math.min(constraints.maxWidth - AppSpacing.md * 2 - 28, 420.0);
+        return SizedBox(
+          height: rows * _rowHeight + AppSpacing.xs,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            physics: const PageScrollPhysics(parent: BouncingScrollPhysics()),
+            itemCount: columns.length,
+            separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+            itemBuilder: (context, c) => SizedBox(
+              width: width,
+              child: Column(
+                children: [
+                  for (final i in columns[c])
+                    SizedBox(
+                      height: _rowHeight,
+                      child: TrackTile(
+                        recording: recordings[i],
+                        subtitle: recordings[i].artistName,
+                        queueRecordings: recordings,
+                        sourceLabel: sourceLabel,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// "Přehrát" v záhlaví seznamu skladeb -- celý seznam od začátku.
+class _PlayAllButton extends ConsumerWidget {
+  const _PlayAllButton({required this.recordings, required this.sourceLabel});
   final List<RecordingModel> recordings;
   final String sourceLabel;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-        height: 198,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          // Jako nadpisy sekcí (md) -- první karta dřív seděla 4 px vlevo.
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          itemCount: recordings.length,
-          separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-          itemBuilder: (context, index) => Padding(
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              width: 140,
-              child: TrackTile(
-                layout: TrackTileLayout.card,
-                recording: recordings[index],
-                queueRecordings: recordings,
-                sourceLabel: sourceLabel,
-                animationIndex: index,
-              ),
-            ),
-          ),
-        ),
+  Widget build(BuildContext context, WidgetRef ref) => IconButton(
+        tooltip: 'Přehrát',
+        icon: const Icon(Symbols.play_circle_rounded, fill: 1),
+        onPressed: recordings.isEmpty
+            ? null
+            : () => ref
+                .read(audioPlayerControllerProvider.notifier)
+                .playQueue([for (final r in recordings) nowPlayingInfoFor(r)], 0, sourceLabel: sourceLabel),
       );
 }
 

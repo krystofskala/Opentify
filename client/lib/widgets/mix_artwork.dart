@@ -126,7 +126,9 @@ MixArtSpec? mixArtForSource({
   if (s.startsWith('home:mix:')) {
     return MixArtSpec(style: MixArtStyle.mood, seed: s, headline: title, photos: photos, eyebrow: 'MIX');
   }
-  if (s.startsWith('personal:category-mix:')) {
+  // Mixy stylů a české hudby ("Tvůj mix · Bluegrass", "Tvůj mix · Český
+  // rock") -- stejný vinyl jako žánrové mixy.
+  if (s.startsWith('personal:category-mix:') || s.startsWith('personal:tag:')) {
     final i = title.indexOf('· ');
     return MixArtSpec(
       style: categoryGroup == 'mood' ? MixArtStyle.mood : MixArtStyle.genre,

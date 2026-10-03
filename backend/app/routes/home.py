@@ -153,11 +153,19 @@ def home_genres(current: tuple[str, str] = Depends(get_current_user)):
     """Žánry na výběr pro řady na Domů a ty, co má profil připnuté."""
     from app import browse
 
+    from app.home import czech
+
     return {
         "available": [
             {"id": c.id, "title": c.title, "color": c.color} for c in browse.CATEGORIES if c.group == "genre"
         ],
-        "selected": [c.id for c in browse.pinned_genres(current[0])],
+        # Česká hudba po žánrech (vitríny ze štítků Last.fm "czech rock"...).
+        "czech": [
+            {"id": gid, "title": title, "color": color}
+            for gid, (_tag, title, color) in czech.CZECH_GENRES.items()
+            if gid != "cz"
+        ],
+        "selected": [c.id for c in browse.pinned_genres(current[0])] + czech.pinned(current[0]),
     }
 
 
@@ -167,7 +175,12 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
     from app.home.service import invalidate_home_cache
     from app.models import AppUser
 
-    ids = [i for i in dict.fromkeys(body.ids) if (c := browse.get_category(i)) is not None and c.group == "genre"]
+    from app.home import czech
+
+    ids = [
+        i for i in dict.fromkeys(body.ids)
+        if ((c := browse.get_category(i)) is not None and c.group == "genre") or (i in czech.CZECH_GENRES and i != "cz")
+    ]
     with Session(engine) as session:
         user = session.get(AppUser, current[0])
         if user is not None:
@@ -177,6 +190,12 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
 
     async def warm() -> None:
         for i in ids:
+            if i in czech.CZECH_GENRES:
+                try:
+                    await czech.build_one(i, current[0])  # česká vitrína hned
+                except Exception:  # noqa: BLE001
+                    pass
+                continue
             c = browse.get_category(i)
             if c is not None:
                 await browse.genre_rail(c)
@@ -283,6 +302,10 @@ async def set_home_layout(body: HomeLayoutIn, current: tuple[str, str] = Depends
         session.commit()
     # Právě zapnuté nové sekce sestavit hned, ne až při dalším běhu.
     turned_on = [sid for sid, on in visible.items() if on and not before.get(sid)]
+    if "czech" in turned_on:
+        from app.home import czech
+
+        asyncio.create_task(czech.build_one("cz", current[0]))
     if turned_on:
         from app.home import extra_sections
 

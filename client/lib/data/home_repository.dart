@@ -131,6 +131,7 @@ class HomeSection {
     this.playlistId,
     this.showcase = const [],
     this.categoryId,
+    this.tag,
     this.tags = const [],
     this.deezerPlaylists = const [],
     this.artists = const [],
@@ -150,6 +151,9 @@ class HomeSection {
 
   /// Žánr vitríny -- "Zobrazit vše" otevře jeho stránku.
   final String? categoryId;
+
+  /// Styl vitríny (česká hudba) -- "Zobrazit vše" otevře stránku stylu.
+  final String? tag;
 
   final String id;
   final String title;
@@ -173,6 +177,7 @@ class HomeSection {
       type: type,
       playlistId: json['playlistId'] as String?,
       categoryId: json['categoryId'] as String?,
+      tag: json['tag'] as String?,
       showcase: type == HomeSectionType.genreShowcase ? items.map(ShowcaseItem.fromJson).toList() : const [],
       tags: type == HomeSectionType.tagChips
           ? [for (final t in items) (tag: t['tag'] as String, title: t['title'] as String)]

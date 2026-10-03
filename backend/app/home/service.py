@@ -69,6 +69,9 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
     registry.append(("personal:styles", g.DAILY_TTL, pm.build_styles))
+    from app.home import czech as czech_home
+
+    registry.append(("personal:czech", timedelta(hours=12), czech_home.build_enabled))
     from app.home import extra_sections
 
     registry.append(("personal:extra-sections", timedelta(minutes=30), extra_sections.build_enabled))
@@ -188,7 +191,7 @@ _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
     ("blends", "Společné mixy", "playlist_cards"),
     ("category_mixes", "Tvoje žánry", "playlist_cards"),
-    ("styles", "Tvé styly", "tag_chips"),
+    ("czech", "Česká hudba", "genre_showcase"),
     ("popular_playlists", "Populární playlisty pro tebe", "deezer_playlists"),
     ("years", "Tvoje roky", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),
@@ -239,6 +242,18 @@ def _accent_for(source: str | None) -> str | None:
         if source and source.startswith(prefix):
             category = get_category(source[len(prefix):])
             return category.color if category else None
+    if source and source.startswith("personal:tag:"):
+        # Mix stylu: barva českého žánru, jinak hlavního žánru stylu
+        # (bluegrass -> Bluegrass, shoegaze -> Indie), jinak z názvu.
+        from app.home.czech import CZECH_GENRES
+        from app.tags import parent_genres
+
+        tag = source[len("personal:tag:"):]
+        for t_, _title, color in CZECH_GENRES.values():
+            if t_ == tag:
+                return color
+        category = get_category(tag) or next((get_category(p) for p in parent_genres(tag)), None)
+        return category.color if category else None
     return None
 
 
@@ -251,6 +266,8 @@ def _art_style(source: str | None) -> str | None:
     if source.startswith("personal:decade:"):
         return "decade"
     if source.startswith("browse:genre:"):
+        return "genre"
+    if source.startswith("personal:tag:"):
         return "genre"
     if source.startswith("personal:category-mix:"):
         from app.browse import get_category
@@ -306,6 +323,41 @@ def _playlist_tracks(session: Session, playlist_id: str, limit: int) -> list[Rec
         if recording is not None:
             out.append(_recording_out(session, recording))
     return out
+
+
+# Obecné styly, které jsou jen jiným názvem hlavního žánru (kategorie) --
+# vedle "Tvůj mix · Folk / Akustická" se "Tvůj mix · Folk" neukazuje.
+_STYLE_TO_CATEGORY = {
+    "alternative": "indie", "indie": "indie", "indie rock": "indie", "folk": "folk", "acoustic": "folk",
+    "singer-songwriter": "folk", "rock": "rock", "pop": "pop", "electronic": "electronic", "rap": "hiphop",
+    "hip-hop": "hiphop", "hip hop": "hiphop", "blues": "blues", "jazz": "jazz", "metal": "metal",
+    "heavy metal": "metal", "country": "country", "soul": "soul", "rnb": "rnb", "dance": "dance",
+    "bluegrass": "bluegrass", "classical": "classical", "reggae": "reggae",
+}
+
+
+def _style_mix_cards(session: Session, user_id: str, shown_categories: set[str]) -> list:
+    """Osobní mixy stylů profilu (Tvé styly, `personal:tag:<štítek>`) jako
+    karty -- v pořadí síly stylu, bez těch, co jen jinak pojmenovávají už
+    zobrazený hlavní žánr."""
+    from app.home import personal_mixes as pm_
+    from app.tags import slug
+
+    snap = session.get(HomeSnapshot, pm_.styles_key(user_id))
+    tags = list((snap.payload or {}).get("tags") or [])[:12] if snap else []
+    cards = []
+    for tag in tags:
+        p = session.exec(
+            select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == f"personal:tag:{slug(tag)}")
+        ).first()
+        if p is None:
+            continue
+        if _STYLE_TO_CATEGORY.get(slug(tag)) in shown_categories:
+            continue
+        card = _card(session, p)
+        if card.item_count > 0:
+            cards.append(card)
+    return cards
 
 
 def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, other_mixes, daily) -> list:
@@ -446,18 +498,32 @@ def build_home(user_id: str) -> dict[str, Any]:
                         }
                     )
 
+        # Připnuté české žánry (Profil › Domů › Žánry) -- vitríny jako u žánrů.
+        from app.home import czech as _cz
+
+        for gid in _cz.pinned(user_id):
+            sec = _cz.render(session, user_id, gid)
+            if sec:
+                sections.append(sec)
+
         worldwide = next((p for p in by_section.get("charts", []) if p.source == "deezer:playlist:3155776842"), None)
         for key, title, kind in _SECTION_ORDER:
-            if key == "styles":
-                # Tvé styly (štítky Last.fm tvých interpretů) -> stránky stylů.
-                snap = session.get(HomeSnapshot, pm.styles_key(user_id))
-                tags = (snap.payload or {}).get("tags") if snap else None
-                if tags:
-                    from app.tags import title_of
+            if key == "czech":
+                from app.home import czech as cz
 
-                    sections.append(
-                        {"id": "styles", "title": title, "type": "tag_chips", "items": [{"tag": t, "title": title_of(t)} for t in tags]}
-                    )
+                sec = cz.render(session, user_id, "cz")
+                if sec:
+                    sections.append(sec)
+                continue
+            if key == "category_mixes":
+                # "Tvoje žánry" = žánry i podžánry/styly v jedné řadě: tvoje
+                # hlavní žánry ("Tvůj mix · Folk") a pak tvoje styly ("Tvůj
+                # mix · Bluegrass"), všechno osobní mixy s vinylem.
+                cards = list(cards_by_section.get("category_mixes") or [])
+                shown = {(c.source or "").rsplit(":", 1)[-1] for c in cards}
+                cards += _style_mix_cards(session, user_id, shown)
+                if cards:
+                    sections.append({"id": key, "title": title, "type": kind, "items": [c.model_dump(mode="json", by_alias=True) for c in cards]})
                 continue
             if key == "popular_playlists":
                 snap = session.get(HomeSnapshot, pm.popular_playlists_key(user_id))
@@ -579,11 +645,14 @@ def default_entries(user_id: str) -> list[tuple[str, str]]:
     if "now_mix" in extra:
         out.append(("now_mix", extra["now_mix"]))
     out += [(f"genre_{c.id}", c.title) for c in browse.pinned_genres(user_id)]
+    from app.home import czech as _cz
+
+    out += [(_cz.section_id(gid), _cz.CZECH_GENRES[gid][1]) for gid in _cz.pinned(user_id)]
     for key, title, _kind in _SECTION_ORDER:
         out.append((key, title))
         follow = {
             "mixes": ["year_ago", "forgotten", "unfinished", "anniversaries"],
-            "styles": ["deep_cuts", "artist_discovery", "album_picks"],
+            "czech": ["deep_cuts", "artist_discovery", "album_picks"],
             "charts": ["trending_tracks"],
             "new_releases": ["release_radar"],
             "editorial": ["shazam", "soundcloud", "family"],

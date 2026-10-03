@@ -21,6 +21,7 @@ class _HomeGenresSheet extends ConsumerStatefulWidget {
 
 class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
   List<({String id, String title, Color color})>? _available;
+  List<({String id, String title, Color color})> _czech = const [];
   List<String> _selected = [];
   String? _error;
   bool _saving = false;
@@ -37,14 +38,31 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
       if (!mounted) return;
       setState(() {
         _available = [
-          for (final g in (json['available'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+          for (final g in (json['available'] as List<dynamic>? ?? const [])
+              .cast<Map<String, dynamic>>())
             (
               id: g['id'] as String,
               title: g['title'] as String? ?? '',
-              color: Color(int.parse((g['color'] as String? ?? '#888888').substring(1), radix: 16) | 0xFF000000),
+              color: Color(int.parse(
+                      (g['color'] as String? ?? '#888888').substring(1),
+                      radix: 16) |
+                  0xFF000000),
             ),
         ];
-        _selected = (json['selected'] as List<dynamic>? ?? const []).cast<String>();
+        _czech = [
+          for (final g in (json['czech'] as List<dynamic>? ?? const [])
+              .cast<Map<String, dynamic>>())
+            (
+              id: g['id'] as String,
+              title: g['title'] as String? ?? '',
+              color: Color(int.parse(
+                      (g['color'] as String? ?? '#888888').substring(1),
+                      radix: 16) |
+                  0xFF000000),
+            ),
+        ];
+        _selected =
+            (json['selected'] as List<dynamic>? ?? const []).cast<String>();
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -54,7 +72,9 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await ref.read(apiClientProvider).putJson('/home/genres', body: {'ids': _selected});
+      await ref
+          .read(apiClientProvider)
+          .putJson('/home/genres', body: {'ids': _selected});
       ref.invalidate(homeProvider);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -73,9 +93,11 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
     final available = _available;
     return GlassSheet(
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md),
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -84,11 +106,13 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
               const SizedBox(height: AppSpacing.xxs),
               Text(
                 'Vybrané žánry dostanou na Domů vlastní řadu. Bez výběru je Domů stejné jako pro ostatní.',
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: AppSpacing.sm),
               if (_error != null)
-                Text('Nepodařilo se: $_error', style: TextStyle(color: theme.colorScheme.error))
+                Text('Nepodařilo se: $_error',
+                    style: TextStyle(color: theme.colorScheme.error))
               else if (available == null)
                 const Padding(
                   padding: EdgeInsets.all(AppSpacing.lg),
@@ -97,21 +121,17 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
               else
                 Flexible(
                   child: SingleChildScrollView(
-                    child: Wrap(
-                      spacing: AppSpacing.xs,
-                      runSpacing: AppSpacing.xs,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        for (final g in available)
-                          FilterChip(
-                            label: Text(g.title),
-                            selected: _selected.contains(g.id),
-                            avatar: _selected.contains(g.id)
-                                ? null
-                                : Icon(Symbols.circle_rounded, size: 12, fill: 1, color: g.color),
-                            onSelected: (on) => setState(() {
-                              on ? _selected.add(g.id) : _selected.remove(g.id);
-                            }),
-                          ),
+                        _chips(available),
+                        if (_czech.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          Text('Česká hudba podle žánru',
+                              style: theme.textTheme.titleSmall),
+                          const SizedBox(height: AppSpacing.xs),
+                          _chips(_czech),
+                        ],
                       ],
                     ),
                   ),
@@ -129,4 +149,23 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
       ),
     );
   }
+
+  Widget _chips(List<({String id, String title, Color color})> list) => Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          for (final g in list)
+            FilterChip(
+              label: Text(g.title),
+              selected: _selected.contains(g.id),
+              avatar: _selected.contains(g.id)
+                  ? null
+                  : Icon(Symbols.circle_rounded,
+                      size: 12, fill: 1, color: g.color),
+              onSelected: (on) => setState(() {
+                on ? _selected.add(g.id) : _selected.remove(g.id);
+              }),
+            ),
+        ],
+      );
 }
