@@ -127,6 +127,14 @@ async def fingerprint(source: str, seconds: int | None = None) -> np.ndarray | N
     return np.frombuffer(out[: len(out) // 4 * 4], dtype="<u4")
 
 
+def fingerprint_worth_keeping(reason: str) -> bool:
+    """Otisk zamítnutého souboru má smysl jen u JINÉ nahrávky. Soubor, který
+    "obsahuje víc než skladbu" (celé album / dlouhé video), tu správnou píseň
+    obsahuje -- jeho otisk by odmítl i každé správné stažení (živě: Norman
+    fucking Rockwell, Something in the Way)."""
+    return reason.startswith(("jiná nahrávka", "AcoustID", "soubor je podle tagů"))
+
+
 async def signature(path: Path) -> str | None:
     """Krátký otisk souboru (~50 s od 20. sekundy) pro `Target.rejected_fps`."""
     import base64

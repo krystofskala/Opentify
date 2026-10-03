@@ -720,9 +720,9 @@ async def _acquire_verified(r, job_id: str, track: TrackMetadata, ctx: dict, int
             return dataclasses.replace(result, verified=verdict.confidence)
         logger.warning("job %s: soubor z %s NEPROŠEL kontrolou: %s (%s)", job_id, result.source_key, verdict.reason, verdict.details)
         reasons.append(verdict.reason)
-        from app.library.verify_file import signature
+        from app.library.verify_file import fingerprint_worth_keeping, signature
 
-        fp = await signature(verdict.path or result.path)
+        fp = await signature(verdict.path or result.path) if fingerprint_worth_keeping(verdict.reason) else None
         (verdict.path or result.path).unlink(missing_ok=True)
         await asyncio.to_thread(_reject_source, track.recording_id, result.source_key, verdict.reason, fp)
         if fp:

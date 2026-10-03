@@ -19,7 +19,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.library.verify_file import signature, verify
+from app.library.verify_file import fingerprint_worth_keeping, signature, verify
 from app.models import MediaAsset, MediaAssetStatus, Recording
 from app.tools.verify_sample import target_for
 
@@ -87,7 +87,7 @@ async def main(dry: bool, limit: int, start: str | None) -> None:
         key = refs.get("sourceKey")
         if not key and target.provider == "youtube" and refs.get("youtubeUrl"):
             key = f"youtube:{str(refs['youtubeUrl']).rsplit('=', 1)[-1]}"
-        fp = await signature(v.path or path)
+        fp = await signature(v.path or path) if fingerprint_worth_keeping(v.reason) else None
         await asyncio.to_thread(_reject_source, rid, key, v.reason, fp)
         (v.path or path).unlink(missing_ok=True)
         with Session(engine) as s:
