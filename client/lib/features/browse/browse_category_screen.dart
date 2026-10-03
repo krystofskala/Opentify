@@ -1,5 +1,7 @@
 import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
+
+import '../games/games_screen.dart' show GamesScreen;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -72,6 +74,8 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Herní soundtracky mají vlastní stránku (hry, série, skladatelé).
+    if (widget.categoryId == 'games') return const GamesScreen();
     final page = ref.watch(browsePageProvider(widget.categoryId));
     return Scaffold(
       bottomNavigationBar: const ShellBarSpace(),

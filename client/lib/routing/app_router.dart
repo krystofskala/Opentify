@@ -23,6 +23,7 @@ import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
+import '../features/games/games_screen.dart';
 import 'branches.dart';
 import 'home_shell.dart';
 import '../features/share/track_link_screen.dart';
@@ -103,6 +104,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 /// záložka je má jako podstránky, takže tab bar zůstává a historie se drží
 /// zvlášť pro každou záložku.
 List<RouteBase> _detailRoutes() => [
+      GoRoute(
+        path: 'games/series/:seriesId',
+        builder: (context, state) => GameSeriesScreen(seriesId: state.pathParameters['seriesId']!),
+      ),
+      GoRoute(
+        path: 'games/:slug',
+        builder: (context, state) => GameScreen(slug: state.pathParameters['slug']!),
+      ),
       GoRoute(
         path: 'artists/:artistId',
         builder: (context, state) => ArtistScreen(artistId: state.pathParameters['artistId']!),

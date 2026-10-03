@@ -31,6 +31,7 @@ const detailHeads = {
   'shazam-list',
   'verify-downloads',
   'year-in-review',
+  'games',
 };
 
 // Dřívější cesty sbírek v Knihovně -> název detailu (`/shazam` je rozpoznávání).

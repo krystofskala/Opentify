@@ -34,6 +34,7 @@ from app.routes.library import library_router
 from app.routes.listens import listens_router
 from app.routes.lyrics import lyrics_router
 from app.routes.browse import browse_router
+from app.routes.games import games_router
 from app.routes.client_log import client_log_router
 from app.routes.listen_later import listen_later_router
 from app.routes.wrapped import wrapped_router
@@ -137,6 +138,7 @@ app.include_router(listens_router, prefix="/api/v1")
 app.include_router(share_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(radio_router, prefix="/api/v1")
 app.include_router(browse_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+app.include_router(games_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(wrapped_router, prefix="/api/v1")
 app.include_router(listen_later_router, prefix="/api/v1")
 app.include_router(client_log_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
