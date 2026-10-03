@@ -129,7 +129,7 @@ class _QueueListState extends ConsumerState<_QueueList> {
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
           decoration: BoxDecoration(
-            color: Colors.redAccent.withValues(alpha: 0.75),
+            color: Theme.of(context).colorScheme.error.withValues(alpha: 0.75),
             borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           child: Row(

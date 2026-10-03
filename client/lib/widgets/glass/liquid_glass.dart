@@ -563,6 +563,7 @@ class RenderLiquidGlass extends RenderBox {
   @override
   void dispose() {
     _shader?.dispose();
+    _opacityLayer.layer = null;
     super.dispose();
   }
 
@@ -580,10 +581,12 @@ class RenderLiquidGlass extends RenderBox {
   @override
   bool get alwaysNeedsCompositing => true;
 
-  OpacityLayer? _opacityLayer;
+  // Přes LayerHandle -- holá reference by vrstvu nedržela naživu a při
+  // dalším paint() by se znovu použila už zahozená (assert v debug/testu).
+  final _opacityLayer = LayerHandle<OpacityLayer>();
 
   void _hiddenForCapture(bool hidden) {
-    _opacityLayer?.alpha = hidden ? 0 : 255;
+    _opacityLayer.layer?.alpha = hidden ? 0 : 255;
   }
 
   @override
@@ -592,10 +595,10 @@ class RenderLiquidGlass extends RenderBox {
   @override
   void paint(PaintingContext context, Offset offset) {
     if (size.isEmpty) {
-      _opacityLayer = null;
+      _opacityLayer.layer = null;
       return;
     }
-    _opacityLayer = context.pushOpacity(offset, 255, _paintGlass, oldLayer: _opacityLayer);
+    _opacityLayer.layer = context.pushOpacity(offset, 255, _paintGlass, oldLayer: _opacityLayer.layer);
   }
 
   // Rychlý pohyb/změna velikosti skla: na webu je zachycený obsah o snímek

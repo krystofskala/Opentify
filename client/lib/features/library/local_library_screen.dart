@@ -924,10 +924,9 @@ class _PlaylistsTab extends ConsumerWidget {
                         options: [LibrarySort.added, LibrarySort.name, LibrarySort.count],
                       ),
                       const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: grid ? 'Zobrazit jako seznam' : 'Zobrazit jako mřížku',
-                        icon: Icon(grid ? Symbols.view_list_rounded : Symbols.grid_view_rounded),
-                        onPressed: () => ref.read(_playlistGridProvider.notifier).set(!grid),
+                      ViewModeToggle(
+                        mode: grid ? ViewMode.grid : ViewMode.list,
+                        onChanged: (mode) => ref.read(_playlistGridProvider.notifier).set(mode == ViewMode.grid),
                       ),
                     ],
                   ),

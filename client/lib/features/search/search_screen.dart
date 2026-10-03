@@ -29,14 +29,13 @@ import '../../widgets/collection_actions.dart';
 
 const _searchSourceLabel = 'Výsledky hledání';
 
-enum SearchFilter { all, tracks, artists, albums, soundcloud }
+enum SearchFilter { all, tracks, artists, albums }
 
 const _filterLabels = {
   SearchFilter.all: 'Vše',
   SearchFilter.tracks: 'Skladby',
   SearchFilter.artists: 'Interpreti',
   SearchFilter.albums: 'Alba',
-  SearchFilter.soundcloud: 'SoundCloud',
 };
 
 const _entityTypeFor = {
@@ -61,7 +60,6 @@ const _libraryScopeFor = {
   SearchFilter.tracks: LibrarySearchScope.tracks,
   SearchFilter.artists: LibrarySearchScope.artists,
   SearchFilter.albums: LibrarySearchScope.albums,
-  SearchFilter.soundcloud: LibrarySearchScope.tracks,
 };
 
 typedef _SectionKey = ({String query, String type, int limit});
@@ -165,6 +163,21 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     return Scaffold(
       appBar: SectionAppBar(
         'Hledat',
+        // "Jen moje knihovna" vpravo nahoře (toggle tlačítko), ať nezužuje
+        // pole ani řádek rozsahů.
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.md),
+            child: GlassIconButton(
+              icon: Symbols.library_music_rounded,
+              tooltip: 'Jen moje knihovna',
+              size: GlassTokens.compactControlHeight,
+              iconSize: 20,
+              selected: libraryOnly,
+              onPressed: () => ref.read(searchLibraryOnlyProvider.notifier).state = !libraryOnly,
+            ),
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(query.isEmpty ? 64 : 112),
           child: Column(
@@ -182,33 +195,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               if (query.isNotEmpty)
                 // Rozsah hledání jako segmentový ovladač (HIG Search fields:
                 // "Use a scope bar to filter among clearly defined search
-                // categories") + ikonové toggle tlačítko "jen moje knihovna"
-                // (HIG Toggles: mimo seznam toggle-tlačítko, ne přepínač).
+                // categories"). SoundCloud není rozsah, ale sekce ve "Vše".
                 SizedBox(
                   height: 48,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: GlassSegmentedControl<SearchFilter>(
-                            segments: [
-                              for (final f in SearchFilter.values) GlassSegment(value: f, label: _filterLabels[f]!),
-                            ],
-                            selected: filter,
-                            onChanged: (f) => ref.read(searchFilterProvider.notifier).state = f,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.xs),
-                        GlassIconButton(
-                          icon: Symbols.library_music_rounded,
-                          tooltip: 'Jen moje knihovna',
-                          size: GlassTokens.compactControlHeight,
-                          iconSize: 20,
-                          selected: libraryOnly,
-                          onPressed: () => ref.read(searchLibraryOnlyProvider.notifier).state = !libraryOnly,
-                        ),
+                    child: GlassSegmentedControl<SearchFilter>(
+                      segments: [
+                        for (final f in SearchFilter.values) GlassSegment(value: f, label: _filterLabels[f]!),
                       ],
+                      selected: filter,
+                      onChanged: (f) => ref.read(searchFilterProvider.notifier).state = f,
                     ),
                   ),
                 ),
@@ -236,9 +233,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   )
                 : filter == SearchFilter.all
                     ? _AllResults(key: ValueKey('all-$query'), query: query)
-                    : filter == SearchFilter.soundcloud
-                        ? _SoundcloudResults(key: ValueKey('sc-$query'), query: query)
-                        : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
+                    : _FilteredResults(key: ValueKey('$filter-$query'), query: query, filter: filter),
       ),
     );
   }
@@ -381,7 +376,8 @@ class _AllResults extends ConsumerWidget {
     final playlists = ref.watch(searchPlaylistsProvider(query));
     final allEmpty = [tracks, artists, albums].every((v) => v.hasValue && v.value!.isEmpty) &&
         playlists.hasValue &&
-        playlists.value!.isEmpty;
+        playlists.value!.isEmpty &&
+        (ref.watch(soundcloudSearchProvider(query)).valueOrNull?.isEmpty ?? !ref.watch(soundcloudSearchProvider(query)).isLoading);
     final allError = [tracks, artists, albums].every((v) => v.hasError);
     if (allEmpty) {
       return EmptyState(icon: Symbols.search_off_rounded, message: 'Pro „$query“ nic nenalezeno.');
@@ -446,6 +442,7 @@ class _AllResults extends ConsumerWidget {
           builder: (items) => _Rail(height: 190, width: 140, children: [for (final a in items) _ReleaseCard(item: a)]),
         ),
         _PlaylistsSection(query: query),
+        _SoundcloudSection(query: query),
       ],
     );
   }
@@ -619,7 +616,6 @@ class _FilteredResults extends ConsumerWidget {
           case SearchFilter.artists:
           case SearchFilter.albums:
           case SearchFilter.all:
-          case SearchFilter.soundcloud: // vlastní pohled (_SoundcloudResults), sem nedojde
             final columns = (MediaQuery.sizeOf(context).width / 170).floor().clamp(2, 8);
             return GridView.builder(
               padding: EdgeInsets.fromLTRB(
@@ -653,31 +649,49 @@ final soundcloudSearchProvider = FutureProvider.autoDispose.family<List<Recordin
       .toList();
 });
 
-/// Hledat › SoundCloud -- dema, remixy, živáky a věci, které jinde nejsou.
-class _SoundcloudResults extends ConsumerWidget {
-  const _SoundcloudResults({super.key, required this.query});
+/// Hledat › Vše › SoundCloud -- dema, remixy, živáky a věci, které jinde
+/// nejsou. Vlastní sekce na konci výsledků; prázdná/nedostupná se skryje
+/// (SoundCloud je doplněk, nemá shazovat celé hledání).
+class _SoundcloudSection extends ConsumerStatefulWidget {
+  const _SoundcloudSection({required this.query});
   final String query;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final results = ref.watch(soundcloudSearchProvider(query));
+  ConsumerState<_SoundcloudSection> createState() => _SoundcloudSectionState();
+}
+
+class _SoundcloudSectionState extends ConsumerState<_SoundcloudSection> {
+  bool _all = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final results = ref.watch(soundcloudSearchProvider(widget.query));
     return results.when(
       data: (items) => items.isEmpty
-          ? EmptyState(icon: Symbols.search_off_rounded, message: 'Na SoundCloudu nic pro „$query“.')
-          : ListView.builder(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.fromLTRB(
-                  AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.lg + navBottomInset(context)),
-              itemCount: items.length,
-              itemBuilder: (context, i) =>
-                  TrackTile(recording: items[i], queueRecordings: items, sourceLabel: 'SoundCloud'),
+          ? const SizedBox.shrink()
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SectionHeader(
+                  'SoundCloud',
+                  onSeeAll: items.length > 5 && !_all ? () => setState(() => _all = true) : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                  child: Column(
+                    children: [
+                      for (final r in _all ? items : items.take(5))
+                        TrackTile(recording: r, queueRecordings: items, sourceLabel: 'SoundCloud'),
+                    ],
+                  ),
+                ),
+              ],
             ),
-      loading: () => const LoadingState(),
-      error: (e, _) => ErrorState(
-        message: 'SoundCloud teď neodpovídá.',
-        error: e,
-        onRetry: () => ref.invalidate(soundcloudSearchProvider(query)),
+      loading: () => const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [SectionHeader('SoundCloud'), SkeletonTrackList(count: 3)],
       ),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }

@@ -77,4 +77,45 @@ void main() {
     ];
     expect(offenders, isEmpty, reason: 'Použij *_rounded s fill: $offenders');
   });
+
+  // Červená jen pro srdíčko (jedna barva „líbí se"); jinak colorScheme.error.
+  test('Colors.red jen v like_heart', () {
+    final red = RegExp(r'Colors\.red');
+    final offenders = [
+      for (final f in files)
+        if (!rel(f).endsWith('widgets/like_heart.dart') && red.hasMatch(f.readAsStringSync())) rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Použij colorScheme.error: $offenders');
+  });
+
+  // Akce jsou pod ⋯ (more_horiz) se skleněným sheetem, ne svislé tečky.
+  test('žádné more_vert', () {
+    final offenders = [
+      for (final f in files)
+        if (f.readAsStringSync().contains('more_vert')) rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Použij more_horiz: $offenders');
+  });
+
+  // Seznam/karty jen přes ViewModeToggle (jeden vzhled přepínače).
+  test('přepínač zobrazení jen přes ViewModeToggle', () {
+    final offenders = [
+      for (final f in files)
+        if (!rel(f).endsWith('widgets/view_mode_toggle.dart') && f.readAsStringSync().contains('view_list_rounded'))
+          rel(f),
+    ];
+    expect(offenders, isEmpty, reason: 'Použij ViewModeToggle: $offenders');
+  });
+
+  // Ráčny: literální rádiusy a velikosti písma se nesmí přidávat (AppRadii,
+  // textTheme). Při úklidu snižuj strop, nikdy nezvyšuj.
+  int count(RegExp re) => files.fold(0, (n, f) => n + re.allMatches(f.readAsStringSync()).length);
+
+  test('literální rádiusy jen ubývají', () {
+    expect(count(RegExp(r'Radius\.circular\(\d')), lessThanOrEqualTo(22), reason: 'Použij AppRadii / AppShapes');
+  });
+
+  test('literální fontSize jen ubývají', () {
+    expect(count(RegExp(r'fontSize: \d')), lessThanOrEqualTo(44), reason: 'Použij textTheme');
+  });
 }
