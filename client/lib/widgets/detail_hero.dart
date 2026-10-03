@@ -278,6 +278,12 @@ List<Widget> detailContentSlivers(BuildContext context, List<Widget> slivers) {
   ];
 }
 
+/// Posledních pár px hlavičky se nekreslí NIC (fotka, závoj): na iPhonu
+/// při zlomkové výšce hlavičky (scroll) poslední řádek vrstvy prosákl jako
+/// tenká tečkovaná čára nad "Přehrát" (živě nahlášeno opakovaně -- 2 px
+/// ani 4 px rezervy nestačily, závoj sahal až na hranu).
+const double _edgeGap = 8;
+
 class _HeroFlexible extends StatelessWidget {
   const _HeroFlexible({
     required this.hero,
@@ -338,7 +344,7 @@ class _HeroFlexible extends StatelessWidget {
               left: 0,
               right: 0,
               top: 0,
-              bottom: 4,
+              bottom: _edgeGap,
               child: ShaderMask(
                 blendMode: BlendMode.dstIn,
                 shaderCallback: (rect) => const LinearGradient(
@@ -393,7 +399,8 @@ class _HeroFlexible extends StatelessWidget {
             Positioned(
               left: 0,
               right: 0,
-              bottom: 0,
+              // Ani závoj nesmí sahat až na hranu (stejný důvod jako fotka).
+              bottom: _edgeGap,
               height: height * 0.62,
               child: _AmbientFade(
                 enabled: true,
