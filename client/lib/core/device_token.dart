@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'native_nav.dart';
@@ -16,12 +17,29 @@ String? actAsProfile;
 const _tokenKey = 'auth.device_token';
 const _actAsKey = 'auth.act_as';
 
+/// Klíč zařízení v systémovém trezoru (iOS Keychain, Android Keystore), ne
+/// v běžném úložišti appky -- to Android kopíroval do zálohy na Google Disk.
+const _secure = FlutterSecureStorage();
+
 Future<void> loadDeviceToken() async {
   if (kIsWeb) return;
   try {
     final prefs = await SharedPreferences.getInstance();
-    deviceToken = prefs.getString(_tokenKey);
     actAsProfile = prefs.getString(_actAsKey);
+    final legacy = prefs.getString(_tokenKey);
+    try {
+      deviceToken = await _secure.read(key: _tokenKey);
+      // Starší verze měla klíč v běžném úložišti -- přestěhovat a smazat.
+      if (deviceToken == null && legacy != null) {
+        await _secure.write(key: _tokenKey, value: legacy);
+        deviceToken = legacy;
+      }
+      if (legacy != null) await prefs.remove(_tokenKey);
+    } catch (_) {
+      // Trezor nejde (vzácné zařízení / obnova zálohy): radši přihlášený
+      // přes staré úložiště než odhlášený.
+      deviceToken = legacy;
+    }
   } catch (_) {}
   await NativeNav.syncConfig();
 }
@@ -30,9 +48,13 @@ Future<void> saveDeviceToken(String token) async {
   if (kIsWeb) return;
   deviceToken = token;
   try {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
-  } catch (_) {}
+    await _secure.write(key: _tokenKey, value: token);
+  } catch (_) {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey, token);
+    } catch (_) {}
+  }
   await NativeNav.syncConfig();
 }
 
@@ -41,6 +63,9 @@ Future<void> clearDeviceToken() async {
   deviceToken = null;
   actAsProfile = null;
   if (kIsWeb) return;
+  try {
+    await _secure.delete(key: _tokenKey);
+  } catch (_) {}
   try {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
