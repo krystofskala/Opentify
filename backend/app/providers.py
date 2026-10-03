@@ -69,6 +69,29 @@ def _normalize(text: str) -> str:
 _SOULSEEK_STOPWORDS = {"the", "feat", "ft", "featuring", "and", "a"}
 
 
+_TRANSLIT = str.maketrans({"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "ß": "ss", "ł": "l", "Ł": "L", "đ": "d",
+                           "Đ": "D", "þ": "th", "Þ": "Th", "œ": "oe", "Œ": "OE", "ı": "i"})
+
+
+def _ascii_fold(text: str) -> str:
+    """"Květy Sigur Rós Mötley" -> "Kvety Sigur Ros Motley" (písma bez
+    latinky -- japonština, azbuka -- zůstávají, jen bez diakritiky)."""
+    text = unicodedata.normalize("NFKD", (text or "").translate(_TRANSLIT))
+    return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+
+def _soulseek_words(artist: str | None, title: str) -> str:
+    title = re.sub(r"[\(\[].*?[\)\]]", " ", title or "")
+    # "AURORA;Pomme", "X & Y", "X feat. Y" -> jen hlavní interpret (méně
+    # povinných slov = víc zásahů; skladbu stejně ověří `_rank`).
+    artist = re.split(r"\s*(?:;|,|/|&|\bfeat\b\.?|\bft\b\.?)\s*", artist or "", flags=re.I)[0]
+    # Zbytky po apostrofech ("I've" -> "ve", "Rock'n'Roll" -> "n") pryč --
+    # každé slovo musí v cestě být a "ve" zbytečně zužovalo hledání.
+    text = re.sub(r"['’`´]\w{1,2}\b", "", f"{artist} {title}")
+    words = [w for w in re.findall(r"\w+", text) if len(w) >= 2 and w.lower() not in _SOULSEEK_STOPWORDS]
+    return " ".join(words)
+
+
 def _title_tokens(title: str) -> set[str]:
     # Závorky/hranaté závorky ("(Remastered 2011)", "[Live]") v názvech
     # souborů často chybí nebo se liší -- do shody se nepočítají.
@@ -208,15 +231,24 @@ class TrackMetadata:
         interpunkce/"&"/apostrofy ("I’d") nebo text v závorkách tak dřív
         shodily hledání na nulu. Jen slova z písmen/číslic, bez závorek,
         bez jednoznakových zbytků po apostrofech."""
-        title = re.sub(r"[\(\[].*?[\)\]]", " ", self.title)
-        # "AURORA;Pomme", "X & Y", "X feat. Y" -> jen hlavní interpret (méně
-        # povinných slov = víc zásahů; skladbu stejně ověří `_rank`).
-        artist = re.split(r"\s*(?:;|,|/|&|\bfeat\b\.?|\bft\b\.?)\s*", self.artist_name or "", flags=re.I)[0]
-        # Zbytky po apostrofech ("I've" -> "ve", "Rock'n'Roll" -> "n") pryč --
-        # každé slovo musí v cestě být a "ve" zbytečně zužovalo hledání.
-        text = re.sub(r"['’`´]\w{1,2}\b", "", f"{artist} {title}")
-        words = [w for w in re.findall(r"\w+", text) if len(w) >= 2 and w.lower() not in _SOULSEEK_STOPWORDS]
-        return " ".join(words) or self.search_query
+        return _soulseek_words(self.artist_name, self.title) or self.search_query
+
+    @property
+    def soulseek_queries(self) -> list[str]:
+        """Dotazy v pořadí, další jen když předchozí nic nenašel (nejvýš 3).
+        Soulseek porovnává znaky přesně: "Květy" nenajde soubor "Kvety"
+        (živě: 0 z 21 hledání s diakritikou) -- proto i verze bez ní, a pak
+        alternativní název (anglický název japonské skladby z Deezeru)."""
+        out: list[str] = []
+        for query in (
+            self.soulseek_query,
+            _ascii_fold(self.soulseek_query),
+            *(_soulseek_words(self.artist_name, alt) for alt in self.alt_titles),
+            *(_ascii_fold(_soulseek_words(self.artist_name, alt)) for alt in self.alt_titles),
+        ):
+            if query and query.lower() not in (q.lower() for q in out):
+                out.append(query)
+        return out[:3]
 
 
 @dataclass
@@ -478,10 +510,64 @@ class SlskdProvider:
                 source_ref=f"{peer['username']}/{peer['filename']}",
                 extra={**peer, "alternates": [], "interactive": interactive, "preferred": True},
             )
-        query = track.soulseek_query
-        if not query:
+        queries = track.soulseek_queries
+        if not queries:
             return None
         profile = self.INTERACTIVE if interactive else self.BACKGROUND
+        ranked: list[tuple[float, str, dict]] = []
+        # Další dotaz jen když předchozí nenašel nic vhodného (bez diakritiky,
+        # jiný název) -- Soulseek nemá rád záplavu hledání, nejvýš 3.
+        for query in queries:
+            ranked = await self._search_ranked(query, track, interactive=interactive, profile=profile)
+            if ranked:
+                break
+        if not ranked:
+            # Každá skladba je na nějakém albu: složka celého alba (i rip se
+            # soubory jen "01.flac" -- sedí interpret, album, počet a délky).
+            return await self._album_folder(track, interactive)
+        peers = [
+            {
+                "username": username,
+                "filename": f["filename"],
+                "size": f.get("size", 0),
+                "bitrate_kbps": f.get("bitRate"),
+            }
+            for _score, username, f in ranked[: profile.max_peers]
+        ]
+        best = peers[0]
+        return ProviderCandidate(
+            source_provider="slskd",
+            source_ref=f"{best['username']}/{best['filename']}",
+            extra={**best, "alternates": peers[1:], "interactive": interactive},
+        )
+
+    async def _album_folder(self, track: TrackMetadata, interactive: bool) -> ProviderCandidate | None:
+        if not track.recording_id or not track.album_title:
+            return None
+        from app.library.album_download import plan_album_for_recording  # kruhový import
+
+        try:
+            pref = await plan_album_for_recording(track.recording_id)
+        except Exception as exc:  # noqa: BLE001 - záloha nesmí shodit stahování
+            logger.info("slskd složka alba pro %s selhala: %s", track.recording_id, exc)
+            return None
+        if (
+            not pref
+            or self._is_blocked(pref["username"])
+            or f"slskd:{pref['username']}|{pref['filename']}" in track.rejected_sources
+        ):
+            return None
+        peer = {k: pref.get(k) for k in ("username", "filename", "size", "bitrate_kbps")}
+        return ProviderCandidate(
+            source_provider="slskd",
+            source_ref=f"{peer['username']}/{peer['filename']}",
+            extra={**peer, "alternates": [], "interactive": interactive, "preferred": True},
+        )
+
+    async def _search_ranked(
+        self, query: str, track: TrackMetadata, *, interactive: bool, profile
+    ) -> list[tuple[float, str, dict]]:
+        """Jedno hledání na Soulseeku -> seřazení vhodní kandidáti (`_rank`)."""
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
             # Hledání přes společnou frontu všech workerů s rozestupem -- rádio
             # s 50 skladbami jich dřív spustilo desítky naráz a slskd vracel
@@ -556,23 +642,7 @@ class SlskdProvider:
             loop.time() - started,
             (active_since if active_since is not None else loop.time()) - started,
         )
-        if not ranked:
-            return None
-        peers = [
-            {
-                "username": username,
-                "filename": f["filename"],
-                "size": f.get("size", 0),
-                "bitrate_kbps": f.get("bitRate"),
-            }
-            for _score, username, f in ranked[: profile.max_peers]
-        ]
-        best = peers[0]
-        return ProviderCandidate(
-            source_provider="slskd",
-            source_ref=f"{best['username']}/{best['filename']}",
-            extra={**best, "alternates": peers[1:], "interactive": interactive},
-        )
+        return ranked
 
     def _rank(self, search_responses: list[dict], track: TrackMetadata, *, interactive: bool) -> list[tuple[float, str, dict]]:
         """Seřadí soubory ze všech odpovědí -- dřív se bral první FLAC bez

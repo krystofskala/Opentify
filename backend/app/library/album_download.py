@@ -12,6 +12,7 @@ Co ve složce chybí, dohledá se po skladbách jako dřív.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import Artist, Recording, Release
-from app.download_match import duration_ok, match_label
+from app.download_match import _covered, artist_in, core_tokens, duration_ok, match_label, tokens
 from app.providers import SlskdProvider, TrackMetadata, _junk_reason, _normalize
 
 logger = logging.getLogger("vault.album_download")
@@ -57,6 +58,55 @@ def _match(rec_title: str, duration_ms: int | None, files: list[dict], artist: s
     return best[1] if best else None
 
 
+# Soubor pojmenovaný jen číslem stopy: "01", "01.", "Track 01", "01 - Track 01",
+# "Stopa 3", "CD1 - 05" (rip celého alba bez názvů skladeb).
+_GENERIC_NAME = re.compile(
+    r"^\s*(?:(?:cd|disc|disk)\s*\d+\s*[-_. ]*)?(?:(?:track|trk|stopa|skladba|titel|piste|pista|traccia)\s*[-_.#]*\s*)?"
+    r"(\d{1,3})\s*[-_.]*\s*(?:(?:track|trk|stopa|skladba|titel|piste|pista|traccia)\s*[-_.#]*\s*\d{1,3})?\s*$",
+    re.I,
+)
+
+
+def generic_track_name(stem: str) -> int | None:
+    """Číslo stopy, když je to celé jméno souboru/tagu ("Track 07" -> 7)."""
+    m = _GENERIC_NAME.match(stem or "")
+    return int(m.group(1)) if m else None
+
+
+def _match_numbered(
+    recs: list[tuple[str, str, int | None, int | None]], files: list[dict], folder: str, artist: str, album: str
+) -> dict[str, dict]:
+    """Složka alba se soubory bez názvů skladeb ("01.flac", "Track 01.mp3"):
+    vezme se podle čísla stopy, jen když sedí VŠECHNO -- interpret i album
+    v cestě, stejný počet souborů jako skladeb a délka každé stopy přesně
+    (celé pořadí délek je otisk alba). Po stažení to ještě ověří otisk
+    proti ukázce z Deezeru."""
+    path_tokens = set(tokens(folder))
+    if not artist_in(artist, folder) or not all(_covered(w, path_tokens) for w in core_tokens(album)):
+        return {}
+    numbers = [n for _rid, _t, _d, n in recs]
+    if None in numbers or len(set(numbers)) != len(numbers) or len(files) != len(recs):
+        return {}
+    by_number: dict[int, dict] = {}
+    for f in files:
+        name = f["filename"].replace("\\", "/").rsplit("/", 1)[-1]
+        ext = Path(name).suffix.lower()
+        number = generic_track_name(Path(name).stem)
+        length = float(f.get("length") or 0) or None
+        if number is None or number in by_number or length is None:
+            return {}
+        if _junk_reason(f["filename"], name, ext, int(f.get("size") or 0), length, f.get("bitRate")):
+            return {}
+        by_number[number] = f
+    matches: dict[str, dict] = {}
+    for rid, _title, dur, number in recs:
+        f = by_number.get(number)  # type: ignore[arg-type]
+        if f is None or not dur or not duration_ok(dur / 1000, float(f["length"]), strict=True):
+            return {}
+        matches[rid] = f
+    return matches
+
+
 def _clear_plan(recording_ids: list[str]) -> None:
     """Starý plán (jiná / špatná složka) pryč -- skladba se pak hledá sama."""
     with Session(engine) as session:
@@ -75,10 +125,9 @@ async def plan_album(release_id: str) -> dict[str, Any]:
         if release is None:
             return {"found": False, "reason": "album neexistuje"}
         artist = session.get(Artist, release.artist_id)
-        recs = [
-            (r.id, r.title, r.duration_ms)
-            for r in session.exec(select(Recording).where(Recording.release_id == release_id)).all()
-        ]
+        rows = session.exec(select(Recording).where(Recording.release_id == release_id)).all()
+        recs = [(r.id, r.title, r.duration_ms) for r in rows]
+        numbered_recs = [(r.id, r.title, r.duration_ms, r.track_number) for r in rows]
         album, artist_name = release.title, artist.name if artist else ""
     if not recs:
         return {"found": False, "reason": "album nemá skladby"}
@@ -112,6 +161,10 @@ async def plan_album(release_id: str) -> dict[str, Any]:
         if len(entry["files"]) > distinct * 1.6 + 3:
             continue
         matches = {rid: m for rid, title, dur in recs if (m := _match(title, dur, entry["files"], artist_name, album))}
+        if len(matches) / len(recs) < MIN_COVERAGE:
+            # Rip bez názvů skladeb ("01.flac"): podle čísla stopy, když sedí
+            # interpret, album, počet skladeb i délka každé z nich.
+            matches = _match_numbered(numbered_recs, entry["files"], key[1], artist_name, album) or matches
         coverage = len(matches) / len(recs)
         if coverage < MIN_COVERAGE:
             continue
@@ -144,3 +197,42 @@ async def plan_album(release_id: str) -> dict[str, Any]:
         session.commit()
     logger.info("album %s: složka %s od %s, %d/%d skladeb", release_id, folder, user, len(matches), len(recs))
     return {"found": True, "matched": len(matches), "total": len(recs), "folder": folder.rsplit("/", 1)[-1]}
+
+
+ALBUM_RETRY_HOURS = 24
+
+
+async def plan_album_for_recording(recording_id: str) -> dict[str, Any] | None:
+    """Záloha stahování po skladbách: když skladba sama nejde najít, zkusit
+    složku jejího alba (`plan_album`) -- jednou za den na album, ať každá
+    chybějící skladba nespouští stejné hledání znovu. Vrátí `preferredSource`
+    skladby (nebo None)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.utils import utcnow
+
+    with Session(engine) as session:
+        rec = session.get(Recording, recording_id)
+        if rec is None or not rec.release_id:
+            return None
+        release = session.get(Release, rec.release_id)
+        if release is None:
+            return None
+        refs = release.external_refs or {}
+        tried = refs.get("albumFolderTriedAt")
+        if tried:
+            when = datetime.fromisoformat(tried)
+            when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+            now = utcnow()
+            now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+            if now - when < timedelta(hours=ALBUM_RETRY_HOURS):
+                return (rec.external_refs or {}).get("preferredSource")
+        release.external_refs = {**refs, "albumFolderTriedAt": utcnow().isoformat()}
+        session.add(release)
+        session.commit()
+        release_id = release.id
+    plan = await plan_album(release_id)
+    logger.info("záloha složkou alba pro %s: %s", recording_id, plan)
+    with Session(engine) as session:
+        rec = session.get(Recording, recording_id)
+        return (rec.external_refs or {}).get("preferredSource") if rec else None

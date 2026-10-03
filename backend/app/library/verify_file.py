@@ -378,6 +378,12 @@ async def verify(path: Path, target: Target, *, full_decode: bool = False, fix_e
         if not tol_ok and not (target.allow_padding and expected <= actual <= expected + max(45.0, expected * 0.25)):
             return Verdict(False, f"délka {actual:.0f} s místo {expected:.0f} s", path=path, details=details)
     tag_title, tag_artist = await asyncio.to_thread(_tags, path) if target.provider == "slskd" else (None, None)
+    # "Track 01" v tagu (rip alba bez názvů) o skladbě nic neříká -- nezamítat.
+    from app.library.album_download import generic_track_name
+
+    if tag_title and generic_track_name(tag_title) is not None:
+        details["tag"] = f"{tag_artist} – {tag_title} (bez názvu)"
+        tag_title = None
     if tag_title:
         details["tag"] = f"{tag_artist} – {tag_title}"
         why = match_label(target.title, tag_title, artist=target.artist, album=target.album)
