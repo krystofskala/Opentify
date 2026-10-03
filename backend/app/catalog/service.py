@@ -165,8 +165,16 @@ class CatalogService:
             # hodnotu nepřepíše (viz jeho "nepřepisovat prázdným" komentář).
             genres=[g["name"] for g in rg.get("genres", []) if g.get("name")],
         )
-        if "secondary-types" in rg and mark_non_music(release, secondary_types):
-            self._session.add(release)
+        if "secondary-types" in rg:
+            if mark_non_music(release, secondary_types):
+                self._session.add(release)
+            # Typ vydání z MB (live, demo, remix...) -- živé album bez "live"
+            # v názvu ("Stop Making Sense") má stahovat živé verze.
+            refs = release.external_refs or {}
+            if refs.get("mbSecondary") != secondary_types:
+                release.external_refs = {**refs, "mbSecondary": secondary_types}
+                self._session.add(release)
+                self._session.commit()
         return release
 
     def _ingest_recording_search_json(self, rec: dict[str, Any]) -> Recording | None:
@@ -1002,6 +1010,13 @@ class CatalogService:
         if not mb_releases:
             return await self._deezer_release_tracks(release)
         chosen = mb_releases[0]
+        # Stav vydání z MB: žádná oficiální edice = bootleg/promo (verze z něj
+        # nejsou studiovky). Viditelné zůstává vše, jen stahování to ví.
+        statuses = sorted({(r.get("status") or "").lower() for r in data.get("releases") or []} - {""})
+        refs = release.external_refs or {}
+        if statuses and refs.get("mbStatuses") != statuses:
+            release.external_refs = {**refs, "mbStatuses": statuses}
+            self._session.add(release)
 
         recordings: list[Recording] = []
         for medium in chosen.get("media", []):
@@ -1024,6 +1039,7 @@ class CatalogService:
                     duration_ms=rec_json.get("length") or track.get("length"),
                     isrc=isrcs[0] if isrcs else None,
                     track_number=_parse_track_number(track.get("number")),
+                    disambiguation=rec_json.get("disambiguation") if rec_json else None,
                 )
                 recordings.append(recording)
 

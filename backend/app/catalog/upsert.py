@@ -107,6 +107,7 @@ def upsert_recording(
     duration_ms: int | None,
     isrc: str | None,
     track_number: int | None,
+    disambiguation: str | None = None,
 ) -> Recording:
     recording = None
     if mbid:
@@ -131,6 +132,18 @@ def upsert_recording(
         recording.track_number = track_number or recording.track_number
         recording.updated_at = utcnow()
         session.add(recording)
+    # Poznámka MusicBrainz k nahrávce ("live, 1994-05-02: ...", "demo",
+    # "acoustic") -- verzi, kterou název neříká, pak hlídá stahování
+    # (`worker._version_hint`).
+    if disambiguation is not None:
+        refs = dict(recording.external_refs or {})
+        if disambiguation.strip():
+            refs["mbDisambiguation"] = disambiguation.strip()
+        else:
+            refs.pop("mbDisambiguation", None)
+        if refs != (recording.external_refs or {}):
+            recording.external_refs = refs
+            session.add(recording)
     session.commit()
     session.refresh(recording)
     return recording

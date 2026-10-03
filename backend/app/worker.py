@@ -836,7 +836,15 @@ _LIVE_ALBUM_RE = re.compile(
 def _version_hint(session: Session, recording: Recording | None) -> str | None:
     """Verze daná vydáním, ne názvem: živák / bootleg koncertu ("2000-08-23:
     Alltel Pavilion..."), demo. Bez téhle nápovědy se stáhla studiová verze."""
-    if recording is None or not recording.release_id:
+    if recording is None:
+        return None
+    # Poznámka MusicBrainz přímo u nahrávky ("live, 1994-05-02: Glastonbury",
+    # "demo", "acoustic") -- nejpřesnější, platí i mimo živé album.
+    note = ((recording.external_refs or {}).get("mbDisambiguation") or "").lower()
+    for word in ("live", "demo", "acoustic"):
+        if re.search(rf"\b{word}\b", note):
+            return word
+    if not recording.release_id:
         return None
     from app.models import Release
 
@@ -845,9 +853,10 @@ def _version_hint(session: Session, recording: Recording | None) -> str | None:
         return None
     refs = release.external_refs or {}
     rarity = refs.get("rarity")
-    if rarity == "demo":
+    secondary = set(refs.get("mbSecondary") or [])
+    if rarity == "demo" or "demo" in secondary:
         return "demo"
-    if rarity in ("live", "bootleg") or _LIVE_RELEASE_RE.match(release.title or ""):
+    if rarity in ("live", "bootleg") or "live" in secondary or _LIVE_RELEASE_RE.match(release.title or ""):
         return "live"
     # Živé album ("MTV Unplugged in New York", "Live at ...") -- skladby z něj
     # jsou živé, i když to jejich název neříká.

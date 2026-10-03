@@ -151,12 +151,14 @@ class DeezerClient:
         """Přesnější párování "interpret + název" (Apple žebříčky, budoucí
         generované playlisty) přes Deezer advanced search syntaxi."""
         query = f'artist:"{artist}" track:"{title}"'
-        tracks = await self._cached_data(f"dz:find_track:{query}", LOOKUP_TTL_SECONDS, "/search/track", {"q": query, "limit": 3})
-        if not tracks:
-            tracks = await self._cached_data(
-                f"dz:find_track_loose:{artist} {title}", LOOKUP_TTL_SECONDS, "/search/track", {"q": f"{artist} {title}", "limit": 3}
+        tracks = await self._cached_data(f"dz:find_track5:{query}", LOOKUP_TTL_SECONDS, "/search/track", {"q": query, "limit": 5})
+        best = _same_version(tracks or [], artist, title)
+        if best is None:
+            loose = await self._cached_data(
+                f"dz:find_track_loose5:{artist} {title}", LOOKUP_TTL_SECONDS, "/search/track", {"q": f"{artist} {title}", "limit": 5}
             )
-        return tracks[0] if tracks else None
+            best = _same_version(loose or [], artist, title)
+        return best
 
     async def playlist_tracks(self, playlist_id: str, limit: int = 100) -> list[dict[str, Any]] | None:
         return await self._cached_data(
@@ -260,3 +262,24 @@ async def close_deezer_client() -> None:
     if _client is not None:
         await _client.aclose()
         _client = None
+
+
+def _same_version(tracks: list[dict[str, Any]], artist: str, title: str) -> dict[str, Any] | None:
+    """První výsledek, který je TA skladba: stejný interpret, celý název a
+    stejná verze -- "Heathens" nesmí vrátit "Heathens (Live In Mexico City)"
+    ani obráceně (dřív se bral první výsledek, klidně živák nebo cover)."""
+    from app.download_match import MARKERS, artist_in, core_tokens, version_words, _covered
+
+    want_version = version_words(title) & MARKERS
+    want_core = core_tokens(title)
+    for track in tracks:
+        name = track.get("title") or ""
+        if version_words(name) & MARKERS != want_version:
+            continue
+        have = core_tokens(name)
+        if want_core and not all(_covered(w, have) for w in want_core):
+            continue
+        if not artist_in(artist, (track.get("artist") or {}).get("name") or ""):
+            continue
+        return track
+    return None
