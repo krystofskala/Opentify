@@ -724,6 +724,9 @@ def render(session: Session, user_id: str, section_id: str) -> list[dict[str, An
             items.append(card)
         return [{"id": section_id, "title": title, "type": "album_cards", "items": items}] if items else []
     if kind == "artists":
-        items = [browse._artist_card(a) for a in (session.get(Artist, i) for i in ids) if a]
+        from app.library.dislikes import disliked_artist_ids
+
+        bad = disliked_artist_ids(session, user_id)
+        items = [browse._artist_card(a) for a in (session.get(Artist, i) for i in ids if i not in bad) if a]
         return [{"id": section_id, "title": title, "type": "artist_cards", "items": items}] if items else []
     return []

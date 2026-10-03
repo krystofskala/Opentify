@@ -21,7 +21,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from app.library.dislikes import disliked_ids
+from app.library.dislikes import disliked_artist_ids, disliked_ids
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.cache import cached_json
 from app.catalog.schemas import ArtistOut, RecordingOut
@@ -311,7 +311,9 @@ class RecommendationService:
         self._session.commit()
 
         bad = disliked_ids(self._session, playlist.owner_user_id)
-        for position, recording in enumerate(r for r in recordings if r.id not in bad):
+        bad_artists = disliked_artist_ids(self._session, playlist.owner_user_id)
+        kept = (r for r in recordings if r.id not in bad and r.artist_id not in bad_artists)
+        for position, recording in enumerate(kept):
             self._session.add(
                 PlaylistItem(playlist_id=playlist.id, recording_id=recording.id, position=position)
             )

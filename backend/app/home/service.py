@@ -781,7 +781,9 @@ def _rail_playlist(session: Session, user_id: str, sec: dict[str, Any]) -> str |
     """Sekce bez vlastního playlistu (Shazam, Před rokem...) -> playlist
     profilu `home:rail:<id>`, ať jde otevřít celá (Přehrát, Zamíchat).
     Položky se přepíšou jen při změně."""
-    ids = [i["id"] for i in sec.get("items") or [] if i.get("id")]
+    from app.library.dislikes import without_disliked
+
+    ids = without_disliked(user_id, [i["id"] for i in sec.get("items") or [] if i.get("id")])
     if not ids:
         return None
     source = f"home:rail:{sec['id']}"

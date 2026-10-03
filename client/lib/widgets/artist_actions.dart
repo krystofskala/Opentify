@@ -11,6 +11,7 @@ import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'radio_station.dart';
 import 'share_sheet.dart';
+import '../state/disliked_artists_controller.dart';
 import '../state/favorite_artists_controller.dart';
 
 /// Menu interpreta -- stejné z ⋯ v hlavičce i dlouhým stiskem karty
@@ -38,6 +39,7 @@ class _ArtistActionsSheet extends ConsumerWidget {
     final later = ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.artist, id) != null));
     final favorite =
         ref.watch(favoriteArtistsProvider.select((s) => s.valueOrNull?.any((a) => a.id == id) ?? false));
+    final disliked = ref.watch(dislikedArtistsProvider.select((s) => s.valueOrNull?.contains(id) ?? false));
 
     Widget row(IconData icon, String label, VoidCallback onTap) => ListTile(
           dense: true,
@@ -82,6 +84,12 @@ class _ArtistActionsSheet extends ConsumerWidget {
               () => ref
                   .read(favoriteArtistsProvider.notifier)
                   .toggle(hostContext, id: id, name: name, imageUrl: imageUrl),
+            ),
+            // Nelíbí se: pryč ze všech mixů, rádií a doporučení.
+            row(
+              Symbols.heart_broken_rounded,
+              disliked ? 'Zrušit „Nelíbí se mi“' : 'Nelíbí se mi',
+              () => ref.read(dislikedArtistsProvider.notifier).toggle(hostContext, id: id, name: name),
             ),
             row(
               later ? Symbols.event_busy_rounded : Symbols.schedule_rounded,

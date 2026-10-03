@@ -20,7 +20,7 @@ import httpx
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import GLOBAL_PLAYLIST_OWNER, Playlist, PlaylistItem, PlaylistKind, Recording, RecordingDislike
+from app.models import GLOBAL_PLAYLIST_OWNER, ArtistDislike, Playlist, PlaylistItem, PlaylistKind, Recording, RecordingDislike
 
 logger = logging.getLogger(__name__)
 LB_API = os.environ.get("LISTENBRAINZ_SUBMIT_BASE_URL", "https://api.listenbrainz.org")
@@ -35,10 +35,44 @@ def disliked_ids(session: Session, user_id: str | None) -> set[str]:
     return set(session.exec(query).all())
 
 
+def disliked_artist_ids(session: Session, user_id: str | None) -> set[str]:
+    """Nelíbení interpreti profilu. Jen osobní výběry -- globální žebříčky
+    (společné všem profilům) se podle jednoho profilu nemění."""
+    if not user_id or user_id == GLOBAL_PLAYLIST_OWNER:
+        return set()
+    return set(session.exec(select(ArtistDislike.artist_id).where(ArtistDislike.user_id == user_id)).all())
+
+
 def without_disliked(user_id: str | None, recording_ids: list[str]) -> list[str]:
     with Session(engine) as session:
         bad = disliked_ids(session, user_id)
+        bad_artists = disliked_artist_ids(session, user_id)
+        if bad_artists and recording_ids:
+            artist_of = dict(
+                session.exec(select(Recording.id, Recording.artist_id).where(Recording.id.in_(recording_ids))).all()  # type: ignore[attr-defined]
+            )
+            bad = bad | {rid for rid in recording_ids if artist_of.get(rid) in bad_artists}
     return [rid for rid in recording_ids if rid not in bad] if bad else recording_ids
+
+
+def purge_artist_from_snapshots(session: Session, artist_id: str, user_id: str) -> int:
+    """Nelíbený interpret zmizí hned z už uložených výběrů TOHOTO profilu
+    (mixy, rádia, Tvoje výběry) -- vlastní playlisty a historie zůstávají."""
+    rows = session.exec(
+        select(PlaylistItem)
+        .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+        .join(Recording, Recording.id == PlaylistItem.recording_id)
+        .where(
+            Recording.artist_id == artist_id,
+            Playlist.owner_user_id == user_id,
+            Playlist.kind != PlaylistKind.USER,
+            ~Playlist.source.startswith("personal:year:"),  # type: ignore[union-attr]
+        )
+    ).all()
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    return len(rows)
 
 
 async def send_feedback(recording_id: str, score: int, user_id: str) -> None:

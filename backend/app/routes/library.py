@@ -1607,3 +1607,54 @@ async def youtube_import(
         async for key in r.scan_iter(match=f"{CACHE_PREFIX}swr:discography:v1:{result['artistId']}:*"):
             await r.delete(key)
     return result
+
+
+@library_router.get("/disliked-artists")
+def disliked_artists(current: tuple[str, str] = Depends(get_current_user)):
+    """Interpreti, které profil nechce slyšet (viz app/library/dislikes.py)."""
+    from app.library.dislikes import disliked_artist_ids
+
+    with Session(engine) as session:
+        return {"artistIds": sorted(disliked_artist_ids(session, current[0]))}
+
+
+@library_router.post("/disliked-artists/{artist_id}")
+async def dislike_artist(artist_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Nelíbí se: pryč z oblíbených a hned ze všech generovaných výběrů
+    profilu; nové výběry ho už nezahrnou."""
+    from app.home.service import invalidate_home_cache
+    from app.library.dislikes import purge_artist_from_snapshots
+    from app.models import ArtistDislike, FavoriteArtist
+
+    user_id = current[0]
+    with Session(engine) as session:
+        if session.get(Artist, artist_id) is None:
+            raise HTTPException(status_code=404, detail="Interpret neexistuje.")
+        exists = session.exec(
+            select(ArtistDislike).where(ArtistDislike.user_id == user_id, ArtistDislike.artist_id == artist_id)
+        ).first()
+        if exists is None:
+            session.add(ArtistDislike(user_id=user_id, artist_id=artist_id))
+        for fav in session.exec(
+            select(FavoriteArtist).where(FavoriteArtist.user_id == user_id, FavoriteArtist.artist_id == artist_id)
+        ).all():
+            session.delete(fav)
+        session.commit()
+        removed = purge_artist_from_snapshots(session, artist_id, user_id)
+    await invalidate_home_cache()
+    return {"disliked": True, "removedFromMixes": removed}
+
+
+@library_router.delete("/disliked-artists/{artist_id}")
+async def undislike_artist(artist_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    from app.home.service import invalidate_home_cache
+    from app.models import ArtistDislike
+
+    with Session(engine) as session:
+        for row in session.exec(
+            select(ArtistDislike).where(ArtistDislike.user_id == current[0], ArtistDislike.artist_id == artist_id)
+        ).all():
+            session.delete(row)
+        session.commit()
+    await invalidate_home_cache()
+    return {"disliked": False}

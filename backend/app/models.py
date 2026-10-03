@@ -313,6 +313,17 @@ class PinnedPlaylist(SQLModel, table=True):
     added_at: datetime = Field(default_factory=utcnow)
 
 
+class ArtistDislike(SQLModel, table=True):
+    """Interpret, kterého profil nechce slyšet -- jeho skladby se nedostanou
+    do žádného generovaného výběru (mixy, rádia, doporučení, Tvoje výběry),
+    viz app/library/dislikes.py."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    artist_id: str = Field(index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class FavoriteArtist(SQLModel, table=True):
     """Oblíbený interpret profilu (srdíčko na stránce interpreta) -- filtr
     "Oblíbení" v Knihovně › Interpreti."""
