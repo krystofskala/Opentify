@@ -63,7 +63,7 @@ class _QueuePanel extends ConsumerWidget {
                   playback.queueSourceLabel != null
                       ? 'PŘEHRÁVÁNO Z ${playback.queueSourceLabel!.toUpperCase()}'
                       : 'FRONTA',
-                  style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: 12, letterSpacing: 1.5),
+                  style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: AppFontSize.caption, letterSpacing: 1.5),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
@@ -299,7 +299,7 @@ class _GroupHeader extends StatelessWidget {
                     ),
                     Text(
                       '$songs · ${expanded ? 'klepnutím sbalíš' : 'klepnutím rozbalíš'}',
-                      style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: 12),
+                      style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: AppFontSize.caption),
                     ),
                   ],
                 ),
@@ -337,7 +337,7 @@ class _SectionLabel extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xxs),
         child: Text(
           text,
-          style: TextStyle(color: _fg(context).withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w700),
+          style: TextStyle(color: _fg(context).withValues(alpha: 0.6), fontSize: AppFontSize.caption, fontWeight: FontWeight.w700),
         ),
       );
 }
@@ -411,7 +411,7 @@ class _QueueRow extends ConsumerWidget {
                         info.artistName!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: 12),
+                        style: TextStyle(color: _fg(context).withValues(alpha: 0.7), fontSize: AppFontSize.caption),
                       ),
                   ],
                 ),

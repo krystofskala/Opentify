@@ -14,6 +14,7 @@ import '../../state/audio_player_controller.dart';
 import '../../state/providers.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart' show ArtworkImage;
+import '../../theme/design_tokens.dart';
 
 final _cardLyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>(
   (ref, id) => ref.watch(lyricsRepositoryProvider).getLyrics(id),
@@ -303,11 +304,11 @@ class _SongCard extends StatelessWidget {
           title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, height: 1.15),
+          style: const TextStyle(color: Colors.white, fontSize: AppFontSize.hero, fontWeight: FontWeight.w800, height: 1.15),
         ),
         if (artist != null) ...[
           const SizedBox(height: 4),
-          Text(artist!, maxLines: 1, style: const TextStyle(color: Colors.white70, fontSize: 17)),
+          Text(artist!, maxLines: 1, style: const TextStyle(color: Colors.white70, fontSize: AppFontSize.title)),
         ],
         const SizedBox(height: 16),
         const _Brand(),
@@ -343,7 +344,7 @@ class _LyricsCard extends StatelessWidget {
               width: 46,
               height: 46,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadii.xs),
                 child: ArtworkImage(url: artworkUrl, icon: Symbols.music_note_rounded),
               ),
             ),
@@ -355,9 +356,9 @@ class _LyricsCard extends StatelessWidget {
                   Text(title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                      style: const TextStyle(color: Colors.white, fontSize: AppFontSize.lead, fontWeight: FontWeight.w800)),
                   if (artist != null)
-                    Text(artist!, maxLines: 1, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                    Text(artist!, maxLines: 1, style: const TextStyle(color: Colors.white70, fontSize: AppFontSize.body)),
                 ],
               ),
             ),
@@ -388,7 +389,7 @@ class _Brand extends StatelessWidget {
         children: [
           Icon(Symbols.graphic_eq_rounded, color: Colors.white, size: 20),
           SizedBox(width: 6),
-          Text('Opentify', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+          Text('Opentify', style: TextStyle(color: Colors.white, fontSize: AppFontSize.lead, fontWeight: FontWeight.w800)),
         ],
       );
 }

@@ -62,7 +62,7 @@ class PlaylistArtwork extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               child: Text(
                 badge!,
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, height: 1.2),
+                style: const TextStyle(color: Colors.white, fontSize: AppFontSize.micro, fontWeight: FontWeight.w800, height: 1.2),
               ),
             ),
           ),
@@ -254,7 +254,7 @@ class RankBadge extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-              color: scheme.onPrimaryContainer, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.4),
+              color: scheme.onPrimaryContainer, fontSize: AppFontSize.tiny, fontWeight: FontWeight.w800, letterSpacing: 0.4),
         ),
       ),
     );
@@ -335,7 +335,7 @@ class QuickPickTile extends StatelessWidget {
               : mix.headline,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 34,
+            fontSize: AppFontSize.xxl,
             fontWeight: FontWeight.w900,
             height: 1,
             shadows: shadow,

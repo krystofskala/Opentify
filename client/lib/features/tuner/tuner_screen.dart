@@ -580,7 +580,7 @@ class _MeterPainter extends CustomPainter {
     // Pásmo "naladěno" (±2 centy).
     canvas.drawRRect(
       RRect.fromLTRBR(x(-TunerFilter.inTuneEnter), mid - 22, x(TunerFilter.inTuneEnter), mid + 22,
-          const Radius.circular(4)),
+          const Radius.circular(AppRadii.xxs)),
       Paint()..color = zone.withValues(alpha: inTune ? 0.38 : 0.18),
     );
 

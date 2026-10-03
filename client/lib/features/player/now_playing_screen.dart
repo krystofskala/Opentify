@@ -43,6 +43,7 @@ import '../share/share_card_screen.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../state/connect_controller.dart';
 import '../../widgets/connect_sheet.dart';
+import '../../theme/design_tokens.dart';
 
 /// Celoobrazovkový přehrávač -- interaktivní "sheet" nad aktuální stránkou
 /// (poloha z `NowPlayingSheetController`: tažení z mini přehrávače nahoru,
@@ -647,13 +648,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                 nowPlaying.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: playerFg(context), fontSize: 17, fontWeight: FontWeight.w700),
+                                style: TextStyle(color: playerFg(context), fontSize: AppFontSize.title, fontWeight: FontWeight.w700),
                               ),
                               Text(
                                 nowPlaying.artistName ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: 15),
+                                style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: AppFontSize.bodyLarge),
                               ),
                             ],
                           ),
@@ -738,7 +739,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 softWrap: false,
-                style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: 11, letterSpacing: 2),
+                style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: AppFontSize.tiny, letterSpacing: 2),
               ),
               if (sourceLabel != null)
                 Builder(builder: (context) {
@@ -751,7 +752,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: playerFg(context),
-                      fontSize: 13,
+                      fontSize: AppFontSize.small,
                       fontWeight: FontWeight.w700,
                       decoration: route == null ? null : TextDecoration.underline,
                       decorationColor: playerFg(context).withValues(alpha: 0.5),
@@ -869,7 +870,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: playerFg(context), fontSize: 26, fontWeight: FontWeight.w800),
+              style: TextStyle(color: playerFg(context), fontSize: AppFontSize.hero, fontWeight: FontWeight.w800),
             ),
           ),
           if (nowPlaying.artistName != null || nowPlaying.artistId != null) ...[
@@ -883,7 +884,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: playerFg(context).withValues(alpha: 0.78),
-                  fontSize: 16,
+                  fontSize: AppFontSize.lead,
                 ),
               ),
             ),
@@ -895,7 +896,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             Text(
               isProvisioning ? provisioningState!.statusLabel : 'Načítám…',
               textAlign: TextAlign.center,
-              style: TextStyle(color: playerFg(context).withValues(alpha: 0.6), fontSize: 13),
+              style: TextStyle(color: playerFg(context).withValues(alpha: 0.6), fontSize: AppFontSize.small),
             ),
           ],
         ],
@@ -1137,14 +1138,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
           color: playerFg(context).withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Symbols.repeat_rounded, size: 14, color: accent),
             const SizedBox(width: 4),
-            Text(label, style: TextStyle(color: playerFg(context), fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(label, style: TextStyle(color: playerFg(context), fontSize: AppFontSize.caption, fontWeight: FontWeight.w600)),
             const SizedBox(width: 4),
             Icon(Symbols.close_rounded, size: 14, color: playerFg(context).withValues(alpha: 0.7)),
           ],
@@ -1235,7 +1236,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             height: 40,
                             child: Center(
                               child: Text('FRONTA',
-                                  style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: 12, letterSpacing: 2)),
+                                  style: TextStyle(color: playerFg(context).withValues(alpha: 0.7), fontSize: AppFontSize.caption, letterSpacing: 2)),
                             ),
                           ),
                           const Expanded(child: QueueView()),

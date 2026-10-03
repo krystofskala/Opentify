@@ -10,6 +10,7 @@ import 'package:flutter/physics.dart';
 import '../../state/glass_settings.dart';
 import '../../theme/glass_tokens.dart';
 import '../glass_container.dart';
+import '../../theme/design_tokens.dart';
 
 class GlassTabItem {
   const GlassTabItem({required this.icon, required this.label});
@@ -241,7 +242,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                       overflow: TextOverflow.fade,
                       softWrap: false,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        fontSize: 11,
+                        fontSize: AppFontSize.tiny,
                         fontWeight: accent == null ? FontWeight.w500 : FontWeight.w700,
                         color: accent ?? theme.colorScheme.onSurfaceVariant,
                       ),

@@ -59,7 +59,7 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       // Emphasized nadpis sekce (M3 Expressive) -- velký, těžký, úzký.
       titleTextStyle: base.textTheme.titleLarge?.copyWith(
         fontFamily: 'Nunito',
-        fontSize: 28,
+        fontSize: AppFontSize.large,
         fontWeight: FontWeight.w900,
         letterSpacing: -0.8,
         color: colorScheme.onSurface,
@@ -137,7 +137,7 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       surfaceTintColor: Colors.transparent,
       titleTextStyle: base.textTheme.titleLarge?.copyWith(
         fontFamily: 'Nunito',
-        fontSize: 22,
+        fontSize: AppFontSize.heading,
         fontWeight: FontWeight.w900,
         letterSpacing: -0.5,
         color: colorScheme.onSurface,
@@ -296,9 +296,9 @@ TextTheme _buildTextTheme(TextTheme base) {
         headlineSmall:
             base.headlineSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w800, letterSpacing: -0.5),
         titleLarge: base.titleLarge
-            ?.copyWith(fontFamily: 'Nunito', fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+            ?.copyWith(fontFamily: 'Nunito', fontSize: AppFontSize.display, fontWeight: FontWeight.w900, letterSpacing: -0.5),
         titleMedium: base.titleMedium
-            ?.copyWith(fontFamily: 'Nunito', fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+            ?.copyWith(fontFamily: 'Nunito', fontSize: AppFontSize.titleLarge, fontWeight: FontWeight.w800, letterSpacing: -0.3),
         titleSmall: base.titleSmall?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w700),
         bodyLarge: base.bodyLarge?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w600),
         bodyMedium: base.bodyMedium?.copyWith(fontFamily: 'Nunito', fontWeight: FontWeight.w500),

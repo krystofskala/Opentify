@@ -65,7 +65,7 @@ class _PlayerButtonsSheetState extends ConsumerState<_PlayerButtonsSheet> {
                         radius: 12,
                         backgroundColor: theme.colorScheme.primary,
                         child: Text('${_picked.indexOf(b) + 1}',
-                            style: TextStyle(fontSize: 12, color: theme.colorScheme.onPrimary)),
+                            style: TextStyle(fontSize: AppFontSize.caption, color: theme.colorScheme.onPrimary)),
                       )
                     : null,
                 onTap: () => _toggle(b),

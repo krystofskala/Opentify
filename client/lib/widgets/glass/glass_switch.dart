@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/glass_tokens.dart';
+import '../../theme/design_tokens.dart';
 
 /// iOS přepínač (51×31, palec 27). HIG Toggles
 /// (https://developer.apple.com/design/human-interface-guidelines/toggles):
@@ -134,7 +135,7 @@ class GlassSwitchRow extends StatelessWidget {
     return MergeSemantics(
       child: InkWell(
         onTap: onChanged == null ? null : () => onChanged!(!value),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: GlassTokens.minHitTarget),
           child: Padding(

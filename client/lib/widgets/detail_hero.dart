@@ -1153,7 +1153,7 @@ class _TypeChip extends StatelessWidget {
               style: TextStyle(
                 fontFamily: 'Nunito',
                 color: fg,
-                fontSize: 14,
+                fontSize: AppFontSize.body,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.1,
                 height: 1.2,
@@ -1310,7 +1310,7 @@ class HeroMetaRow extends StatelessWidget {
                       item.text,
                       style: TextStyle(
                         color: scheme.onSecondaryContainer,
-                        fontSize: 12,
+                        fontSize: AppFontSize.caption,
                         fontWeight: FontWeight.w800,
                         shadows: const [],
                       ),
@@ -1327,7 +1327,7 @@ class HeroMetaRow extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   item.text,
-                  style: TextStyle(color: base.withValues(alpha: 0.82), fontSize: 13, fontWeight: FontWeight.w600),
+                  style: TextStyle(color: base.withValues(alpha: 0.82), fontSize: AppFontSize.small, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -1516,7 +1516,7 @@ class HeroLink extends StatelessWidget {
             style: TextStyle(
               color: base.withValues(alpha: 0.9),
               fontWeight: FontWeight.w700,
-              fontSize: 16,
+              fontSize: AppFontSize.lead,
             ),
           ),
         ),
@@ -1544,7 +1544,7 @@ class HeroMeta extends StatelessWidget {
         text,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: base.withValues(alpha: 0.88), fontSize: 15, fontWeight: FontWeight.w600, height: 1.3),
+        style: TextStyle(color: base.withValues(alpha: 0.88), fontSize: AppFontSize.bodyLarge, fontWeight: FontWeight.w600, height: 1.3),
       ),
     );
   }

@@ -112,10 +112,10 @@ void main() {
   int count(RegExp re) => files.fold(0, (n, f) => n + re.allMatches(f.readAsStringSync()).length);
 
   test('literální rádiusy jen ubývají', () {
-    expect(count(RegExp(r'Radius\.circular\(\d')), lessThanOrEqualTo(22), reason: 'Použij AppRadii / AppShapes');
+    expect(count(RegExp(r'Radius\.circular\(\d')), lessThanOrEqualTo(14), reason: 'Použij AppRadii / AppShapes');
   });
 
   test('literální fontSize jen ubývají', () {
-    expect(count(RegExp(r'fontSize: \d')), lessThanOrEqualTo(44), reason: 'Použij textTheme');
+    expect(count(RegExp(r'fontSize: \d')), lessThanOrEqualTo(2), reason: 'Použij textTheme / AppFontSize');
   });
 }

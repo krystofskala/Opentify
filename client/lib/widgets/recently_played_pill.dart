@@ -83,14 +83,14 @@ class RecentlyPlayedPill extends ConsumerWidget {
                         info.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: onContainer),
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: AppFontSize.small, color: onContainer),
                       ),
                       if (info.artistName != null)
                         Text(
                           info.artistName!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, color: onContainer.withValues(alpha: 0.7)),
+                          style: TextStyle(fontSize: AppFontSize.tiny, color: onContainer.withValues(alpha: 0.7)),
                         ),
                     ],
                   ),

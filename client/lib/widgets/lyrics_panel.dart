@@ -13,6 +13,7 @@ import '../state/providers.dart';
 import '../theme/glass_tokens.dart';
 import 'glass/expressive_shapes.dart';
 import 'glass/glass.dart';
+import '../theme/design_tokens.dart';
 
 final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>((ref, recordingId) {
   return ref.watch(lyricsRepositoryProvider).getLyrics(recordingId);
@@ -136,7 +137,7 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
         if (!immersive)
           SizedBox(
             height: 40,
-            child: Center(child: Text('TEXT SKLADBY', style: muted.copyWith(fontSize: 12, letterSpacing: 2))),
+            child: Center(child: Text('TEXT SKLADBY', style: muted.copyWith(fontSize: AppFontSize.caption, letterSpacing: 2))),
           ),
         Expanded(
           child: lyricsAsync.when(
@@ -180,8 +181,8 @@ class _LyricsViewState extends ConsumerState<LyricsView> {
                 child: Text(
                   plain,
                   style: immersive
-                      ? TextStyle(color: fg, fontSize: 24, fontWeight: FontWeight.w800, height: 1.35)
-                      : TextStyle(color: fg, fontSize: 16, height: 1.6),
+                      ? TextStyle(color: fg, fontSize: AppFontSize.display, fontWeight: FontWeight.w800, height: 1.35)
+                      : TextStyle(color: fg, fontSize: AppFontSize.lead, height: 1.6),
                   textAlign: immersive ? TextAlign.start : TextAlign.center,
                 ),
               );
@@ -521,7 +522,7 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
             duration: const Duration(milliseconds: 350),
             style: TextStyle(
               color: isCurrent ? fg : fg.withValues(alpha: distance < 0 ? 0.32 : 0.4),
-              fontSize: 30,
+              fontSize: AppFontSize.xl,
               fontWeight: FontWeight.w800,
               height: 1.2,
               letterSpacing: -0.3,

@@ -7,6 +7,7 @@ import '../../theme/glass_tokens.dart';
 import '../glass_container.dart';
 import 'glass_button.dart';
 import 'glass_pressable.dart';
+import '../../theme/design_tokens.dart';
 
 class GlassSegment<T> {
   const GlassSegment({required this.value, required this.label, this.icon});
@@ -286,7 +287,7 @@ class SelectedCapsule extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final shape = glassShape(const BorderRadius.all(Radius.circular(999)));
+    final shape = glassShape(const BorderRadius.all(Radius.circular(AppRadii.pill)));
     if (GlassSettings.solidOf(context)) {
       return AnimatedContainer(
         duration: Motion.state.duration,

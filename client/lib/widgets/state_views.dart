@@ -41,7 +41,7 @@ class SectionHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     // 22/w800: pod nadpisem stránky (28-34/w900), ať hierarchie
                     // nahoře není plochá (design audit).
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 22, fontWeight: FontWeight.w800),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: AppFontSize.heading, fontWeight: FontWeight.w800),
                   ),
                 ),
                 if (badge != null) ...[const SizedBox(width: AppSpacing.xs), badge!],
@@ -89,7 +89,7 @@ class SectionBadge extends StatelessWidget {
             children: [
               Icon(icon, size: 13, color: Theme.of(context).colorScheme.onSurface),
               const SizedBox(width: AppSpacing.xxs),
-              Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface)),
+              Text(label, style: TextStyle(fontSize: AppFontSize.tiny, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface)),
             ],
           ),
         ),

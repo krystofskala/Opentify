@@ -449,7 +449,7 @@ class _TrackInfo extends StatelessWidget {
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: statusColor ?? fg.withValues(alpha: 0.75), fontSize: 12),
+                    style: TextStyle(color: statusColor ?? fg.withValues(alpha: 0.75), fontSize: AppFontSize.caption),
                   ),
                 ),
             ],

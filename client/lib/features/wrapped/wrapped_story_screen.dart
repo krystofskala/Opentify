@@ -20,6 +20,7 @@ import '../../widgets/media_card.dart' show ArtworkImage;
 import '../../widgets/mix_artwork.dart';
 import '../../widgets/state_views.dart';
 import 'wrapped_hub_screen.dart' show WrappedCountdown;
+import '../../theme/design_tokens.dart';
 
 /// "Tisíce" úzkou nezlomitelnou mezerou: 34 698.
 String wrappedNumber(int value) {
@@ -618,7 +619,7 @@ class _PillButton extends StatelessWidget {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: AppFontSize.bodyLarge),
       ),
       onPressed: onPressed,
       icon: Icon(icon, size: 20),
@@ -1324,7 +1325,7 @@ class _BarChart extends StatelessWidget {
                             color: highlight == null || highlight == i
                                 ? Colors.white
                                 : Colors.white.withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(AppRadii.xxs),
                           ),
                         ),
                       ),

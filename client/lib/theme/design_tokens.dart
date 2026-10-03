@@ -16,6 +16,30 @@ class AppRadii {
   static const double lg = 20; // = cornerLargeIncreased: skleněné kontejnery
   static const double xl = 28; // = cornerExtraLarge: velké obaly, sheety, hlavičky detailu
   static const double pill = 999; // aktivní/hrající morph cíl, plně kulaté ovladače
+  static const double xxs = 4; // tenké pruhy (průběh, úchyty)
+}
+
+/// Škála velikostí písma mimo `textTheme` (přehrávač, karty ke sdílení,
+/// odznaky) -- jediný zdroj čísel, ať se velikosti nerozjíždějí. Tam, kde to
+/// jde, má přednost `Theme.of(context).textTheme`.
+class AppFontSize {
+  const AppFontSize._();
+
+  static const double micro = 10; // odznaky na kartách
+  static const double tiny = 11; // popisky tab baru, štítky
+  static const double caption = 12; // vedlejší řádek (interpret, čas)
+  static const double small = 13;
+  static const double body = 14;
+  static const double bodyLarge = 15;
+  static const double lead = 16; // text písně, karty
+  static const double title = 17; // název skladby v přehrávači
+  static const double titleLarge = 18;
+  static const double heading = 22;
+  static const double display = 24; // aktivní řádek textu písně
+  static const double hero = 26; // velký název (přehrávač, karta ke sdílení)
+  static const double large = 28;
+  static const double xl = 30;
+  static const double xxl = 34; // číslo na obalu mixu
 }
 
 /// Sdílená škála rozestupů -- nahrazuje ad hoc `EdgeInsets`/`SizedBox`
