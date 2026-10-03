@@ -125,6 +125,45 @@ def _band(hour: int) -> str:
     return next(name for lo, hi, name in _BANDS if lo <= h < hi)
 
 
+def _artist_names(recording_ids: list[str]) -> dict[str, str]:
+    with Session(engine) as s:
+        rows = s.exec(
+            select(Recording.id, Artist.name).join(Artist, Artist.id == Recording.artist_id).where(Recording.id.in_(recording_ids))  # type: ignore[attr-defined]
+        ).all()
+    return dict(rows)
+
+
+async def _artist_styles(name: str) -> list[str]:
+    from app.home import lastfm_taste as lt
+
+    try:
+        return (await lt.artist_tags(name))[:5]
+    except Exception:  # noqa: BLE001 -- Last.fm výpadek = bez stylu
+        return []
+
+
+async def _dominant_style(top: list[str], weights: Counter) -> tuple[str | None, Any]:
+    """Nejhranější styl mezi skladbami (štítky interpretů z Last.fm, silnější
+    štítek víc) a funkce "sedí skladba do něj"."""
+    names = await asyncio.to_thread(_artist_names, top)
+    styles: dict[str, list[str]] = {}
+    for name in dict.fromkeys(names.values()):
+        styles[name] = await _artist_styles(name)
+    score: Counter = Counter()
+    for rid in top:
+        for pos, tag in enumerate(styles.get(names.get(rid, ""), [])[:3]):
+            score[tag] += weights[rid] * (1.0, 0.7, 0.5)[pos]
+    if not score:
+        return None, lambda _r: True
+    style = score.most_common(1)[0][0]
+    return style, lambda rid: style in styles.get(names.get(rid, ""), [])
+
+
+async def _has_style(recording_id: str, style: str) -> bool:
+    name = (await asyncio.to_thread(_artist_names, [recording_id])).get(recording_id)
+    return bool(name) and style in await _artist_styles(name)
+
+
 async def build_now_mix(user_id: str) -> int:
     """Skladby, které hraješ v tuhle denní dobu (všední den / víkend zvlášť),
     + to, co posluchači pouštějí spolu s nimi. Přegeneruje se při změně části
@@ -145,10 +184,18 @@ async def build_now_mix(user_id: str) -> int:
         return 0
     rng = random.Random(stamp)
     top = [r for r, _w in recs.most_common(80)]
-    own = top[:40]
+    # Jeden styl na mix (živě: večerní mix skákal mezi žánry) -- styl, který
+    # v tuhle dobu hraješ nejvíc; skladby i "podobné" jen z něj.
+    style, fits = await _dominant_style(top, recs)
+    in_style = [r for r in top if fits(r)] if style else top
+    if len(in_style) < 8:
+        in_style, style = top, None
+    own = in_style[:40]
     rng.shuffle(own)
     own = own[:24]
-    similar = await lt.similar_track_ids(top[:6], set(top), rng, 16)
+    similar = await lt.similar_track_ids(in_style[:6], set(top), rng, 32 if style else 16)
+    if style:
+        similar = [r for r in similar if await _has_style(r, style)][:16]
     ids: list[str] = []
     while own or similar:
         ids += own[:2]
@@ -156,7 +203,8 @@ async def build_now_mix(user_id: str) -> int:
         ids += similar[:1]
         similar = similar[1:]
     ids = list(dict.fromkeys(ids))[:40]
-    pid = _save_playlist(user_id, "personal:now-mix", band, f"{band} -- co v tuhle dobu posloucháš a podobné", ids, timedelta(hours=8))
+    what = f"{style} -- " if style else ""
+    pid = _save_playlist(user_id, "personal:now-mix", band, f"{band}: {what}co v tuhle dobu posloucháš a podobné", ids, timedelta(hours=8))
     _save(user_id, "now_mix", {"title": f"Mix na teď · {band}", "kind": "tracks", "ids": ids[:20], "playlistId": pid, "stamp": stamp})
     return len(ids)
 
