@@ -51,13 +51,10 @@ _NOT_STYLE = {
     "female vocalists", "female vocalist", "male vocalist", "under 2000 listeners", "my favorite", "albums i own",
     "spotify", "check out", "00s", "10s", "20s", "90s", "80s", "70s", "60s", "50s", "british", "american",
     "usa", "uk", "canadian", "australian", "german", "french", "swedish", "czech", "slovak",
-    # Národnosti a nástroje -- nejsou to styly (z artist.getTopTags).
-    "norwegian", "scottish", "irish", "english", "danish", "finnish", "icelandic", "dutch", "belgian", "spanish",
-    "italian", "polish", "japanese", "korean", "brazilian", "mexican", "south africa", "south african", "new zealand",
-    "austrian", "swiss", "russian", "ukrainian", "israeli", "argentina", "argentinian", "chilean", "colombian",
-    "guitar", "harmonica", "banjo", "piano", "violin", "cello", "saxophone", "trumpet", "drums", "bass", "ukulele",
-    "mandolin", "fiddle", "vocal", "vocals", "male", "female", "singer", "songwriter", "band", "duo", "cover",
-    "covers", "live", "favourites", "favorite songs", "favourite songs", "seen live", "all", "good", "cool",
+    # Nálepky z artist.getTopTags, které nic neříkají. Národnosti a nástroje
+    # ("norwegian", "harmonica") zůstávají -- přání majitele, u blues dávají smysl.
+    "vocal", "vocals", "male", "female", "singer", "songwriter", "band", "duo", "cover", "covers", "live",
+    "favourites", "favorite songs", "favourite songs", "all", "good", "cool",
 }
 _DECADE = re.compile(r"^\d{2,4}s$")
 
