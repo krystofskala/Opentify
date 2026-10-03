@@ -1,6 +1,8 @@
 """Hry -- stránka herních soundtracků (app/games.py)."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth import get_current_user
 
 from app import games
 
@@ -32,8 +34,11 @@ def _cards(page: dict) -> dict:
 
 
 @games_router.get("")
-async def games_page():
-    return _cards(await games.page())
+async def games_page(current: tuple[str, str] = Depends(get_current_user)):
+    """Úvodní stránka her: ruční výběr + živé řady (app/soundtrack_discovery.py)."""
+    from app import soundtrack_discovery
+
+    return _cards(await soundtrack_discovery.landing("games", current[0]))
 
 
 @games_router.get("/series/{series_id}")
@@ -71,10 +76,10 @@ movies_router = APIRouter(prefix="/movies", tags=["movies"])
 
 
 @movies_router.get("")
-async def movies_page():
-    from app.movies import MOVIES_CATALOG
+async def movies_page(current: tuple[str, str] = Depends(get_current_user)):
+    from app import soundtrack_discovery
 
-    return _cards(await games.page(MOVIES_CATALOG))
+    return _cards(await soundtrack_discovery.landing("movies", current[0]))
 
 
 @movies_router.get("/series/{series_id}")

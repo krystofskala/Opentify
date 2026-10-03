@@ -103,6 +103,10 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     from app.tools import upgrade_video_audio
 
     registry.append(("maintenance:video-audio", g.DAILY_TTL, lambda: upgrade_video_audio.run(40)))
+    # Herní / filmové soundtracky: živé řady (Steam, Wikidata, Apple plakáty).
+    from app import soundtrack_discovery
+
+    registry.append(("soundtracks:discovery", g.DAILY_TTL, soundtrack_discovery.build_all))
     return registry
 
 

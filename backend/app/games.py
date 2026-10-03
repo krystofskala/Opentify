@@ -408,7 +408,15 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
                                                       "soundtrack from the", "music from the"))
                         )
                     )
-                    if not (by_composer or by_label or by_various):
+                    # Dílo bez známého skladatele (z Wikidat/Steamu): album s přesně
+                    # tímhle názvem a oficiálním označením ("X (Original Soundtrack)").
+                    by_exact = False
+                    if not composers and not is_various and tracks >= 5:
+                        core = re.split(r"[\(\[]| - | – ", title)[0]
+                        by_exact = not (set(_words(core)) - set(want) - _CORE_OK) and any(
+                            w in low for w in ("original soundtrack", "original game soundtrack", "original score", "ost")
+                        )
+                    if not (by_composer or by_label or by_various or by_exact):
                         continue
                     kind = forced or ("songs" if is_various else "score")
                     official = any(w in low for w in ("original", "soundtrack", "ost", "score", "music from", "motion picture"))

@@ -72,7 +72,7 @@ class GamesScreen extends ConsumerWidget {
           void seeAll(String list) => context.push('/$base/list/$list');
           return CustomScrollView(
             slivers: [
-              SliverToBoxAdapter(child: _HeroCarousel(games: heroes, base: base, title: title)),
+              SliverToBoxAdapter(child: _HeroCarousel(games: heroes, base: base, title: title, poster: data['poster'] == true)),
               if (mixes.isNotEmpty) ...[
                 SliverToBoxAdapter(
                     child: SectionHeader('Mixy', onSeeAll: mixes.length > 2 ? () => seeAll('mixes') : null)),
@@ -141,10 +141,13 @@ class _ComposerCard extends StatelessWidget {
 /// Velké obrázky děl jako zaoblené karty -- samy přetáčí (6 s), jdou táhnout
 /// prstem i myší, vedlejší karty vykukují. Výběr a pořadí se mění denně.
 class _HeroCarousel extends StatefulWidget {
-  const _HeroCarousel({required this.games, required this.base, required this.title});
+  const _HeroCarousel({required this.games, required this.base, required this.title, this.poster = false});
   final List<Map<String, dynamic>> games;
   final String base;
   final String title;
+
+  /// Filmy: plakáty na výšku (Apple) místo širokých obrázků.
+  final bool poster;
 
   @override
   State<_HeroCarousel> createState() => _HeroCarouselState();
@@ -194,14 +197,18 @@ class _HeroCarouselState extends State<_HeroCarousel> {
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth;
       // Na telefonu skoro celá šířka, na širokém okně víc karet vedle sebe.
-      final fraction = width >= 1100 ? 0.45 : (width >= 700 ? 0.65 : 0.9);
+      final fraction = widget.poster
+          ? (width >= 1100 ? 0.18 : (width >= 700 ? 0.3 : 0.62))
+          : (width >= 1100 ? 0.45 : (width >= 700 ? 0.65 : 0.9));
       if (_controller == null || fraction != _fraction) {
         _controller?.dispose();
         _fraction = fraction;
         _controller = PageController(viewportFraction: fraction, initialPage: n * (_loops ~/ 2) + _page);
         _restartTimer();
       }
-      final height = (width * fraction * 0.56).clamp(190.0, 360.0);
+      final height = widget.poster
+          ? (width * fraction * 1.45).clamp(260.0, 460.0)
+          : (width * fraction * 0.56).clamp(190.0, 360.0);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
