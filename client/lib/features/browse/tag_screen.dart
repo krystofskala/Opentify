@@ -47,6 +47,19 @@ class TagPage {
   final List<BrowseCategory> parents;
   final List<String> related;
 
+  TagPage copyWithExtras({HomePlaylistCard? forYou, List<BrowsePlaylist>? playlists}) => TagPage(
+        tag: tag,
+        title: title,
+        mix: mix,
+        forYou: forYou ?? this.forYou,
+        playlists: playlists ?? this.playlists,
+        topArtists: topArtists,
+        albums: albums,
+        about: about,
+        parents: parents,
+        related: related,
+      );
+
   factory TagPage.fromJson(Map<String, dynamic> json) {
     List<Map<String, dynamic>> list(String key) =>
         (json[key] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
@@ -68,6 +81,22 @@ class TagPage {
 final tagPageProvider = FutureProvider.autoDispose.family<TagPage, String>((ref, tag) async {
   final json = await ref.watch(apiClientProvider).getJson('/browse/tag/${Uri.encodeComponent(tag)}');
   return TagPage.fromJson(json);
+});
+
+/// "Pro tebe · X" zvlášť -- skládá se déle, stránka na něj nečeká.
+final tagForYouProvider = FutureProvider.autoDispose.family<HomePlaylistCard?, String>((ref, tag) async {
+  final json = await ref.watch(apiClientProvider).getJson('/browse/tag-for-you/${Uri.encodeComponent(tag)}');
+  final card = json['forYou'];
+  return card == null ? null : HomePlaylistCard.fromJson(card as Map<String, dynamic>);
+});
+
+/// Populární playlisty stylu z Deezeru zvlášť (první načtení trvá).
+final tagPlaylistsProvider = FutureProvider.autoDispose.family<List<BrowsePlaylist>, String>((ref, tag) async {
+  final json = await ref.watch(apiClientProvider).getJson('/browse/tag-playlists/${Uri.encodeComponent(tag)}');
+  return (json['playlists'] as List<dynamic>? ?? const [])
+      .cast<Map<String, dynamic>>()
+      .map(BrowsePlaylist.fromJson)
+      .toList();
 });
 
 /// Řada čipů se styly (podžánry na stránce žánru, štítky interpreta).
@@ -121,7 +150,7 @@ class TagScreen extends ConsumerWidget {
             title: Text(page.valueOrNull?.title ?? tag, style: const TextStyle(fontWeight: FontWeight.w800)),
           ),
           ...page.when(
-            data: (data) => _content(context, data),
+            data: (data) => _content(context, ref, data),
             loading: () => [
               SliverToBoxAdapter(
                 child: Padding(
@@ -159,8 +188,13 @@ class TagScreen extends ConsumerWidget {
     );
   }
 
-  List<Widget> _content(BuildContext context, TagPage data) {
+  List<Widget> _content(BuildContext context, WidgetRef ref, TagPage page) {
     final theme = Theme.of(context);
+    // Osobní mix a playlisty dorazí zvlášť, až budou hotové.
+    final data = page.copyWithExtras(
+      forYou: page.forYou ?? ref.watch(tagForYouProvider(tag)).valueOrNull,
+      playlists: page.playlists.isNotEmpty ? page.playlists : ref.watch(tagPlaylistsProvider(tag)).valueOrNull,
+    );
     return [
       if (data.forYou != null || data.mix != null) ...[
         const SliverToBoxAdapter(child: SectionHeader('Mixy')),

@@ -66,6 +66,61 @@ async def _none() -> None:
     return None
 
 
+_running: dict[str, asyncio.Task] = {}
+
+
+def _background(key: str, coro) -> None:
+    """Jedno dopočítání na pozadí na klíč (opakované otevření stránky ho
+    nespouští znovu)."""
+    if key in _running and not _running[key].done():
+        coro.close()
+        return
+    _running[key] = asyncio.create_task(coro)
+
+
+async def _cached_only(key: str) -> Any:
+    import json
+
+    from app.catalog.cache import CACHE_PREFIX
+    from app.redis_bus import get_redis
+
+    raw = await get_redis().get(CACHE_PREFIX + key)
+    return json.loads(raw) if raw is not None else None
+
+
+async def tag_playlists(tag: str) -> list[dict[str, Any]]:
+    from app import browse as _browse
+
+    t = slug(tag)
+    return await cached_json(
+        f"tag:playlists:v1:{t}", TAG_TTL_S, lambda: _browse.search_playlists(t, 10, popular=True), is_empty=lambda v: not v
+    )
+
+
+def _for_you_ready(tag: str, user_id: str) -> str | None:
+    """Dnešní "Pro tebe · X", je-li už složený."""
+    from app.models import Playlist
+
+    with Session(engine) as session:
+        p = session.exec(
+            select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == f"personal:tag:{slug(tag)}")
+        ).first()
+        if p is not None and p.generated_at and p.generated_at.date() == utcnow().date():
+            return p.id
+    return None
+
+
+def playlist_card(playlist_id: str | None) -> dict[str, Any] | None:
+    from app.home.service import _card
+    from app.models import Playlist
+
+    if not playlist_id:
+        return None
+    with Session(engine) as session:
+        pl = session.get(Playlist, playlist_id)
+        return _card(session, pl).model_dump(mode="json", by_alias=True) if pl else None
+
+
 def slug(tag: str) -> str:
     return tag.strip().lower()
 
@@ -232,13 +287,17 @@ async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
             "about": await lastfm.tag_summary(t),
         }
 
-    from app import browse as _browse
-
-    data, for_you_id, playlists = await asyncio.gather(
-        cached_json(f"tag:page:v2:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("artistIds")),
-        tag_for_you(t, user_id) if user_id else _none(),
-        cached_json(f"tag:playlists:v1:{t}", TAG_TTL_S, lambda: _browse.search_playlists(t, 10, popular=True), is_empty=lambda v: not v),
-    )
+    # Hlavní obsah hned; osobní mix a playlisty z Deezeru jen když už jsou
+    # hotové (jinak se dopočítají na pozadí a klient si je dotáhne zvlášť,
+    # `/browse/tag-for-you`, `/browse/tag-playlists`) -- stránka dřív čekala
+    # na všechno najednou.
+    data = await cached_json(f"tag:page:v2:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    for_you_id = _for_you_ready(t, user_id) if user_id else None
+    if user_id and for_you_id is None:
+        _background(f"for-you:{t}:{user_id}", tag_for_you(t, user_id))
+    playlists = await _cached_only(f"tag:playlists:v1:{t}")
+    if playlists is None:
+        _background(f"playlists:{t}", tag_playlists(t))
     from app.home.service import _card
     from app.models import Artist, Playlist, Release
 
