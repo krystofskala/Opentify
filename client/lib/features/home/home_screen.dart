@@ -1,4 +1,5 @@
 import '../browse/browse_category_screen.dart' show DeezerPlaylistTile;
+import 'home_layout_sheet.dart';
 import '../browse/tag_screen.dart' show TagChips;
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
@@ -47,7 +48,17 @@ class HomeScreen extends ConsumerWidget {
     final recent = ref.watch(recentContextsProvider).valueOrNull ?? const <RecentContext>[];
 
     return Scaffold(
-      appBar: SectionAppBar(_greeting()),
+      appBar: SectionAppBar(
+        _greeting(),
+        actions: [
+          IconButton(
+            tooltip: 'Upravit Domů',
+            icon: const Icon(Symbols.tune_rounded),
+            onPressed: () => showHomeLayoutSheet(context),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(homeProvider);
@@ -65,13 +76,17 @@ class HomeScreen extends ConsumerWidget {
                   icon: Symbols.home_rounded,
                   message: 'Domů se zatím připravuje – žebříčky a mixy se generují na pozadí, zkus to za pár minut.',
                 ),
-              // Úplně nahoře: na co navázat (poslední poslouchaná alba).
-              if (recent.isNotEmpty) _ContinueListening(items: recent),
-              // Něco, co v "Poslechnout později" leží přes 2 týdny.
               // Pozvánka do společného mixu (Blend), čeká na mě.
               const BlendInviteBanner(),
+              // Něco, co v "Poslechnout později" leží přes 2 týdny.
               const ListenLaterReminder(),
-              for (final section in sections) _HomeSectionView(section: section),
+              // Pořadí a skrytí sekcí podle profilu (Domů › Upravit); "Pokračovat
+              // v poslechu" je mezi nimi jako zástupce (data z /home/recent).
+              for (final section in sections)
+                if (section.type == HomeSectionType.continueListening)
+                  if (recent.isNotEmpty) _ContinueListening(items: recent) else const SizedBox.shrink()
+                else
+                  _HomeSectionView(section: section),
             ],
           ),
           loading: () => const _HomeSkeleton(),
@@ -452,6 +467,7 @@ class _HomeSectionView extends StatelessWidget {
             ),
           ],
         );
+      case HomeSectionType.continueListening: // vykresluje HomeScreen (data z /home/recent)
       case HomeSectionType.unknown:
         return const SizedBox.shrink();
     }

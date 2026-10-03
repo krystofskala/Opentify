@@ -13,6 +13,7 @@ import '../../state/providers.dart';
 import '../../state/glass_settings.dart';
 import '../../state/auth_controller.dart';
 import 'home_genres_sheet.dart';
+import '../home/home_layout_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../state/grain_controller.dart';
 import '../../state/theme_mode_controller.dart';
@@ -149,14 +150,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               id: 'home',
               icon: Symbols.home_rounded,
               title: 'Domů',
-              summary: 'Vlastní řady žánrů',
-              child: _ActionRow(
-                icon: Symbols.category_rounded,
-                title: 'Žánry na Domů',
-                description: 'Vybrané žánry dostanou na Domů vlastní řadu hned pod Rychlým výběrem. '
-                    'Bez výběru je Domů stejné jako pro ostatní.',
-                buttonLabel: 'Vybrat',
-                onPressed: () => showHomeGenresSheet(context),
+              summary: 'Pořadí sekcí, skryté sekce, žánry',
+              child: Column(
+                children: [
+                  _ActionRow(
+                    icon: Symbols.tune_rounded,
+                    title: 'Upravit Domů',
+                    description: 'Přetažením změníš pořadí sekcí na Domů, vypínačem je skryješ.',
+                    buttonLabel: 'Upravit',
+                    onPressed: () => showHomeLayoutSheet(context),
+                  ),
+                  _ActionRow(
+                    icon: Symbols.category_rounded,
+                    title: 'Žánry na Domů',
+                    description: 'Vybrané žánry dostanou na Domů vlastní řadu. '
+                        'Bez výběru je Domů stejné jako pro ostatní.',
+                    buttonLabel: 'Vybrat',
+                    onPressed: () => showHomeGenresSheet(context),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 12),

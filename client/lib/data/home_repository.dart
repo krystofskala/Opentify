@@ -97,9 +97,10 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, unknown }
+enum HomeSectionType { continueListening, quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
+      'continue' => HomeSectionType.continueListening,
       'quick_picks' => HomeSectionType.quickPicks,
       'playlist_cards' => HomeSectionType.playlistCards,
       'album_cards' => HomeSectionType.albumCards,

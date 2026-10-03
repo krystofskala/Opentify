@@ -505,7 +505,77 @@ def build_home(user_id: str) -> dict[str, Any]:
                             "items": [t.model_dump(mode="json", by_alias=True) for t in tracks],
                         }
                     )
-        return {"generatedAt": utcnow().isoformat(), "sections": sections}
+        # "Pokračovat v poslechu" skládá klient (`/home/recent`) -- tady jen
+        # zástupce, ať jde řadit a skrýt jako ostatní sekce.
+        sections.insert(0, {"id": "continue", "title": "Pokračovat v poslechu", "type": "continue", "items": []})
+        return {"generatedAt": utcnow().isoformat(), "sections": apply_layout(session, user_id, sections)}
+
+
+def layout_key(user_id: str) -> str:
+    return f"home_layout:{user_id}"
+
+
+def get_layout(session: Session, user_id: str) -> dict[str, list[str]]:
+    row = session.get(HomeSnapshot, layout_key(user_id))
+    payload = (row.payload or {}) if row else {}
+    return {"order": list(payload.get("order") or []), "hidden": list(payload.get("hidden") or [])}
+
+
+def _layout_id(section_id: str) -> str:
+    # "Novinky: žánr" patří ke svému žánru (jedna položka v úpravě Domů).
+    return "genre_" + section_id[len("genre_new_"):] if section_id.startswith("genre_new_") else section_id
+
+
+def apply_layout(session: Session, user_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pořadí a skrytí sekcí podle profilu (Domů › Upravit). Sekce, které
+    v uloženém pořadí nejsou (nové), zůstávají na svém výchozím místě
+    vůči ostatním."""
+    layout = get_layout(session, user_id)
+    hidden = set(layout["hidden"])
+    order = {sid: i for i, sid in enumerate(layout["order"])}
+    visible = [s for s in sections if _layout_id(s["id"]) not in hidden]
+    if not order:
+        return visible
+    # Výchozí pozice neznámých sekcí: hned za nejbližší známou předchozí.
+    keyed = []
+    last = -1.0
+    for default_pos, s in enumerate(visible):
+        lid = _layout_id(s["id"])
+        if lid in order:
+            last = float(order[lid])
+            keyed.append((last, default_pos, s))
+        else:
+            keyed.append((last + 0.5, default_pos, s))
+    keyed.sort(key=lambda k: (k[0], k[1]))
+    return [s for _o, _d, s in keyed]
+
+
+def layout_entries(user_id: str) -> list[dict[str, Any]]:
+    """Všechny sekce, které Domů pro profil umí, v jeho pořadí, i se skrytými."""
+    from app import browse
+
+    defaults: list[tuple[str, str]] = [("continue", "Pokračovat v poslechu"), ("quick_picks", "Rychlý výběr")]
+    defaults += [(f"genre_{c.id}", c.title) for c in browse.pinned_genres(user_id)]
+    defaults += [(key, title) for key, title, _kind in _SECTION_ORDER]
+    charts_at = next(i for i, (k, _t) in enumerate(defaults) if k == "charts")
+    defaults.insert(charts_at + 1, ("trending_tracks", "Populární ve světě"))
+    with Session(engine) as session:
+        layout = get_layout(session, user_id)
+    hidden = set(layout["hidden"])
+    order = {sid: i for i, sid in enumerate(layout["order"])}
+    entries = [{"id": sid, "title": title, "visible": sid not in hidden} for sid, title in defaults]
+    if order:
+        last = -1.0
+        keyed = []
+        for pos, e in enumerate(entries):
+            if e["id"] in order:
+                last = float(order[e["id"]])
+                keyed.append((last, pos, e))
+            else:
+                keyed.append((last + 0.5, pos, e))
+        keyed.sort(key=lambda k: (k[0], k[1]))
+        entries = [e for _o, _p, e in keyed]
+    return entries
 
 
 async def get_home(user_id: str) -> dict[str, Any]:

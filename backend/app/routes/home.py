@@ -250,6 +250,38 @@ async def unpin_quick(playlist_id: str, current: tuple[str, str] = Depends(get_c
     return {"ids": ids}
 
 
+class HomeLayoutIn(BaseModel):
+    order: list[str]
+    hidden: list[str] = []
+
+
+@home_router.get("/layout")
+def home_layout(current: tuple[str, str] = Depends(get_current_user)):
+    """Sekce Domů v pořadí profilu, i se skrytými (Domů › Upravit)."""
+    from app.home.service import layout_entries
+
+    return {"sections": layout_entries(current[0])}
+
+
+@home_router.put("/layout")
+async def set_home_layout(body: HomeLayoutIn, current: tuple[str, str] = Depends(get_current_user)):
+    from app.home.service import invalidate_home_cache, layout_entries, layout_key
+    from app.models import HomeSnapshot
+    from app.utils import utcnow
+
+    known = {e["id"] for e in layout_entries(current[0])}
+    order = [i for i in dict.fromkeys(body.order) if i in known]
+    hidden = [i for i in dict.fromkeys(body.hidden) if i in known]
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, layout_key(current[0])) or HomeSnapshot(key=layout_key(current[0]))
+        row.payload = {"order": order, "hidden": hidden}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    await invalidate_home_cache()
+    return {"sections": layout_entries(current[0])}
+
+
 _refresh_running = False
 
 
