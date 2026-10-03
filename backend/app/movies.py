@@ -63,8 +63,9 @@ MOVIES: list[Game] = [
     Game("mandalorian", "The Mandalorian", 2019, ("Ludwig Göransson",), "star-wars", wiki="The Mandalorian", tags=("tv",)),
     # Marvel
     Game("avengers", "The Avengers", 2012, ("Alan Silvestri",), "marvel", wiki="The Avengers (2012 film)", tags=("epic",)),
-    Game("guardians", "Guardians of the Galaxy", 2014, ("Various Artists",), "marvel",
-         wiki="Guardians of the Galaxy (film)", album="Guardians of the Galaxy: Awesome Mix Vol. 1", tags=("roadtrip",)),
+    Game("guardians", "Guardians of the Galaxy", 2014, ("Tyler Bates",), "marvel",
+         wiki="Guardians of the Galaxy (film)", extra_albums=("Guardians of the Galaxy: Awesome Mix Vol. 1",), tags=("roadtrip",),
+         stations=("Awesome Mix Vol. 1",), hints=("guardians", "galaxy"), stations_title="Soundtrack (písně)"),
     Game("infinity-war", "Avengers: Infinity War", 2018, ("Alan Silvestri",), "marvel", wiki="Avengers: Infinity War", tags=("epic",)),
     Game("endgame", "Avengers: Endgame", 2019, ("Alan Silvestri",), "marvel", wiki="Avengers: Endgame", tags=("epic",)),
     Game("black-panther", "Black Panther", 2018, ("Ludwig Göransson",), "marvel", wiki="Black Panther (film)", tags=("epic",)),
@@ -105,9 +106,10 @@ MOVIES: list[Game] = [
     Game("amelie", "Amélie", 2001, ("Yann Tiersen",), None, wiki="Amélie", album="Le fabuleux destin d'Amélie Poulain", tags=("classic",)),
     # Kompilační soundtracky (písně)
     Game("pulp-fiction", "Pulp Fiction", 1994, ("Various Artists",), None, wiki="Pulp Fiction",
-         album="Music From The Motion Picture Pulp Fiction", tags=("roadtrip",)),
+         extra_albums=("Pulp Fiction",), tags=("roadtrip",)),
     Game("drive", "Drive", 2011, ("Cliff Martinez",), None, wiki="Drive (2011 film)", tags=("roadtrip", "thriller")),
-    Game("baby-driver", "Baby Driver", 2017, ("Various Artists",), None, wiki="Baby Driver", tags=("roadtrip",)),
+    Game("baby-driver", "Baby Driver", 2017, ("Steven Price",), None, wiki="Baby Driver", extra_albums=("Baby Driver",), tags=("roadtrip",),
+         stations=("Baby Driver soundtrack",), hints=("baby driver",), stations_title="Soundtrack (písně)"),
     # Horor a napětí
     Game("psycho", "Psycho", 1960, ("Bernard Herrmann",), None, wiki="Psycho (1960 film)", tags=("horror", "classic")),
     Game("halloween", "Halloween", 1978, ("John Carpenter",), None, wiki="Halloween (1978 film)", tags=("horror",)),
@@ -167,7 +169,7 @@ MOVIES_CATALOG = Catalog(
     ),
     all_title="Všechny filmy a seriály",
     series_unit="filmů",
-    page_version="v4",
+    page_version="v6",
     strict_core=True,
-    ost_version="v4",
+    ost_version="v6",
 )

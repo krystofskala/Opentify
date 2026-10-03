@@ -52,6 +52,11 @@ class Game:
     # v názvu fanouškovského playlistu ("san andreas", "gta sa").
     stations: tuple[str, ...] = ()
     hints: tuple[str, ...] = ()
+    # Další alba díla, hlavně soundtrack s písněmi ("Awesome Mix Vol. 1").
+    extra_albums: tuple[str, ...] = ()
+    # Nadpis playlistů ze `stations` (GTA: rádia; jinde soundtrack s písněmi,
+    # když oficiální album u nás na streamování není).
+    stations_title: str = "Rádia"
 
 
 # Série: id -> (název, barva)
@@ -278,7 +283,8 @@ async def images(game: Game) -> dict[str, str | None]:
 # ----------------------------------------------------------------------
 
 _NOT_OST = ("piano", "lofi", "lo-fi", "cover", "covers", "tribute", "remix", "remixes", "acoustic", "guitar", "8-bit version",
-            "orchestral covers", "karaoke", "relax", "sleep", "chill", "trailer", "best soundtracks", "inspired by")
+            "orchestral covers", "karaoke", "relax", "sleep", "chill", "trailer", "best soundtracks", "inspired by",
+            "[live]", "(live)", "bedtime", "lullaby", "one piano")
 # Jiný díl / jiné dílo: číslo, římská číslice, pokračování, film.
 _SEQUEL = {
     "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv", "xv", "xvi", "2", "3", "4", "5", "6",
@@ -325,74 +331,94 @@ class Catalog:
     ost_version: str = "v1"
 
 
-async def soundtrack(game: Game, cat: Catalog | None = None) -> str | None:
-    """Id našeho alba se soundtrackem díla. Jen celé album od skladatele
-    nebo oficiálního vydavatele, se stejným dílem (ne VII místo X, ne
-    Part II, ne covery/piano/lo-fi). Radši nic než cizí album."""
+async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, str]]:
+    """Alba díla: [{"id", "kind"}] -- "score" (hudba skladatele / oficiální
+    vydavatel) a "songs" (oficiální kompilace písní, které v díle zazní,
+    "Various Artists"). Jako na CD/LP: dvě desky. Jen stejné dílo, žádné
+    covery/piano/lo-fi; radši nic než cizí album."""
     from app.catalog.deezer import get_deezer_client
     from app.catalog.deezer_ingest import ingest_album, ingest_artist
 
     cat = cat or GAMES_CATALOG
-    version = "v4" if cat.ns == "games" else cat.ost_version
+    version = "v6" if cat.ns == "games" else cat.ost_version
 
     async def fetch() -> dict[str, Any]:
         dz = get_deezer_client()
-        name = game.album or game.title
-        want = [w for w in _words(name) if w not in ("the", "of", "a", "and")]
-        title_words = set(_words(game.title)) | set(_words(name))
-        composers = {fold(c) for c in game.composers}
-        best: tuple[int, dict[str, Any]] | None = None
-        for q in (f"{name} soundtrack", f"{game.composers[0]} {name}", name):
-            hits = await dz._cached_data(f"dz:search_album_q:{q}", MONTH, "/search/album", {"q": q, "limit": 25}) or []
-            for h in hits:
-                title = h.get("title") or ""
-                artist = fold((h.get("artist") or {}).get("name") or "")
-                words = _words(title)
-                if not all(_covered(w, set(words)) for w in want):
-                    continue
-                if {w for w in words if w in cat.sequel} - title_words:
-                    continue
-                if cat.strict_core:
-                    core = re.split(r"[\(\[]| - | – ", title)[0]
-                    if set(_words(core)) - set(want) - _CORE_OK:
+        picks: dict[str, tuple[int, dict[str, Any]]] = {}
+        names = [(game.album or game.title, None), *((n, "songs") for n in game.extra_albums)]
+        for name, forced in names:
+            want = [w for w in _words(name) if w not in ("the", "of", "a", "and")]
+            title_words = set(_words(game.title)) | set(_words(name))
+            composers = {fold(c) for c in game.composers}
+            for q in (f"{name} soundtrack", f"{game.composers[0]} {name}", name):
+                hits = await dz._cached_data(f"dz:search_album_q:{q}", MONTH, "/search/album", {"q": q, "limit": 25}) or []
+                for h in hits:
+                    title = h.get("title") or ""
+                    artist = fold((h.get("artist") or {}).get("name") or "")
+                    words = _words(title)
+                    if not all(_covered(w, set(words)) for w in want):
                         continue
-                low = fold(title)
-                if any(bad in low for bad in _NOT_OST):
-                    continue
-                if int(h.get("nb_tracks") or 0) and int(h.get("nb_tracks") or 0) < 5:
-                    continue
-                by_composer = any(c in artist or (artist and artist in c) for c in composers)
-                by_label = any(label in artist for label in cat.labels)
-                # Filmy: oficiální soundtrack bývá pod "Various Artists" -- jen
-                # s přesným názvem filmu, oficiálním označením a 10+ skladbami.
-                by_various = (
-                    cat.strict_core
-                    and artist == "various artists"
-                    and int(h.get("nb_tracks") or 0) >= 10
-                    and any(w in fold(title) for w in ("original motion picture soundtrack", "original soundtrack", "music from the motion picture"))
-                )
-                if not (by_composer or by_label or by_various):
-                    continue
-                official = any(w in low for w in ("original", "soundtrack", "ost", "score", "music from", "motion picture"))
-                score = (3 if by_composer else 1) + (1 if official else 0)
-                if best is None or score > best[0]:
-                    best = (score, h)
-            if best and best[0] >= 4:
-                break
-        return {"album": best[1] if best else None}
+                    if {w for w in words if w in cat.sequel} - title_words:
+                        continue
+                    if cat.strict_core:
+                        core = re.split(r"[\(\[]| - | – ", title)[0]
+                        if set(_words(core)) - set(want) - _CORE_OK:
+                            continue
+                    low = fold(title)
+                    if any(bad in low for bad in _NOT_OST):
+                        continue
+                    # Rok v názvu jiný než rok díla = jiný díl / remake ("God of War (2005)").
+                    if any(abs(int(y) - game.year) > 1 for y in re.findall(r"\b(?:19|20)\d{2}\b", title)):
+                        continue
+                    tracks = int(h.get("nb_tracks") or 0)
+                    if tracks and tracks < 5:
+                        continue
+                    is_various = artist == "various artists"
+                    by_composer = not is_various and any(c in artist or (artist and artist in c) for c in composers)
+                    by_label = not is_various and any(label in artist for label in cat.labels)
+                    # Oficiální kompilace písní -- jen s přesným názvem díla,
+                    # oficiálním označením a 10+ skladbami.
+                    by_various = (
+                        is_various
+                        and tracks >= 10
+                        and (
+                            forced == "songs"
+                            or any(w in low for w in ("original motion picture soundtrack", "original soundtrack",
+                                                      "music from the motion picture", "original game soundtrack"))
+                        )
+                    )
+                    if not (by_composer or by_label or by_various):
+                        continue
+                    kind = forced or ("songs" if is_various else "score")
+                    official = any(w in low for w in ("original", "soundtrack", "ost", "score", "music from", "motion picture"))
+                    rank = (3 if by_composer else 1) + (1 if official else 0)
+                    if kind not in picks or rank > picks[kind][0]:
+                        picks[kind] = (rank, h)
+                if picks.get(forced or "score", (0,))[0] >= 4:
+                    break
+        return {"albums": [{"kind": k, "album": picks[k][1]} for k in ("score", "songs") if k in picks]}
 
     try:
-        found = (await cached_json(f"{cat.ns}:ost:{version}:{game.slug}", MONTH, fetch)).get("album")
+        found = (await cached_json(f"{cat.ns}:ost:{version}:{game.slug}", MONTH, fetch)).get("albums") or []
     except Exception:  # noqa: BLE001
         logger.exception("soundtrack %s", game.slug)
-        return None
-    if not found:
-        return None
+        return []
+    out: list[dict[str, str]] = []
     with Session(engine) as session:
-        artist = ingest_artist(session, found.get("artist") or {})
-        release = ingest_album(session, found, artist) if artist else None
+        for item in found:
+            album = item.get("album") or {}
+            artist = ingest_artist(session, album.get("artist") or {})
+            release = ingest_album(session, album, artist) if artist else None
+            if release is not None and all(o["id"] != release.id for o in out):
+                out.append({"id": release.id, "kind": item.get("kind") or "score"})
         session.commit()
-        return release.id if release else None
+    return out
+
+
+async def soundtrack(game: Game, cat: Catalog | None = None) -> str | None:
+    """Hlavní album díla (score, jinak písně)."""
+    albums = await soundtracks(game, cat)
+    return albums[0]["id"] if albums else None
 
 
 # ----------------------------------------------------------------------
@@ -402,7 +428,8 @@ async def soundtrack(game: Game, cat: Catalog | None = None) -> str | None:
 
 async def game_card(game: Game, cat: Catalog | None = None) -> dict[str, Any]:
     cat = cat or GAMES_CATALOG
-    img, album_id = await asyncio.gather(images(game), soundtrack(game, cat))
+    img, albums = await asyncio.gather(images(game), soundtracks(game, cat))
+    album_id = albums[0]["id"] if albums else None
     if not img["hero"] and album_id:
         # Bez obrázku díla (Minecraft) aspoň obal soundtracku.
         from app.models import Release
@@ -422,6 +449,7 @@ async def game_card(game: Game, cat: Catalog | None = None) -> dict[str, Any]:
         "hero": img["hero"],
         "cover": img["cover"],
         "albumId": album_id,
+        "albums": albums,
     }
 
 
@@ -526,7 +554,7 @@ async def page(cat: Catalog | None = None) -> dict[str, Any]:
             ],
         }
 
-    key = "games:page:v7" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
+    key = "games:page:v9" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
     return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("rows"))
 
 
@@ -601,7 +629,12 @@ async def game_page(slug: str, cat: Catalog | None = None) -> dict[str, Any] | N
         return None
     card = await game_card(game, cat)
     others = [g for g in cat.items if game.series and g.series == game.series and g.slug != slug]
-    return {**card, "seriesGames": await _cards(sorted(others, key=lambda g: g.year), cat), "stationIds": await stations(game)}
+    return {
+        **card,
+        "seriesGames": await _cards(sorted(others, key=lambda g: g.year), cat),
+        "stationIds": await stations(game),
+        "stationsTitle": game.stations_title,
+    }
 
 
 async def series_page(series_id: str, cat: Catalog | None = None) -> dict[str, Any] | None:
@@ -621,7 +654,7 @@ async def series_page(series_id: str, cat: Catalog | None = None) -> dict[str, A
             "playlistId": await _series_playlist(cat, series_id, cards, station_ids), "stationIds": station_ids,
         }
 
-    key = f"games:series:v5:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
+    key = f"games:series:v7:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
     return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("games"))
 
 
@@ -635,8 +668,8 @@ async def _series_playlist(
 
     tracks: list[dict[str, Any]] = []
     for card in cards:
-        if card.get("albumId"):
-            tracks += await _album_tracks(card["albumId"])
+        for album in card.get("albums") or ([{"id": card["albumId"]}] if card.get("albumId") else []):
+            tracks += await _album_tracks(album["id"])
     ids = await asyncio.to_thread(g._ingest_tracks, tracks[:400]) if tracks else []
     if station_ids:
         # GTA: hudba série = rádia všech dílů (soundtrack jako album nevyšel).
