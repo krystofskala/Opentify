@@ -20,7 +20,6 @@ import 'radio_station.dart';
 import '../state/library_scope.dart';
 import '../state/offline_controller.dart';
 import '../state/auth_controller.dart';
-import '../state/providers.dart' show apiClientProvider;
 import 'verify_track_sheet.dart';
 import 'share_sheet.dart';
 import 'report_problem.dart';

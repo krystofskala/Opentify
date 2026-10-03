@@ -33,6 +33,8 @@ import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import '../../widgets/toast.dart';
 import '../artist/artist_support.dart' show openExternal;
+import '../../core/app_update.dart';
+import '../../widgets/app_update_sheet.dart';
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -106,141 +108,140 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-            // Verze appky hned pod nadpisem -- ať je vidět, jestli update dorazil.
-            const _AppVersion(),
-            // Admin jedná za jiný profil -- pruh se "Zpět na můj".
-            const ActingAsBanner(),
-            // Rychlý přístup nahoře (živě chtěné): Wrapped, Shazam, ladička.
-            Row(
-              children: [
-                Expanded(
-                  child: _QuickButton(
-                      icon: Symbols.equalizer_rounded, label: 'Wrapped', onTap: () => context.push('/wrapped')),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: _QuickButton(
-                      icon: Symbols.graphic_eq_rounded, label: 'Shazam', onTap: () => context.push('/shazam')),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: _QuickButton(
-                      icon: Symbols.music_note_rounded, label: 'Ladička', onTap: () => context.push('/tuner')),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: _QuickButton(
-                      icon: Symbols.join_inner_rounded, label: 'Blend', onTap: () => context.push('/blends')),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Sbalitelné skupiny místo jednoho dlouhého seznamu karet (pro
-            // tátu: otevře jen to, co potřebuje; stav se pamatuje).
-            const _Section(
-              id: 'appearance',
-              icon: Symbols.contrast_rounded,
-              title: 'Vzhled',
-              summary: 'Motiv, sklo nebo plné plochy, zrno',
-              initiallyOpen: true,
-              child: _AppearanceSettings(),
-            ),
-            const SizedBox(height: 12),
-            _Section(
-              id: 'home',
-              icon: Symbols.home_rounded,
-              title: 'Domů',
-              summary: 'Pořadí sekcí, skryté sekce, žánry',
-              child: Column(
-                children: [
-                  _ActionRow(
-                    icon: Symbols.tune_rounded,
-                    title: 'Upravit Domů',
-                    description: 'Přetažením změníš pořadí sekcí na Domů, vypínačem je skryješ.',
-                    buttonLabel: 'Upravit',
-                    onPressed: () => showHomeLayoutSheet(context),
+                  // Verze appky hned pod nadpisem -- ať je vidět, jestli update dorazil.
+                  const _AppVersion(),
+                  // Admin jedná za jiný profil -- pruh se "Zpět na můj".
+                  const ActingAsBanner(),
+                  // Rychlý přístup nahoře (živě chtěné): Wrapped, Shazam, ladička.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _QuickButton(
+                            icon: Symbols.equalizer_rounded, label: 'Wrapped', onTap: () => context.push('/wrapped')),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _QuickButton(
+                            icon: Symbols.graphic_eq_rounded, label: 'Shazam', onTap: () => context.push('/shazam')),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _QuickButton(
+                            icon: Symbols.music_note_rounded, label: 'Ladička', onTap: () => context.push('/tuner')),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _QuickButton(
+                            icon: Symbols.join_inner_rounded, label: 'Blend', onTap: () => context.push('/blends')),
+                      ),
+                    ],
                   ),
-                  const _ShareListeningRow(),
-                  _ActionRow(
-                    icon: Symbols.category_rounded,
-                    title: 'Žánry, nálady a soundtracky na Domů',
-                    description: 'Vybrané žánry dostanou na Domů vlastní řadu. '
-                        'Bez výběru je Domů stejné jako pro ostatní.',
-                    buttonLabel: 'Vybrat',
-                    onPressed: () => showHomeGenresSheet(context),
+                  const SizedBox(height: 12),
+                  // Sbalitelné skupiny místo jednoho dlouhého seznamu karet (pro
+                  // tátu: otevře jen to, co potřebuje; stav se pamatuje).
+                  const _Section(
+                    id: 'appearance',
+                    icon: Symbols.contrast_rounded,
+                    title: 'Vzhled',
+                    summary: 'Motiv, sklo nebo plné plochy, zrno',
+                    initiallyOpen: true,
+                    child: _AppearanceSettings(),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            _Section(
-              id: 'music',
-              icon: Symbols.library_music_rounded,
-              title: 'Moje hudba',
-              summary: isAdmin
-                  ? 'Import ze Spotify, export, kontrola stažených, lokální knihovna'
-                  : 'Import ze Spotify, export dat, ListenBrainz',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _ActionRow(
-                    icon: Symbols.cloud_upload_rounded,
-                    title: 'Import ze Spotify a YouTube Music',
-                    description:
-                        'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
-                        'YourLibrary.json z oficiálního exportu -- Liked Songs pro denní mix, '
-                        'ostatní playlisty pod svým jménem. ZIP s historií poslechů (Extended '
-                        'streaming history) nahraje poslechy pro Wrapped a mixy.\n'
-                        'YouTube Music: Google Takeout › YouTube a YouTube Music › historie, '
-                        'formát JSON (v Takeoutu přepnout z HTML) – poslechy se přidají k těm ze Spotify.',
-                    buttonLabel: 'Vybrat soubor…',
-                    onPressed: () => _importFromSpotify(context),
-                  ),
-                  const _ImportedHistoryLine(),
-                  _ActionRow(
-                    icon: Symbols.archive_rounded,
-                    title: 'Exportovat moje data',
-                    description: 'Oblíbené, playlisty, historie poslechů a seznam „Na později“ v jednom ZIPu. '
-                        'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',
-                    buttonLabel: 'Exportovat',
-                    onPressed: () => _export(context),
-                  ),
-                  const _ListenBrainzRow(),
-                  const _LastfmRow(),
-                  if (isAdmin) ...[
-                    _ActionRow(
-                      icon: Symbols.fact_check_rounded,
-                      title: 'Kontrola stažených',
-                      description: 'Skladby, u kterých nesedí délka nebo Shazam slyší něco jiného. '
-                          'Pusť si je a rozhodni: je to dobře, nebo stáhnout znovu.',
-                      buttonLabel: 'Projít',
-                      onPressed: () => context.push('/verify-downloads'),
+                  const SizedBox(height: 12),
+                  _Section(
+                    id: 'home',
+                    icon: Symbols.home_rounded,
+                    title: 'Domů',
+                    summary: 'Pořadí sekcí, skryté sekce, žánry',
+                    child: Column(
+                      children: [
+                        _ActionRow(
+                          icon: Symbols.tune_rounded,
+                          title: 'Upravit Domů',
+                          description: 'Přetažením změníš pořadí sekcí na Domů, vypínačem je skryješ.',
+                          buttonLabel: 'Upravit',
+                          onPressed: () => showHomeLayoutSheet(context),
+                        ),
+                        const _ShareListeningRow(),
+                        _ActionRow(
+                          icon: Symbols.category_rounded,
+                          title: 'Žánry, nálady a soundtracky na Domů',
+                          description: 'Vybrané žánry dostanou na Domů vlastní řadu. '
+                              'Bez výběru je Domů stejné jako pro ostatní.',
+                          buttonLabel: 'Vybrat',
+                          onPressed: () => showHomeGenresSheet(context),
+                        ),
+                      ],
                     ),
-                    _ActionRow(
-                      icon: Symbols.folder_rounded,
-                      title: 'Lokální knihovna',
-                      description:
-                          'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
-                          'v .env), spáruje je na MusicBrainz podle tagů a dotáhne obaly. '
-                          'Běží na pozadí, u větší knihovny to chvíli potrvá.',
-                      buttonLabel: scanStatus.valueOrNull?.isRunning == true ? 'Skenuji…' : 'Skenovat knihovnu',
-                      onPressed: scanStatus.valueOrNull?.isRunning == true ? null : () => _startScan(context),
+                  ),
+                  const SizedBox(height: 12),
+                  _Section(
+                    id: 'music',
+                    icon: Symbols.library_music_rounded,
+                    title: 'Moje hudba',
+                    summary: isAdmin
+                        ? 'Import ze Spotify, export, kontrola stažených, lokální knihovna'
+                        : 'Import ze Spotify, export dat, ListenBrainz',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _ActionRow(
+                          icon: Symbols.cloud_upload_rounded,
+                          title: 'Import ze Spotify a YouTube Music',
+                          description: 'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
+                              'YourLibrary.json z oficiálního exportu -- Liked Songs pro denní mix, '
+                              'ostatní playlisty pod svým jménem. ZIP s historií poslechů (Extended '
+                              'streaming history) nahraje poslechy pro Wrapped a mixy.\n'
+                              'YouTube Music: Google Takeout › YouTube a YouTube Music › historie, '
+                              'formát JSON (v Takeoutu přepnout z HTML) – poslechy se přidají k těm ze Spotify.',
+                          buttonLabel: 'Vybrat soubor…',
+                          onPressed: () => _importFromSpotify(context),
+                        ),
+                        const _ImportedHistoryLine(),
+                        _ActionRow(
+                          icon: Symbols.archive_rounded,
+                          title: 'Exportovat moje data',
+                          description: 'Oblíbené, playlisty, historie poslechů a seznam „Na později“ v jednom ZIPu. '
+                              'CSV jde nahrát do TuneMyMusic a převést do Spotify, Apple Music a dalších.',
+                          buttonLabel: 'Exportovat',
+                          onPressed: () => _export(context),
+                        ),
+                        const _ListenBrainzRow(),
+                        const _LastfmRow(),
+                        if (isAdmin) ...[
+                          _ActionRow(
+                            icon: Symbols.fact_check_rounded,
+                            title: 'Kontrola stažených',
+                            description: 'Skladby, u kterých nesedí délka nebo Shazam slyší něco jiného. '
+                                'Pusť si je a rozhodni: je to dobře, nebo stáhnout znovu.',
+                            buttonLabel: 'Projít',
+                            onPressed: () => context.push('/verify-downloads'),
+                          ),
+                          _ActionRow(
+                            icon: Symbols.folder_rounded,
+                            title: 'Lokální knihovna',
+                            description: 'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '
+                                'v .env), spáruje je na MusicBrainz podle tagů a dotáhne obaly. '
+                                'Běží na pozadí, u větší knihovny to chvíli potrvá.',
+                            buttonLabel: scanStatus.valueOrNull?.isRunning == true ? 'Skenuji…' : 'Skenovat knihovnu',
+                            onPressed: scanStatus.valueOrNull?.isRunning == true ? null : () => _startScan(context),
+                          ),
+                          scanStatus.maybeWhen(
+                            data: (status) => status.status == 'idle'
+                                ? const SizedBox.shrink()
+                                : Padding(
+                                    padding: const EdgeInsets.only(top: 12), child: _ScanStatusCard(status: status)),
+                            orElse: () => const SizedBox.shrink(),
+                          ),
+                        ],
+                      ],
                     ),
-                    scanStatus.maybeWhen(
-                      data: (status) => status.status == 'idle'
-                          ? const SizedBox.shrink()
-                          : Padding(padding: const EdgeInsets.only(top: 12), child: _ScanStatusCard(status: status)),
-                      orElse: () => const SizedBox.shrink(),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Profily (jen admin; ostatní sekci nevidí).
-            const ProfilesSection(),
-            const SizedBox(height: 12),
-            const _LogoutButton(),
+                  ),
+                  const SizedBox(height: 12),
+                  // Profily (jen admin; ostatní sekci nevidí).
+                  const ProfilesSection(),
+                  const SizedBox(height: 12),
+                  const _LogoutButton(),
                 ],
               ),
             ),
@@ -293,7 +294,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       await showSpotifyImportReport(context, result);
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
-      showToast(messenger, detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify nebo z Google Takeoutu (JSON).');
+      showToast(messenger,
+          detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify nebo z Google Takeoutu (JSON).');
     }
   }
 
@@ -436,7 +438,8 @@ class _AppearanceSettings extends ConsumerWidget {
           StatefulBuilder(
             builder: (context, setState) => _SwitchRow(
               title: 'Live Activity',
-              subtitle: 'Karta s obalem ve tvaru na zamčené obrazovce a v Dynamic Islandu (vedle systémového přehrávače).',
+              subtitle:
+                  'Karta s obalem ve tvaru na zamčené obrazovce a v Dynamic Islandu (vedle systémového přehrávače).',
               value: NowPlayingActivity.enabled,
               onChanged: (v) async {
                 await NowPlayingActivity.setEnabled(v);
@@ -834,19 +837,19 @@ class _QuickButton extends StatelessWidget {
       child: SizedBox(
         width: double.infinity,
         child: DecoratedBox(
-        decoration: ShapeDecoration(shape: shape, color: scheme.secondaryContainer),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 30, color: scheme.onSecondaryContainer),
-              const SizedBox(height: 6),
-              Text(label, style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSecondaryContainer)),
-            ],
+          decoration: ShapeDecoration(shape: shape, color: scheme.secondaryContainer),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 30, color: scheme.onSecondaryContainer),
+                const SizedBox(height: 6),
+                Text(label, style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSecondaryContainer)),
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -867,11 +870,20 @@ class _AppVersion extends StatelessWidget {
         final info = snap.data;
         if (info == null) return const SizedBox(height: 18);
         final platform = kIsWeb ? 'web' : defaultTargetPlatform.name;
+        final style = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
         return Padding(
           padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-          child: Text(
-            'Opentify ${info.version} · $platform',
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          child: Row(
+            children: [
+              Text('Opentify ${info.version} · $platform', style: style),
+              // Android: aktualizace z GitHubu (iOS řeší SideStore).
+              if (appUpdatesSupported)
+                GestureDetector(
+                  onTap: () => checkAppUpdateManually(context),
+                  child: Text(' · Zkontrolovat aktualizace',
+                      style: style?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.w700)),
+                ),
+            ],
           ),
         );
       },
@@ -910,7 +922,8 @@ class _LastfmRow extends ConsumerWidget {
       token = start['token'] as String;
       url = start['url'] as String;
     } catch (e) {
-      showToast(messenger, e is ApiException ? (e.detail ?? 'Last.fm teď nejde připojit.') : 'Last.fm teď nejde připojit.');
+      showToast(
+          messenger, e is ApiException ? (e.detail ?? 'Last.fm teď nejde připojit.') : 'Last.fm teď nejde připojit.');
       return;
     }
     if (!context.mounted) return;
@@ -1076,7 +1089,6 @@ class _LogoutButton extends ConsumerWidget {
     );
   }
 }
-
 
 /// Profil › Domů: sdílet, co poslouchám, s ostatními profily (jejich sekce
 /// "Co poslouchá rodina"). Ve výchozím stavu vypnuté.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,8 @@ import '../widgets/glass/liquid_glass.dart';
 import '../widgets/now_playing_sheet.dart' show HiddenUnderPlayer;
 import '../widgets/player_bar.dart';
 import 'branches.dart';
+import '../core/app_update.dart';
+import '../widgets/app_update_sheet.dart';
 
 /// Bottom-nav shell pro čtyři hlavní destinace (Domů/Hledat/Knihovna/Profil).
 /// Detaily (interpret, album, playlist...) se otevírají UVNITŘ záložky
@@ -57,6 +61,19 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
   static const _expandAfter = 24.0;
 
   @override
+  void initState() {
+    super.initState();
+    // Android: nová verze na GitHubu -> nabídka (chvíli po startu, ať nebrzdí).
+    if (appUpdatesSupported) {
+      _updateTimer = Timer(const Duration(seconds: 4), () {
+        if (mounted) offerAppUpdate(context);
+      });
+    }
+  }
+
+  Timer? _updateTimer;
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final delegate = GoRouter.of(context).routerDelegate;
@@ -68,6 +85,7 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
 
   @override
   void dispose() {
+    _updateTimer?.cancel();
     _delegate?.removeListener(_onNavigate);
     _collapse.dispose();
     super.dispose();
