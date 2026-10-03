@@ -32,6 +32,18 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
     _load();
   }
 
+  List<({String id, String title, Color color})> _moods = const [];
+  List<({String id, String title, Color color})> _soundtracks = const [];
+
+  List<({String id, String title, Color color})> _parse(Object? raw) => [
+        for (final g in (raw as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+          (
+            id: g['id'] as String,
+            title: g['title'] as String? ?? '',
+            color: Color(int.parse((g['color'] as String? ?? '#888888').substring(1), radix: 16) | 0xFF000000),
+          ),
+      ];
+
   Future<void> _load() async {
     try {
       final json = await ref.read(apiClientProvider).getJson('/home/genres');
@@ -49,6 +61,8 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
                   0xFF000000),
             ),
         ];
+        _moods = _parse(json['moods']);
+        _soundtracks = _parse(json['soundtracks']);
         _czech = [
           for (final g in (json['czech'] as List<dynamic>? ?? const [])
               .cast<Map<String, dynamic>>())
@@ -102,10 +116,10 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Žánry na Domů', style: theme.textTheme.titleLarge),
+              Text('Žánry, nálady a soundtracky na Domů', style: theme.textTheme.titleLarge),
               const SizedBox(height: AppSpacing.xxs),
               Text(
-                'Vybrané žánry dostanou na Domů vlastní řadu. Bez výběru je Domů stejné jako pro ostatní.',
+                'Každý vybraný dostane na Domů vlastní řadu (mix, alba, interpreti). Bez výběru je Domů stejné jako pro ostatní.',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
@@ -125,6 +139,18 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _chips(available),
+                        if (_moods.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          Text('Nálady a chvíle', style: theme.textTheme.titleSmall),
+                          const SizedBox(height: AppSpacing.xs),
+                          _chips(_moods),
+                        ],
+                        if (_soundtracks.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          Text('Soundtracky', style: theme.textTheme.titleSmall),
+                          const SizedBox(height: AppSpacing.xs),
+                          _chips(_soundtracks),
+                        ],
                         if (_czech.isNotEmpty) ...[
                           const SizedBox(height: AppSpacing.md),
                           Text('Česká hudba podle žánru',

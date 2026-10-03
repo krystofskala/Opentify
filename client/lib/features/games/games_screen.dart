@@ -577,11 +577,18 @@ class FranchiseScreen extends ConsumerWidget {
                       ),
                     ),
                   ],
-                  if (stations.isNotEmpty) ...[
-                    const SliverToBoxAdapter(child: SectionHeader('Rádia')),
+                  // Rádia po hrách (GTA: 49 stanic v pěti hrách) -- každá řada
+                  // se "Zobrazit vše".
+                  for (final group in _byGame(stations)) ...[
+                    SliverToBoxAdapter(
+                      child: SectionHeader(
+                        group.$1 == null ? 'Rádia' : 'Rádia · ${group.$1}',
+                        onSeeAll: group.$2.length > 2 ? () => _showStations(context, group.$1 ?? 'Rádia', group.$2) : null,
+                      ),
+                    ),
                     SliverToBoxAdapter(
                       child: _Rail(height: 214, children: [
-                        for (final s in stations)
+                        for (final s in group.$2)
                           PlaylistCardView(card: s, onTap: () => context.push('/playlists/${s.id}')),
                       ]),
                     ),
@@ -733,4 +740,54 @@ class FranchiseTile extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// Rádia seskupená podle hry (popis playlistu = název hry), nejnovější hra napřed.
+List<(String?, List<HomePlaylistCard>)> _byGame(List<HomePlaylistCard> stations) {
+  final groups = <String?, List<HomePlaylistCard>>{};
+  for (final s in stations) {
+    groups.putIfAbsent(s.description, () => []).add(s);
+  }
+  return [for (final e in groups.entries) (e.key, e.value)];
+}
+
+void _showStations(BuildContext context, String title, List<HomePlaylistCard> stations) {
+  showGlassSheet<void>(
+    context,
+    builder: (sheetContext) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => GlassSheet(
+        expand: true,
+        child: CustomScrollView(
+          controller: scroll,
+          slivers: [
+            SliverToBoxAdapter(child: SectionHeader(title)),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg),
+              sliver: SliverGrid.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 180,
+                  childAspectRatio: 0.72,
+                  crossAxisSpacing: AppSpacing.sm,
+                  mainAxisSpacing: AppSpacing.sm,
+                ),
+                itemCount: stations.length,
+                itemBuilder: (context, i) => PlaylistCardView(
+                  card: stations[i],
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    context.push('/playlists/${stations[i].id}');
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

@@ -163,7 +163,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   const _ShareListeningRow(),
                   _ActionRow(
                     icon: Symbols.category_rounded,
-                    title: 'Žánry na Domů',
+                    title: 'Žánry, nálady a soundtracky na Domů',
                     description: 'Vybrané žánry dostanou na Domů vlastní řadu. '
                         'Bez výběru je Domů stejné jako pro ostatní.',
                     buttonLabel: 'Vybrat',

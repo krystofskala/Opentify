@@ -587,7 +587,24 @@ def pinned_genres(user_id: str) -> list[Category]:
     with Session(engine) as session:
         user = session.get(AppUser, user_id)
         ids = (user.home_genres if user else None) or []
-    return [c for c in (get_category(i) for i in ids) if c is not None and c.group == "genre"]
+    return [c for c in (get_category(i) for i in ids) if c is not None and c.group in ("genre", "mood")]
+
+
+def pinned_soundtracks(user_id: str) -> list[Category]:
+    """Soundtracky připnuté na Domů (Herní soundtracky, Filmy a seriály)."""
+    from app.models import AppUser
+
+    with Session(engine) as session:
+        user = session.get(AppUser, user_id)
+        ids = (user.home_genres if user else None) or []
+    return [c for c in (get_category(i) for i in ids) if c is not None and c.group == "soundtrack" and c.parent is None]
+
+
+def _pinned_anywhere() -> set[str]:
+    from app.models import AppUser
+
+    with Session(engine) as session:
+        return {i for u in session.exec(select(AppUser)).all() for i in (u.home_genres or [])}
 
 
 async def build_genre_rails() -> int:
@@ -597,7 +614,9 @@ async def build_genre_rails() -> int:
 
     with Session(engine) as session:
         wanted = {i for u in session.exec(select(AppUser)).all() for i in (u.home_genres or [])}
-    genres = [c for c in CATEGORIES if c.group == "genre"]
+    pinned = _pinned_anywhere()
+    # Žánry vždy (Domů › Žánry), nálady jen když je má někdo připnuté.
+    genres = [c for c in CATEGORIES if c.group == "genre" or (c.group == "mood" and c.id in pinned)]
     genres.sort(key=lambda c: c.id not in wanted)
     built = 0
     for c in genres:

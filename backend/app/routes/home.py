@@ -159,13 +159,21 @@ def home_genres(current: tuple[str, str] = Depends(get_current_user)):
         "available": [
             {"id": c.id, "title": c.title, "color": c.color} for c in browse.CATEGORIES if c.group == "genre"
         ],
+        "moods": [{"id": c.id, "title": c.title, "color": c.color} for c in browse.CATEGORIES if c.group == "mood"],
+        "soundtracks": [
+            {"id": c.id, "title": c.title, "color": c.color}
+            for c in browse.CATEGORIES
+            if c.group == "soundtrack" and c.parent is None
+        ],
         # Česká hudba po žánrech (vitríny ze štítků Last.fm "czech rock"...).
         "czech": [
             {"id": gid, "title": title, "color": color}
             for gid, (_tag, title, color) in czech.CZECH_GENRES.items()
             if gid != "cz"
         ],
-        "selected": [c.id for c in browse.pinned_genres(current[0])] + czech.pinned(current[0]),
+        "selected": [c.id for c in browse.pinned_genres(current[0])]
+        + [c.id for c in browse.pinned_soundtracks(current[0])]
+        + czech.pinned(current[0]),
     }
 
 
@@ -179,7 +187,8 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
 
     ids = [
         i for i in dict.fromkeys(body.ids)
-        if ((c := browse.get_category(i)) is not None and c.group == "genre") or (i in czech.CZECH_GENRES and i != "cz")
+        if ((c := browse.get_category(i)) is not None and (c.group in ("genre", "mood") or (c.group == "soundtrack" and c.parent is None)))
+        or (i in czech.CZECH_GENRES and i != "cz")
     ]
     with Session(engine) as session:
         user = session.get(AppUser, current[0])
@@ -197,6 +206,14 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
                     pass
                 continue
             c = browse.get_category(i)
+            if c is not None and c.group == "soundtrack":
+                from app import soundtrack_discovery
+
+                try:
+                    await soundtrack_discovery.write_showcase(c.id)  # vitrína z denního snímku hned
+                except Exception:  # noqa: BLE001
+                    pass
+                continue
             if c is not None:
                 await browse.genre_rail(c)
                 await browse.genre_new_releases(c)  # novinky (bluegrass) hned, ne až za hodinu

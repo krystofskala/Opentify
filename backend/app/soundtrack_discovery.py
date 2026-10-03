@@ -289,6 +289,10 @@ async def build(ns: str) -> dict[str, Any]:
         session.add(row)
         session.commit()
     logger.info("soundtracky %s: %s", ns, {k: len(v) for k, v in pools.items()})
+    try:
+        await write_showcase(ns)
+    except Exception:  # noqa: BLE001
+        logger.exception("vitrína soundtracků %s", ns)
     return data
 
 
@@ -434,3 +438,44 @@ async def landing(ns: str, user_id: str) -> dict[str, Any]:
         "composerIds": composer_ids,
         "poster": ns == "movies",
     }
+
+
+async def write_showcase(ns: str) -> None:
+    """Vitrína soundtracků pro Domů (připnuté "Herní soundtracky" / "Filmy a
+    seriály"): mixy a soundtracky populárních děl. Snímek, Domů jen čte."""
+    from app import games
+    from app.models import HomeSnapshot
+    from app.movies import MOVIES_CATALOG
+    from app.utils import utcnow
+
+    cat = games.GAMES_CATALOG if ns == "games" else MOVIES_CATALOG
+    curated = await games.page(cat)
+    pools = _dyn(ns).get("pools") or {}
+    popular = _merge(pools.get("popular") or [], pools.get("new") or [], limit=12)
+    album_ids = [c["albums"][0]["id"] for c in popular if c.get("albums")]
+    mix_ids = list((curated.get("mixIds") or {}).values())[:4]
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, f"soundtracks:showcase:{ns}") or HomeSnapshot(key=f"soundtracks:showcase:{ns}")
+        row.payload = {"mixIds": mix_ids, "albumIds": album_ids}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+
+
+def showcase_items(session: Session, ns: str) -> list[dict[str, Any]]:
+    from app import browse
+    from app.home.service import _card
+    from app.models import HomeSnapshot, Playlist, Release
+
+    row = session.get(HomeSnapshot, f"soundtracks:showcase:{ns}")
+    data = (row.payload or {}) if row else {}
+    items: list[dict[str, Any]] = []
+    for pid in data.get("mixIds") or []:
+        pl = session.get(Playlist, pid)
+        if pl is not None:
+            items.append({"itemType": "playlist", **_card(session, pl).model_dump(mode="json", by_alias=True)})
+    for rid in data.get("albumIds") or []:
+        rel = session.get(Release, rid)
+        if rel is not None:
+            items.append({"itemType": "album", "badge": None, **browse._album_card(session, rel)})
+    return items

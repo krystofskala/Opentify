@@ -462,6 +462,15 @@ def build_home(user_id: str) -> dict[str, Any]:
         from app import browse
         from app.models import HomeSnapshot as _Snap
 
+        # Připnuté soundtracky (Herní soundtracky, Filmy a seriály) -- vitrína
+        # z denního snímku, "Zobrazit vše" otevře celou stránku.
+        from app import soundtrack_discovery as _sd
+
+        for c in browse.pinned_soundtracks(user_id):
+            items = _sd.showcase_items(session, c.id)
+            if items:
+                sections.append({"id": f"genre_{c.id}", "title": c.title, "type": "genre_showcase", "categoryId": c.id, "items": items})
+
         for c in browse.pinned_genres(user_id):
             # Vitrína žánru: mix napřed, pak novinky, alba a interpreti --
             # ukázka celé stránky žánru (dřív jen řada skladeb jednoho playlistu).
@@ -658,6 +667,7 @@ def default_entries(user_id: str, include_rails: bool = False) -> list[tuple[str
     if "now_mix" in extra:
         out.append(("now_mix", extra["now_mix"]))
     out += [(f"genre_{c.id}", c.title) for c in browse.pinned_genres(user_id)]
+    out += [(f"genre_{c.id}", c.title) for c in browse.pinned_soundtracks(user_id)]
     from app.home import czech as _cz
 
     out += [(_cz.section_id(gid), _cz.CZECH_GENRES[gid][1]) for gid in _cz.pinned(user_id)]
