@@ -1119,6 +1119,15 @@ async def main() -> None:
                 await requeue_orphaned_jobs(r)
             except Exception:  # noqa: BLE001
                 logger.exception("úklid zaseklých jobů selhal")
+            # Mezisklad Soulseeku (prázdné složky, nepoužité soubory) -- jednou
+            # za 3 h napříč replikami.
+            try:
+                if await r.set("maintenance:slskd-janitor", CONSUMER_NAME, nx=True, ex=3 * 3600):
+                    from app.library import slskd_janitor
+
+                    await asyncio.to_thread(slskd_janitor.clean, slskd_janitor.downloads_root())
+            except Exception:  # noqa: BLE001
+                logger.exception("úklid meziskladu slskd selhal")
             try:
                 await _process_due_upgrades(r)
             except Exception:  # noqa: BLE001
