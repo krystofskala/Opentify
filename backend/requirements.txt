@@ -14,3 +14,4 @@ yt-dlp>=2026.8.19
 deno>=2.0
 # Open Shazam (app/recognize.py): otisk zvuku -> Shazam, přes Mullvad VPN.
 shazamio==0.8.*
+cryptography>=43

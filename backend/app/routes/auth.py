@@ -258,6 +258,20 @@ def revoke_devices(user_id: str, _admin=Depends(require_admin)):
     return {"userId": user_id, "revoked": True}
 
 
+@auth_router.delete("/users/{user_id}")
+def delete_user(user_id: str, _admin=Depends(require_admin)):
+    """Smazat profil se všemi jeho daty (viz app/library/delete_profile.py)."""
+    from app.library.delete_profile import delete_profile
+
+    try:
+        counts = delete_profile(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {"userId": user_id, "deleted": counts}
+
+
 @auth_router.delete("/devices/{device_id}")
 def revoke_device(device_id: str, request: Request, _admin=Depends(require_admin)):
     """Odhlásit jedno zařízení (ztracený telefon). Tohle zařízení ne --

@@ -228,6 +228,42 @@ class ProfilesSection extends ConsumerWidget {
     }
   }
 
+  Future<void> _deleteProfile(BuildContext context, WidgetRef ref, ProfileRow p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Smazat profil ${p.name}?'),
+        content: const Text(
+          'Smaže se všechno: poslechy, knihovna, oblíbené, playlisty, Wrapped, '
+          'přihlášená zařízení i propojení s ListenBrainz a Last.fm. Stažená hudba '
+          'zůstane. Tohle nejde vrátit zpátky.',
+        ),
+        actions: [
+          GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(dialog).pop(false),
+          ),
+          GlassButton(
+            label: 'Smazat',
+            destructive: true,
+            compact: true,
+            onPressed: () => Navigator.of(dialog).pop(true),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await ref.read(apiClientProvider).deleteJson('/auth/users/${p.id}');
+      ref.invalidate(profilesProvider);
+      if (context.mounted) toast(context, 'Profil ${p.name} smazán');
+    } catch (e) {
+      if (context.mounted) _snack(context, e);
+    }
+  }
+
   /// ⋯ u profilu -- stejný skleněný sheet jako ostatní menu (ne vyskakovací).
   void _profileMenu(BuildContext context, WidgetRef ref, ProfileRow p) {
     final actions = <(IconData, String, VoidCallback)>[
@@ -238,6 +274,9 @@ class ProfilesSection extends ConsumerWidget {
         (Symbols.key_rounded, 'Údaje k přihlášení', () => _showLoginInfo(context, p.name, p.username!)),
       if (p.hasPassword && p.role != 'admin')
         (Symbols.lock_reset_rounded, 'Vynulovat heslo', () => _resetPassword(context, ref, p)),
+      // Ne na profil, za který zrovna jednáš (nejdřív se přepni zpátky).
+      if (p.role != 'admin' && p.id != (ref.read(authProvider).valueOrNull?.acting?.id))
+        (Symbols.delete_forever_rounded, 'Smazat profil a jeho data', () => _deleteProfile(context, ref, p)),
     ];
     showGlassSheet<void>(
       context,

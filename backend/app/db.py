@@ -30,6 +30,9 @@ if DATABASE_URL.startswith("sqlite"):
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _ensure_columns()
+    from app.secret_box import encrypt_legacy
+
+    encrypt_legacy(engine)
 
 
 def _ensure_columns() -> None:

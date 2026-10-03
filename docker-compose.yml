@@ -12,6 +12,8 @@ services:
       DATABASE_URL: sqlite:////data/db/vault.db
       MEDIA_ROOT: /data/media
       REDIS_URL: redis://redis:6379/0
+      # Šifrovací klíč pro tokeny služeb v DB (ListenBrainz, Last.fm) -- jen v .env.
+      OPENTIFY_DATA_KEY: ${OPENTIFY_DATA_KEY:-}
       # Přihlášení jménem a heslem (app/auth.py); `open` = bez přihlašování.
       AUTH_MODE: ${AUTH_MODE:-login}
       # Knihovna › Server: přehled sdílení na Soulseeku (jen čtení, viz
@@ -77,6 +79,8 @@ services:
       DATABASE_URL: sqlite:////data/db/vault.db
       MEDIA_ROOT: /data/media
       REDIS_URL: redis://redis:6379/0
+      # Šifrovací klíč pro tokeny služeb v DB (ListenBrainz, Last.fm) -- jen v .env.
+      OPENTIFY_DATA_KEY: ${OPENTIFY_DATA_KEY:-}
       MUSICBRAINZ_BASE_URL: https://musicbrainz.org/ws/2
       DEEZER_API_BASE: https://api.deezer.com
       # composite = zkusí slskd, při prázdném hledání/chybě padá na yt-dlp

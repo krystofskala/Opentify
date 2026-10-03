@@ -31,6 +31,8 @@ from app.models import AppUser, AuthToken
 from app.utils import utcnow
 
 ADMIN_ID = "demo-user"
+# Klíč zařízení nepoužitý tak dlouho přestane platit (nové přihlášení pozvánkou).
+DEVICE_IDLE_EXPIRY = timedelta(days=90)
 TOKEN_COOKIE = "opentify_token"
 ACT_AS_COOKIE = "opentify_act_as"
 
@@ -78,6 +80,11 @@ def _user_for_token(session: Session, token: str | None) -> AppUser | None:
     if row is None:
         return None
     now = utcnow()
+    # Zapomenuté zařízení (starý telefon) se po čase samo odhlásí.
+    if now - (aware(row.last_used_at) or aware(row.created_at)) > DEVICE_IDLE_EXPIRY:
+        session.delete(row)
+        session.commit()
+        return None
     if row.last_used_at is None or now - aware(row.last_used_at) > timedelta(hours=6):
         row.last_used_at = now
         session.add(row)

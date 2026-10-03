@@ -18,12 +18,12 @@ vyvolaný explicitním otevřením obrazovky, ne psaním do vyhledávacího pole
 
 from __future__ import annotations
 
-from urllib.parse import quote_plus
-
 import asyncio
 import re
 import unicodedata
+from collections import Counter
 from typing import Any
+from urllib.parse import quote_plus
 
 from sqlmodel import Session, func, select
 from app.catalog.identity import is_own_id
@@ -84,6 +84,25 @@ _MB_PRIMARY_TYPE_TO_RELEASE_TYPE = {
     "single": "single",
     "ep": "ep",
 }
+
+
+def _canonical_edition(releases: list[dict]) -> dict:
+    """Edice pro tracklist: nejméně disků (deluxe s bonusovým / živým diskem
+    nevyhraje nad standardní -- živě: Angus & Julia Stone ukazovali studiové
+    skladby proložené živými z bonusového disku), pak nejdřívější vydání.
+    Pořadí od MB samo o sobě nic neznamená."""
+
+    def shape(r: dict) -> tuple[int, int]:
+        media = [m for m in r.get("media") or [] if m.get("tracks")]
+        return len(media), sum(len(m["tracks"]) for m in media)
+
+    fewest = min(shape(r)[0] for r in releases)
+    candidates = [r for r in releases if shape(r)[0] == fewest]
+    # Nejběžnější počet skladeb mezi nimi (promo/zkrácené edice nevyhrají),
+    # pak nejdřívější vydání.
+    counts = Counter(shape(r)[1] for r in candidates)
+    usual = max(counts, key=lambda n: (counts[n], n))
+    return min((r for r in candidates if shape(r)[1] == usual), key=lambda r: r.get("date") or "9999")
 
 
 def _parse_track_number(raw: str | None) -> int | None:
@@ -1009,7 +1028,7 @@ class CatalogService:
         ]
         if not mb_releases:
             return await self._deezer_release_tracks(release)
-        chosen = mb_releases[0]
+        chosen = _canonical_edition(mb_releases)
         # Stav vydání z MB: žádná oficiální edice = bootleg/promo (verze z něj
         # nejsou studiovky). Viditelné zůstává vše, jen stahování to ví.
         statuses = sorted({(r.get("status") or "").lower() for r in data.get("releases") or []} - {""})
@@ -1019,8 +1038,13 @@ class CatalogService:
             self._session.add(release)
 
         recordings: list[Recording] = []
-        for medium in chosen.get("media", []):
+        media = [m for m in chosen.get("media", []) if m.get("tracks")]
+        # Víc disků: čísla průběžně přes všechny disky (2CD Marsyas: 1..31),
+        # jinak se disky prolínaly (1, 1, 2, 2...). Tak i vinylové strany "A1".
+        position = 0
+        for medium in media:
             for track in medium.get("tracks", []):
+                position += 1
                 rec_json = track.get("recording", {})
                 title = rec_json.get("title") or track.get("title")
                 if not title:
@@ -1038,7 +1062,7 @@ class CatalogService:
                     title=title,
                     duration_ms=rec_json.get("length") or track.get("length"),
                     isrc=isrcs[0] if isrcs else None,
-                    track_number=_parse_track_number(track.get("number")),
+                    track_number=position if len(media) > 1 else _parse_track_number(track.get("number")),
                     disambiguation=rec_json.get("disambiguation") if rec_json else None,
                 )
                 recordings.append(recording)
@@ -1172,7 +1196,7 @@ class CatalogService:
                 continue
             titles = [
                 (track.get("recording") or {}).get("title") or track.get("title")
-                for medium in mb_releases[0].get("media", [])
+                for medium in _canonical_edition(mb_releases).get("media", [])
                 for track in medium.get("tracks", [])
             ]
             normalized_mb = {normalize_title(t) for t in titles if t}

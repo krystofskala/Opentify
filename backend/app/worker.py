@@ -1138,6 +1138,14 @@ async def main() -> None:
                     await asyncio.to_thread(share_view.sync)
             except Exception:  # noqa: BLE001
                 logger.exception("tagy / sdílená složka selhaly")
+            # Noční záloha databáze na houbaře (jednou za ~den, jen jeden worker).
+            try:
+                from app.maintenance import db_backup
+
+                if db_backup.due() and await r.set("maintenance:db-backup", CONSUMER_NAME, nx=True, ex=3600):
+                    await asyncio.to_thread(db_backup.backup)
+            except Exception:  # noqa: BLE001
+                logger.exception("záloha databáze selhala")
             try:
                 await _process_due_upgrades(r)
             except Exception:  # noqa: BLE001

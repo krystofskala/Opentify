@@ -16,6 +16,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
+from app.secret_box import EncryptedStr
 from app.utils import utcnow
 
 
@@ -240,7 +241,7 @@ class AppUser(SQLModel, table=True):
     tailscale_login: str | None = Field(default=None, index=True)
     # Vlastní ListenBrainz účet profilu (token z listenbrainz.org/settings).
     # Poslechy profilu jdou JEN s tímhle tokenem -- nikdy s adminovým.
-    listenbrainz_token: str | None = None
+    listenbrainz_token: str | None = Field(default=None, sa_type=EncryptedStr)  # šifrovaně (app/secret_box.py)
     listenbrainz_user: str | None = None
     # Přihlašovací jméno (zakládá admin) a heslo (scrypt). Bez hesla = první
     # přihlášení si ho vytvoří; admin ho při zapomenutí vynuluje.
@@ -255,7 +256,7 @@ class AppUser(SQLModel, table=True):
     # Vlastní Last.fm účet profilu (session klíč z přihlášení na last.fm).
     # Scrobbluje se jen s ním a jen poslechy od připojení -- jiné profily
     # bez vlastního účtu na Last.fm nic neposílají.
-    lastfm_session: str | None = None
+    lastfm_session: str | None = Field(default=None, sa_type=EncryptedStr)  # šifrovaně
     lastfm_user: str | None = None
     lastfm_connected_at: datetime | None = None
 
