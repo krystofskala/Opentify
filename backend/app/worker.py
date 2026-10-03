@@ -272,6 +272,7 @@ def _finish_success(
 
         asset.status = MediaAssetStatus.AVAILABLE
         asset.storage_path = storage_path
+        asset.available_at = asset.available_at or utcnow()
         asset.checksum_sha256 = checksum
         asset.filesize_bytes = size
         asset.source_provider = source_provider

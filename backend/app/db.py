@@ -33,6 +33,21 @@ def init_db() -> None:
     from app.secret_box import encrypt_legacy
 
     encrypt_legacy(engine)
+    _backfill_available_at()
+
+
+def _backfill_available_at() -> None:
+    """`MediaAsset.available_at` pro starší soubory: konec prvního úspěšného
+    stažení, jinak (lokální sken) poslední známá změna."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE mediaasset SET available_at = (SELECT min(coalesce(j.finished_at, j.created_at)) "
+            "FROM provisioningjob j WHERE j.recording_id = mediaasset.recording_id AND j.status = 'SUCCEEDED') "
+            "WHERE available_at IS NULL AND status = 'AVAILABLE'"
+        ))
+        conn.execute(text("UPDATE mediaasset SET available_at = updated_at WHERE available_at IS NULL AND status = 'AVAILABLE'"))
 
 
 def _ensure_columns() -> None:
@@ -52,6 +67,7 @@ def _ensure_columns() -> None:
             ("hidden_from_library", "BOOLEAN"),
             ("waveform", "VARCHAR"),
             ("waveform_duration_ms", "INTEGER"),
+            ("available_at", "DATETIME"),
         ],
         "recording": [("deezer_id", "VARCHAR")],
         "listen": [("context", "VARCHAR"), ("lastfm_submitted_at", "DATETIME"), ("lastfm_attempts", "INTEGER")],

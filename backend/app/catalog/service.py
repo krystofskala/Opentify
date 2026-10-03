@@ -997,10 +997,12 @@ class CatalogService:
         if tracks:
             # Kolik skladeb album má (různé názvy) -- Knihovna podle toho pozná
             # celá alba ("Jen celá alba").
-            count = len({(t.title or "").strip().lower() for t in tracks})
+            titles = sorted({(t.title or "").strip().lower() for t in tracks})
+            count = len(titles)
             release = self._session.get(Release, release_id)
-            if release is not None and (release.external_refs or {}).get("tracklistCount") != count:
-                release.external_refs = {**(release.external_refs or {}), "tracklistCount": count}
+            refs = (release.external_refs or {}) if release is not None else {}
+            if release is not None and (refs.get("tracklistCount") != count or refs.get("tracklistTitles") != titles):
+                release.external_refs = {**refs, "tracklistCount": count, "tracklistTitles": titles}
                 self._session.add(release)
                 self._session.commit()
         return tracks

@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from app.catalog.artwork import _normalize
 from app.db import engine
 from app.models import MediaAsset, MediaAssetStatus, Recording
+from app.utils import utcnow
 
 _PREFIX = re.compile(r"^(cd\s*\d+\s*[-_.]\s*)?\d{1,3}\s*[-_.)]\s*", re.I)
 
@@ -87,6 +88,7 @@ def main(dry: bool) -> None:
                 t.storage_path = path
                 t.checksum_sha256, t.filesize_bytes, t.format, t.bitrate_kbps, t.source_provider = fields
                 t.status = MediaAssetStatus.AVAILABLE
+                t.available_at = t.available_at or utcnow()
                 t.loudness_gain_db = None
                 t.waveform = None
                 s.add(t)

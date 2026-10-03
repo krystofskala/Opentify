@@ -129,6 +129,9 @@ class MediaAsset(SQLModel, table=True):
     # připojená jen pro čtení a soubory nemažeme) -- skladba zůstává
     # přehratelná, jen se neukazuje v knihovně.
     hidden_from_library: bool | None = None
+    # Kdy byla skladba poprvé k dispozici (Knihovna › řazení "Přidáno").
+    # `updated_at` se mění při každém přetagování / měření hlasitosti.
+    available_at: datetime | None = None
     updated_at: datetime = Field(default_factory=utcnow)
 
 

@@ -185,6 +185,7 @@ def _upsert_media_asset(session: Session, recording_id: str, path: Path, source_
     # cesta, jak "opravit" dřív jen provisionable/placeholder nahrávku.
     asset.status = MediaAssetStatus.AVAILABLE
     asset.storage_path = str(path)
+    asset.available_at = asset.available_at or utcnow()
     asset.source_provider = source_provider
     asset.format = path.suffix.lstrip(".")
     asset.filesize_bytes = path.stat().st_size

@@ -208,7 +208,7 @@ def local_tracks(
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .outerjoin(Artist, Artist.id == Recording.artist_id)
         .where(_in_library(current[0]))
-        .order_by(MediaAsset.updated_at.desc())
+        .order_by(func.coalesce(MediaAsset.available_at, MediaAsset.updated_at).desc())
         .offset(offset)
         .limit(limit)
     ).all()
@@ -250,7 +250,7 @@ def local_albums(
             Release.artist_id,
             Artist.name,
             func.count(func.distinct(Recording.id)),
-            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.updated_at)),
+            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.available_at, MediaAsset.updated_at)),
             Release.external_refs,
         )
         .join(Recording, Recording.release_id == Release.id)
@@ -278,6 +278,10 @@ def local_albums(
     out = []
     for release_id, title, images, artist_id, artist_name, track_count, added_at, refs in rows:
         total = (refs or {}).get("tracklistCount")
+        # Názvy skladeb kanonické edice (bez bonusových disků jiných edic,
+        # které v DB k albu visí) -- jinak počet různých názvů vycházel i u
+        # neúplných alb.
+        wanted = (refs or {}).get("tracklistTitles")
         out.append(
             {
                 "id": release_id,
@@ -291,7 +295,9 @@ def local_albums(
                 # Celé album: všechny skladby tracklistu v knihovně (tracklist
                 # neznámý = nevíme, do filtru "Jen celá alba" nepatří).
                 "totalTracks": total,
-                "complete": bool(total) and len(owned_titles.get(release_id, ())) >= total,
+                "complete": set(wanted) <= owned_titles.get(release_id, set())
+                if wanted
+                else bool(total) and len(owned_titles.get(release_id, ())) >= total,
             }
         )
     return out
@@ -316,7 +322,7 @@ def local_artists(
             Artist.name,
             Artist.images,
             func.count(func.distinct(Recording.id)),
-            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.updated_at)),
+            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.available_at, MediaAsset.updated_at)),
         )
         .join(Recording, Recording.artist_id == Artist.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
