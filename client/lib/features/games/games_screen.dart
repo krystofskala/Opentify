@@ -172,6 +172,8 @@ class _HeroCarouselState extends State<_HeroCarousel> {
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       final c = _controller;
       if (c == null || !c.hasClients || !mounted) return;
+      // Omezení pohybu: karusel se sám neotáčí, jen tažením.
+      if (MediaQuery.disableAnimationsOf(context)) return;
       c.nextPage(duration: const Duration(milliseconds: 650), curve: Curves.easeInOutCubic);
     });
   }

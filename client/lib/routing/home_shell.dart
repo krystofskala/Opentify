@@ -6,7 +6,6 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../theme/glass_tokens.dart';
 import '../widgets/glass/glass.dart';
 import '../widgets/glass/liquid_glass.dart';
-import '../widgets/glass_container.dart';
 import '../widgets/now_playing_sheet.dart' show HiddenUnderPlayer;
 import '../widgets/player_bar.dart';
 import 'branches.dart';
@@ -81,7 +80,11 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
     _travel = 0;
     if (collapsed == _collapsed) return;
     _collapsed = collapsed;
-    collapsed ? _collapse.forward() : _collapse.reverse();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _collapse.value = collapsed ? 1 : 0;
+    } else {
+      collapsed ? _collapse.forward() : _collapse.reverse();
+    }
   }
 
   bool _onScroll(ScrollNotification n) {

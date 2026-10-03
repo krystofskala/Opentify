@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/reduced_motion.dart';
 import 'routing/app_router.dart';
 import 'state/appearance_sync.dart';
 import 'state/audio_player_controller.dart';
@@ -131,10 +132,21 @@ class OpentifyApp extends ConsumerWidget {
 const _simulateInsets = bool.fromEnvironment('SIMULATE_INSETS');
 
 Widget _maybeSimulatedInsets(BuildContext context, Widget child) {
-  if (!_simulateInsets) return child;
-  const insets = EdgeInsets.only(top: 47, bottom: 34);
   final mq = MediaQuery.of(context);
-  return MediaQuery(data: mq.copyWith(padding: insets, viewPadding: insets), child: child);
+  // Omezení pohybu: na webu Flutter `prefers-reduced-motion` do
+  // `disableAnimations` nepropisuje -- doplníme ho, ať celá appka čte jen
+  // `MediaQuery.disableAnimationsOf`.
+  final reduce = !mq.disableAnimations && systemPrefersReducedMotion();
+  if (!_simulateInsets && !reduce) return child;
+  const insets = EdgeInsets.only(top: 47, bottom: 34);
+  return MediaQuery(
+    data: mq.copyWith(
+      padding: _simulateInsets ? insets : null,
+      viewPadding: _simulateInsets ? insets : null,
+      disableAnimations: mq.disableAnimations || reduce,
+    ),
+    child: child,
+  );
 }
 
 /// Klepnutí kamkoli mimo textové pole zavře klávesnici. Tlačítka a pole

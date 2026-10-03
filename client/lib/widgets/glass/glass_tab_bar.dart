@@ -71,11 +71,22 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     super.dispose();
   }
 
+  // Omezení pohybu: kapka skočí rovnou na místo, bez pružiny a poskoku.
+  bool get _reduceMotion => MediaQuery.disableAnimationsOf(context);
+
   void _springPos(double target, SpringDescription spring, [double? velocity]) {
+    if (_reduceMotion) {
+      _pos.value = target;
+      return;
+    }
     _pos.animateWith(SpringSimulation(spring, _pos.value, target, velocity ?? _pos.velocity));
   }
 
   void _springLift(double target) {
+    if (_reduceMotion) {
+      _lift.value = 0;
+      return;
+    }
     _lift.animateWith(SpringSimulation(_liftSpring, _lift.value, target, _lift.velocity));
   }
 
@@ -90,7 +101,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
   void _onTapUp(TapUpDetails d) {
     final index = _slotAt(d.localPosition.dx).round();
     // Malý hop: kapka povyskočí a hned zapadne.
-    _lift.animateWith(SpringSimulation(_liftSpring, _lift.value, 0, 6));
+    if (!_reduceMotion) _lift.animateWith(SpringSimulation(_liftSpring, _lift.value, 0, 6));
     _select(index);
   }
 

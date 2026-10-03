@@ -10,7 +10,6 @@ import '../theme/design_tokens.dart';
 import '../theme/glass_tokens.dart';
 import '../theme/shapes.dart';
 import 'glass/glass.dart';
-import 'glass_container.dart';
 import 'media_card.dart' show ArtworkImage;
 import '../state/providers.dart' show realtimeClientProvider;
 

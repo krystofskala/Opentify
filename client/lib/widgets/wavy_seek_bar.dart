@@ -81,7 +81,10 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     // .repeat() si říkal o snímek při každém vsyncu a tím držel celou appku
     // (rozmazání, sklo, pozadí) na 60/120 fps po celou dobu přehrávání --
     // na starším iPhonu hlavní zdroj zasekávání (audit výkonu).
-    _phaseController = _SteppedPhase(() => mounted && TickerMode.valuesOf(context).enabled)..repeat();
+    _phaseController = _SteppedPhase(
+      // Omezení pohybu: vlna stojí (amplituda zůstává, jen neplyne).
+      () => mounted && TickerMode.valuesOf(context).enabled && !MediaQuery.disableAnimationsOf(context),
+    )..repeat();
     _ampController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
