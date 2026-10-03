@@ -344,7 +344,13 @@ async def verify(path: Path, target: Target, *, full_decode: bool = False, fix_e
 
     ref, ref_ms = await _reference(target)
     file_fp = await fingerprint(str(path), seconds=900) if (ref is not None or target.rejected_fps) else None
-    for sig in target.rejected_fps:
+    # Otisk dřív zamítnutého souboru platí jen tehdy, když ukázka z Deezeru
+    # shodu nepotvrdí -- zkrácený edit ("A Forest" z Greatest Hits) sdílí zvuk
+    # se správnou albovou verzí a blokoval by ji.
+    ref_confirms = False
+    if ref is not None and file_fp is not None and len(file_fp) >= 40:
+        ref_confirms = best_ber(file_fp, ref) <= MATCH_BER
+    for sig in () if ref_confirms else target.rejected_fps:
         old_fp = _from_signature(sig)
         if file_fp is not None and old_fp is not None and len(old_fp) >= 40 and best_ber(file_fp, old_fp) <= 0.15:
             return Verdict(False, "stejný zvuk jako dřív zamítnutý soubor", path=path, details=details)
