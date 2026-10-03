@@ -82,6 +82,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
   // idempotentní -- existující job jen vrátí, hotovou skladbu vrátí jako
   // AVAILABLE). Max `_maxRechecks` pokusů na skladbu.
   static const _stallAfter = Duration(seconds: 10);
+  static const _streamingStallAfter = Duration(seconds: 45);
   static const _maxRechecks = 6;
   late final Timer _watchdog;
   final Map<String, DateTime> _lastChange = {};
@@ -90,13 +91,23 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
 
   Future<void> _checkStalled() async {
     final now = DateTime.now();
-    for (final entry in state.entries) {
+    for (final entry in state.entries.toList()) {
       final id = entry.key;
-      if (!entry.value.isInFlight || entry.value.status == 'STREAMING' || _checking.contains(id)) continue;
+      if (!entry.value.isInFlight || _checking.contains(id)) continue;
       final last = _lastChange[id];
-      if (last == null || now.difference(last) < _stallAfter) continue;
+      // I "STREAMING" (hraje se během stahování): když dohrálo stahování a
+      // zpráva utekla, zůstal by kroužek navždy -- jen s delší lhůtou.
+      final stallAfter = entry.value.status == 'STREAMING' ? _streamingStallAfter : _stallAfter;
+      if (last == null || now.difference(last) < stallAfter) continue;
       final count = _rechecks[id] ?? 0;
-      if (count >= _maxRechecks) continue;
+      if (count >= _maxRechecks) {
+        // Ani server neví nic nového -- zaseknutý stav zahodit (řádek je
+        // zase normální, další klepnutí spustí stahování znovu).
+        state = Map.of(state)..remove(id);
+        _lastChange.remove(id);
+        _rechecks.remove(id);
+        continue;
+      }
       _rechecks[id] = count + 1;
       _checking.add(id);
       try {

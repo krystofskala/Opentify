@@ -104,7 +104,9 @@ class TrackTile extends ConsumerWidget {
     final trackState = ref.watch(provisioningControllerProvider.select((m) => m[recording.id]));
     final status = trackState?.status;
     final isAvailable = status == 'AVAILABLE' || recording.availability == Availability.available;
-    final isInFlight = trackState?.isInFlight ?? false;
+    // Katalog říká "staženo" -> žádný kroužek, i kdyby appce utekla zpráva
+    // o dokončení (živě: "Mice on Venus" se točila hodiny po stažení).
+    final isInFlight = (trackState?.isInFlight ?? false) && recording.availability != Availability.available;
     final isFailed = trackState?.isFailed ?? false;
     final isPlaying = ref.watch(
       audioPlayerControllerProvider.select((s) => s.nowPlaying?.recordingId == recording.id),
