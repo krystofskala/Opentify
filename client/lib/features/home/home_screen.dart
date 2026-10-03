@@ -535,8 +535,6 @@ class _QuickPicks extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Připnuté (menu playlistu › Připnout do Rychlého výběru) mají špendlík.
-    final pinned = ref.watch(quickPinsProvider).valueOrNull?.ids.toSet() ?? const <String>{};
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.xs),
       child: LayoutBuilder(
@@ -561,14 +559,6 @@ class _QuickPicks extends ConsumerWidget {
                           onLongPress: () => _playlistActions(context, card),
                         ),
                       ),
-                      if (pinned.contains(card.id))
-                        Positioned(
-                          top: 4,
-                          right: 6,
-                          child: IgnorePointer(
-                            child: Icon(Symbols.keep_rounded, size: 14, fill: 1, color: Theme.of(context).colorScheme.primary),
-                          ),
-                        ),
                     ],
                   ),
                 ),

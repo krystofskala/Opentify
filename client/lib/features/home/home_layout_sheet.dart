@@ -90,6 +90,37 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
     }
   }
 
+  /// Chytré seznamy (Mix na teď, Před rokem, Shazam...) se připínají do
+  /// "Tvoje výběry" -- tady jde vrátit odepnutý (jinak se připíná v menu).
+  List<Widget> _smartLists(ThemeData theme) {
+    final pins = ref.watch(quickPinsProvider).valueOrNull;
+    if (pins == null || pins.rails.isEmpty) return const [];
+    return [
+      const SizedBox(height: AppSpacing.sm),
+      Text('Chytré seznamy v Tvých výběrech', style: theme.textTheme.titleSmall),
+      const SizedBox(height: AppSpacing.xxs),
+      Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          for (final rail in pins.rails)
+            FilterChip(
+              label: Text(rail.title),
+              selected: rail.pinned,
+              onSelected: (on) async {
+                final repo = ref.read(homeRepositoryProvider);
+                try {
+                  on ? await repo.pinQuick(rail.id, kind: 'rail') : await repo.unpinQuick(rail.id, kind: 'rail');
+                } catch (_) {}
+                ref.invalidate(quickPinsProvider);
+                ref.invalidate(homeProvider);
+              },
+            ),
+        ],
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -160,6 +191,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
                 expand: true,
                 onPressed: _saving ? null : _editGenres,
               ),
+              ..._smartLists(theme),
               const SizedBox(height: AppSpacing.xs),
               Row(
                 children: [

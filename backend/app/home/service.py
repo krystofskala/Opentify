@@ -369,21 +369,9 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
     from app.models import PlaylistKind, PlaylistMember
 
     liked = get_or_create_liked_songs_playlist(session, user_id)
+    # Připínání je v "Tvoje výběry" (app/home/picks.py), tady jen chytré pořadí.
     pinned: list = []
-    for pid in qp.get_pins(session, user_id):
-        p = session.get(Playlist, pid)
-        if p is None:
-            continue
-        member = session.exec(
-            select(PlaylistMember).where(PlaylistMember.playlist_id == p.id, PlaylistMember.user_id == user_id)
-        ).first()
-        if p.owner_user_id in (user_id, GLOBAL_PLAYLIST_OWNER) or member is not None:
-            card = _card(session, p)
-            if card.item_count > 0:
-                pinned.append(card)
-    room = qp.QUICK_SIZE - len(pinned)
-    if room <= 0:
-        return pinned[: qp.QUICK_SIZE]
+    room = qp.QUICK_SIZE
     taken = {c.id for c in pinned}
     fallback = (other_mixes + daily)[:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1]
     # Kandidáti chytrého výběru: tvoje mixy, žánrové mixy, společné mixy,
@@ -579,28 +567,22 @@ def build_home(user_id: str) -> dict[str, Any]:
             cards = cards_by_section.get(key) or []
             if cards:
                 sections.append({"id": key, "title": title, "type": kind, "items": [c.model_dump(mode="json", by_alias=True) for c in cards]})
-            if key == "charts" and worldwide is not None:
-                tracks = _playlist_tracks(session, worldwide.id, 20)
-                if tracks:
-                    sections.append(
-                        {
-                            "id": "trending_tracks",
-                            "title": "Populární ve světě",
-                            "type": "track_rail",
-                            "playlistId": worldwide.id,
-                            "items": [t.model_dump(mode="json", by_alias=True) for t in tracks],
-                        }
-                    )
         # Volitelné sekce (Profil › Domů) -- jen zapnuté, ze snapshotů.
         from app.home import extra_sections as xs
 
+        from app.home.picks import RAILS
+
         layout = get_layout(session, user_id)
         for spec in xs.SPECS:
-            if is_visible(layout, spec.id):
+            if spec.id not in RAILS and is_visible(layout, spec.id):
                 try:
                     sections += xs.render(session, user_id, spec.id)
                 except Exception:  # noqa: BLE001 - jedna sekce nesmí shodit Domů
                     logger.exception("sekce %s se nepodařilo vykreslit", spec.id)
+
+        picks_section = _picks_section(session, user_id, worldwide)
+        if picks_section:
+            sections.append(picks_section)
 
         # "Pokračovat v poslechu" skládá klient (`/home/recent`) -- tady jen
         # zástupce, ať jde řadit a skrýt jako ostatní sekce.
@@ -636,7 +618,12 @@ def is_visible(layout: dict[str, Any], section_id: str) -> bool:
 
 
 def section_enabled(user_id: str, section_id: str) -> bool:
+    from app.home import picks
+
     with Session(engine) as session:
+        # Chytrý seznam se generuje, když je připnutý v "Tvoje výběry".
+        if section_id in picks.RAILS:
+            return f"rail:{section_id}" in picks.get(session, user_id)
         return is_visible(get_layout(session, user_id), section_id)
 
 
@@ -649,13 +636,21 @@ def _layout_id(section_id: str) -> str:
     return section_id
 
 
-def default_entries(user_id: str) -> list[tuple[str, str]]:
-    """Všechny sekce Domů ve výchozím pořadí (id, název)."""
+def default_entries(user_id: str, include_rails: bool = False) -> list[tuple[str, str]]:
+    """Všechny sekce Domů ve výchozím pořadí (id, název). Chytré seznamy
+    (`picks.RAILS`) už nejsou sekce -- připínají se do "Tvoje výběry"."""
     from app import browse
     from app.home.extra_sections import SPECS
+    from app.home.picks import RAILS
 
+    if not include_rails:
+        return [e for e in default_entries(user_id, include_rails=True) if e[0] not in RAILS]
     extra = {s.id: s.title for s in SPECS}
-    out: list[tuple[str, str]] = [("continue", "Pokračovat v poslechu"), ("quick_picks", "Rychlý výběr")]
+    out: list[tuple[str, str]] = [
+        ("continue", "Pokračovat v poslechu"),
+        ("quick_picks", "Rychlý výběr"),
+        ("track_mixes", TRACK_MIXES_TITLE),
+    ]
     if "now_mix" in extra:
         out.append(("now_mix", extra["now_mix"]))
     out += [(f"genre_{c.id}", c.title) for c in browse.pinned_genres(user_id)]
@@ -676,10 +671,10 @@ def default_entries(user_id: str) -> list[tuple[str, str]]:
     return out
 
 
-def effective_order(user_id: str, layout: dict[str, Any]) -> list[str]:
+def effective_order(user_id: str, layout: dict[str, Any], include_rails: bool = False) -> list[str]:
     """Uložené pořadí + sekce, které v něm nejsou (nové), za svého
     výchozího předchůdce."""
-    defaults = [sid for sid, _t in default_entries(user_id)]
+    defaults = [sid for sid, _t in default_entries(user_id, include_rails=include_rails)]
     order = [sid for sid in layout["order"] if sid in defaults]
     if not order:
         return defaults
@@ -704,35 +699,82 @@ TRACK_MIXES_TITLE = "Tvoje výběry"
 
 
 def _collapse_track_rails(session: Session, user_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sekce, které byly jen seznamem skladeb (Mix na teď, Před rokem,
-    Populární ve světě, Shazam, Co poslouchá rodina...), jsou na mobilu
-    roztažené a nedá se v nich pohybovat (živě nahlášeno) -- každá je teď
-    JEDNA karta playlistu a všechny v jedné řadě na místě první z nich.
-    Zapínají/řadí se dál jednotlivě (Profil › Domů)."""
-    rails = [s for s in sections if s.get("type") == "track_rail"]
-    if not rails:
-        return sections
-    cards = []
-    for sec in rails:
+    """Zbylé sekce se seznamem skladeb (řada žánru, než je hotová vitrína)
+    -- roztažené seznamy se na mobilu nedají ovládat, takže karta playlistu
+    na stejném místě."""
+    out: list[dict[str, Any]] = []
+    for sec in sections:
+        if sec.get("type") != "track_rail":
+            out.append(sec)
+            continue
         playlist_id = sec.get("playlistId") or _rail_playlist(session, user_id, sec)
         playlist = session.get(Playlist, playlist_id) if playlist_id else None
         if playlist is None:
             continue
         card = _card(session, playlist).model_copy(update={"title": sec["title"]})
         if card.item_count > 0:
-            cards.append(card.model_dump(mode="json", by_alias=True))
+            out.append({"id": sec["id"], "title": sec["title"], "type": "playlist_cards", "items": [card.model_dump(mode="json", by_alias=True)]})
     session.commit()
-    merged = {"id": "track_mixes", "title": TRACK_MIXES_TITLE, "type": "playlist_cards", "items": cards}
-    out: list[dict[str, Any]] = []
-    placed = False
-    for sec in sections:
-        if sec.get("type") == "track_rail":
-            if not placed and cards:
-                out.append(merged)
-                placed = True
-            continue
-        out.append(sec)
     return out
+
+
+def _rail_sections(session: Session, user_id: str, rail: str, worldwide: Playlist | None) -> list[dict[str, Any]]:
+    """Chytrý seznam -> seznam(y) skladeb (rodina = jeden za člověka)."""
+    if rail == "trending_tracks":
+        if worldwide is None:
+            return []
+        tracks = _playlist_tracks(session, worldwide.id, 50)
+        return [{"id": "trending_tracks", "title": "Populární ve světě", "items": [t.model_dump(mode="json", by_alias=True) for t in tracks]}]
+    from app.home import extra_sections as xs
+
+    try:
+        return xs.render(session, user_id, rail)
+    except Exception:  # noqa: BLE001 - jeden seznam nesmí shodit Domů
+        logger.exception("chytrý seznam %s se nepodařilo vykreslit", rail)
+        return []
+
+
+def _picks_section(session: Session, user_id: str, worldwide: Playlist | None) -> dict[str, Any] | None:
+    """"Tvoje výběry" = připnuté playlisty, alba a chytré seznamy v pořadí
+    připnutí (app/home/picks.py)."""
+    from app import browse
+    from app.home import picks
+    from app.library.spotify_import import get_or_create_liked_songs_playlist
+    from app.models import PlaylistMember
+
+    liked_id = get_or_create_liked_songs_playlist(session, user_id).id
+    items: list[dict[str, Any]] = []
+    for pin in picks.get(session, user_id):
+        kind, _, ref = pin.partition(":")
+        if kind == "playlist":
+            p = session.get(Playlist, ref)
+            if p is None:
+                continue
+            member = session.exec(
+                select(PlaylistMember).where(PlaylistMember.playlist_id == p.id, PlaylistMember.user_id == user_id)
+            ).first()
+            if p.id != liked_id and p.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER) and member is None:
+                continue
+            card = _card(session, p)
+            if card.item_count > 0:
+                items.append({"itemType": "playlist", **card.model_dump(mode="json", by_alias=True)})
+        elif kind == "album":
+            release = session.get(Release, ref)
+            if release is not None:
+                items.append({"itemType": "album", "badge": None, **browse._album_card(session, release)})
+        elif kind == "rail":
+            for sec in _rail_sections(session, user_id, ref, worldwide):
+                pid = _rail_playlist(session, user_id, sec)
+                p = session.get(Playlist, pid) if pid else None
+                if p is None:
+                    continue
+                card = _card(session, p).model_copy(update={"title": sec["title"]})
+                if card.item_count > 0:
+                    items.append({"itemType": "playlist", **card.model_dump(mode="json", by_alias=True)})
+    session.commit()
+    if not items:
+        return None
+    return {"id": "track_mixes", "title": TRACK_MIXES_TITLE, "type": "genre_showcase", "items": items}
 
 
 def _rail_playlist(session: Session, user_id: str, sec: dict[str, Any]) -> str | None:

@@ -259,19 +259,26 @@ class HomeRepository {
     return json.map((e) => RecentContext.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  /// Rychlý výběr: připnuté playlisty (id v pořadí) + id Oblíbených.
-  Future<({List<String> ids, String? likedId, int max})> quickPins() async {
+  /// "Tvoje výběry": připnuté playlisty (i karty chytrých seznamů), alba
+  /// a chytré seznamy, které jde připnout.
+  Future<PicksPins> quickPins() async {
     final json = await _api.getJson('/home/quick-pins');
-    return (
-      ids: (json['ids'] as List<dynamic>? ?? const []).cast<String>(),
+    return PicksPins(
+      ids: (json['ids'] as List<dynamic>? ?? const []).cast<String>().toSet(),
+      albumIds: (json['albumIds'] as List<dynamic>? ?? const []).cast<String>().toSet(),
+      rails: [
+        for (final r in json['rails'] as List<dynamic>? ?? const [])
+          (id: (r as Map<String, dynamic>)['id'] as String, title: r['title'] as String, pinned: r['pinned'] == true),
+      ],
       likedId: json['likedId'] as String?,
-      max: json['max'] as int? ?? 6,
+      max: json['max'] as int? ?? 24,
     );
   }
 
-  Future<void> pinQuick(String playlistId) => _api.putJson('/home/quick-pins/$playlistId');
+  /// `kind`: playlist / album / rail (chytrý seznam).
+  Future<void> pinQuick(String id, {String kind = 'playlist'}) => _api.putJson('/home/quick-pins/$id?kind=$kind');
 
-  Future<void> unpinQuick(String playlistId) => _api.deleteJson('/home/quick-pins/$playlistId');
+  Future<void> unpinQuick(String id, {String kind = 'playlist'}) => _api.deleteJson('/home/quick-pins/$id?kind=$kind');
 
   Future<List<HomeSection>> home() async {
     final json = await _api.getJson('/home');
@@ -305,4 +312,16 @@ class ShowcaseItem {
             artistImage: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()).firstOrNull,
           ),
       };
+}
+
+
+/// Připnuté do "Tvoje výběry" (Domů).
+class PicksPins {
+  const PicksPins({required this.ids, required this.albumIds, required this.rails, required this.likedId, required this.max});
+
+  final Set<String> ids;
+  final Set<String> albumIds;
+  final List<({String id, String title, bool pinned})> rails;
+  final String? likedId;
+  final int max;
 }

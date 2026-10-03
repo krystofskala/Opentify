@@ -86,27 +86,31 @@ Future<void> showCollectionActions(
 }
 
 class _CollectionActionsSheet extends ConsumerWidget {
-  /// "Připnout do Rychlého výběru" / "Odepnout" (max 6 připnutých).
+  /// "Připnout do Tvých výběrů" / "Odepnout" -- playlist i album (Domů ›
+  /// Tvoje výběry, v pořadí připnutí).
   Widget _quickPinRow(BuildContext context, WidgetRef ref, void Function(String) toast) {
     final pins = ref.watch(quickPinsProvider).valueOrNull;
     if (pins == null) return const SizedBox.shrink();
+    final isAlbum = kind == CollectionKind.album;
     final pinId = kind == CollectionKind.liked ? (pins.likedId ?? 'liked') : id;
-    final pinned = pins.ids.contains(pinId);
+    final pinned = isAlbum ? pins.albumIds.contains(id) : pins.ids.contains(pinId);
     return _Row(
       icon: pinned ? Symbols.keep_off_rounded : Symbols.keep_rounded,
-      label: pinned ? 'Odepnout z Rychlého výběru' : 'Připnout do Rychlého výběru',
+      label: pinned ? 'Odepnout z Tvých výběrů' : 'Připnout do Tvých výběrů',
       onTap: () async {
         Navigator.of(context).pop();
         final repo = ref.read(homeRepositoryProvider);
+        final target = kind == CollectionKind.liked ? 'liked' : id;
+        final pinKind = isAlbum ? 'album' : 'playlist';
         try {
           if (pinned) {
-            await repo.unpinQuick(kind == CollectionKind.liked ? 'liked' : id);
+            await repo.unpinQuick(target, kind: pinKind);
           } else {
-            await repo.pinQuick(kind == CollectionKind.liked ? 'liked' : id);
+            await repo.pinQuick(target, kind: pinKind);
           }
           ref.invalidate(quickPinsProvider);
           ref.invalidate(homeProvider);
-          toast(pinned ? 'Odepnuto z Rychlého výběru' : 'Připnuto do Rychlého výběru');
+          toast(pinned ? 'Odepnuto z Tvých výběrů' : 'Připnuto do Tvých výběrů');
         } on ApiException catch (e) {
           toast(e.detail ?? 'Nepodařilo se připnout');
         } catch (_) {
@@ -309,7 +313,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   onEdit!();
                 },
               ),
-            if (kind != CollectionKind.album) _quickPinRow(context, ref, toast),
+            _quickPinRow(context, ref, toast),
             if (onSaveCopy != null)
               _Row(
                 icon: Symbols.library_add_rounded,

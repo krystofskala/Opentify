@@ -91,8 +91,8 @@ final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
   return ref.watch(homeRepositoryProvider).home();
 });
 
-/// Playlisty připnuté do Rychlého výběru (max 6).
-final quickPinsProvider = FutureProvider.autoDispose<({List<String> ids, String? likedId, int max})>((ref) {
+/// Připnuté do "Tvoje výběry" (playlisty, alba, chytré seznamy).
+final quickPinsProvider = FutureProvider.autoDispose<PicksPins>((ref) {
   return ref.watch(homeRepositoryProvider).quickPins();
 });
 

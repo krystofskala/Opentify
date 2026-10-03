@@ -231,42 +231,82 @@ def _pin_target(session: Session, user_id: str, playlist_id: str) -> str:
 
 @home_router.get("/quick-pins")
 def quick_pins(current: tuple[str, str] = Depends(get_current_user)):
-    """Playlisty připnuté do Rychlého výběru (max 6, v pořadí)."""
-    from app.home import quick_picks as qp
+    """Připnuté do "Tvoje výběry": playlisty (i karty chytrých seznamů
+    `home:rail:*`), alba a chytré seznamy, které jde ještě připnout."""
+    from app.home import picks
     from app.library.spotify_import import get_or_create_liked_songs_playlist
 
+    user_id = current[0]
     with Session(engine) as session:
-        ids = qp.get_pins(session, current[0])
-        liked = get_or_create_liked_songs_playlist(session, current[0]).id
-    return {"ids": ids, "likedId": liked, "max": qp.MAX_PINS}
+        items = picks.get(session, user_id)
+        liked = get_or_create_liked_songs_playlist(session, user_id).id
+        rails = {i.split(":", 1)[1] for i in items if i.startswith("rail:")}
+        rail_playlists = [
+            p.id
+            for p in session.exec(
+                select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source.startswith("home:rail:"))  # type: ignore[union-attr]
+            ).all()
+            if picks.rail_of_source(p.source) in rails
+        ]
+    return {
+        "ids": [i.split(":", 1)[1] for i in items if i.startswith("playlist:")] + rail_playlists,
+        "albumIds": [i.split(":", 1)[1] for i in items if i.startswith("album:")],
+        "rails": [{"id": sid, "title": title, "pinned": sid in rails} for sid, title in picks.RAILS.items()],
+        "likedId": liked,
+        "max": picks.MAX_PINS,
+    }
 
 
-@home_router.put("/quick-pins/{playlist_id}")
-async def pin_quick(playlist_id: str, current: tuple[str, str] = Depends(get_current_user)):
-    from app.home import quick_picks as qp
+def _pin_key(session: Session, user_id: str, kind: str, target_id: str) -> str:
+    from app.home import picks
+
+    if kind == "album":
+        if session.get(Release, target_id) is None:
+            raise HTTPException(status_code=404, detail="album neexistuje")
+        return f"album:{target_id}"
+    if kind == "rail":
+        if target_id not in picks.RAILS:
+            raise HTTPException(status_code=404, detail="neznámý seznam")
+        return f"rail:{target_id}"
+    pid = _pin_target(session, user_id, target_id)
+    # Karta chytrého seznamu (playlist home:rail:*) = ten chytrý seznam.
+    rail = picks.rail_of_source((session.get(Playlist, pid) or Playlist(owner_user_id="", title="")).source)
+    return f"rail:{rail}" if rail else f"playlist:{pid}"
+
+
+@home_router.put("/quick-pins/{target_id}")
+async def pin_quick(target_id: str, kind: str = "playlist", current: tuple[str, str] = Depends(get_current_user)):
+    from app.home import picks
     from app.home.service import invalidate_home_cache
 
     with Session(engine) as session:
-        pid = _pin_target(session, current[0], playlist_id)
-        ids = qp.get_pins(session, current[0])
-        if pid not in ids:
-            if len(ids) >= qp.MAX_PINS:
-                raise HTTPException(status_code=409, detail=f"Připnout jde nejvýš {qp.MAX_PINS} playlistů.")
-            ids = qp.set_pins(session, current[0], [*ids, pid])
+        pin = _pin_key(session, current[0], kind, target_id)
+        items = picks.get(session, current[0])
+        if pin not in items:
+            if len(items) >= picks.MAX_PINS:
+                raise HTTPException(status_code=409, detail=f"Připnout jde nejvýš {picks.MAX_PINS} položek.")
+            items = picks.save(session, current[0], [*items, pin])
+    if pin.startswith("rail:"):
+        # Chytrý seznam se generuje jen připnutý -- postavit hned.
+        from app.home import extra_sections as xs
+
+        sid = pin.split(":", 1)[1]
+        if any(s.id == sid and s.build is not None for s in xs.SPECS):
+            await xs.build_now(current[0], [sid], force=True)
     await invalidate_home_cache()
-    return {"ids": ids}
+    return {"items": items}
 
 
-@home_router.delete("/quick-pins/{playlist_id}")
-async def unpin_quick(playlist_id: str, current: tuple[str, str] = Depends(get_current_user)):
-    from app.home import quick_picks as qp
+@home_router.delete("/quick-pins/{target_id}")
+async def unpin_quick(target_id: str, kind: str = "playlist", current: tuple[str, str] = Depends(get_current_user)):
+    from app.home import picks
     from app.home.service import invalidate_home_cache
 
     with Session(engine) as session:
-        pid = _pin_target(session, current[0], "liked") if playlist_id == "liked" else playlist_id
-        ids = qp.set_pins(session, current[0], [i for i in qp.get_pins(session, current[0]) if i != pid])
+        pin = _pin_key(session, current[0], kind, target_id)
+        items = picks.save(session, current[0], [i for i in picks.get(session, current[0]) if i != pin])
     await invalidate_home_cache()
-    return {"ids": ids}
+    return {"items": items}
 
 
 class HomeLayoutIn(BaseModel):
