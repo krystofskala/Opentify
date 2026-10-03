@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -231,12 +232,16 @@ final liquidGlassProvider = StateNotifierProvider<LiquidGlassController, bool>((
 /// segmenty) je plná M3 Expressive plocha s kontrastním okrajem. Pro starší
 /// iPhony (bez rozmazání a lomu je to výrazně lehčí) a horší zrak (plné
 /// plochy = vyšší kontrast textu).
+///
+/// Nastavení TOHOTO zařízení (nesynchronizuje se profilem): ve webu je sklo
+/// výchozí vypnuté (prohlížeč ho kreslí pomalu, i v Chromu), v appce zapnuté.
 class GlassOffController extends StateNotifier<bool> {
-  GlassOffController() : super(false) {
+  GlassOffController() : super(kIsWeb) {
     _load();
   }
 
-  static const _prefKey = 'appearance.glass_off';
+  // Nový klíč: starý `appearance.glass_off` se synchronizoval mezi zařízeními.
+  static const _prefKey = 'appearance.glass_off_device';
 
   Future<void> _load() async {
     try {

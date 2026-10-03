@@ -402,8 +402,8 @@ class _AppearanceSettings extends ConsumerWidget {
         Text('Styl', style: theme.textTheme.titleSmall),
         Text(
           glassOff
-              ? 'Plné plochy bez průhlednosti – vyšší kontrast a lehčí pro starší telefony.'
-              : 'Průhledné sklo s rozmazáním a lomem, jako v iOS.',
+              ? 'Plné plochy bez průhlednosti – vyšší kontrast a lehčí pro starší telefony. Platí jen pro toto zařízení.'
+              : 'Průhledné sklo s rozmazáním a lomem, jako v iOS. Platí jen pro toto zařízení.',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 6),

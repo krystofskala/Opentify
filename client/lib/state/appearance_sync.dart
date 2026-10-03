@@ -47,7 +47,6 @@ class _AppearanceSync {
         'appearance.glass_buttons': _ref.read(glassButtonsProvider),
         'appearance.glass_grain': _ref.read(glassGrainProvider),
         'appearance.liquid_glass_test': _ref.read(liquidGlassProvider),
-        'appearance.glass_off': _ref.read(glassOffProvider),
         'appearance.no_grain': _ref.read(noGrainProvider),
         'appearance.theme_mode': _ref.read(themeModeProvider).name,
       };
@@ -71,7 +70,6 @@ class _AppearanceSync {
     await flag('appearance.glass_buttons', _ref.read(glassButtonsProvider.notifier).set);
     await flag('appearance.glass_grain', _ref.read(glassGrainProvider.notifier).set);
     await flag('appearance.liquid_glass_test', _ref.read(liquidGlassProvider.notifier).set);
-    await flag('appearance.glass_off', _ref.read(glassOffProvider.notifier).set);
     await flag('appearance.no_grain', _ref.read(noGrainProvider.notifier).set);
     final tone = GlassToneMode.values.where((m) => m.name == values['appearance.glass_tone']).firstOrNull;
     if (tone != null) await _ref.read(glassToneProvider.notifier).set(tone);
@@ -106,7 +104,6 @@ class _AppearanceSync {
     watch(glassButtonsProvider);
     watch(glassGrainProvider);
     watch(liquidGlassProvider);
-    watch(glassOffProvider);
     watch(noGrainProvider);
     watch(themeModeProvider);
   }
