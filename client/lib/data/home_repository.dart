@@ -242,6 +242,20 @@ class HomeRepository {
     return json.map((e) => RecentContext.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// Rychlý výběr: připnuté playlisty (id v pořadí) + id Oblíbených.
+  Future<({List<String> ids, String? likedId, int max})> quickPins() async {
+    final json = await _api.getJson('/home/quick-pins');
+    return (
+      ids: (json['ids'] as List<dynamic>? ?? const []).cast<String>(),
+      likedId: json['likedId'] as String?,
+      max: json['max'] as int? ?? 6,
+    );
+  }
+
+  Future<void> pinQuick(String playlistId) => _api.putJson('/home/quick-pins/$playlistId');
+
+  Future<void> unpinQuick(String playlistId) => _api.deleteJson('/home/quick-pins/$playlistId');
+
   Future<List<HomeSection>> home() async {
     final json = await _api.getJson('/home');
     return (json['sections'] as List<dynamic>? ?? const [])

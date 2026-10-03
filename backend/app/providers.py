@@ -178,6 +178,8 @@ class TrackMetadata:
 
     # Jiné názvy téže nahrávky (anglický název japonské skladby z Deezeru).
     alt_titles: tuple[str, ...] = ()
+    # Jen oficiální audio stopa (náhrada videoklipu, viz upgrade_video_audio).
+    official_audio_only: bool = False
 
     def label_mismatch(self, label: str, *, context: str = "") -> str | None:
         """`match_label` proti názvu i alternativním názvům (None = sedí)."""
@@ -243,6 +245,8 @@ class FetchResult:
     source_key: str | None = None
     # Jistota kontroly souboru (worker._acquire_verified): high/medium/low.
     verified: str | None = None
+    # YouTube: 0 = oficiální audio stopa, 1 = kanál interpreta (videoklip), 2 = ostatní.
+    source_tier: int | None = None
 
 
 class MediaProvider(Protocol):
@@ -1035,8 +1039,13 @@ class YoutubeProvider:
             ],
         }
 
+        tiers: dict[str, int] = {}
+
         def pick_videos() -> list[str]:
-            return [f"https://www.youtube.com/watch?v={e['id']}" for e in youtube_pick(track, query)]
+            picks = youtube_pick(track, query)
+            for e in picks:
+                tiers[f"https://www.youtube.com/watch?v={e['id']}"] = e.get("_tier", 2)
+            return [f"https://www.youtube.com/watch?v={e['id']}" for e in picks]
 
         chosen_url: list[str] = []
 
@@ -1112,6 +1121,7 @@ class YoutubeProvider:
             bitrate_kbps=bitrate,
             source_url=chosen_url[0] if chosen_url else None,
             source_key=f"youtube:{chosen_url[0].rsplit('=', 1)[-1]}" if chosen_url else None,
+            source_tier=tiers.get(chosen_url[0]) if chosen_url else None,
         )
 
 
@@ -1144,6 +1154,8 @@ def youtube_pick(track: TrackMetadata, query: str) -> list[dict]:
                 continue
             seen.add(e["id"])
             verdict = _youtube_verdict(track, e, target, by_isrc=by_isrc)
+            if not isinstance(verdict, str) and track.official_audio_only and verdict[0] != 0:
+                verdict = "není oficiální audio"
             if isinstance(verdict, str):
                 reasons[verdict.split(" (")[0]] += 1
                 continue

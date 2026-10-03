@@ -209,8 +209,9 @@ def _start_job(job_id: str) -> dict | None:
             "soundcloud_url": (recording.external_refs or {}).get("soundcloudUrl") if recording else None,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
-            "non_music": bool(recording and (recording.external_refs or {}).get("junk"))
-            or (is_non_music(session.get(Release, recording.release_id)) if recording and recording.release_id else False),
+            "non_music": is_non_music(session.get(Release, recording.release_id))
+            if recording and recording.release_id
+            else False,
         }
 
 
@@ -855,13 +856,20 @@ def _version_hint(session: Session, recording: Recording | None) -> str | None:
     return None
 
 
-def _remember_source_key(recording_id: str, key: str) -> None:
+def _remember_source_key(recording_id: str, key: str, tier: int | None = None) -> None:
     """Přesný zdroj souboru -- pro "Špatná verze -- stáhnout jinou"."""
     with Session(engine) as session:
         recording = session.get(Recording, recording_id)
         if recording is None:
             return
-        recording.external_refs = {**(recording.external_refs or {}), "sourceKey": key}
+        refs = {**(recording.external_refs or {}), "sourceKey": key}
+        # Videoklip (ne oficiální audio stopa) -- intro navíc rozhodí text;
+        # denně se zkusí nahradit čistým audiem (tools/upgrade_video_audio.py).
+        if key.startswith("youtube:") and tier is not None and tier > 0:
+            refs["videoSource"] = True
+        else:
+            refs.pop("videoSource", None)
+        recording.external_refs = refs
         session.add(recording)
         session.commit()
 
@@ -953,7 +961,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         if result.source_url:
             await asyncio.to_thread(_remember_source_url, ctx["recording_id"], result.source_url)
         if result.source_key:
-            await asyncio.to_thread(_remember_source_key, ctx["recording_id"], result.source_key)
+            await asyncio.to_thread(_remember_source_key, ctx["recording_id"], result.source_key, result.source_tier)
         await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.SUCCEEDED.value, pct=100)
         await publish_track_available(ctx["user_id"], ctx["recording_id"], stream_url)
         # Až PO `track.available` a fire-and-forget -- analýza nesmí zdržet

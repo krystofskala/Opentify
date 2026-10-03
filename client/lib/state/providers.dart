@@ -91,6 +91,11 @@ final homeProvider = FutureProvider.autoDispose<List<HomeSection>>((ref) {
   return ref.watch(homeRepositoryProvider).home();
 });
 
+/// Playlisty připnuté do Rychlého výběru (max 6).
+final quickPinsProvider = FutureProvider.autoDispose<({List<String> ids, String? likedId, int max})>((ref) {
+  return ref.watch(homeRepositoryProvider).quickPins();
+});
+
 /// "Pokračovat v poslechu" -- načte se znovu při každé změně skladby (poslech
 /// předchozí je tou dobou uložený).
 final recentContextsProvider = FutureProvider.autoDispose<List<RecentContext>>((ref) {

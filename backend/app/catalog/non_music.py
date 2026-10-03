@@ -39,10 +39,8 @@ def is_non_music_title(title: str | None) -> bool:
 def is_non_music(release: Release | None) -> bool:
     if release is None:
         return False
-    refs = release.external_refs or {}
-    # "junk" = pirátské vydání, které nejde nikdy obsloužit správně (koncertní
-    # bootleg, falešná výběrovka "Beatles Unpublished") -- stejně skryté.
-    return bool(refs.get("nonMusic") or refs.get("junk")) or is_non_music_title(release.title)
+    # Pirátská vydání se NESKRÝVAJÍ (přání majitele) -- jen rozhovory apod.
+    return bool((release.external_refs or {}).get("nonMusic")) or is_non_music_title(release.title)
 
 
 def mark_non_music(release: Release, secondary_types: list[str] | set[str]) -> bool:

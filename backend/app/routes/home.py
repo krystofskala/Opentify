@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -190,6 +190,64 @@ async def set_home_genres(body: HomeGenresIn, current: tuple[str, str] = Depends
     asyncio.create_task(warm())
     await invalidate_home_cache()
     return {"selected": ids}
+
+
+def _pin_target(session: Session, user_id: str, playlist_id: str) -> str:
+    """'liked' = Oblíbené profilu; jinak playlist, který profil vidí."""
+    from app.library.spotify_import import get_or_create_liked_songs_playlist
+    from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistMember
+
+    if playlist_id == "liked":
+        return get_or_create_liked_songs_playlist(session, user_id).id
+    p = session.get(Playlist, playlist_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="playlist neexistuje")
+    member = session.exec(
+        select(PlaylistMember).where(PlaylistMember.playlist_id == p.id, PlaylistMember.user_id == user_id)
+    ).first()
+    if p.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER) and member is None:
+        raise HTTPException(status_code=403, detail="cizí playlist")
+    return p.id
+
+
+@home_router.get("/quick-pins")
+def quick_pins(current: tuple[str, str] = Depends(get_current_user)):
+    """Playlisty připnuté do Rychlého výběru (max 6, v pořadí)."""
+    from app.home import quick_picks as qp
+    from app.library.spotify_import import get_or_create_liked_songs_playlist
+
+    with Session(engine) as session:
+        ids = qp.get_pins(session, current[0])
+        liked = get_or_create_liked_songs_playlist(session, current[0]).id
+    return {"ids": ids, "likedId": liked, "max": qp.MAX_PINS}
+
+
+@home_router.put("/quick-pins/{playlist_id}")
+async def pin_quick(playlist_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    from app.home import quick_picks as qp
+    from app.home.service import invalidate_home_cache
+
+    with Session(engine) as session:
+        pid = _pin_target(session, current[0], playlist_id)
+        ids = qp.get_pins(session, current[0])
+        if pid not in ids:
+            if len(ids) >= qp.MAX_PINS:
+                raise HTTPException(status_code=409, detail=f"Připnout jde nejvýš {qp.MAX_PINS} playlistů.")
+            ids = qp.set_pins(session, current[0], [*ids, pid])
+    await invalidate_home_cache()
+    return {"ids": ids}
+
+
+@home_router.delete("/quick-pins/{playlist_id}")
+async def unpin_quick(playlist_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    from app.home import quick_picks as qp
+    from app.home.service import invalidate_home_cache
+
+    with Session(engine) as session:
+        pid = _pin_target(session, current[0], "liked") if playlist_id == "liked" else playlist_id
+        ids = qp.set_pins(session, current[0], [i for i in qp.get_pins(session, current[0]) if i != pid])
+    await invalidate_home_cache()
+    return {"ids": ids}
 
 
 _refresh_running = False

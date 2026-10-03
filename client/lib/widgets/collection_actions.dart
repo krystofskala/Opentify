@@ -17,6 +17,7 @@ import 'radio_station.dart';
 import 'share_sheet.dart';
 import 'remove_from_library.dart' show confirmRemoveFromLibrary;
 import 'track_actions.dart' show nowPlayingInfoFor;
+import '../core/api_client.dart' show ApiException;
 import '../core/cz_plural.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
 import '../state/offline_controller.dart';
@@ -85,6 +86,36 @@ Future<void> showCollectionActions(
 }
 
 class _CollectionActionsSheet extends ConsumerWidget {
+  /// "Připnout do Rychlého výběru" / "Odepnout" (max 6 připnutých).
+  Widget _quickPinRow(BuildContext context, WidgetRef ref, void Function(String) toast) {
+    final pins = ref.watch(quickPinsProvider).valueOrNull;
+    if (pins == null) return const SizedBox.shrink();
+    final pinId = kind == CollectionKind.liked ? (pins.likedId ?? 'liked') : id;
+    final pinned = pins.ids.contains(pinId);
+    return _Row(
+      icon: pinned ? Symbols.keep_off_rounded : Symbols.keep_rounded,
+      label: pinned ? 'Odepnout z Rychlého výběru' : 'Připnout do Rychlého výběru',
+      onTap: () async {
+        Navigator.of(context).pop();
+        final repo = ref.read(homeRepositoryProvider);
+        try {
+          if (pinned) {
+            await repo.unpinQuick(kind == CollectionKind.liked ? 'liked' : id);
+          } else {
+            await repo.pinQuick(kind == CollectionKind.liked ? 'liked' : id);
+          }
+          ref.invalidate(quickPinsProvider);
+          ref.invalidate(homeProvider);
+          toast(pinned ? 'Odepnuto z Rychlého výběru' : 'Připnuto do Rychlého výběru');
+        } on ApiException catch (e) {
+          toast(e.detail ?? 'Nepodařilo se připnout');
+        } catch (_) {
+          toast('Nepodařilo se připnout');
+        }
+      },
+    );
+  }
+
   const _CollectionActionsSheet({
     required this.hostContext,
     required this.kind,
@@ -278,6 +309,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   onEdit!();
                 },
               ),
+            if (kind != CollectionKind.album) _quickPinRow(context, ref, toast),
             if (onSaveCopy != null)
               _Row(
                 icon: Symbols.library_add_rounded,

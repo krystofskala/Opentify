@@ -90,6 +90,10 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     from app import browse
 
     registry.append(("home:genre-rails", timedelta(hours=1), browse.build_genre_rails))
+    # Videoklipy -> oficiální audio (intro rozhodí synchronizované texty).
+    from app.tools import upgrade_video_audio
+
+    registry.append(("maintenance:video-audio", g.DAILY_TTL, lambda: upgrade_video_audio.run(40)))
     return registry
 
 
@@ -298,6 +302,59 @@ def _playlist_tracks(session: Session, playlist_id: str, limit: int) -> list[Rec
     return out
 
 
+def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, other_mixes, daily) -> list:
+    """Rychlý výběr: připnuté napřed (max 6), zbytek podle denní doby
+    (app/home/quick_picks.py); bez historie původní pořadí."""
+    from app.home import quick_picks as qp
+    from app.library.spotify_import import get_or_create_liked_songs_playlist
+    from app.models import PlaylistKind, PlaylistMember
+
+    liked = get_or_create_liked_songs_playlist(session, user_id)
+    pinned: list = []
+    for pid in qp.get_pins(session, user_id):
+        p = session.get(Playlist, pid)
+        if p is None:
+            continue
+        member = session.exec(
+            select(PlaylistMember).where(PlaylistMember.playlist_id == p.id, PlaylistMember.user_id == user_id)
+        ).first()
+        if p.owner_user_id in (user_id, GLOBAL_PLAYLIST_OWNER) or member is not None:
+            card = _card(session, p)
+            if card.item_count > 0:
+                pinned.append(card)
+    room = qp.QUICK_SIZE - len(pinned)
+    if room <= 0:
+        return pinned[: qp.QUICK_SIZE]
+    taken = {c.id for c in pinned}
+    fallback = (other_mixes + daily)[:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1]
+    # Kandidáti chytrého výběru: tvoje mixy, žánrové mixy, společné mixy,
+    # tvoje playlisty a Oblíbené.
+    candidates: list[Playlist] = []
+    for key in ("mixes", "category_mixes", "blends"):
+        candidates += by_section.get(key, [])
+    candidates += session.exec(
+        select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.kind == PlaylistKind.USER)
+    ).all()
+    candidates.append(liked)
+    candidates = [p for p in {p.id: p for p in candidates}.values() if p.id not in taken]
+    ranked = qp.rank(session, user_id, candidates, liked.id)
+    auto: list = []
+    for p in ranked:
+        card = _card(session, p)
+        if card.item_count > 0 and card.id not in taken:
+            auto.append(card)
+            taken.add(card.id)
+        if len(auto) >= room:
+            break
+    for card in fallback:
+        if len(auto) >= room:
+            break
+        if card.id not in taken:
+            auto.append(card)
+            taken.add(card.id)
+    return pinned + auto
+
+
 def build_home(user_id: str) -> dict[str, Any]:
     with Session(engine) as session:
         playlists = session.exec(
@@ -346,8 +403,7 @@ def build_home(user_id: str) -> dict[str, Any]:
         mixes = cards_by_section["mixes"]
         other_mixes = [c for c in mixes if not (c.source or "").startswith("personal:daily-mix:")]
         daily = [c for c in mixes if (c.source or "").startswith("personal:daily-mix:")]
-        quick = (other_mixes + daily)[:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1]
-        quick = quick[:6]
+        quick = _quick_picks(session, user_id, by_section, cards_by_section, other_mixes, daily)
         if quick:
             sections.append({"id": "quick_picks", "title": "Rychlý výběr", "type": "quick_picks", "items": [c.model_dump(mode="json", by_alias=True) for c in quick]})
 
