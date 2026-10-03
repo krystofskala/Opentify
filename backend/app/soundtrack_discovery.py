@@ -35,7 +35,7 @@ DAY = 24 * 3600
 MONTH = 30 * DAY
 _UA = {"User-Agent": "Opentify/1.0 (claudstopher@gmail.com)"}
 WD_SPARQL = "https://query.wikidata.org/sparql"
-DYN_VERSION = "v2"
+DYN_VERSION = "v3"
 
 
 # ----------------------------------------------------------------------
@@ -134,6 +134,27 @@ async def _steam_popular() -> list[int]:
     return (await cached_json("steam:popular:v1", DAY, fetch, is_empty=lambda v: not v.get("ids"))).get("ids") or []
 
 
+async def _steam_indie() -> list[int]:
+    """Uznávané indie hry: štítek Indie na Steamu (SteamSpy, bez klíče), jen
+    s aspoň 93 % kladných recenzí a hodně hráči (Stardew, Hollow Knight...)."""
+
+    async def fetch() -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=60.0, headers=_UA) as client:
+                r = await client.get("https://steamspy.com/api.php", params={"request": "tag", "tag": "Indie"})
+            games = list((r.json() or {}).values())
+        except (httpx.HTTPError, ValueError):
+            return {}
+        good = []
+        for g in games:
+            pos, neg = int(g.get("positive") or 0), int(g.get("negative") or 0)
+            if pos >= 15000 and pos / max(1, pos + neg) >= 0.93:
+                good.append((pos, int(g["appid"])))
+        return {"ids": [a for _p, a in sorted(good, reverse=True)[:60]]}
+
+    return (await cached_json("steamspy:indie:v1", 7 * DAY, fetch, is_empty=lambda v: not v.get("ids"))).get("ids") or []
+
+
 async def _qids_for_steam(app_ids: list[int]) -> list[str]:
     if not app_ids:
         return []
@@ -197,7 +218,7 @@ async def _work_cards(qids: list[str], ns: str, tag: str) -> list[dict[str, Any]
         work = await works.to_work(entity)
         items.append((work, kind))
     cat = games.catalog_for("game" if ns == "games" else "film")
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(2)
 
     async def one(item):
         work, kind = item
@@ -249,8 +270,9 @@ async def build(ns: str) -> dict[str, Any]:
     if ns == "games":
         steam_qids = await _qids_for_steam(await _steam_popular())
         pools["popular"] = await _work_cards(steam_qids[:40], ns, "popular")
+        pools["indie"] = await _work_cards((await _qids_for_steam(await _steam_indie()))[:50], ns, "indie")
     for pool, query in queries.items():
-        if pool == "series":
+        if pool == "series" or (ns == "games" and pool == "indie"):
             continue
         qids = await _sparql(query, f"{ns}:{pool}:{date.today().isoformat()[:7]}")
         pools[pool] = await _work_cards(qids, ns, pool)
