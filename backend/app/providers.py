@@ -1154,6 +1154,10 @@ def youtube_pick(track: TrackMetadata, query: str) -> list[dict]:
         consider(_yt_search(track, track.isrc, 3), by_isrc=True)
     if not any(key[0] == 0 for key, _ in ranked):
         consider(_yt_search(track, query, 8), by_isrc=False)
+    for alt in track.alt_titles:
+        # Stejná verze pod jiným názvem (anglický název japonské skladby).
+        if not any(key[0] == 0 for key, _ in ranked):
+            consider(_yt_search(track, f"{track.artist_name or ''} {alt}".strip(), 8), by_isrc=False)
     if not ranked:
         consider(_yt_search(track, f"{query} audio", 6), by_isrc=False)
     if not ranked:
