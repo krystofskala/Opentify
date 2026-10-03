@@ -15,7 +15,7 @@ from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine
 from app.home import generators as g
 from app.home import personal_mixes as pm
-from app.models import GLOBAL_PLAYLIST_OWNER, Artist, HomeSnapshot, Playlist, PlaylistItem, Recording, Release
+from app.models import GLOBAL_PLAYLIST_OWNER, Artist, HomeSnapshot, Playlist, PlaylistItem, PlaylistKind, Recording, Release
 from app.redis_bus import get_redis
 from app.utils import utcnow
 
@@ -190,8 +190,8 @@ async def home_refresh_loop(check_every_s: float = 15 * 60) -> None:
 _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
     ("blends", "Společné mixy", "playlist_cards"),
-    ("category_mixes", "Tvoje žánry", "playlist_cards"),
-    ("styles", "Tvé styly", "tag_chips"),
+    ("category_mixes", "Tvoje mixy podle žánrů", "playlist_cards"),
+    ("styles", "Prozkoumej své styly", "tag_chips"),
     ("czech", "Česká hudba", "genre_showcase"),
     ("popular_playlists", "Populární playlisty pro tebe", "deezer_playlists"),
     ("years", "Tvoje roky", "playlist_cards"),
@@ -324,6 +324,41 @@ def _playlist_tracks(session: Session, playlist_id: str, limit: int) -> list[Rec
         if recording is not None:
             out.append(_recording_out(session, recording))
     return out
+
+
+# Obecné styly, které jsou jen jiným názvem hlavního žánru (kategorie) --
+# vedle "Tvůj mix · Folk / Akustická" se "Tvůj mix · Folk" neukazuje.
+_STYLE_TO_CATEGORY = {
+    "alternative": "indie", "indie": "indie", "indie rock": "indie", "folk": "folk", "acoustic": "folk",
+    "singer-songwriter": "folk", "rock": "rock", "pop": "pop", "electronic": "electronic", "rap": "hiphop",
+    "hip-hop": "hiphop", "hip hop": "hiphop", "blues": "blues", "jazz": "jazz", "metal": "metal",
+    "heavy metal": "metal", "country": "country", "soul": "soul", "rnb": "rnb", "dance": "dance",
+    "bluegrass": "bluegrass", "classical": "classical", "reggae": "reggae",
+}
+
+
+def _style_mix_cards(session: Session, user_id: str, shown_categories: set[str]) -> list:
+    """Osobní mixy stylů profilu (Tvé styly, `personal:tag:<štítek>`) jako
+    karty -- v pořadí síly stylu, bez těch, co jen jinak pojmenovávají už
+    zobrazený hlavní žánr."""
+    from app.home import personal_mixes as pm_
+    from app.tags import slug
+
+    snap = session.get(HomeSnapshot, pm_.styles_key(user_id))
+    tags = list((snap.payload or {}).get("tags") or [])[:12] if snap else []
+    cards = []
+    for tag in tags:
+        p = session.exec(
+            select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == f"personal:tag:{slug(tag)}")
+        ).first()
+        if p is None:
+            continue
+        if _STYLE_TO_CATEGORY.get(slug(tag)) in shown_categories:
+            continue
+        card = _card(session, p)
+        if card.item_count > 0:
+            cards.append(card)
+    return cards
 
 
 def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, other_mixes, daily) -> list:
@@ -480,6 +515,16 @@ def build_home(user_id: str) -> dict[str, Any]:
                 sec = cz.render(session, user_id, "cz")
                 if sec:
                     sections.append(sec)
+                continue
+            if key == "category_mixes":
+                # Mixy hlavních žánrů ("Tvůj mix · Folk") a pak tvých stylů
+                # ("Tvůj mix · Bluegrass") -- mění se podle toho, co posloucháš.
+                # Štítky stylů (sekce "styles") otevírají celou stránku stylu.
+                cards = list(cards_by_section.get("category_mixes") or [])
+                shown = {(c.source or "").rsplit(":", 1)[-1] for c in cards}
+                cards += _style_mix_cards(session, user_id, shown)
+                if cards:
+                    sections.append({"id": key, "title": title, "type": kind, "items": [c.model_dump(mode="json", by_alias=True) for c in cards]})
                 continue
             if key == "styles":
                 # Tvé styly (štítky Last.fm tvých interpretů, podle toho, co
@@ -651,7 +696,76 @@ def apply_layout(session: Session, user_id: str, sections: list[dict[str, Any]])
     layout = get_layout(session, user_id)
     pos = {sid: i for i, sid in enumerate(effective_order(user_id, layout))}
     visible = [s for s in sections if is_visible(layout, _layout_id(s["id"]))]
-    return [s for _p, _i, s in sorted(((pos.get(_layout_id(s["id"]), 10_000), i, s) for i, s in enumerate(visible)), key=lambda k: (k[0], k[1]))]
+    ordered = [s for _p, _i, s in sorted(((pos.get(_layout_id(s["id"]), 10_000), i, s) for i, s in enumerate(visible)), key=lambda k: (k[0], k[1]))]
+    return _collapse_track_rails(session, user_id, ordered)
+
+
+TRACK_MIXES_TITLE = "Tvoje výběry"
+
+
+def _collapse_track_rails(session: Session, user_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sekce, které byly jen seznamem skladeb (Mix na teď, Před rokem,
+    Populární ve světě, Shazam, Co poslouchá rodina...), jsou na mobilu
+    roztažené a nedá se v nich pohybovat (živě nahlášeno) -- každá je teď
+    JEDNA karta playlistu a všechny v jedné řadě na místě první z nich.
+    Zapínají/řadí se dál jednotlivě (Profil › Domů)."""
+    rails = [s for s in sections if s.get("type") == "track_rail"]
+    if not rails:
+        return sections
+    cards = []
+    for sec in rails:
+        playlist_id = sec.get("playlistId") or _rail_playlist(session, user_id, sec)
+        playlist = session.get(Playlist, playlist_id) if playlist_id else None
+        if playlist is None:
+            continue
+        card = _card(session, playlist).model_copy(update={"title": sec["title"]})
+        if card.item_count > 0:
+            cards.append(card.model_dump(mode="json", by_alias=True))
+    session.commit()
+    merged = {"id": "track_mixes", "title": TRACK_MIXES_TITLE, "type": "playlist_cards", "items": cards}
+    out: list[dict[str, Any]] = []
+    placed = False
+    for sec in sections:
+        if sec.get("type") == "track_rail":
+            if not placed and cards:
+                out.append(merged)
+                placed = True
+            continue
+        out.append(sec)
+    return out
+
+
+def _rail_playlist(session: Session, user_id: str, sec: dict[str, Any]) -> str | None:
+    """Sekce bez vlastního playlistu (Shazam, Před rokem...) -> playlist
+    profilu `home:rail:<id>`, ať jde otevřít celá (Přehrát, Zamíchat).
+    Položky se přepíšou jen při změně."""
+    ids = [i["id"] for i in sec.get("items") or [] if i.get("id")]
+    if not ids:
+        return None
+    source = f"home:rail:{sec['id']}"
+    playlist = session.exec(select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == source)).first()
+    if playlist is None:
+        playlist = Playlist(
+            owner_user_id=user_id, title=sec["title"], kind=PlaylistKind.GENERATED_RECOMMENDATION, source=source
+        )
+        session.add(playlist)
+        session.flush()
+    current = [
+        i.recording_id
+        for i in session.exec(
+            select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position)
+        ).all()
+    ]
+    if current != ids or playlist.title != sec["title"]:
+        for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
+            session.delete(item)
+        for pos, rid in enumerate(ids):
+            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=pos))
+        playlist.title = sec["title"]
+        playlist.cover_urls = []
+        playlist.generated_at = utcnow()
+        session.add(playlist)
+    return playlist.id
 
 
 def layout_entries(user_id: str) -> list[dict[str, Any]]:
