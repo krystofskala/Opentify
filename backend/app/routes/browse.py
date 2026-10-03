@@ -129,3 +129,11 @@ async def open_playlist(deezer_id: str, title: str | None = None):
     if playlist_id is None:
         raise HTTPException(status_code=502, detail="playlist se nepodařilo načíst")
     return {"playlistId": playlist_id}
+
+
+@browse_router.get("/search-tags")
+async def search_tags(q: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Žánry a styly pro Hledat › Vše ("blues" -> Blues, Chicago Blues...)."""
+    from app import genre_search
+
+    return {"items": await genre_search.search(q, user_id=current[0])}

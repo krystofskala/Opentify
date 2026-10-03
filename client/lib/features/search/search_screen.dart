@@ -26,6 +26,7 @@ import '../../widgets/track_tile.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../theme/glass_tokens.dart';
 import '../../widgets/collection_actions.dart';
+import '../browse/tag_screen.dart' show tagRoute;
 
 const _searchSourceLabel = 'Výsledky hledání';
 
@@ -409,6 +410,7 @@ class _AllResults extends ConsumerWidget {
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
+        _GenreChips(query: query),
         _Section(
           title: 'Skladby',
           value: tracks,
@@ -641,6 +643,49 @@ class _FilteredResults extends ConsumerWidget {
   }
 }
 
+
+/// Žánry a styly k dotazu ("blues" -> Blues, Chicago Blues, Delta Blues...).
+final searchTagsProvider = FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, query) async {
+  final json = await ref.watch(apiClientProvider).getJson('/browse/search-tags', query: {'q': query});
+  return (json['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
+});
+
+/// Hledat › Vše: řada tlačítek žánrů a stylů (stejná jako "Prozkoumej své
+/// styly" na Domů) -- kategorie otevře Procházet, styl stránku stylu.
+class _GenreChips extends ConsumerWidget {
+  const _GenreChips({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final items = ref.watch(searchTagsProvider(query)).valueOrNull ?? const [];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: SizedBox(
+        height: 44,
+        child: ListView.separated(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          itemCount: items.length,
+          separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.xs),
+          itemBuilder: (context, i) {
+            final item = items[i];
+            final isCategory = item['kind'] == 'category';
+            return ActionChip(
+              avatar: Icon(isCategory ? Symbols.category_rounded : Symbols.sell_rounded, size: 18),
+              label: Text(item['title'] as String),
+              onPressed: () => context.push(
+                isCategory ? '/browse/${item['id']}' : tagRoute(item['tag'] as String),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
 
 final soundcloudSearchProvider = FutureProvider.autoDispose.family<List<RecordingModel>, String>((ref, query) async {
   final json = await ref.watch(apiClientProvider).getJson('/catalog/soundcloud/search', query: {'q': query});
