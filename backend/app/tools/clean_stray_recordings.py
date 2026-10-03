@@ -1,0 +1,116 @@
+"""Úklid "cizích" skladeb u alb: nahrávky z jiných edic (bonusový / živý
+disk deluxe edice, regionální bonusy), které v DB visí u alba, ale v jeho
+kanonickém tracklistu nejsou (viz `_canonical_edition` v catalog/service.py).
+Tracklist alba je už neukazuje, ale strašily jinde (knihovna, hledání).
+
+Smaže se JEN nahrávka, na kterou nic neodkazuje (soubor, poslech, playlist,
+knihovna, Poslechni později, lajky/dislajky, rozpracovaný job). Použité
+zůstanou -- živá verze není studiová, slučovat je nejde. Jen alba
+z MusicBrainz (jiná nemají kanonickou edici).
+
+    python -m app.tools.clean_stray_recordings [--dry-run]"""
+from __future__ import annotations
+
+import asyncio
+import sys
+from collections import Counter
+
+from sqlalchemy import delete, func
+from sqlmodel import Session, select
+
+from app.catalog.deezer import get_deezer_client
+from app.catalog.musicbrainz import get_musicbrainz_client
+from app.catalog.service import CatalogService
+from app.db import engine
+from app.models import (
+    HeardFully,
+    LibraryEntry,
+    Listen,
+    ListenLater,
+    MediaAsset,
+    PlaylistItem,
+    ProvisioningJob,
+    ProvisioningJobStatus,
+    Recording,
+    RecordingDislike,
+    Release,
+)
+
+_FINAL = (ProvisioningJobStatus.FAILED, ProvisioningJobStatus.SUCCEEDED)
+
+
+def _candidates() -> list[str]:
+    """Alba z MB, která mají v DB víc skladeb než jejich tracklist."""
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Release.id, Release.external_refs, func.count(Recording.id))
+            .join(Recording, Recording.release_id == Release.id)
+            .where(Release.mbid.is_not(None), ~Release.mbid.startswith("own:"))  # type: ignore[union-attr]
+            .group_by(Release.id)
+        ).all()
+    out = []
+    for rid, refs, n in rows:
+        refs = refs or {}
+        if refs.get("source") in ("youtube", "soundcloud", "manual"):
+            continue
+        known = refs.get("tracklistCount")
+        if known is None or n > known:
+            out.append(rid)
+    return out
+
+
+def _referenced(session: Session, rec_id: str) -> bool:
+    if session.get(MediaAsset, rec_id) is not None:
+        return True
+    for model, col in ((Listen, Listen.recording_id), (PlaylistItem, PlaylistItem.recording_id),
+                       (LibraryEntry, LibraryEntry.recording_id), (HeardFully, HeardFully.recording_id),
+                       (RecordingDislike, RecordingDislike.recording_id)):
+        if session.exec(select(func.count()).select_from(model).where(col == rec_id)).one():
+            return True
+    if session.exec(select(func.count()).select_from(ListenLater).where(ListenLater.target_id == rec_id)).one():
+        return True
+    open_jobs = session.exec(
+        select(func.count()).select_from(ProvisioningJob)
+        .where(ProvisioningJob.recording_id == rec_id, ProvisioningJob.status.not_in(_FINAL))  # type: ignore[attr-defined]
+    ).one()
+    return bool(open_jobs)
+
+
+async def main(dry: bool) -> None:
+    todo = _candidates()
+    print(f"alb k prověření: {len(todo)}", flush=True)
+    stats: Counter = Counter()
+    for n, rid in enumerate(todo, 1):
+        with Session(engine) as session:
+            try:
+                tracks = await CatalogService(session, get_musicbrainz_client(), get_deezer_client()).get_release_tracks(rid)
+                session.commit()
+            except Exception as exc:  # noqa: BLE001
+                stats["chyba tracklistu"] += 1
+                print(f"  {rid}: {exc}", flush=True)
+                continue
+            release = session.get(Release, rid)
+            # Tracklist musí být z MB a úplný, jinak nic nemazat.
+            if not tracks or release is None or release.mbid is None:
+                stats["bez tracklistu"] += 1
+                continue
+            keep = {t.id for t in tracks}
+            for rec in session.exec(select(Recording).where(Recording.release_id == rid)).all():
+                if rec.id in keep:
+                    continue
+                if _referenced(session, rec.id):
+                    stats["použité (zůstávají)"] += 1
+                    continue
+                stats["smazáno"] += 1
+                if not dry:
+                    session.exec(delete(ProvisioningJob).where(ProvisioningJob.recording_id == rec.id))
+                    session.delete(rec)
+            if not dry:
+                session.commit()
+        if n % 100 == 0:
+            print(f"  {n}/{len(todo)} {dict(stats)}", flush=True)
+    print(("nanečisto: " if dry else "hotovo: ") + str(dict(stats)), flush=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main("--dry-run" in sys.argv))
