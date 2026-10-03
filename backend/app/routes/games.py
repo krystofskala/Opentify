@@ -23,7 +23,12 @@ def _cards(page: dict) -> dict:
             if p is not None
         ]
         composers = [browse._artist_card(a) for a in (session.get(Artist, i) for i in page.get("composerIds") or []) if a]
-    return {**page, "mixes": mixes, "composers": composers}
+        stations = [
+            _card(session, p).model_dump(mode="json", by_alias=True)
+            for p in (session.get(Playlist, pid) for pid in page.get("stationIds") or [])
+            if p is not None
+        ]
+    return {**page, "mixes": mixes, "composers": composers, "stations": stations}
 
 
 @games_router.get("")
@@ -44,4 +49,35 @@ async def game(slug: str):
     out = await games.game_page(slug)
     if out is None:
         raise HTTPException(status_code=404, detail="hra neexistuje")
-    return out
+    return _cards(out)
+
+
+# Filmy a seriály -- stejná stránka nad jiným katalogem (app/movies.py).
+movies_router = APIRouter(prefix="/movies", tags=["movies"])
+
+
+@movies_router.get("")
+async def movies_page():
+    from app.movies import MOVIES_CATALOG
+
+    return _cards(await games.page(MOVIES_CATALOG))
+
+
+@movies_router.get("/series/{series_id}")
+async def movie_series(series_id: str):
+    from app.movies import MOVIES_CATALOG
+
+    out = await games.series_page(series_id, MOVIES_CATALOG)
+    if out is None:
+        raise HTTPException(status_code=404, detail="série neexistuje")
+    return _cards({**out, "mixIds": {"series": out.get("playlistId")} if out.get("playlistId") else {}})
+
+
+@movies_router.get("/{slug}")
+async def movie(slug: str):
+    from app.movies import MOVIES_CATALOG
+
+    out = await games.game_page(slug, MOVIES_CATALOG)
+    if out is None:
+        raise HTTPException(status_code=404, detail="film neexistuje")
+    return _cards(out)

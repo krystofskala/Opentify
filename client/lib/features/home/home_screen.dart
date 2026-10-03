@@ -342,10 +342,26 @@ class _HomeSectionView extends StatelessWidget {
           ],
         );
       case HomeSectionType.artistCards:
+        Widget artistTile(BuildContext context, int index) {
+          final a = section.artists[index];
+          return MediaCard(
+            title: a.name,
+            imageUrl: a.images.isEmpty ? null : a.images.first,
+            shape: MediaCardShape.circle,
+            placeholderIcon: Symbols.person_rounded,
+            artworkKey: (releaseId: null, artistId: a.id),
+            onTap: () => context.push('/artists/${a.id}'),
+          );
+        }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SectionHeader(section.title),
+            SectionHeader(
+              section.title,
+              onSeeAll: section.artists.length > 3
+                  ? () => _showGrid(context, section.title, section.artists.length, artistTile, 0.78)
+                  : null,
+            ),
             SizedBox(
               height: 190,
               child: ListView.separated(
@@ -376,7 +392,13 @@ class _HomeSectionView extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SectionHeader(section.title),
+            SectionHeader(
+              section.title,
+              onSeeAll: section.deezerPlaylists.length > 3
+                  ? () => _showGrid(context, section.title, section.deezerPlaylists.length,
+                      (context, i) => DeezerPlaylistTile(playlist: section.deezerPlaylists[i]), 0.72)
+                  : null,
+            ),
             SizedBox(
               height: 214,
               child: ListView.separated(
@@ -391,6 +413,58 @@ class _HomeSectionView extends StatelessWidget {
           ],
         );
       case HomeSectionType.genreShowcase:
+        Widget showcaseTile(BuildContext context, ShowcaseItem item) {
+          if (item.playlist case final card?) {
+            return PlaylistCardView(
+              card: card,
+              onTap: () => context.push('/playlists/${card.id}'),
+              onLongPress: () => _playlistActions(context, card),
+            );
+          }
+          if (item.album case final album?) {
+            return SizedBox(
+              width: 150,
+              child: Stack(
+                children: [
+                  _albumCard(context, album, null),
+                  if (item.badge != null)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: DecoratedBox(
+                        decoration: ShapeDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          shape: const StadiumBorder(),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          child: Text(
+                            item.badge!,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(color: Theme.of(context).colorScheme.onPrimary),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }
+          return SizedBox(
+            width: 140,
+            child: MediaCard(
+              title: item.artistName ?? '',
+              subtitle: 'Interpret',
+              imageUrl: item.artistImage,
+              shape: MediaCardShape.circle,
+              placeholderIcon: Symbols.person_rounded,
+              artworkKey: (releaseId: null, artistId: item.artistId),
+              onTap: () => context.push('/artists/${item.artistId}'),
+            ),
+          );
+        }
         // Ukázka stránky žánru: mix napřed, pak novinky, alba a interpreti.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -399,7 +473,13 @@ class _HomeSectionView extends StatelessWidget {
               section.title,
               onSeeAll: section.categoryId != null
                   ? () => context.push('/browse/${section.categoryId}')
-                  : (section.tag != null ? () => context.push(tagRoute(section.tag!)) : null),
+                  : (section.tag != null
+                      ? () => context.push(tagRoute(section.tag!))
+                      // Bez vlastní stránky (Tvoje výběry): celá řada v mřížce.
+                      : (section.showcase.length > 3
+                          ? () => _showGrid(context, section.title, section.showcase.length,
+                              (context, i) => showcaseTile(context, section.showcase[i]), 0.72)
+                          : null)),
             ),
             SizedBox(
               height: 214,
@@ -408,59 +488,7 @@ class _HomeSectionView extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 itemCount: section.showcase.length,
                 separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-                itemBuilder: (context, index) {
-                  final item = section.showcase[index];
-                  if (item.playlist case final card?) {
-                    return PlaylistCardView(
-                      card: card,
-                      onTap: () => context.push('/playlists/${card.id}'),
-                      onLongPress: () => _playlistActions(context, card),
-                    );
-                  }
-                  if (item.album case final album?) {
-                    return SizedBox(
-                      width: 150,
-                      child: Stack(
-                        children: [
-                          _albumCard(context, album, null),
-                          if (item.badge != null)
-                            Positioned(
-                              top: 8,
-                              left: 8,
-                              child: DecoratedBox(
-                                decoration: ShapeDecoration(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  shape: const StadiumBorder(),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  child: Text(
-                                    item.badge!,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(color: Theme.of(context).colorScheme.onPrimary),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  }
-                  return SizedBox(
-                    width: 140,
-                    child: MediaCard(
-                      title: item.artistName ?? '',
-                      subtitle: 'Interpret',
-                      imageUrl: item.artistImage,
-                      shape: MediaCardShape.circle,
-                      placeholderIcon: Symbols.person_rounded,
-                      artworkKey: (releaseId: null, artistId: item.artistId),
-                      onTap: () => context.push('/artists/${item.artistId}'),
-                    ),
-                  );
-                },
+                itemBuilder: (context, index) => showcaseTile(context, section.showcase[index]),
               ),
             ),
           ],
@@ -504,7 +532,8 @@ class _HomeSectionView extends StatelessWidget {
 Widget _albumCard(BuildContext context, HomeAlbumCard album, int? index) => MediaCard(
       title: album.title,
       // Poznámka sekce ("30 let", "zbývá 6 skladeb") za interpretem.
-      subtitle: album.badge == null ? album.artistName : [album.artistName, album.badge].whereType<String>().join(' · '),
+      subtitle:
+          album.badge == null ? album.artistName : [album.artistName, album.badge].whereType<String>().join(' · '),
       imageUrl: album.images.isEmpty ? null : album.images.first,
       artworkKey: (releaseId: album.id, artistId: album.artistId),
       onTap: () => context.push('/releases/${album.id}'),

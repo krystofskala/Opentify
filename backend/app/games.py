@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -47,6 +48,10 @@ class Game:
     wiki: str | None = None  # název článku na en.wikipedia (obrázek mimo Steam)
     album: str | None = None  # nápověda názvu alba, když se jmenuje jinak než hra
     tags: tuple[str, ...] = field(default_factory=tuple)  # epic, calm, retro, indie, czech, new
+    # Rádia ve hře (GTA): názvy stanic + slova, podle kterých se pozná hra
+    # v názvu fanouškovského playlistu ("san andreas", "gta sa").
+    stations: tuple[str, ...] = ()
+    hints: tuple[str, ...] = ()
 
 
 # Série: id -> (název, barva)
@@ -72,6 +77,7 @@ SERIES: dict[str, tuple[str, str]] = {
     "hollow-knight": ("Hollow Knight", "#3F5F7F"),
     "portal": ("Portal / Half-Life", "#D27A2B"),
     "red-dead": ("Red Dead", "#A8432B"),
+    "gta": ("Grand Theft Auto", "#2E7D4F"),
 }
 
 GAMES: list[Game] = [
@@ -134,6 +140,28 @@ GAMES: list[Game] = [
     Game("portal-2", "Portal 2", 2011, ("Mike Morasky",), "portal", steam=620),
     # Red Dead
     Game("rdr2", "Red Dead Redemption 2", 2018, ("Woody Jackson",), "red-dead", steam=1174180, tags=("calm",)),
+    # Grand Theft Auto -- hlavně rádia (Rockstar je nestreamuje -- skladby
+    # z nejlepšího fanouškovského playlistu každé stanice)
+    Game("gta-3", "Grand Theft Auto III", 2001, ("Rockstar Games",), "gta", steam=12100, tags=("retro",),
+         stations=("Flashback 95.6", "Double Clef FM", "K-Jah", "Rise FM", "Lips 106", "Game Radio FM", "MSX FM", "Head Radio"),
+         hints=("gta 3", "gta iii", "gta3", "grand theft auto iii", "grand theft auto 3", "liberty city")),
+    Game("gta-vc", "Grand Theft Auto: Vice City", 2002, ("Rockstar Games",), "gta", steam=12110, tags=("retro",),
+         stations=("Flash FM", "V-Rock", "Wildstyle", "Fever 105", "Emotion 98.3", "Wave 103", "Radio Espantoso", "VRock"),
+         hints=("vice city", "gta vc", "gtavc")),
+    Game("gta-sa", "Grand Theft Auto: San Andreas", 2004, ("Rockstar Games",), "gta", steam=12120, tags=("retro",),
+         stations=("Radio Los Santos", "K-DST", "Bounce FM", "CSR 103.9", "K-Rose", "Radio X", "SF-UR", "Playback FM",
+                   "Master Sounds 98.3", "K-Jah West"),
+         hints=("san andreas", "gta sa", "gtasa")),
+    Game("gta-4", "Grand Theft Auto IV", 2008, ("Michael Hunter",), "gta", steam=12210,
+         stations=("Liberty Rock Radio", "The Journey", "Vladivostok FM", "Electro-Choc", "The Beat 102.7",
+                   "Liberty City Hardcore", "Fusion FM", "Massive B", "IF99", "Radio Broker"),
+         hints=("gta 4", "gta iv", "gta4", "grand theft auto iv", "grand theft auto 4")),
+    Game("gta-5", "Grand Theft Auto V", 2013, ("Tangerine Dream", "Woody Jackson", "The Alchemist", "Oh No"), "gta", steam=271590,
+         album="The Music of Grand Theft Auto V", tags=("new",),
+         stations=("Non-Stop-Pop FM", "Los Santos Rock Radio", "West Coast Classics", "Radio Los Santos", "FlyLo FM",
+                   "Channel X", "Rebel Radio", "Space 103.2", "The Lowdown 91.1", "Vinewood Boulevard Radio", "Soulwax FM",
+                   "WorldWide FM", "East Los FM", "Radio Mirror Park", "The Blue Ark", "Blonded Los Santos 97.8"),
+         hints=("gta 5", "gta v", "gta5", "gtav", "grand theft auto v", "grand theft auto 5", "gta online")),
     # Česká stopa
     Game("kcd", "Kingdom Come: Deliverance", 2018, ("Jan Valta", "Adam Sporka"), "kingdom-come", steam=379430, tags=("czech", "epic")),
     Game("kcd2", "Kingdom Come: Deliverance II", 2025, ("Jan Valta",), "kingdom-come", steam=1771300, tags=("czech", "new", "epic")),
@@ -265,16 +293,47 @@ _LABELS = (
 )
 
 
+# Slova, která v názvu alba nevadí (vydání, ne jiné dílo).
+_CORE_OK = {
+    "the", "of", "a", "and", "original", "motion", "picture", "soundtrack", "score", "music", "from", "ost", "complete",
+    "edition", "deluxe", "expanded", "anniversary", "remastered", "version", "vol", "volume", "1", "official", "series",
+    "netflix", "hbo", "season", "songs", "theme", "themes", "tv", "television", "film", "movie", "collection",
+}
+
+
 def _words(text: str) -> list[str]:
     return [w for w in tokens(text.replace(":", " ").replace("-", " "))]
 
 
-async def soundtrack(game: Game) -> str | None:
-    """Id našeho alba se soundtrackem hry. Jen celé album od skladatele
-    hry nebo oficiálního vydavatele, se stejným dílem (ne VII místo X, ne
-    Part II, ne film, ne covery/piano/lo-fi). Radši nic než cizí album."""
+@dataclass(frozen=True)
+class Catalog:
+    """Sada děl se soundtracky -- hry, filmy a seriály (app/movies.py)."""
+
+    ns: str  # klíče cache, zdroje playlistů, cesty v appce
+    items: list[Game]
+    series: dict[str, tuple[str, str]]
+    mixes: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
+    labels: tuple[str, ...]
+    sequel: frozenset[str]
+    rows: tuple[tuple[str, str, str], ...]  # (id, název, štítek)
+    all_title: str
+    series_unit: str  # "her" / "filmů"
+    page_version: str = "v1"
+    # Název alba (před závorkou) nesmí mít slovo navíc oproti dílu -- u filmů
+    # "Avengers: Endgame" není "The Avengers", "Halloween Ends" není "Halloween".
+    strict_core: bool = False
+    ost_version: str = "v1"
+
+
+async def soundtrack(game: Game, cat: Catalog | None = None) -> str | None:
+    """Id našeho alba se soundtrackem díla. Jen celé album od skladatele
+    nebo oficiálního vydavatele, se stejným dílem (ne VII místo X, ne
+    Part II, ne covery/piano/lo-fi). Radši nic než cizí album."""
     from app.catalog.deezer import get_deezer_client
     from app.catalog.deezer_ingest import ingest_album, ingest_artist
+
+    cat = cat or GAMES_CATALOG
+    version = "v4" if cat.ns == "games" else cat.ost_version
 
     async def fetch() -> dict[str, Any]:
         dz = get_deezer_client()
@@ -291,18 +350,30 @@ async def soundtrack(game: Game) -> str | None:
                 words = _words(title)
                 if not all(_covered(w, set(words)) for w in want):
                     continue
-                if {w for w in words if w in _SEQUEL} - title_words:
+                if {w for w in words if w in cat.sequel} - title_words:
                     continue
+                if cat.strict_core:
+                    core = re.split(r"[\(\[]| - | – ", title)[0]
+                    if set(_words(core)) - set(want) - _CORE_OK:
+                        continue
                 low = fold(title)
                 if any(bad in low for bad in _NOT_OST):
                     continue
                 if int(h.get("nb_tracks") or 0) and int(h.get("nb_tracks") or 0) < 5:
                     continue
                 by_composer = any(c in artist or (artist and artist in c) for c in composers)
-                by_label = any(label in artist for label in _LABELS)
-                if not (by_composer or by_label):
+                by_label = any(label in artist for label in cat.labels)
+                # Filmy: oficiální soundtrack bývá pod "Various Artists" -- jen
+                # s přesným názvem filmu, oficiálním označením a 10+ skladbami.
+                by_various = (
+                    cat.strict_core
+                    and artist == "various artists"
+                    and int(h.get("nb_tracks") or 0) >= 10
+                    and any(w in fold(title) for w in ("original motion picture soundtrack", "original soundtrack", "music from the motion picture"))
+                )
+                if not (by_composer or by_label or by_various):
                     continue
-                official = any(w in low for w in ("original", "soundtrack", "ost", "score", "music from"))
+                official = any(w in low for w in ("original", "soundtrack", "ost", "score", "music from", "motion picture"))
                 score = (3 if by_composer else 1) + (1 if official else 0)
                 if best is None or score > best[0]:
                     best = (score, h)
@@ -311,7 +382,7 @@ async def soundtrack(game: Game) -> str | None:
         return {"album": best[1] if best else None}
 
     try:
-        found = (await cached_json(f"games:ost:v3:{game.slug}", MONTH, fetch)).get("album")
+        found = (await cached_json(f"{cat.ns}:ost:{version}:{game.slug}", MONTH, fetch)).get("album")
     except Exception:  # noqa: BLE001
         logger.exception("soundtrack %s", game.slug)
         return None
@@ -329,17 +400,18 @@ async def soundtrack(game: Game) -> str | None:
 # ----------------------------------------------------------------------
 
 
-async def game_card(game: Game) -> dict[str, Any]:
-    img, album_id = await asyncio.gather(images(game), soundtrack(game))
+async def game_card(game: Game, cat: Catalog | None = None) -> dict[str, Any]:
+    cat = cat or GAMES_CATALOG
+    img, album_id = await asyncio.gather(images(game), soundtrack(game, cat))
     if not img["hero"] and album_id:
-        # Bez obrázku hry (Minecraft) aspoň obal soundtracku.
+        # Bez obrázku díla (Minecraft) aspoň obal soundtracku.
         from app.models import Release
 
         with Session(engine) as session:
             rel = session.get(Release, album_id)
             cover = (rel.images or [None])[0] if rel else None
         img = {"hero": cover, "cover": cover}
-    series = SERIES.get(game.series or "")
+    series = cat.series.get(game.series or "")
     return {
         "slug": game.slug,
         "title": game.title,
@@ -353,40 +425,43 @@ async def game_card(game: Game) -> dict[str, Any]:
     }
 
 
-async def _cards(games: list[Game]) -> list[dict[str, Any]]:
+async def _cards(items: list[Game], cat: Catalog | None = None) -> list[dict[str, Any]]:
     sem = asyncio.Semaphore(6)
 
     async def one(g: Game) -> dict[str, Any]:
         async with sem:
-            return await game_card(g)
+            return await game_card(g, cat)
 
-    return list(await asyncio.gather(*(one(g) for g in games)))
+    return list(await asyncio.gather(*(one(g) for g in items)))
 
 
-async def _mix(mix_id: str, cards: dict[str, dict[str, Any]]) -> str | None:
-    """Herní mix z alb her se štítkem (u bossů a témat jen skladby, jejichž
-    název to říká), denně jinak zamíchaný."""
+async def _album_tracks(album_id: str) -> list[dict[str, Any]]:
     from app.catalog.deezer import get_deezer_client
+    from app.models import Release
+
+    with Session(engine) as session:
+        rel = session.get(Release, album_id)
+        dz_id = rel.deezer_id if rel else None
+    return (await get_deezer_client().album_tracks(str(dz_id)) or []) if dz_id else []
+
+
+async def _mix(cat: Catalog, mix_id: str, cards: dict[str, dict[str, Any]]) -> str | None:
+    """Mix z alb děl se štítkem (u bossů a témat jen skladby, jejichž název
+    to říká), denně jinak zamíchaný; obal = mozaika obalů děl."""
     from app.home import generators as g
     from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
 
-    title, description, tags, words = GAME_MIXES[mix_id]
-    dz = get_deezer_client()
-    rng = random.Random(f"games:{mix_id}:{utcnow().date().isoformat()}")
+    title, description, tags, words = cat.mixes[mix_id]
+    rng = random.Random(f"{cat.ns}:{mix_id}:{utcnow().date().isoformat()}")
     picked: list[dict[str, Any]] = []
     covers: list[str] = []
-    for game in GAMES:
-        if not set(tags) & set(game.tags):
+    for item in cat.items:
+        if not set(tags) & set(item.tags):
             continue
-        card = cards.get(game.slug)
+        card = cards.get(item.slug)
         if not card or not card.get("albumId"):
             continue
-        with Session(engine) as session:
-            from app.models import Release
-
-            rel = session.get(Release, card["albumId"])
-            dz_id = rel.deezer_id if rel else None
-        tracks = (await dz.album_tracks(str(dz_id)) or []) if dz_id else []
+        tracks = await _album_tracks(card["albumId"])
         if words:
             tracks = [t for t in tracks if any(w in fold(t.get("title") or "").split() for w in words)] or tracks[:1]
         rng.shuffle(tracks)
@@ -398,105 +473,206 @@ async def _mix(mix_id: str, cards: dict[str, dict[str, Any]]) -> str | None:
         return None
     ids = await asyncio.to_thread(g._ingest_tracks, picked[:60])
     return g._save_playlist(
-        owner=GLOBAL_PLAYLIST_OWNER, source=f"games:mix:{mix_id}", title=title, description=description,
-        kind=PlaylistKind.EDITORIAL, section="games", recording_ids=ids, cover_urls=rng.sample(covers, min(4, len(covers))),
+        owner=GLOBAL_PLAYLIST_OWNER, source=f"{cat.ns}:mix:{mix_id}", title=title, description=description,
+        kind=PlaylistKind.EDITORIAL, section=cat.ns, recording_ids=ids, cover_urls=rng.sample(covers, min(4, len(covers))),
         ttl=g.DAILY_TTL,
     )
 
 
-async def page() -> dict[str, Any]:
+async def page(cat: Catalog | None = None) -> dict[str, Any]:
+    cat = cat or GAMES_CATALOG
+
     async def build() -> dict[str, Any]:
-        cards_list = await _cards(GAMES)
+        cards_list = await _cards(cat.items, cat)
         cards = {c["slug"]: c for c in cards_list}
-        rng = random.Random(f"games:hero:{utcnow().date().isoformat()}")
+        rng = random.Random(f"{cat.ns}:hero:{utcnow().date().isoformat()}")
         heroes = [c for c in cards_list if c["hero"] and c["albumId"]]
         rng.shuffle(heroes)
         series = []
-        for sid, (title, color) in SERIES.items():
-            members = [cards[g.slug] for g in GAMES if g.series == sid]
+        for sid, (title, color) in cat.series.items():
+            members = [cards[g.slug] for g in cat.items if g.series == sid]
             if len(members) < 2:
                 continue
             latest = max(members, key=lambda c: c["year"])
             series.append({"id": sid, "title": title, "color": color, "image": latest["hero"] or latest["cover"], "count": len(members)})
         mixes = {}
-        for mix_id in GAME_MIXES:
+        for mix_id in cat.mixes:
             try:
-                mixes[mix_id] = await _mix(mix_id, cards)
+                mixes[mix_id] = await _mix(cat, mix_id, cards)
             except Exception:  # noqa: BLE001
-                logger.exception("herní mix %s", mix_id)
+                logger.exception("mix %s %s", cat.ns, mix_id)
         composers: list[str] = []
-        for g in GAMES:
+        for g in cat.items:
             for c in g.composers[:1]:
-                if c not in composers:
+                if c not in composers and c != "Various Artists":
                     composers.append(c)
         from app import browse
 
         composer_ids = await browse._resolve_artists(composers, 24, set())
 
         def row(tag: str) -> list[dict[str, Any]]:
-            return [cards[g.slug] for g in GAMES if tag in g.tags]
+            rows = [cards[g.slug] for g in cat.items if tag in g.tags]
+            return sorted(rows, key=lambda c: -c["year"]) if tag == "new" else rows
 
         return {
-            "heroes": heroes[:6],
+            "heroes": heroes[:10],
             "series": series,
+            "seriesUnit": cat.series_unit,
             "mixIds": {k: v for k, v in mixes.items() if v},
             "composerIds": composer_ids,
             "rows": [
-                {"id": "new", "title": "Nové soundtracky", "games": sorted(row("new"), key=lambda c: -c["year"])},
-                {"id": "indie", "title": "Indie klenoty", "games": row("indie")},
-                {"id": "retro", "title": "Legendy 8/16-bit", "games": row("retro")},
-                {"id": "czech", "title": "Česká stopa", "games": row("czech")},
-                {"id": "all", "title": "Všechny hry", "games": sorted(cards_list, key=lambda c: c["title"])},
+                *({"id": rid, "title": title, "games": row(tag)} for rid, title, tag in cat.rows),
+                {"id": "all", "title": cat.all_title, "games": sorted(cards_list, key=lambda c: c["title"])},
             ],
         }
 
-    return await cached_json("games:page:v5", DAY, build, is_empty=lambda v: not v.get("rows"))
+    key = "games:page:v7" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
+    return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("rows"))
 
 
-async def game_page(slug: str) -> dict[str, Any] | None:
-    game = get(slug)
-    if game is None:
-        return None
-    card = await game_card(game)
-    others = [g for g in GAMES if game.series and g.series == game.series and g.slug != slug]
-    return {**card, "seriesGames": await _cards(sorted(others, key=lambda g: g.year))}
-
-
-async def series_page(series_id: str) -> dict[str, Any] | None:
-    if series_id not in SERIES:
-        return None
-    title, color = SERIES[series_id]
-
-    async def build() -> dict[str, Any]:
-        games = sorted((g for g in GAMES if g.series == series_id), key=lambda g: g.year)
-        cards = await _cards(games)
-        return {"id": series_id, "title": title, "color": color, "games": cards, "playlistId": await _series_playlist(series_id, cards)}
-
-    return await cached_json(f"games:series:v3:{series_id}", DAY, build, is_empty=lambda v: not v.get("games"))
-
-
-async def _series_playlist(series_id: str, cards: list[dict[str, Any]]) -> str | None:
-    """Hudba ze všech her série jedním playlistem (chronologicky, celé
-    soundtracky) -- jako stránka interpreta, jen pro hru."""
+async def stations(game: Game) -> list[str]:
+    """Rádia hry jako naše playlisty ("Radio Los Santos", obal hry): skladby
+    z nejlepšího fanouškovského playlistu stanice na Deezeru, jehož název
+    obsahuje stanici i hru. Měsíc v cache, playlist se obnovuje denně."""
+    from app import browse
     from app.catalog.deezer import get_deezer_client
     from app.home import generators as g
-    from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind, Release
+    from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
 
+    if not game.stations:
+        return []
+    img = await images(game)
     dz = get_deezer_client()
+    hints = [fold(h) for h in game.hints]
+
+    async def one(station: str) -> str | None:
+        async def fetch() -> dict[str, Any]:
+            want = [w for w in _words(station) if w not in ("fm", "radio", "the")] or _words(station)
+            for query in (f"{game.title} {station}", f"gta {station}"):
+                for p in await browse.search_playlists(query, limit=12, min_tracks=8, max_tracks=200):
+                    title = fold(p["title"])
+                    words = set(_words(p["title"]))
+                    if all(_covered(w, words) for w in want) and any(h in title for h in hints):
+                        return {"deezerId": p["deezerId"]}
+            return {}
+
+        try:
+            found = await cached_json(f"games:station:v1:{game.slug}:{station}", MONTH, fetch, is_empty=lambda v: not v)
+        except Exception:  # noqa: BLE001
+            return None
+        if not found.get("deezerId"):
+            return None
+        tracks = await dz.playlist_tracks(found["deezerId"], 100) or []
+        if not tracks:
+            return None
+        ids = await asyncio.to_thread(g._ingest_tracks, tracks)
+        if not ids:
+            return None
+        return g._save_playlist(
+            owner=GLOBAL_PLAYLIST_OWNER, source=f"games:station:{game.slug}:{fold(station)}", title=station,
+            description=game.title, kind=PlaylistKind.EDITORIAL, section="games", recording_ids=ids,
+            cover_urls=[img["cover"]] if img.get("cover") else [], ttl=g.DAILY_TTL,
+        )
+
+    async def cached(station: str) -> str | None:
+        hit = await cached_json(f"games:station-pl:v1:{game.slug}:{station}", DAY, lambda: _wrap(one(station)), is_empty=lambda v: not v.get("id"))
+        return hit.get("id")
+
+    out = []
+    for station in game.stations:
+        try:
+            pid = await cached(station)
+        except Exception:  # noqa: BLE001
+            logger.exception("rádio %s %s", game.slug, station)
+            pid = None
+        if pid:
+            out.append(pid)
+    return out
+
+
+async def _wrap(coro) -> dict[str, Any]:
+    return {"id": await coro}
+
+
+async def game_page(slug: str, cat: Catalog | None = None) -> dict[str, Any] | None:
+    cat = cat or GAMES_CATALOG
+    game = next((g for g in cat.items if g.slug == slug), None)
+    if game is None:
+        return None
+    card = await game_card(game, cat)
+    others = [g for g in cat.items if game.series and g.series == game.series and g.slug != slug]
+    return {**card, "seriesGames": await _cards(sorted(others, key=lambda g: g.year), cat), "stationIds": await stations(game)}
+
+
+async def series_page(series_id: str, cat: Catalog | None = None) -> dict[str, Any] | None:
+    cat = cat or GAMES_CATALOG
+    if series_id not in cat.series:
+        return None
+    title, color = cat.series[series_id]
+
+    async def build() -> dict[str, Any]:
+        items = sorted((g for g in cat.items if g.series == series_id), key=lambda g: g.year)
+        cards = await _cards(items, cat)
+        station_ids: list[str] = []
+        for item in reversed(items):  # nejnovější díl napřed
+            station_ids += await stations(item)
+        return {
+            "id": series_id, "title": title, "color": color, "games": cards, "unit": cat.series_unit,
+            "playlistId": await _series_playlist(cat, series_id, cards, station_ids), "stationIds": station_ids,
+        }
+
+    key = f"games:series:v5:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
+    return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("games"))
+
+
+async def _series_playlist(
+    cat: Catalog, series_id: str, cards: list[dict[str, Any]], station_ids: list[str] | None = None
+) -> str | None:
+    """Hudba ze všech dílů série jedním playlistem (chronologicky, celé
+    soundtracky) -- jako stránka interpreta."""
+    from app.home import generators as g
+    from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
+
     tracks: list[dict[str, Any]] = []
     for card in cards:
-        if not card.get("albumId"):
-            continue
+        if card.get("albumId"):
+            tracks += await _album_tracks(card["albumId"])
+    ids = await asyncio.to_thread(g._ingest_tracks, tracks[:400]) if tracks else []
+    if station_ids:
+        # GTA: hudba série = rádia všech dílů (soundtrack jako album nevyšel).
+        from app.models import PlaylistItem
+        from sqlmodel import select
+
         with Session(engine) as session:
-            rel = session.get(Release, card["albumId"])
-            dz_id = rel.deezer_id if rel else None
-        tracks += (await dz.album_tracks(str(dz_id)) or []) if dz_id else []
-    if not tracks:
+            for pid in station_ids:
+                ids += [
+                    i.recording_id
+                    for i in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == pid).order_by(PlaylistItem.position)).all()
+                ]
+        ids = list(dict.fromkeys(ids))[:800]
+    if not ids:
         return None
-    ids = await asyncio.to_thread(g._ingest_tracks, tracks[:400])
-    title = SERIES[series_id][0]
+    title = cat.series[series_id][0]
     return g._save_playlist(
-        owner=GLOBAL_PLAYLIST_OWNER, source=f"games:series:{series_id}", title=f"{title} · celá série",
-        description="Soundtracky všech her série", kind=PlaylistKind.EDITORIAL, section="games",
+        owner=GLOBAL_PLAYLIST_OWNER, source=f"{cat.ns}:series:{series_id}", title=f"{title} · celá série",
+        description="Soundtracky všech dílů série", kind=PlaylistKind.EDITORIAL, section=cat.ns,
         recording_ids=ids, cover_urls=[c["cover"] for c in cards if c.get("cover")][-4:], ttl=g.DAILY_TTL,
     )
+
+
+GAMES_CATALOG = Catalog(
+    ns="games",
+    items=GAMES,
+    series=SERIES,
+    mixes=GAME_MIXES,
+    labels=_LABELS,
+    sequel=frozenset(_SEQUEL),
+    rows=(
+        ("new", "Nové soundtracky", "new"),
+        ("indie", "Indie klenoty", "indie"),
+        ("retro", "Legendy 8/16-bit", "retro"),
+        ("czech", "Česká stopa", "czech"),
+    ),
+    all_title="Všechny hry",
+    series_unit="her",
+)

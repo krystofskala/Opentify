@@ -105,6 +105,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 /// zvlášť pro každou záložku.
 List<RouteBase> _detailRoutes() => [
       GoRoute(
+        path: 'games/list/:listId',
+        builder: (context, state) => GamesListScreen(base: 'games', listId: state.pathParameters['listId']!),
+      ),
+      GoRoute(
+        path: 'movies/list/:listId',
+        builder: (context, state) => GamesListScreen(base: 'movies', listId: state.pathParameters['listId']!),
+      ),
+      GoRoute(
+        path: 'movies/series/:seriesId',
+        builder: (context, state) => GameSeriesScreen(base: 'movies', seriesId: state.pathParameters['seriesId']!),
+      ),
+      GoRoute(
+        path: 'movies/:slug',
+        builder: (context, state) => GameScreen(base: 'movies', slug: state.pathParameters['slug']!),
+      ),
+      GoRoute(
         path: 'games/series/:seriesId',
         builder: (context, state) => GameSeriesScreen(seriesId: state.pathParameters['seriesId']!),
       ),

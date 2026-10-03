@@ -76,6 +76,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
   Widget build(BuildContext context) {
     // Herní soundtracky mají vlastní stránku (hry, série, skladatelé).
     if (widget.categoryId == 'games') return const GamesScreen();
+    if (widget.categoryId == 'movies') return const GamesScreen(base: 'movies', title: 'Filmy a seriály');
     final page = ref.watch(browsePageProvider(widget.categoryId));
     return Scaffold(
       bottomNavigationBar: const ShellBarSpace(),
