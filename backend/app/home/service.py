@@ -191,6 +191,7 @@ _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("mixes", "Vytvořeno pro tebe", "playlist_cards"),
     ("blends", "Společné mixy", "playlist_cards"),
     ("category_mixes", "Tvoje žánry", "playlist_cards"),
+    ("styles", "Tvé styly", "tag_chips"),
     ("czech", "Česká hudba", "genre_showcase"),
     ("popular_playlists", "Populární playlisty pro tebe", "deezer_playlists"),
     ("years", "Tvoje roky", "playlist_cards"),
@@ -323,41 +324,6 @@ def _playlist_tracks(session: Session, playlist_id: str, limit: int) -> list[Rec
         if recording is not None:
             out.append(_recording_out(session, recording))
     return out
-
-
-# Obecné styly, které jsou jen jiným názvem hlavního žánru (kategorie) --
-# vedle "Tvůj mix · Folk / Akustická" se "Tvůj mix · Folk" neukazuje.
-_STYLE_TO_CATEGORY = {
-    "alternative": "indie", "indie": "indie", "indie rock": "indie", "folk": "folk", "acoustic": "folk",
-    "singer-songwriter": "folk", "rock": "rock", "pop": "pop", "electronic": "electronic", "rap": "hiphop",
-    "hip-hop": "hiphop", "hip hop": "hiphop", "blues": "blues", "jazz": "jazz", "metal": "metal",
-    "heavy metal": "metal", "country": "country", "soul": "soul", "rnb": "rnb", "dance": "dance",
-    "bluegrass": "bluegrass", "classical": "classical", "reggae": "reggae",
-}
-
-
-def _style_mix_cards(session: Session, user_id: str, shown_categories: set[str]) -> list:
-    """Osobní mixy stylů profilu (Tvé styly, `personal:tag:<štítek>`) jako
-    karty -- v pořadí síly stylu, bez těch, co jen jinak pojmenovávají už
-    zobrazený hlavní žánr."""
-    from app.home import personal_mixes as pm_
-    from app.tags import slug
-
-    snap = session.get(HomeSnapshot, pm_.styles_key(user_id))
-    tags = list((snap.payload or {}).get("tags") or [])[:12] if snap else []
-    cards = []
-    for tag in tags:
-        p = session.exec(
-            select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == f"personal:tag:{slug(tag)}")
-        ).first()
-        if p is None:
-            continue
-        if _STYLE_TO_CATEGORY.get(slug(tag)) in shown_categories:
-            continue
-        card = _card(session, p)
-        if card.item_count > 0:
-            cards.append(card)
-    return cards
 
 
 def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, other_mixes, daily) -> list:
@@ -515,15 +481,18 @@ def build_home(user_id: str) -> dict[str, Any]:
                 if sec:
                     sections.append(sec)
                 continue
-            if key == "category_mixes":
-                # "Tvoje žánry" = žánry i podžánry/styly v jedné řadě: tvoje
-                # hlavní žánry ("Tvůj mix · Folk") a pak tvoje styly ("Tvůj
-                # mix · Bluegrass"), všechno osobní mixy s vinylem.
-                cards = list(cards_by_section.get("category_mixes") or [])
-                shown = {(c.source or "").rsplit(":", 1)[-1] for c in cards}
-                cards += _style_mix_cards(session, user_id, shown)
-                if cards:
-                    sections.append({"id": key, "title": title, "type": kind, "items": [c.model_dump(mode="json", by_alias=True) for c in cards]})
+            if key == "styles":
+                # Tvé styly (štítky Last.fm tvých interpretů, podle toho, co
+                # posloucháš teď) -> stránky stylů. Jiná funkce než "Tvoje
+                # žánry" (osobní mixy hlavních žánrů) -- uživatel je chce zvlášť.
+                snap = session.get(HomeSnapshot, pm.styles_key(user_id))
+                tags = (snap.payload or {}).get("tags") if snap else None
+                if tags:
+                    from app.tags import title_of
+
+                    sections.append(
+                        {"id": "styles", "title": title, "type": "tag_chips", "items": [{"tag": t, "title": title_of(t)} for t in tags]}
+                    )
                 continue
             if key == "popular_playlists":
                 snap = session.get(HomeSnapshot, pm.popular_playlists_key(user_id))
@@ -652,7 +621,7 @@ def default_entries(user_id: str) -> list[tuple[str, str]]:
         out.append((key, title))
         follow = {
             "mixes": ["year_ago", "forgotten", "unfinished", "anniversaries"],
-            "czech": ["deep_cuts", "artist_discovery", "album_picks"],
+            "styles": ["deep_cuts", "artist_discovery", "album_picks"],
             "charts": ["trending_tracks"],
             "new_releases": ["release_radar"],
             "editorial": ["shazam", "soundcloud", "family"],
