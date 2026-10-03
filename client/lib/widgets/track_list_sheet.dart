@@ -56,26 +56,11 @@ class _TrackListSheetState extends ConsumerState<_TrackListSheet> {
       expand: false,
       builder: (context, scrollController) => GlassSheet(
         expand: true,
-        showGrabber: false,
         child: FutureBuilder<List<RecordingModel>>(
           future: _future,
           builder: (context, snapshot) {
-            final header = SliverToBoxAdapter(
-              child: Column(
-                children: [
-                  const SizedBox(height: AppSpacing.xs),
-                  Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  SectionHeader(widget.title),
-                ],
-              ),
-            );
+            // Úchyt kreslí GlassSheet (stejný ve všech sheetech).
+            final header = SliverToBoxAdapter(child: SectionHeader(widget.title));
             if (snapshot.hasError) {
               return CustomScrollView(controller: scrollController, slivers: [
                 header,

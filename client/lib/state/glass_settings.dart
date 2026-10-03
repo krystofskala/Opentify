@@ -32,23 +32,23 @@ class GlassSliderController extends StateNotifier<double> {
 /// Profil › Vzhled › "Mléčnost skla": síla rozmazání obsahu pod sklem
 /// (0 = čiré, 1 = dvojnásobné proti původnímu; výchozí 0.1 -- schváleno).
 final glassFrostProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_frost', 0.1));
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_frost', 0.28));
 
 /// Profil › Vzhled › "Síla tónu": síla výplně skla (0 = bez tónu, 1 =
 /// dvojnásobná proti původnímu; výchozí 0.7 -- schváleno).
 final glassTintProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_tint', 0.7));
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_tint', 0.59));
 
 /// Profil › Vzhled › "Tmavost tónu": jak tmavá je výplň skla (výchozí 0.5 =
 /// dosavadní vzhled). Odděleně od barevnosti -- tmavé sklo nemusí být sytě
 /// barevné (živě: hodně barevné tmavé sklo vypadalo divně).
 final glassDarknessProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_darkness', 0.5));
+    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_darkness', 0.77));
 
 /// Profil › Vzhled › "Barevnost tónu": kolik barvy skladby sklo nese
 /// (0 = neutrální šedá, výchozí 0.7 = dosavadní vzhled).
 final glassColorfulnessProvider = StateNotifierProvider<GlassSliderController, double>(
-    (ref) => GlassSliderController('appearance.glass_colorfulness', 0.7));
+    (ref) => GlassSliderController('appearance.glass_colorfulness', 0.44));
 
 /// Profil › Vzhled › "Barva tónu": hlavní = převládající barva pozadí
 /// (sklo ladí s pozadím), kontrastní = výrazná barva obalu (akcent). Dřív
@@ -112,7 +112,7 @@ class GlassAccentTintController extends StateNotifier<bool> {
 enum GlassToneMode { auto, light, dark }
 
 class GlassToneController extends StateNotifier<GlassToneMode> {
-  GlassToneController() : super(GlassToneMode.dark) {
+  GlassToneController() : super(GlassToneMode.auto) {
     _load();
   }
 
@@ -256,6 +256,8 @@ class GlassOffController extends StateNotifier<bool> {
 }
 
 final glassOffProvider = StateNotifierProvider<GlassOffController, bool>((ref) => GlassOffController());
+
+// Výchozí hodnoty = nastavení majitele z telefonu (2026-10-03, profil "Já").
 
 /// Nastavení skla pro celý strom (`GlassContainer` je bez Riverpodu).
 class GlassSettings extends InheritedWidget {

@@ -657,21 +657,18 @@ Future<void> _showGrid(
     BuildContext context, String title, int count, Widget Function(BuildContext, int) itemBuilder, double aspect) {
   return showGlassSheet(
     context,
+    // Stejné rozměry, úchyt i nadpis jako sheet se skladbami (TrackListSheet).
     builder: (sheetContext) => DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.85,
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
       maxChildSize: 0.95,
       builder: (context, scroll) => GlassSheet(
         expand: true,
         child: CustomScrollView(
           controller: scroll,
           slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.sm),
-                child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-              ),
-            ),
+            SliverToBoxAdapter(child: SectionHeader(title)),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg),
               sliver: SliverGrid.builder(
