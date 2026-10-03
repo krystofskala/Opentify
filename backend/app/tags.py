@@ -88,6 +88,30 @@ async def _cached_only(key: str) -> Any:
     return json.loads(raw) if raw is not None else None
 
 
+async def tag_mix(tag: str) -> dict[str, Any]:
+    """"X · nejoblíbenější" (Last.fm) -- zvlášť, skládá se nejdéle."""
+    from app.home import generators as g
+    from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
+
+    t = slug(tag)
+
+    async def build() -> dict[str, Any]:
+        tracks = await lastfm.tag_top_tracks(t, limit=120)
+        random.Random(f"tag:{t}:{utcnow().date().isoformat()}").shuffle(tracks)
+        ids = await _resolve_tracks(tracks, MIX_SIZE)
+        if not ids:
+            return {"playlistId": None}
+        return {
+            "playlistId": g._save_playlist(
+                owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:tag:{t}", title=f"{title_of(t)} · nejoblíbenější",
+                description=f"{title_of(t)} -- co posluchači Last.fm pouštějí nejvíc", kind=PlaylistKind.GENRE,
+                section="browse", recording_ids=ids, cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
+            )
+        }
+
+    return await cached_json(f"tag:mix:v1:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("playlistId"))
+
+
 async def tag_playlists(tag: str) -> list[dict[str, Any]]:
     from app import browse as _browse
 
@@ -263,35 +287,24 @@ async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
     t = slug(tag)
 
     async def build() -> dict[str, Any]:
-        tracks, artist_names, album_items = await asyncio.gather(
-            lastfm.tag_top_tracks(t, limit=120), lastfm.tag_top_artists(t, 30), lastfm.tag_top_albums(t, 20)
-        )
-        random.Random(f"tag:{t}:{utcnow().date().isoformat()}").shuffle(tracks)
-        # Souběžně (Deezer limit ~10 req/s je hlavní brzda).
-        ids, artist_ids, album_ids = await asyncio.gather(
-            _resolve_tracks(tracks, MIX_SIZE),
+        # Bez mixu (40 skladeb přes Deezer = ~18 s) -- ten zvlášť, `tag_mix`.
+        artist_names, album_items = await asyncio.gather(lastfm.tag_top_artists(t, 30), lastfm.tag_top_albums(t, 20))
+        artist_ids, album_ids, about = await asyncio.gather(
             browse._resolve_artists(artist_names, 18, set()),
             browse._resolve_albums(album_items, 12),
+            lastfm.tag_summary(t),
         )
-        playlist_id = None
-        if ids:
-            playlist_id = g._save_playlist(
-                owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:tag:{t}", title=f"{title_of(t)} · nejoblíbenější",
-                description=f"{title_of(t)} -- co posluchači Last.fm pouštějí nejvíc", kind=PlaylistKind.GENRE,
-                section="browse", recording_ids=ids, cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
-            )
-        return {
-            "playlistId": playlist_id,
-            "artistIds": artist_ids,
-            "albumIds": album_ids,
-            "about": await lastfm.tag_summary(t),
-        }
+        return {"artistIds": artist_ids, "albumIds": album_ids, "about": about}
 
     # Hlavní obsah hned; osobní mix a playlisty z Deezeru jen když už jsou
     # hotové (jinak se dopočítají na pozadí a klient si je dotáhne zvlášť,
     # `/browse/tag-for-you`, `/browse/tag-playlists`) -- stránka dřív čekala
     # na všechno najednou.
-    data = await cached_json(f"tag:page:v2:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    data = await cached_json(f"tag:page:v3:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    mix_cached = await _cached_only(f"tag:mix:v1:{t}")
+    if mix_cached is None:
+        _background(f"mix:{t}", tag_mix(t))
+    data = {**data, "playlistId": (mix_cached or {}).get("playlistId")}
     for_you_id = _for_you_ready(t, user_id) if user_id else None
     if user_id and for_you_id is None:
         _background(f"for-you:{t}:{user_id}", tag_for_you(t, user_id))
@@ -332,3 +345,26 @@ async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
         ],
         "related": siblings[:10],
     }
+
+
+async def warm_style_pages() -> int:
+    """Denně na pozadí: stránky 8 nejsilnějších stylů profilu (Tvé styly)
+    předem -- otevřou se hned i napoprvé (studená stránka = desítky
+    dotazů na Deezer)."""
+    from app.home import generators as g
+    from app.home.personal_mixes import styles_key
+    from app.models import HomeSnapshot
+
+    user_id = g.home_user()
+    with Session(engine) as session:
+        snap = session.get(HomeSnapshot, styles_key(user_id))
+        styles = list((snap.payload or {}).get("tags") or [])[:8] if snap else []
+    for tag in styles:
+        try:
+            await tag_page(tag, None)
+            await tag_mix(tag)
+            await tag_playlists(tag)
+            await tag_for_you(tag, user_id)
+        except Exception:  # noqa: BLE001 - jeden styl nesmí zastavit ostatní
+            continue
+    return len(styles)

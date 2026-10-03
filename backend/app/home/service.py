@@ -73,6 +73,9 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
 
     registry.append(("personal:extra-sections", timedelta(minutes=30), extra_sections.build_enabled))
     registry.append(("personal:popular-playlists", g.DAILY_TTL, pm.build_popular_playlists))
+    from app import tags as _tags
+
+    registry.append(("personal:warm-styles", g.DAILY_TTL, _tags.warm_style_pages))
     from app.home.warm_artists import warm_artist_pages
 
     registry.append(("personal:warm-artists", g.DAILY_TTL, warm_artist_pages))

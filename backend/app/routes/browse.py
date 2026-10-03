@@ -37,6 +37,16 @@ async def tag_for_you(tag: str, current: tuple[str, str] = Depends(get_current_u
     return {"forYou": tags.playlist_card(await tags.tag_for_you(tag, current[0]))}
 
 
+@browse_router.get("/tag-mix/{tag:path}")
+async def tag_mix(tag: str, _current: tuple[str, str] = Depends(get_current_user)):
+    """Mix stylu "X · nejoblíbenější" -- zvlášť, skládá se nejdéle."""
+    from app import tags
+
+    if not tags.is_style(tag):
+        raise HTTPException(status_code=404, detail="tohle není hudební styl")
+    return {"mix": tags.playlist_card((await tags.tag_mix(tag)).get("playlistId"))}
+
+
 @browse_router.get("/tag-playlists/{tag:path}")
 async def tag_playlists(tag: str, _current: tuple[str, str] = Depends(get_current_user)):
     """Populární playlisty stylu z Deezeru -- zvlášť (první načtení trvá)."""

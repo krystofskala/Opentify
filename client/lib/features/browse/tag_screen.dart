@@ -47,10 +47,10 @@ class TagPage {
   final List<BrowseCategory> parents;
   final List<String> related;
 
-  TagPage copyWithExtras({HomePlaylistCard? forYou, List<BrowsePlaylist>? playlists}) => TagPage(
+  TagPage copyWithExtras({HomePlaylistCard? mix, HomePlaylistCard? forYou, List<BrowsePlaylist>? playlists}) => TagPage(
         tag: tag,
         title: title,
-        mix: mix,
+        mix: mix ?? this.mix,
         forYou: forYou ?? this.forYou,
         playlists: playlists ?? this.playlists,
         topArtists: topArtists,
@@ -81,6 +81,13 @@ class TagPage {
 final tagPageProvider = FutureProvider.autoDispose.family<TagPage, String>((ref, tag) async {
   final json = await ref.watch(apiClientProvider).getJson('/browse/tag/${Uri.encodeComponent(tag)}');
   return TagPage.fromJson(json);
+});
+
+/// Mix stylu "X · nejoblíbenější" zvlášť -- skládá se nejdéle.
+final tagMixProvider = FutureProvider.autoDispose.family<HomePlaylistCard?, String>((ref, tag) async {
+  final json = await ref.watch(apiClientProvider).getJson('/browse/tag-mix/${Uri.encodeComponent(tag)}');
+  final card = json['mix'];
+  return card == null ? null : HomePlaylistCard.fromJson(card as Map<String, dynamic>);
 });
 
 /// "Pro tebe · X" zvlášť -- skládá se déle, stránka na něj nečeká.
@@ -192,6 +199,7 @@ class TagScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     // Osobní mix a playlisty dorazí zvlášť, až budou hotové.
     final data = page.copyWithExtras(
+      mix: page.mix ?? ref.watch(tagMixProvider(tag)).valueOrNull,
       forYou: page.forYou ?? ref.watch(tagForYouProvider(tag)).valueOrNull,
       playlists: page.playlists.isNotEmpty ? page.playlists : ref.watch(tagPlaylistsProvider(tag)).valueOrNull,
     );
