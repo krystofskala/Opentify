@@ -203,8 +203,10 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
               ),
           ],
         ),
-        // Tab bar zajede dolů a zeslábne.
+        // Tab bar zajede dolů a zeslábne. Ořez jen během smršťování --
+        // zvednutá kapka výběru smí přesahovat nad lištu (na PC useknutá).
         ClipRect(
+          clipBehavior: t > 0 ? Clip.hardEdge : Clip.none,
           child: Align(
             alignment: Alignment.topCenter,
             heightFactor: 1 - t,
