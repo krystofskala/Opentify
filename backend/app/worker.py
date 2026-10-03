@@ -208,9 +208,8 @@ def _start_job(job_id: str) -> dict | None:
             "soundcloud_url": (recording.external_refs or {}).get("soundcloudUrl") if recording else None,
             "attempts": job.attempts,
             "max_attempts": job.max_attempts,
-            "non_music": is_non_music(session.get(Release, recording.release_id))
-            if recording and recording.release_id
-            else False,
+            "non_music": bool(recording and (recording.external_refs or {}).get("junk"))
+            or (is_non_music(session.get(Release, recording.release_id)) if recording and recording.release_id else False),
         }
 
 
