@@ -169,7 +169,7 @@ MOVIES_CATALOG = Catalog(
     ),
     all_title="Všechny filmy a seriály",
     series_unit="filmů",
-    page_version="v6",
+    page_version="v7",
     strict_core=True,
-    ost_version="v6",
+    ost_version="v7",
 )

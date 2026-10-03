@@ -340,7 +340,7 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
     from app.catalog.deezer_ingest import ingest_album, ingest_artist
 
     cat = cat or GAMES_CATALOG
-    version = "v6" if cat.ns == "games" else cat.ost_version
+    version = "v7" if cat.ns == "games" else cat.ost_version
 
     async def fetch() -> dict[str, Any]:
         dz = get_deezer_client()
@@ -368,7 +368,7 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
                     if any(bad in low for bad in _NOT_OST):
                         continue
                     # Rok v názvu jiný než rok díla = jiný díl / remake ("God of War (2005)").
-                    if any(abs(int(y) - game.year) > 1 for y in re.findall(r"\b(?:19|20)\d{2}\b", title)):
+                    if any(abs(int(y) - game.year) > 1 for y in re.findall(r"\b(?:19|20)\d{2}\b", title) if y not in game.title):
                         continue
                     tracks = int(h.get("nb_tracks") or 0)
                     if tracks and tracks < 5:
@@ -554,7 +554,7 @@ async def page(cat: Catalog | None = None) -> dict[str, Any]:
             ],
         }
 
-    key = "games:page:v9" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
+    key = "games:page:v10" if cat.ns == "games" else f"{cat.ns}:page:{cat.page_version}"
     return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("rows"))
 
 
@@ -654,7 +654,7 @@ async def series_page(series_id: str, cat: Catalog | None = None) -> dict[str, A
             "playlistId": await _series_playlist(cat, series_id, cards, station_ids), "stationIds": station_ids,
         }
 
-    key = f"games:series:v7:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
+    key = f"games:series:v8:{series_id}" if cat.ns == "games" else f"{cat.ns}:series:{cat.page_version}:{series_id}"
     return await cached_json(key, DAY, build, is_empty=lambda v: not v.get("games"))
 
 
