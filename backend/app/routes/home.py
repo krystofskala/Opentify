@@ -269,17 +269,56 @@ async def set_home_layout(body: HomeLayoutIn, current: tuple[str, str] = Depends
     from app.models import HomeSnapshot
     from app.utils import utcnow
 
-    known = {e["id"] for e in layout_entries(current[0])}
+    before = {e["id"]: e["visible"] for e in layout_entries(current[0])}
+    known = set(before)
     order = [i for i in dict.fromkeys(body.order) if i in known]
-    hidden = [i for i in dict.fromkeys(body.hidden) if i in known]
+    hidden = {i for i in body.hidden if i in known}
+    # Prázdné pořadí = "Výchozí" (vše zpět, i zapnutí/vypnutí).
+    visible = {sid: sid not in hidden for sid in known} if order else {}
     with Session(engine) as session:
         row = session.get(HomeSnapshot, layout_key(current[0])) or HomeSnapshot(key=layout_key(current[0]))
-        row.payload = {"order": order, "hidden": hidden}
+        row.payload = {"order": order, "visible": visible}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    # Právě zapnuté nové sekce sestavit hned, ne až při dalším běhu.
+    turned_on = [sid for sid, on in visible.items() if on and not before.get(sid)]
+    if turned_on:
+        from app.home import extra_sections
+
+        asyncio.create_task(extra_sections.build_now(current[0], turned_on))
+    await invalidate_home_cache()
+    return {"sections": layout_entries(current[0])}
+
+
+class ShareListeningIn(BaseModel):
+    on: bool
+
+
+@home_router.get("/share-listening")
+def get_share_listening(current: tuple[str, str] = Depends(get_current_user)):
+    """Sdílí profil, co poslouchá, s ostatními profily (sekce "Co poslouchá rodina")?"""
+    from app.home.extra_sections import shares_listening
+
+    with Session(engine) as session:
+        return {"on": shares_listening(session, current[0])}
+
+
+@home_router.put("/share-listening")
+async def set_share_listening(body: ShareListeningIn, current: tuple[str, str] = Depends(get_current_user)):
+    from app.home.extra_sections import share_key
+    from app.home.service import invalidate_home_cache
+    from app.models import HomeSnapshot
+    from app.utils import utcnow
+
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, share_key(current[0])) or HomeSnapshot(key=share_key(current[0]))
+        row.payload = {"on": body.on}
         row.generated_at = utcnow()
         session.add(row)
         session.commit()
     await invalidate_home_cache()
-    return {"sections": layout_entries(current[0])}
+    return {"on": body.on}
 
 
 _refresh_running = False

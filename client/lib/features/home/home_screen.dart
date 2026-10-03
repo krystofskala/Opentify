@@ -336,6 +336,36 @@ class _HomeSectionView extends StatelessWidget {
             TagChips(tags: [for (final t in section.tags) t.tag], titles: [for (final t in section.tags) t.title]),
           ],
         );
+      case HomeSectionType.artistCards:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(section.title),
+            SizedBox(
+              height: 190,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: section.artists.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) {
+                  final a = section.artists[index];
+                  return SizedBox(
+                    width: 130,
+                    child: MediaCard(
+                      title: a.name,
+                      imageUrl: a.images.isEmpty ? null : a.images.first,
+                      shape: MediaCardShape.circle,
+                      placeholderIcon: Symbols.person_rounded,
+                      artworkKey: (releaseId: null, artistId: a.id),
+                      onTap: () => context.push('/artists/${a.id}'),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
       case HomeSectionType.deezerPlaylists:
         // Populární playlisty pro tvé styly (Deezer) -- převezmou se až na klepnutí.
         return Column(
@@ -466,7 +496,8 @@ class _HomeSectionView extends StatelessWidget {
 
 Widget _albumCard(BuildContext context, HomeAlbumCard album, int? index) => MediaCard(
       title: album.title,
-      subtitle: album.artistName,
+      // Poznámka sekce ("30 let", "zbývá 6 skladeb") za interpretem.
+      subtitle: album.badge == null ? album.artistName : [album.artistName, album.badge].whereType<String>().join(' · '),
       imageUrl: album.images.isEmpty ? null : album.images.first,
       artworkKey: (releaseId: album.id, artistId: album.artistId),
       onTap: () => context.push('/releases/${album.id}'),

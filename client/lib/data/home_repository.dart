@@ -1,7 +1,7 @@
 import '../core/api_client.dart';
 import '../core/media_url.dart';
 import '../models/recording_model.dart';
-import 'browse_repository.dart' show BrowseCategory, BrowsePlaylist;
+import 'browse_repository.dart' show BrowseArtist, BrowseCategory, BrowsePlaylist;
 
 /// Karta playlistu na Domů (žebříček, žánr, výběr, osobní mix).
 class HomePlaylistCard {
@@ -78,6 +78,7 @@ class HomeAlbumCard {
     this.artistName,
     this.releaseDate,
     this.images = const [],
+    this.badge,
   });
 
   final String id;
@@ -87,6 +88,9 @@ class HomeAlbumCard {
   final String? releaseDate;
   final List<String> images;
 
+  /// Krátká poznámka sekce ("30 let", "zbývá 6 skladeb", "nové album").
+  final String? badge;
+
   factory HomeAlbumCard.fromJson(Map<String, dynamic> json) => HomeAlbumCard(
         id: json['id'] as String,
         title: json['title'] as String,
@@ -94,16 +98,18 @@ class HomeAlbumCard {
         artistName: json['artistName'] as String?,
         releaseDate: json['releaseDate'] as String?,
         images: resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>()),
+        badge: json['badge'] as String?,
       );
 }
 
-enum HomeSectionType { continueListening, quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, unknown }
+enum HomeSectionType { continueListening, quickPicks, playlistCards, albumCards, artistCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'continue' => HomeSectionType.continueListening,
       'quick_picks' => HomeSectionType.quickPicks,
       'playlist_cards' => HomeSectionType.playlistCards,
       'album_cards' => HomeSectionType.albumCards,
+      'artist_cards' => HomeSectionType.artistCards,
       'track_rail' => HomeSectionType.trackRail,
       'category_tiles' => HomeSectionType.categoryTiles,
       'genre_showcase' => HomeSectionType.genreShowcase,
@@ -127,7 +133,11 @@ class HomeSection {
     this.categoryId,
     this.tags = const [],
     this.deezerPlaylists = const [],
+    this.artists = const [],
   });
+
+  /// "Interpreti, které bys mohl znát".
+  final List<BrowseArtist> artists;
 
   /// "Populární playlisty pro tebe": playlisty z Deezeru (otevřou se až na klepnutí).
   final List<BrowsePlaylist> deezerPlaylists;
@@ -175,6 +185,7 @@ class HomeSection {
       categories: type == HomeSectionType.categoryTiles ? items.map(BrowseCategory.fromJson).toList() : const [],
       deezerPlaylists:
           type == HomeSectionType.deezerPlaylists ? items.map(BrowsePlaylist.fromJson).toList() : const [],
+      artists: type == HomeSectionType.artistCards ? items.map(BrowseArtist.fromJson).toList() : const [],
     );
   }
 }

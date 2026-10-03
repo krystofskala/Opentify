@@ -8,6 +8,7 @@ jedou po staru jen z Deezeru.
 from __future__ import annotations
 
 import asyncio
+import re
 import random
 from collections import Counter
 from typing import Any
@@ -24,11 +25,23 @@ def norm(name: str) -> str:
     return _normalize(primary_artist_name(name or ""))
 
 
+def lastfm_name(name: str) -> str:
+    """Jméno pro Last.fm: celé (kapela "Angus & Julia Stone" není "Angus"),
+    jen bez dalších interpretů za ";" a bez "feat. X"."""
+    first = (name or "").split(";")[0]
+    return re.split(r"\s+(?:feat\.?|ft\.?|featuring)\s+", first, flags=re.I)[0].strip()
+
+
 async def similar_artist_names(name: str, limit: int = 30, min_match: float = 0.08) -> list[tuple[str, float]]:
     """[(jméno, shoda 0-1)] podobných interpretů podle posluchačů."""
     if not name:
         return []
-    items = await lastfm.similar_artists(primary_artist_name(name), limit=limit)
+    # Napřed celé jméno: "Angus & Julia Stone" je kapela, "Angus" (hlavní
+    # jméno) je úplně jiný -- metalový -- interpret. Zkrácené jen jako záloha
+    # ("X feat. Y", "AURORA;Pomme").
+    items = await lastfm.similar_artists(lastfm_name(name), limit=limit)
+    if not items and primary_artist_name(name) != name:
+        items = await lastfm.similar_artists(primary_artist_name(name), limit=limit)
     return [(i["name"], i["match"]) for i in items if i.get("match", 0) >= min_match]
 
 
@@ -36,7 +49,7 @@ async def artist_tags(name: str) -> list[str]:
     """Styly interpreta (štítky Last.fm), nejsilnější první."""
     from app.tags import is_style
 
-    info = await lastfm.artist_info(primary_artist_name(name)) if name else None
+    info = await lastfm.artist_info(lastfm_name(name)) if name else None
     return [t.lower() for t in (info or {}).get("tags") or [] if is_style(t)]
 
 
@@ -47,7 +60,7 @@ def _track_info(recording_ids: list[str]) -> list[tuple[str, str]]:
             rec = session.get(Recording, rid)
             artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
             if rec is not None and artist is not None and rec.title:
-                out.append((primary_artist_name(artist.name), rec.title))
+                out.append((lastfm_name(artist.name), rec.title))
     return out
 
 
@@ -136,7 +149,7 @@ async def user_styles_weighted(top_artists: list[tuple[str, float]], limit: int 
 
     async def tags_of(name: str) -> list[tuple[str, int]]:
         async with sem:
-            return await artist_top_tags(primary_artist_name(name))
+            return await artist_top_tags(lastfm_name(name))
 
     tag_lists = await asyncio.gather(*(tags_of(n) for n, _w in top_artists))
     score: Counter = Counter()

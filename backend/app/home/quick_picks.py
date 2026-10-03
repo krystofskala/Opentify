@@ -54,8 +54,8 @@ def _aware(dt):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter]:
-    """(váha kontextu, váha interpreta) pro TEĎ."""
+def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter, Counter]:
+    """(váha kontextu, váha interpreta, váha skladby) pro TEĎ."""
     now = utcnow()
     local_now = now.astimezone(_TZ)
     hour_now = local_now.hour + local_now.minute / 60
@@ -88,12 +88,12 @@ def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter]:
         ).all():
             if artist_id:
                 artists[artist_id] += rec_w[rid]
-    return ctx, artists
+    return ctx, artists, rec_w
 
 
 def rank(session: Session, user_id: str, candidates: list[Playlist], liked_id: str | None) -> list[Playlist]:
     """Kandidáti seřazení podle toho, jak sedí na tuhle denní dobu."""
-    ctx, artists = time_profile(session, user_id)
+    ctx, artists, _recs = time_profile(session, user_id)
     if not ctx and not artists:
         return candidates
     max_ctx = max(ctx.values(), default=0) or 1.0

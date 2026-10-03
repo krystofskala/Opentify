@@ -160,6 +160,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     buttonLabel: 'Upravit',
                     onPressed: () => showHomeLayoutSheet(context),
                   ),
+                  const _ShareListeningRow(),
                   _ActionRow(
                     icon: Symbols.category_rounded,
                     title: 'Žánry na Domů',
@@ -1072,6 +1073,55 @@ class _LogoutButton extends ConsumerWidget {
           reloadPage();
         },
       ),
+    );
+  }
+}
+
+
+/// Profil › Domů: sdílet, co poslouchám, s ostatními profily (jejich sekce
+/// "Co poslouchá rodina"). Ve výchozím stavu vypnuté.
+class _ShareListeningRow extends ConsumerStatefulWidget {
+  const _ShareListeningRow();
+
+  @override
+  ConsumerState<_ShareListeningRow> createState() => _ShareListeningRowState();
+}
+
+class _ShareListeningRowState extends ConsumerState<_ShareListeningRow> {
+  bool? _on;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.read(apiClientProvider).getJson('/home/share-listening').then((json) {
+      if (mounted) setState(() => _on = json['on'] as bool? ?? false);
+    }).catchError((Object _) {
+      if (mounted) setState(() => _on = false);
+    });
+  }
+
+  Future<void> _set(bool on) async {
+    setState(() => _on = on);
+    try {
+      await ref.read(apiClientProvider).putJson('/home/share-listening', body: {'on': on});
+    } catch (_) {
+      if (mounted) setState(() => _on = !on);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      secondary: const Icon(Symbols.group_rounded),
+      title: const Text('Sdílet, co poslouchám'),
+      subtitle: Text(
+        'Ostatní profily uvidí tvé poslední skladby v sekci „Co poslouchá rodina“.',
+        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      value: _on ?? false,
+      onChanged: _on == null ? null : _set,
     );
   }
 }

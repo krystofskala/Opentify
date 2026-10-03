@@ -209,6 +209,18 @@ async def similar_tracks(artist: str, title: str, limit: int = 30) -> list[dict[
     ]
 
 
+async def artist_top_tracks(name: str, limit: int = 60) -> list[dict[str, Any]]:
+    """Nejposlouchanější skladby interpreta na Last.fm (pořadí = popularita)."""
+    data = await get(
+        {"method": "artist.gettoptracks", "artist": name, "autocorrect": "1", "limit": str(limit)}, ttl=DAY
+    )
+    return [
+        {"title": t.get("name"), "artist": (t.get("artist") or {}).get("name") or name, "playcount": _int(t.get("playcount"))}
+        for t in _as_list(((data or {}).get("toptracks") or {}).get("track"))
+        if t.get("name")
+    ]
+
+
 async def top_albums(name: str, limit: int = 30) -> list[dict[str, Any]]:
     data = await get(
         {"method": "artist.gettopalbums", "artist": name, "autocorrect": "1", "limit": str(limit)}, ttl=DAY

@@ -69,6 +69,9 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
     registry.append(("personal:styles", g.DAILY_TTL, pm.build_styles))
+    from app.home import extra_sections
+
+    registry.append(("personal:extra-sections", timedelta(minutes=30), extra_sections.build_enabled))
     registry.append(("personal:popular-playlists", g.DAILY_TTL, pm.build_popular_playlists))
     from app.home.warm_artists import warm_artist_pages
 
@@ -505,6 +508,17 @@ def build_home(user_id: str) -> dict[str, Any]:
                             "items": [t.model_dump(mode="json", by_alias=True) for t in tracks],
                         }
                     )
+        # Volitelné sekce (Profil › Domů) -- jen zapnuté, ze snapshotů.
+        from app.home import extra_sections as xs
+
+        layout = get_layout(session, user_id)
+        for spec in xs.SPECS:
+            if is_visible(layout, spec.id):
+                try:
+                    sections += xs.render(session, user_id, spec.id)
+                except Exception:  # noqa: BLE001 - jedna sekce nesmí shodit Domů
+                    logger.exception("sekce %s se nepodařilo vykreslit", spec.id)
+
         # "Pokračovat v poslechu" skládá klient (`/home/recent`) -- tady jen
         # zástupce, ať jde řadit a skrýt jako ostatní sekce.
         sections.insert(0, {"id": "continue", "title": "Pokračovat v poslechu", "type": "continue", "items": []})
@@ -515,67 +529,99 @@ def layout_key(user_id: str) -> str:
     return f"home_layout:{user_id}"
 
 
-def get_layout(session: Session, user_id: str) -> dict[str, list[str]]:
+# Výchozí stav: základní sada zapnutá, ostatní (a všechny nové sekce) si
+# profil zapne sám v Profil › Domů -- ať si každý dá přesně, co mu přináší.
+DEFAULT_OFF = {
+    "years", "trending_tracks", "top_albums", "genres", "editorial", "popular_playlists",
+    "now_mix", "year_ago", "forgotten", "unfinished", "anniversaries", "release_radar", "deep_cuts",
+    "artist_discovery", "album_picks", "shazam", "soundcloud", "family",
+}
+
+
+def get_layout(session: Session, user_id: str) -> dict[str, Any]:
+    """{"order": [...], "visible": {id: bool}} -- jen to, co profil sám změnil."""
     row = session.get(HomeSnapshot, layout_key(user_id))
     payload = (row.payload or {}) if row else {}
-    return {"order": list(payload.get("order") or []), "hidden": list(payload.get("hidden") or [])}
+    visible = dict(payload.get("visible") or {})
+    for sid in payload.get("hidden") or []:  # starší tvar (jen skryté)
+        visible.setdefault(sid, False)
+    return {"order": list(payload.get("order") or []), "visible": visible}
+
+
+def is_visible(layout: dict[str, Any], section_id: str) -> bool:
+    return bool(layout["visible"].get(section_id, section_id not in DEFAULT_OFF))
+
+
+def section_enabled(user_id: str, section_id: str) -> bool:
+    with Session(engine) as session:
+        return is_visible(get_layout(session, user_id), section_id)
 
 
 def _layout_id(section_id: str) -> str:
-    # "Novinky: žánr" patří ke svému žánru (jedna položka v úpravě Domů).
-    return "genre_" + section_id[len("genre_new_"):] if section_id.startswith("genre_new_") else section_id
+    # "Novinky: žánr" patří ke svému žánru, "X poslouchá" k sekci rodiny.
+    if section_id.startswith("genre_new_"):
+        return "genre_" + section_id[len("genre_new_"):]
+    if section_id.startswith("family_"):
+        return "family"
+    return section_id
+
+
+def default_entries(user_id: str) -> list[tuple[str, str]]:
+    """Všechny sekce Domů ve výchozím pořadí (id, název)."""
+    from app import browse
+    from app.home.extra_sections import SPECS
+
+    extra = {s.id: s.title for s in SPECS}
+    out: list[tuple[str, str]] = [("continue", "Pokračovat v poslechu"), ("quick_picks", "Rychlý výběr")]
+    if "now_mix" in extra:
+        out.append(("now_mix", extra["now_mix"]))
+    out += [(f"genre_{c.id}", c.title) for c in browse.pinned_genres(user_id)]
+    for key, title, _kind in _SECTION_ORDER:
+        out.append((key, title))
+        follow = {
+            "mixes": ["year_ago", "forgotten", "unfinished", "anniversaries"],
+            "styles": ["deep_cuts", "artist_discovery", "album_picks"],
+            "charts": ["trending_tracks"],
+            "new_releases": ["release_radar"],
+            "editorial": ["shazam", "soundcloud", "family"],
+        }.get(key, [])
+        for sid in follow:
+            out.append((sid, "Populární ve světě" if sid == "trending_tracks" else extra.get(sid, sid)))
+    return out
+
+
+def effective_order(user_id: str, layout: dict[str, Any]) -> list[str]:
+    """Uložené pořadí + sekce, které v něm nejsou (nové), za svého
+    výchozího předchůdce."""
+    defaults = [sid for sid, _t in default_entries(user_id)]
+    order = [sid for sid in layout["order"] if sid in defaults]
+    if not order:
+        return defaults
+    for i, sid in enumerate(defaults):
+        if sid in order:
+            continue
+        prev = next((defaults[j] for j in range(i - 1, -1, -1) if defaults[j] in order), None)
+        order.insert(order.index(prev) + 1 if prev else 0, sid)
+    return order
 
 
 def apply_layout(session: Session, user_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Pořadí a skrytí sekcí podle profilu (Domů › Upravit). Sekce, které
-    v uloženém pořadí nejsou (nové), zůstávají na svém výchozím místě
-    vůči ostatním."""
+    """Pořadí a skrytí sekcí podle profilu (Profil › Domů)."""
     layout = get_layout(session, user_id)
-    hidden = set(layout["hidden"])
-    order = {sid: i for i, sid in enumerate(layout["order"])}
-    visible = [s for s in sections if _layout_id(s["id"]) not in hidden]
-    if not order:
-        return visible
-    # Výchozí pozice neznámých sekcí: hned za nejbližší známou předchozí.
-    keyed = []
-    last = -1.0
-    for default_pos, s in enumerate(visible):
-        lid = _layout_id(s["id"])
-        if lid in order:
-            last = float(order[lid])
-            keyed.append((last, default_pos, s))
-        else:
-            keyed.append((last + 0.5, default_pos, s))
-    keyed.sort(key=lambda k: (k[0], k[1]))
-    return [s for _o, _d, s in keyed]
+    pos = {sid: i for i, sid in enumerate(effective_order(user_id, layout))}
+    visible = [s for s in sections if is_visible(layout, _layout_id(s["id"]))]
+    return [s for _p, _i, s in sorted(((pos.get(_layout_id(s["id"]), 10_000), i, s) for i, s in enumerate(visible)), key=lambda k: (k[0], k[1]))]
 
 
 def layout_entries(user_id: str) -> list[dict[str, Any]]:
-    """Všechny sekce, které Domů pro profil umí, v jeho pořadí, i se skrytými."""
-    from app import browse
-
-    defaults: list[tuple[str, str]] = [("continue", "Pokračovat v poslechu"), ("quick_picks", "Rychlý výběr")]
-    defaults += [(f"genre_{c.id}", c.title) for c in browse.pinned_genres(user_id)]
-    defaults += [(key, title) for key, title, _kind in _SECTION_ORDER]
-    charts_at = next(i for i, (k, _t) in enumerate(defaults) if k == "charts")
-    defaults.insert(charts_at + 1, ("trending_tracks", "Populární ve světě"))
+    """Všechny sekce Domů v pořadí profilu, i se skrytými (Profil › Domů)."""
+    titles = dict(default_entries(user_id))
     with Session(engine) as session:
         layout = get_layout(session, user_id)
-    hidden = set(layout["hidden"])
-    order = {sid: i for i, sid in enumerate(layout["order"])}
-    entries = [{"id": sid, "title": title, "visible": sid not in hidden} for sid, title in defaults]
-    if order:
-        last = -1.0
-        keyed = []
-        for pos, e in enumerate(entries):
-            if e["id"] in order:
-                last = float(order[e["id"]])
-                keyed.append((last, pos, e))
-            else:
-                keyed.append((last + 0.5, pos, e))
-        keyed.sort(key=lambda k: (k[0], k[1]))
-        entries = [e for _o, _p, e in keyed]
-    return entries
+    return [
+        {"id": sid, "title": titles.get(sid, sid), "visible": is_visible(layout, sid)}
+        for sid in effective_order(user_id, layout)
+    ]
 
 
 async def get_home(user_id: str) -> dict[str, Any]:
