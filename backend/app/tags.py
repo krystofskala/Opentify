@@ -11,9 +11,10 @@ import random
 import re
 from typing import Any
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.catalog import lastfm
+from app.catalog.artwork import _normalize
 from app.catalog.cache import cached_json
 from app.db import engine
 from app.utils import utcnow
@@ -50,11 +51,22 @@ _NOT_STYLE = {
     "female vocalists", "female vocalist", "male vocalist", "under 2000 listeners", "my favorite", "albums i own",
     "spotify", "check out", "00s", "10s", "20s", "90s", "80s", "70s", "60s", "50s", "british", "american",
     "usa", "uk", "canadian", "australian", "german", "french", "swedish", "czech", "slovak",
+    # Národnosti a nástroje -- nejsou to styly (z artist.getTopTags).
+    "norwegian", "scottish", "irish", "english", "danish", "finnish", "icelandic", "dutch", "belgian", "spanish",
+    "italian", "polish", "japanese", "korean", "brazilian", "mexican", "south africa", "south african", "new zealand",
+    "austrian", "swiss", "russian", "ukrainian", "israeli", "argentina", "argentinian", "chilean", "colombian",
+    "guitar", "harmonica", "banjo", "piano", "violin", "cello", "saxophone", "trumpet", "drums", "bass", "ukulele",
+    "mandolin", "fiddle", "vocal", "vocals", "male", "female", "singer", "songwriter", "band", "duo", "cover",
+    "covers", "live", "favourites", "favorite songs", "favourite songs", "seen live", "all", "good", "cool",
 }
 _DECADE = re.compile(r"^\d{2,4}s$")
 
 TAG_TTL_S = 12 * 60 * 60
 MIX_SIZE = 40
+
+
+async def _none() -> None:
+    return None
 
 
 def slug(tag: str) -> str:
@@ -107,7 +119,89 @@ async def _resolve_tracks(items: list[dict[str, str]], limit: int) -> list[str]:
     return (await asyncio.to_thread(g._ingest_tracks, found[:limit])) if found else []
 
 
-async def tag_page(tag: str) -> dict[str, Any]:
+async def tag_for_you(tag: str, user_id: str) -> str | None:
+    """"Pro tebe · X": skladby stylu podle profilu -- tvoje (poslouchané,
+    oblíbené, z knihovny) od interpretů, kteří ten styl hrají, doplněné
+    nejposlouchanějšími skladbami stylu od jim podobných interpretů. Jednou
+    denně; vrací id playlistu nebo None (styl u tebe skoro není)."""
+    from app.catalog.lastfm import artist_top_tags
+    from app.home import generators as g
+    from app.home import lastfm_taste as lt
+    from app.home.personal_mixes import load_taste
+    from app.models import Playlist, PlaylistKind
+
+    t = slug(tag)
+    source = f"personal:tag:{t}"
+    today = utcnow().date()
+    with Session(engine) as session:
+        existing = session.exec(select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == source)).first()
+        if existing is not None and existing.generated_at and existing.generated_at.date() == today:
+            return existing.id
+
+    taste = await asyncio.to_thread(load_taste, user_id)
+    now = utcnow()
+    rec_weight: dict[str, float] = {}
+    artist_weight: dict[str, float] = {}
+    liked = set(taste.liked)
+    for rid, artist_id in taste.artist_of.items():
+        w = 0.1 + 0.3 * (rid in liked) + 0.05 * taste.listen_counts.get(rid, 0)
+        if rid in taste.last_played:
+            w += 0.5 ** ((now - taste.last_played[rid]).total_seconds() / 86400 / 30)
+        rec_weight[rid] = w
+        artist_weight[artist_id] = artist_weight.get(artist_id, 0.0) + w
+    top_artists = sorted(artist_weight, key=lambda a: -artist_weight[a])[:70]
+    names = {a: taste.artist_name.get(a) for a in top_artists}
+    sem = asyncio.Semaphore(6)
+
+    async def plays_tag(artist_id: str) -> bool:
+        name = names.get(artist_id)
+        if not name:
+            return False
+        async with sem:
+            tags = await artist_top_tags(name)
+        return any(slug(n) == t and c >= 15 for n, c in tags)
+
+    flags = await asyncio.gather(*(plays_tag(a) for a in top_artists))
+    tag_artists = [a for a, ok in zip(top_artists, flags) if ok]
+    rng = random.Random(f"{source}:{today.isoformat()}")
+    own_by_artist: dict[str, list[str]] = {}
+    for rid, artist_id in taste.artist_of.items():
+        if artist_id in tag_artists:
+            own_by_artist.setdefault(artist_id, []).append(rid)
+    own: list[str] = []
+    for artist_id in tag_artists:
+        picks = sorted(own_by_artist.get(artist_id, []), key=lambda r: -rec_weight[r] * (0.7 + 0.6 * rng.random()))
+        own += picks[:3]
+    rng.shuffle(own)
+    own = own[:26]
+
+    # Objevy: nejposlouchanější skladby stylu (Last.fm) od interpretů, které
+    # už posloucháš, nebo jim podobných -- ne celý svět stylu.
+    known_names = {_normalize(names[a] or "") for a in tag_artists}
+    similar: set[str] = set()
+    for a in tag_artists[:6]:
+        similar |= {_normalize(n) for n, _m in await lt.similar_artist_names(names[a] or "", 25)}
+    pool = [x for x in await lastfm.tag_top_tracks(t, limit=200) if _normalize(x["artist"]) in (known_names | similar)]
+    rng.shuffle(pool)
+    discovery = [r for r in await _resolve_tracks(pool, 20) if r not in set(own)][:14]
+    if len(own) + len(discovery) < 12 or len(own) < 4:
+        return None
+    ids: list[str] = []
+    while own or discovery:
+        ids += own[:2]
+        own = own[2:]
+        ids += discovery[:1]
+        discovery = discovery[1:]
+    ids = list(dict.fromkeys(ids))[:40]
+    return g._save_playlist(
+        owner=user_id, source=source, title=f"Pro tebe · {title_of(t)}",
+        description=f"{title_of(t)} podle tebe -- tvoje oblíbené a objevy od podobných interpretů",
+        kind=PlaylistKind.PERSONAL_MIX, section="tag", recording_ids=ids, cover_urls=g._covers_for(ids[:4]),
+        ttl=g.DAILY_TTL,
+    )
+
+
+async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
     """Stránka stylu: mix (náš playlist ze štítku), interpreti, alba, popis,
     příbuzné styly. Cache 12 h, mix se mění denně."""
     from app import browse
@@ -130,8 +224,8 @@ async def tag_page(tag: str) -> dict[str, Any]:
         playlist_id = None
         if ids:
             playlist_id = g._save_playlist(
-                owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:tag:{t}", title=title_of(t),
-                description=f"{title_of(t)} -- mix podle posluchačů Last.fm", kind=PlaylistKind.GENRE,
+                owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:tag:{t}", title=f"{title_of(t)} · nejoblíbenější",
+                description=f"{title_of(t)} -- co posluchači Last.fm pouštějí nejvíc", kind=PlaylistKind.GENRE,
                 section="browse", recording_ids=ids, cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
             )
         return {
@@ -141,7 +235,13 @@ async def tag_page(tag: str) -> dict[str, Any]:
             "about": await lastfm.tag_summary(t),
         }
 
-    data = await cached_json(f"tag:page:v1:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    from app import browse as _browse
+
+    data, for_you_id, playlists = await asyncio.gather(
+        cached_json(f"tag:page:v2:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("artistIds")),
+        tag_for_you(t, user_id) if user_id else _none(),
+        cached_json(f"tag:playlists:v1:{t}", TAG_TTL_S, lambda: _browse.search_playlists(t, 10, popular=True), is_empty=lambda v: not v),
+    )
     from app.home.service import _card
     from app.models import Artist, Playlist, Release
 
@@ -150,6 +250,10 @@ async def tag_page(tag: str) -> dict[str, Any]:
         if data.get("playlistId"):
             pl = session.get(Playlist, data["playlistId"])
             mix = _card(session, pl).model_dump(mode="json", by_alias=True) if pl else None
+        for_you = None
+        if for_you_id:
+            pl = session.get(Playlist, for_you_id)
+            for_you = _card(session, pl).model_dump(mode="json", by_alias=True) if pl else None
         artists = [browse._artist_card(a) for a in (session.get(Artist, i) for i in data.get("artistIds") or []) if a]
         albums = [browse._album_card(session, r) for r in (session.get(Release, i) for i in data.get("albumIds") or []) if r]
     parents = parent_genres(t)
@@ -160,6 +264,8 @@ async def tag_page(tag: str) -> dict[str, Any]:
         "tag": t,
         "title": title_of(t),
         "mix": mix,
+        "forYou": for_you,
+        "playlists": playlists or [],
         "topArtists": artists,
         "albums": albums,
         "about": data.get("about"),

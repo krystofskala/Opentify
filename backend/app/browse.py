@@ -131,15 +131,22 @@ async def _category_playlists(c: Category) -> list[dict[str, Any]]:
 
 
 async def search_playlists(
-    query: str, limit: int = 12, min_tracks: int = 15, max_tracks: int = 250
+    query: str, limit: int = 12, min_tracks: int = 15, max_tracks: int = 250, *, popular: bool = False
 ) -> list[dict[str, Any]]:
     """Playlisty z Deezeru podle dotazu -- redakční napřed, pak od lidí
     (GTA rádia, soundtracky...). Do katalogu se převezmou až při otevření.
-    Rozsah počtu skladeb odfiltruje prázdné a obří "vše možné" playlisty."""
+    Rozsah počtu skladeb odfiltruje prázdné a obří "vše možné" playlisty.
+    `popular`: ty od lidí seřadit podle počtu fanoušků (detail playlistu)."""
     dz = get_deezer_client()
     items = await dz.search_typed("playlist", query, 25) or []
     editorial = [p for p in items if "deezer" in ((p.get("user") or {}).get("name") or "").lower()]
     others = [p for p in items if p not in editorial and min_tracks <= (p.get("nb_tracks") or 0) <= max_tracks]
+    if popular and others:
+        details = await asyncio.gather(*(dz.playlist(str(p["id"])) for p in others[:15] if p.get("id")), return_exceptions=True)
+        fans = {str(d.get("id")): int(d.get("fans") or 0) for d in details if isinstance(d, dict) and d.get("id")}
+        others = sorted(others[:15], key=lambda p: -fans.get(str(p.get("id")), 0))
+        for p in others:
+            p["_fans"] = fans.get(str(p.get("id")))
     out = []
     for p in (editorial + others)[:limit]:
         if not p.get("id"):
@@ -151,6 +158,7 @@ async def search_playlists(
                 "pictureUrl": p.get("picture_xl") or p.get("picture_big") or p.get("picture_medium"),
                 "trackCount": p.get("nb_tracks"),
                 "editorial": p in editorial,
+                "fans": p.get("_fans"),
             }
         )
     return out

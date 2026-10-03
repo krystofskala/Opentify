@@ -1,7 +1,7 @@
 import '../core/api_client.dart';
 import '../core/media_url.dart';
 import '../models/recording_model.dart';
-import 'browse_repository.dart' show BrowseCategory;
+import 'browse_repository.dart' show BrowseCategory, BrowsePlaylist;
 
 /// Karta playlistu na Domů (žebříček, žánr, výběr, osobní mix).
 class HomePlaylistCard {
@@ -97,7 +97,7 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, tagChips, unknown }
+enum HomeSectionType { quickPicks, playlistCards, albumCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'quick_picks' => HomeSectionType.quickPicks,
@@ -107,6 +107,7 @@ HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'category_tiles' => HomeSectionType.categoryTiles,
       'genre_showcase' => HomeSectionType.genreShowcase,
       'tag_chips' => HomeSectionType.tagChips,
+      'deezer_playlists' => HomeSectionType.deezerPlaylists,
       _ => HomeSectionType.unknown,
     };
 
@@ -124,7 +125,11 @@ class HomeSection {
     this.showcase = const [],
     this.categoryId,
     this.tags = const [],
+    this.deezerPlaylists = const [],
   });
+
+  /// "Populární playlisty pro tebe": playlisty z Deezeru (otevřou se až na klepnutí).
+  final List<BrowsePlaylist> deezerPlaylists;
 
   /// "Tvé styly": (štítek, název) -> stránka stylu.
   final List<({String tag, String title})> tags;
@@ -167,6 +172,8 @@ class HomeSection {
       albums: type == HomeSectionType.albumCards ? items.map(HomeAlbumCard.fromJson).toList() : const [],
       tracks: type == HomeSectionType.trackRail ? items.map(RecordingModel.fromJson).toList() : const [],
       categories: type == HomeSectionType.categoryTiles ? items.map(BrowseCategory.fromJson).toList() : const [],
+      deezerPlaylists:
+          type == HomeSectionType.deezerPlaylists ? items.map(BrowsePlaylist.fromJson).toList() : const [],
     );
   }
 }

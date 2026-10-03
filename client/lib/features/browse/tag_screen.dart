@@ -13,6 +13,7 @@ import '../../widgets/media_card.dart';
 import '../../widgets/player_bar.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
+import 'browse_category_screen.dart' show DeezerPlaylistTile;
 import 'browse_grid.dart' show BrowseTile;
 
 /// Odkaz na stránku stylu (podžánr / štítek interpreta).
@@ -24,6 +25,8 @@ class TagPage {
     required this.tag,
     required this.title,
     this.mix,
+    this.forYou,
+    this.playlists = const [],
     this.topArtists = const [],
     this.albums = const [],
     this.about,
@@ -34,6 +37,10 @@ class TagPage {
   final String tag;
   final String title;
   final HomePlaylistCard? mix;
+  /// "Pro tebe · X" -- podle tvého poslechu (null, když styl skoro neposloucháš).
+  final HomePlaylistCard? forYou;
+  /// Populární playlisty stylu z Deezeru.
+  final List<BrowsePlaylist> playlists;
   final List<BrowseArtist> topArtists;
   final List<HomeAlbumCard> albums;
   final String? about;
@@ -47,6 +54,8 @@ class TagPage {
       tag: json['tag'] as String,
       title: json['title'] as String,
       mix: json['mix'] == null ? null : HomePlaylistCard.fromJson(json['mix'] as Map<String, dynamic>),
+      forYou: json['forYou'] == null ? null : HomePlaylistCard.fromJson(json['forYou'] as Map<String, dynamic>),
+      playlists: list('playlists').map(BrowsePlaylist.fromJson).toList(),
       topArtists: list('topArtists').map(BrowseArtist.fromJson).toList(),
       albums: list('albums').map(HomeAlbumCard.fromJson).toList(),
       about: json['about'] as String?,
@@ -153,25 +162,47 @@ class TagScreen extends ConsumerWidget {
   List<Widget> _content(BuildContext context, TagPage data) {
     final theme = Theme.of(context);
     return [
-      if (data.mix != null) ...[
-        const SliverToBoxAdapter(child: SectionHeader('Mix stylu')),
+      if (data.forYou != null || data.mix != null) ...[
+        const SliverToBoxAdapter(child: SectionHeader('Mixy')),
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: PlaylistCardView(
-                card: data.mix!,
-                width: 170,
-                onTap: () => context.push('/playlists/${data.mix!.id}'),
-                onLongPress: () => showCollectionActions(
-                  context,
-                  kind: CollectionKind.playlist,
-                  id: data.mix!.id,
-                  title: data.mix!.title,
-                  imageUrl: data.mix!.coverUrls.firstOrNull,
-                ),
-              ),
+          child: SizedBox(
+            height: 214,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              children: [
+                for (final card in [data.forYou, data.mix].whereType<HomePlaylistCard>())
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.sm),
+                    child: PlaylistCardView(
+                      card: card,
+                      width: 170,
+                      onTap: () => context.push('/playlists/${card.id}'),
+                      onLongPress: () => showCollectionActions(
+                        context,
+                        kind: CollectionKind.playlist,
+                        id: card.id,
+                        title: card.title,
+                        imageUrl: card.coverUrls.firstOrNull,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      if (data.playlists.isNotEmpty) ...[
+        const SliverToBoxAdapter(child: SectionHeader('Populární playlisty')),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 214,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              itemCount: data.playlists.length,
+              separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, i) => SizedBox(width: 150, child: DeezerPlaylistTile(playlist: data.playlists[i])),
             ),
           ),
         ),
@@ -250,7 +281,7 @@ class TagScreen extends ConsumerWidget {
           ),
         ),
       ],
-      if (data.mix == null && data.topArtists.isEmpty && data.albums.isEmpty)
+      if (data.mix == null && data.forYou == null && data.playlists.isEmpty && data.topArtists.isEmpty && data.albums.isEmpty)
         const SliverToBoxAdapter(
           child: EmptyState(compact: true, message: 'K tomuhle stylu teď nic nemáme.'),
         ),

@@ -37,6 +37,7 @@ class BrowsePlaylist {
     this.pictureUrl,
     this.trackCount,
     required this.editorial,
+    this.style,
   });
 
   final String deezerId;
@@ -45,12 +46,16 @@ class BrowsePlaylist {
   final int? trackCount;
   final bool editorial;
 
+  /// Styl, ke kterému playlist patří ("Populární playlisty pro tebe").
+  final String? style;
+
   factory BrowsePlaylist.fromJson(Map<String, dynamic> json) => BrowsePlaylist(
         deezerId: json['deezerId'] as String,
         title: json['title'] as String,
         pictureUrl: json['pictureUrl'] as String?,
         trackCount: json['trackCount'] as int?,
         editorial: json['editorial'] as bool? ?? false,
+        style: json['style'] as String?,
       );
 }
 

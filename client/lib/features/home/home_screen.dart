@@ -1,3 +1,4 @@
+import '../browse/browse_category_screen.dart' show DeezerPlaylistTile;
 import '../browse/tag_screen.dart' show TagChips;
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
@@ -328,6 +329,25 @@ class _HomeSectionView extends StatelessWidget {
           children: [
             SectionHeader(section.title),
             TagChips(tags: [for (final t in section.tags) t.tag], titles: [for (final t in section.tags) t.title]),
+          ],
+        );
+      case HomeSectionType.deezerPlaylists:
+        // Populární playlisty pro tvé styly (Deezer) -- převezmou se až na klepnutí.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(section.title),
+            SizedBox(
+              height: 214,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: section.deezerPlaylists.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) =>
+                    SizedBox(width: 150, child: DeezerPlaylistTile(playlist: section.deezerPlaylists[index])),
+              ),
+            ),
           ],
         );
       case HomeSectionType.genreShowcase:

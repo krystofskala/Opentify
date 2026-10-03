@@ -116,6 +116,37 @@ async def tag_category_shares(name: str) -> dict[str, float]:
     return out
 
 
+# Obecné nálepky, které by jinak přebily všechno ostatní ("alternative",
+# "indie", "rock" má skoro každý interpret) -- jen poloviční váha.
+_BROAD = {
+    "rock", "pop", "indie", "alternative", "electronic", "folk", "hip-hop", "hip hop", "rap", "jazz", "metal",
+    "punk", "soul", "rnb", "r&b", "country", "classical", "blues", "dance", "experimental", "singer-songwriter",
+    "acoustic", "instrumental", "alternative rock", "indie rock", "indie pop", "pop rock",
+}
+
+
+async def user_styles_weighted(top_artists: list[tuple[str, float]], limit: int = 60) -> list[str]:
+    """Styly profilu z vážených štítků Last.fm (artist.getTopTags, 0-100) --
+    víc stylů na interpreta, úzké styly ("bluegrass", "shoegaze") dostanou
+    šanci a obecné nálepky poloviční váhu."""
+    from app.catalog.lastfm import artist_top_tags
+    from app.tags import is_style
+
+    sem = asyncio.Semaphore(6)
+
+    async def tags_of(name: str) -> list[tuple[str, int]]:
+        async with sem:
+            return await artist_top_tags(primary_artist_name(name))
+
+    tag_lists = await asyncio.gather(*(tags_of(n) for n, _w in top_artists))
+    score: Counter = Counter()
+    for (name, weight), tags in zip(top_artists, tag_lists):
+        styles = [(t.lower(), c) for t, c in tags if is_style(t) and c >= 10][:8]
+        for tag, count in styles:
+            score[tag] += weight * (count / 100) * (0.5 if tag in _BROAD else 1.0)
+    return [t for t, _ in score.most_common(limit)]
+
+
 async def user_styles(top_artists: list[tuple[str, float]], limit: int = 12) -> list[str]:
     """Nejposlouchanější styly profilu: štítky jeho interpretů vážené tím,
     jak moc je poslouchá."""

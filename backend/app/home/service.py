@@ -69,6 +69,7 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))
     registry.append(("personal:throwback", g.DAILY_TTL, pm.build_throwback))
     registry.append(("personal:styles", g.DAILY_TTL, pm.build_styles))
+    registry.append(("personal:popular-playlists", g.DAILY_TTL, pm.build_popular_playlists))
     from app.home.warm_artists import warm_artist_pages
 
     registry.append(("personal:warm-artists", g.DAILY_TTL, warm_artist_pages))
@@ -178,6 +179,7 @@ _SECTION_ORDER: list[tuple[str, str, str]] = [
     ("blends", "Společné mixy", "playlist_cards"),
     ("category_mixes", "Tvoje žánry", "playlist_cards"),
     ("styles", "Tvé styly", "tag_chips"),
+    ("popular_playlists", "Populární playlisty pro tebe", "deezer_playlists"),
     ("years", "Tvoje roky", "playlist_cards"),
     ("charts", "Žebříčky", "playlist_cards"),
     ("new_releases", "Nová vydání", "album_cards"),
@@ -394,6 +396,12 @@ def build_home(user_id: str) -> dict[str, Any]:
                     sections.append(
                         {"id": "styles", "title": title, "type": "tag_chips", "items": [{"tag": t, "title": title_of(t)} for t in tags]}
                     )
+                continue
+            if key == "popular_playlists":
+                snap = session.get(HomeSnapshot, pm.popular_playlists_key(user_id))
+                items = (snap.payload or {}).get("items") if snap else None
+                if items:
+                    sections.append({"id": key, "title": title, "type": kind, "items": items})
                 continue
             if key == "genres":
                 # Žánry na Domů = PŘESNĚ dlaždice z Hledat (stejné názvy, barvy,

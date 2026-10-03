@@ -621,13 +621,67 @@ async def build_styles() -> int:
 
     user_id = g.home_user()
     taste = await asyncio.to_thread(load_taste, user_id)
-    top = [(taste.artist_name[a], w) for a, w in taste.artist_weight.most_common(40) if a in taste.artist_name]
-    styles = await lt.user_styles(top, 40)
+    # Podle toho, co posloucháš TEĎ: poslech před 2 týdny váží polovinu,
+    # před měsícem čtvrtinu; oblíbené jen málo (jinak by vládl celý rok).
+    now = utcnow()
+    weight: Counter = Counter()
+    liked = set(taste.liked)
+    for rid, artist_id in taste.artist_of.items():
+        w = 0.0
+        if rid in taste.last_played:
+            days = max(0.0, (now - taste.last_played[rid]).total_seconds() / 86400)
+            w += (1 + taste.recent_listens.get(rid, 0)) * 0.5 ** (days / 14)
+        w += 0.05 * taste.listen_counts.get(rid, 0)
+        if rid in liked:
+            w += 0.3
+        if w:
+            weight[artist_id] += w
+    top = [(taste.artist_name[a], w) for a, w in weight.most_common(60) if a in taste.artist_name]
+    styles = await lt.user_styles_weighted(top, 60)
     with Session(engine) as session:
         row = session.get(HomeSnapshot, styles_key(user_id)) or HomeSnapshot(key=styles_key(user_id))
-        # Na Domů 12 nejsilnějších, celý seznam pro "tvé podžánry" u žánrů.
-        row.payload = {"tags": styles[:12], "all": styles}
+        # Na Domů 20 nejsilnějších, celý seznam pro "tvé podžánry" u žánrů.
+        row.payload = {"tags": styles[:20], "all": styles}
         row.generated_at = utcnow()
         session.add(row)
         session.commit()
-    return len(styles[:12])
+    return len(styles[:20])
+
+
+def popular_playlists_key(user_id: str) -> str:
+    return f"popular_playlists:{user_id}"
+
+
+async def build_popular_playlists() -> int:
+    """"Populární playlisty pro tebe": pro tvé nejsilnější styly (viz
+    build_styles) nejsledovanější playlisty z Deezeru -- redakční napřed, pak
+    od lidí podle počtu fanoušků. Otevřou se až na klepnutí (převzetí do
+    katalogu, `browse.open_deezer_playlist`)."""
+    from app import browse
+    from app.models import HomeSnapshot
+    from app.tags import title_of
+
+    user_id = g.home_user()
+    with Session(engine) as session:
+        snap = session.get(HomeSnapshot, styles_key(user_id))
+        tags = list((snap.payload or {}).get("tags") or [])[:10] if snap else []
+    items: list[dict] = []
+    seen: set[str] = set()
+    for tag in tags:
+        try:
+            found = await browse.search_playlists(tag, 4, popular=True)
+        except Exception:  # noqa: BLE001 - jeden styl nesmí shodit celou sekci
+            continue
+        for p in found:
+            if p["deezerId"] in seen:
+                continue
+            seen.add(p["deezerId"])
+            items.append({**p, "style": title_of(tag)})
+            break
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, popular_playlists_key(user_id)) or HomeSnapshot(key=popular_playlists_key(user_id))
+        row.payload = {"items": items}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    return len(items)

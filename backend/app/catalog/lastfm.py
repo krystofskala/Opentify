@@ -171,6 +171,14 @@ async def artist_info(name: str) -> dict[str, Any] | None:
     }
 
 
+async def artist_top_tags(name: str, limit: int = 12) -> list[tuple[str, int]]:
+    """Štítky interpreta i s vahou 0-100 (getinfo dává jen 5 bez vah --
+    úzké styly jako "bluegrass" nebo "shoegaze" tak zapadaly pod "indie")."""
+    data = await get({"method": "artist.gettoptags", "artist": name, "autocorrect": "1"}, ttl=7 * DAY)
+    tags = _as_list(((data or {}).get("toptags") or {}).get("tag"))
+    return [(t["name"], _int(t.get("count")) or 0) for t in tags if t.get("name")][:limit]
+
+
 async def track_album(artist: str, title: str) -> str | None:
     """Album, ze kterého se skladba na Last.fm nejvíc poslouchá."""
     data = await get({"method": "track.getinfo", "artist": artist, "track": title, "autocorrect": "1"}, ttl=7 * DAY)
