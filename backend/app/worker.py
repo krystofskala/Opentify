@@ -41,6 +41,7 @@ from app.db import engine, init_db
 from app.events import publish_job_progress, publish_track_available, publish_track_streaming
 from app.loudness import analyze_and_store
 from app.catalog.non_music import is_non_music
+from app.download_match import match_label
 from app.models import (
     Artist,
     MediaAsset,
@@ -692,6 +693,16 @@ def _is_missing_version(message: str) -> bool:
     )
 
 
+async def _deezer_title(deezer_id: str) -> str | None:
+    from app.catalog.deezer import get_deezer_client
+
+    try:
+        track = await get_deezer_client().track(str(deezer_id))
+    except Exception:  # noqa: BLE001
+        return None
+    return (track or {}).get("title")
+
+
 MAX_VERIFY_ROUNDS = 3
 
 
@@ -812,6 +823,15 @@ def _album_title(session: Session, recording: Recording | None) -> str | None:
 _LIVE_RELEASE_RE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}|\d{4}-\d{2}|\d{1,2}\.\d{1,2}\.\d{4})\s*[:\-–]")
 
 
+# "Live at/in/from...", "(Live)", "Unplugged", "In Concert" -- ne "Live
+# Through This" (studiové album Hole).
+_LIVE_ALBUM_RE = re.compile(
+    r"\blive (?:at|in|from|on|aus|au|à)\b|[\(\[]\s*live\b|\blive\s*[\)\]]|\s[-–]\s*live\b|^live$"
+    r"|\bunplugged\b|\bin concert\b|\bkoncert\b|\bnaživo\b",
+    re.I,
+)
+
+
 def _version_hint(session: Session, recording: Recording | None) -> str | None:
     """Verze daná vydáním, ne názvem: živák / bootleg koncertu ("2000-08-23:
     Alltel Pavilion..."), demo. Bez téhle nápovědy se stáhla studiová verze."""
@@ -827,6 +847,10 @@ def _version_hint(session: Session, recording: Recording | None) -> str | None:
     if rarity == "demo":
         return "demo"
     if rarity in ("live", "bootleg") or _LIVE_RELEASE_RE.match(release.title or ""):
+        return "live"
+    # Živé album ("MTV Unplugged in New York", "Live at ...") -- skladby z něj
+    # jsou živé, i když to jejich název neříká.
+    if _LIVE_ALBUM_RE.search(release.title or ""):
         return "live"
     return None
 
@@ -880,6 +904,14 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         version_hint=ctx.get("version_hint"),
         preferred_source=ctx.get("preferred_source"),
     )
+
+    if ctx.get("deezer_id") and not (track.youtube_id or track.soundcloud_url):
+        # Název přesné verze na Deezeru, je-li jinak napsaný (japonský název
+        # vs. anglický "In the Rain") -- kandidáti pak projdou i pod ním a
+        # správnost ověří otisk ukázky té verze.
+        alt = await _deezer_title(ctx["deezer_id"])
+        if alt and match_label(track.title, alt) is not None and match_label(alt, track.title) is not None:
+            track = dataclasses.replace(track, alt_titles=(alt,))
 
     if not track.duration_ms and not (track.youtube_id or track.soundcloud_url):
         # Bez délky by se kandidáti nedali ověřit -- dohledat (jistá shoda).

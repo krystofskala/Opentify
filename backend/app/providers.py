@@ -176,6 +176,19 @@ class TrackMetadata:
     # dostal studiovou verzi), "demo" u dem.
     version_hint: str | None = None
 
+    # Jiné názvy téže nahrávky (anglický název japonské skladby z Deezeru).
+    alt_titles: tuple[str, ...] = ()
+
+    def label_mismatch(self, label: str, *, context: str = "") -> str | None:
+        """`match_label` proti názvu i alternativním názvům (None = sedí)."""
+        why = match_label(self.match_title, label, artist=self.artist_name, album=self.album_title, context=context)
+        if why and any(
+            match_label(alt, label, artist=self.artist_name, album=self.album_title, context=context) is None
+            for alt in self.alt_titles
+        ):
+            return None
+        return why
+
     @property
     def match_title(self) -> str:
         """Název pro porovnávání kandidátů (s `version_hint`)."""
@@ -616,7 +629,7 @@ class SlskdProvider:
                     continue
                 # Název: po odebrání čísla stopy, interpreta a alba musí
                 # zbýt přesně název skladby (download_match.py).
-                why = match_label(track.match_title, basename, artist=track.artist_name, album=track.album_title, context=folder)
+                why = track.label_mismatch(basename, context=folder)
                 if why:
                     rejected[why.split(" (")[0]] += 1
                     continue
@@ -1183,7 +1196,7 @@ def _youtube_verdict(track: TrackMetadata, entry: dict, target: float | None, *,
     tier = _youtube_tier(track, entry)
     if not artist_in(track.artist_name, f"{title} {channel} {(entry.get('description') or '')[:300]}"):
         return "interpret"
-    why = match_label(track.match_title, title, artist=track.artist_name, album=track.album_title)
+    why = track.label_mismatch(title)
     d = entry.get("duration")
     exact = bool(target and d and duration_ok(target, d, strict=True))
     # ISRC + oficiální stopa + přesná délka = ta nahrávka i s jinak napsaným
@@ -1314,7 +1327,7 @@ class SoundcloudProvider:
                 uploader = e.get("uploader") or e.get("channel") or ""
                 if not artist_in(track.artist_name, f"{e.get('title') or ''} {uploader}"):
                     continue
-                if match_label(track.match_title, e.get("title") or "", artist=track.artist_name, album=track.album_title):
+                if track.label_mismatch(e.get("title") or ""):
                     continue
                 if f"soundcloud:{e['url']}" in track.rejected_sources:
                     continue

@@ -35,7 +35,7 @@ NOISE = {
     "edition", "anniversary", "expanded", "soundtrack", "motion", "picture", "ost", "flac", "mp3", "kbps",
     "320", "320kbps", "16bit", "24bit", "bit", "khz", "cd", "web", "vinyl", "lp", "ep", "topic", "vevo",
     "from", "of", "in", "by", "feat", "ft", "featuring", "with", "prod", "stream", "streaming", "premiere",
-    "high", "quality", "best", "oficialni", "klip", "videoklip", "lyrics", "subtitulado", "traducida",
+    "high", "quality", "best", "oficialni", "klip", "videoklip", "lyrics", "subtitulado", "traducida", "verze",
 }
 
 # Jiná verze / jiná nahrávka / nehudební video -- nesmí být v kandidátovi,
