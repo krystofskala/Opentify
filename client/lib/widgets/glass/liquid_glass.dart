@@ -107,8 +107,30 @@ class _LiquidScopeData extends InheritedWidget {
 }
 
 /// Zachytávání obsahu pod skly jednoho `LiquidScope`.
+///
+/// Zachytává se jen, když se pod sklem něco změnilo (dřív smyčka: sklo se
+/// po zachycení překreslilo, překreslení si vyžádalo další zachycení -- 24x
+/// za sekundu i v úplném klidu):
+/// - sklo se pohnulo / změnilo velikost, stránka se scrolluje nebo
+///   překreslí -> rychle (~24 fps),
+/// - překreslilo se pozadí appky (pomalý přeliv barev) -> ~8 fps,
+/// - pojistka každých 500 ms (obrázky dotažené uvnitř stránky, které se
+///   kreslí ve vlastní vrstvě a o změně nedají vědět).
 class LiquidCapture {
+  LiquidCapture() {
+    _all.add(this);
+  }
+
+  static final Set<LiquidCapture> _all = {};
   static RenderLiquidSource? _background;
+
+  /// Pod skly se mohlo něco změnit -- všechna zachytávání (pozadí je
+  /// společné, scroll může být pod kterýmkoli sklem).
+  static void markAllDirty({bool fast = false}) {
+    for (final c in _all) {
+      c._markDirty(fast: fast);
+    }
+  }
 
   // Víc zdrojů (stránky nad sebou) -- bere se naposledy připojený, který
   // se zrovna kreslí (zakrytá/offstage stránka obrázek nevrátí).
@@ -125,6 +147,11 @@ class LiquidCapture {
   Timer? _wait;
   DateTime _lastCapture = DateTime.fromMillisecondsSinceEpoch(0);
   bool _disposed = false;
+  // Co se změnilo od posledního zachycení.
+  bool _dirty = true;
+  bool _dirtyFast = true;
+  Rect? _capturedUnion; // kde byla skla při posledním zachycení
+  Timer? _safety;
 
   // Rezerva kolem skla -- při tahu sheetu se sklo posune dřív, než přijde
   // nový snímek; víc rezervy = méně často obyčejné rozmazání.
@@ -133,6 +160,9 @@ class LiquidCapture {
   // tak jako tak. Dřív 32 ms a "moc brzy" si vynucovalo každý snímek
   // (scheduleFrame) -- appka pak kreslila 60 fps i v klidu.
   static const Duration _interval = Duration(milliseconds: 42);
+  // Jen pozadí appky se změnilo (pomalý přeliv) -- stačí ~8 fps.
+  static const Duration _slowInterval = Duration(milliseconds: 125);
+  static const Duration _safetyInterval = Duration(milliseconds: 500);
 
   // Ostrý výřez stačí do 2x (Retina 3x je pod rozmazaným sklem k ničemu),
   // rozmazaný v polovičním rozlišení -- čte se přes UV, takže sedí dál.
@@ -140,10 +170,42 @@ class LiquidCapture {
 
   bool get ready => _sharp != null && _rect != null;
 
+  void _markDirty({required bool fast}) {
+    if (_disposed) return;
+    _dirty = true;
+    _dirtyFast = _dirtyFast || fast;
+    _schedule();
+  }
+
+  Rect? _glassUnion() {
+    Rect? union;
+    for (final g in _glasses) {
+      final r = g.globalRect;
+      if (r == null) continue;
+      union = union == null ? r : union.expandToInclude(r);
+    }
+    return union;
+  }
+
   void _schedule() {
     if (_scheduled || _disposed || _glasses.isEmpty) return;
+    // Sklo se pohnulo (tah sheetu, scroll lišty) = rychlá změna.
+    final union = _glassUnion();
+    if (union != _capturedUnion) {
+      _dirty = true;
+      _dirtyFast = true;
+    }
+    if (!_dirty) {
+      // Nic se nezměnilo -- jen pojistka (obsah ve vlastních vrstvách).
+      _safety ??= Timer(_safetyInterval, () {
+        _safety = null;
+        _markDirty(fast: false);
+      });
+      return;
+    }
     _scheduled = true;
-    final wait = _interval - DateTime.now().difference(_lastCapture);
+    final interval = _dirtyFast ? _interval : _slowInterval;
+    final wait = interval - DateTime.now().difference(_lastCapture);
     if (wait > Duration.zero) {
       // Počkat časovačem, ne vynucenými snímky.
       _wait = Timer(wait, _captureNextFrame);
@@ -159,6 +221,11 @@ class LiquidCapture {
       _scheduled = false;
       if (_disposed || _glasses.isEmpty) return;
       _lastCapture = DateTime.now();
+      _dirty = false;
+      _dirtyFast = false;
+      _safety?.cancel();
+      _safety = null;
+      _capturedUnion = _glassUnion();
       _capture();
     });
     SchedulerBinding.instance.scheduleFrame();
@@ -271,7 +338,9 @@ class LiquidCapture {
 
   void dispose() {
     _disposed = true;
+    _all.remove(this);
     _wait?.cancel();
+    _safety?.cancel();
     _sharp?.dispose();
     _blurred?.dispose();
     for (final i in _retired) {
@@ -347,6 +416,17 @@ class RenderLiquidSource extends RenderRepaintBoundary {
   void detach() {
     _unregister();
     super.detach();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    super.paint(context, offset);
+    // Obsah pod skly se překreslil -> zachytit znovu (pozadí pomaleji).
+    if (isPage) {
+      _scope?._markDirty(fast: true);
+    } else {
+      LiquidCapture.markAllDirty();
+    }
   }
 
   /// Výřez `global` (logické px) jako obrázek + jaká část `global` to
@@ -489,14 +569,21 @@ class RenderLiquidGlass extends RenderBox {
   @override
   bool get sizedByParent => true;
 
+  // Vlastní hranice překreslení: sklo se po každém zachycení překreslí --
+  // kdyby tím překreslilo i stránku pod sebou (sklo uvnitř stránky, lišta
+  // alba), stránka by zase vyžádala zachycení a smyčka by běžela pořád.
+  @override
+  bool get isRepaintBoundary => true;
+
   // Vlastní vrstva (průhlednost), aby šlo sklo při zachytávání na okamžik
   // skrýt, viz `LiquidCapture._capture`.
   @override
   bool get alwaysNeedsCompositing => true;
 
+  OpacityLayer? _opacityLayer;
+
   void _hiddenForCapture(bool hidden) {
-    final l = layer;
-    if (l is OpacityLayer) l.alpha = hidden ? 0 : 255;
+    _opacityLayer?.alpha = hidden ? 0 : 255;
   }
 
   @override
@@ -505,10 +592,10 @@ class RenderLiquidGlass extends RenderBox {
   @override
   void paint(PaintingContext context, Offset offset) {
     if (size.isEmpty) {
-      layer = null;
+      _opacityLayer = null;
       return;
     }
-    layer = context.pushOpacity(offset, 255, _paintGlass, oldLayer: layer as OpacityLayer?);
+    _opacityLayer = context.pushOpacity(offset, 255, _paintGlass, oldLayer: _opacityLayer);
   }
 
   // Rychlý pohyb/změna velikosti skla: na webu je zachycený obsah o snímek

@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../core/reduced_motion.dart';
 import '../theme/accent_color.dart' show CoverCharacter, accentTransitionDuration, isAchromatic;
-import 'glass/liquid_glass.dart' show LiquidSource;
+import 'glass/liquid_glass.dart' show LiquidCapture, LiquidSource;
 
 /// Globální pozadí appky -- tekuté zrnité gradienty (reference: "50 Grainy
 /// Gradients", generativní Figma gradienty) v jednom fragment shaderu
@@ -291,6 +291,9 @@ class _AppBackgroundState extends State<AppBackground> {
 
   bool _onScroll(ScrollNotification notification) {
     if (notification is ScrollUpdateNotification) {
+      // Stránka pod skly se posunula (položky seznamu se kreslí ve vlastních
+      // vrstvách, překreslení stránky by se jinak nedozvědělo).
+      LiquidCapture.markAllDirty(fast: true);
       final delta = (notification.scrollDelta ?? 0).abs();
       final now = _now;
       final dt = math.max(now - _lastScrollAt, 1 / 60);
