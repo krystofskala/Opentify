@@ -100,7 +100,7 @@ async def category_for_you(category_id: str, current: tuple[str, str] = Depends(
     """Stránka žánru › Pro tebe: alba od tvých interpretů, interpreti žánru,
     které ještě neznáš."""
     c = browse.get_category(category_id)
-    if c is None or c.group != "genre":
+    if c is None or c.group not in ("genre", "mood"):
         raise HTTPException(status_code=404, detail="žánr neexistuje")
     out = await browse.genre_for_you(c, current[0])
     # Tvé podžánry: styly, které posloucháš, a patří pod tenhle žánr.

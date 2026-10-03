@@ -21,6 +21,17 @@ from app.utils import utcnow
 
 # Ručně vybrané podžánry (štítky Last.fm) -- pořadí = jak se ukážou.
 SUBGENRES: dict[str, tuple[str, ...]] = {
+    # Nálady: styly, které k nim sedí (stránka nálady › Styly k náladě).
+    "sleep": ("ambient", "new age", "drone", "neoclassical", "dark ambient", "lullaby"),
+    "focus": ("lo-fi", "post-rock", "minimal", "neoclassical", "ambient", "math rock", "downtempo"),
+    "chill": ("lo-fi", "downtempo", "chillwave", "trip-hop", "dream pop", "bossa nova", "neo-soul"),
+    "workout": ("edm", "trap", "drum and bass", "hard rock", "metalcore", "dubstep", "big beat"),
+    "party": ("house", "dance-pop", "disco", "reggaeton", "electro house", "nu-disco", "funk"),
+    "feelgood": ("funk", "disco", "indie pop", "soul", "surf rock", "motown", "power pop"),
+    "romance": ("soul", "rnb", "slow jams", "neo-soul", "bossa nova", "chanson", "jazz vocal"),
+    "sad": ("slowcore", "sadcore", "emo", "singer-songwriter", "dream pop", "shoegaze", "indie folk"),
+    "morning": ("acoustic", "indie folk", "bossa nova", "jazz", "folk pop", "soft rock"),
+    "roadtrip": ("classic rock", "heartland rock", "americana", "indie rock", "synthwave", "southern rock"),
     "pop": ("synthpop", "dream pop", "indie pop", "electropop", "art pop", "k-pop", "dance-pop", "bedroom pop", "pop rock", "chamber pop"),
     "hiphop": ("trap", "boom bap", "conscious hip hop", "underground hip hop", "jazz rap", "lo-fi", "grime", "drill", "cloud rap", "czech rap"),
     "rock": ("classic rock", "alternative rock", "hard rock", "punk rock", "grunge", "progressive rock", "psychedelic rock", "post-rock", "garage rock", "britpop"),

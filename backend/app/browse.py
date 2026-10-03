@@ -336,6 +336,12 @@ LASTFM_TAGS: dict[str, tuple[str, ...]] = {
     **LB_TAGS,
     "hiphop": ("hip-hop", "rap"), "rnb": ("rnb",), "kids": ("childrens music",),
     "asian": ("k-pop", "j-pop"), "brazil": ("mpb", "bossa nova"), "african": ("afrobeats", "afrobeat"),
+    # Nálady a chvíle -- štítky posluchačů (stejný základ jako žánry).
+    "sleep": ("sleep", "calm", "ambient"), "focus": ("focus", "study", "instrumental"),
+    "chill": ("chill", "chillout", "mellow"), "workout": ("workout", "gym", "energetic"),
+    "party": ("party", "dance", "club"), "feelgood": ("happy", "feel good", "upbeat"),
+    "romance": ("love", "romantic", "love songs"), "sad": ("sad", "melancholy", "melancholic"),
+    "morning": ("morning", "coffee", "acoustic"), "roadtrip": ("driving", "road trip", "summer"),
 }
 LASTFM_EXTRA = 40
 
@@ -419,6 +425,8 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
         def take(rid: str) -> None:
             key = _track_key(session, rid)
             if rid in combined or key is None or key in seen:
+                return
+            if c.group == "mood" and _functional(key[0]):
                 return
             seen.add(key)
             combined.append(rid)
@@ -660,6 +668,10 @@ def showcase_items(session: Session, payload: dict[str, Any]) -> list[dict[str, 
 
 # Podobné žánry (odkazy dole na stránce žánru).
 RELATED_GENRES: dict[str, tuple[str, ...]] = {
+    "sleep": ("focus", "chill", "sad"), "focus": ("chill", "sleep", "morning"), "chill": ("focus", "morning", "romance"),
+    "workout": ("party", "roadtrip", "feelgood"), "party": ("workout", "feelgood", "dance"),
+    "feelgood": ("party", "roadtrip", "morning"), "romance": ("chill", "sad", "rnb"), "sad": ("romance", "sleep", "chill"),
+    "morning": ("feelgood", "chill", "focus"), "roadtrip": ("feelgood", "workout", "rock"),
     "pop": ("dance", "rnb", "indie", "asian"), "hiphop": ("rnb", "soul", "african", "pop"),
     "rock": ("metal", "indie", "blues", "folk"), "indie": ("rock", "folk", "electronic", "pop"),
     "electronic": ("dance", "indie", "pop", "hiphop"), "dance": ("electronic", "pop", "latin", "african"),
@@ -873,6 +885,22 @@ async def _recent_albums(artist_ids: list[str], limit: int) -> list[str]:
     return ids
 
 
+# Výplňová "funkční" hudba (Tabata Songs, Absolute Sleep Music, Relaxing
+# Piano Bar...) -- u nálad zaplaví štítky posluchačů; ven z interpretů i řady.
+_FUNCTIONAL = re.compile(
+    r"\b(music|songs|sleep|sleeping|relax\w*|tabata|workout|fitness|gym|study|studying|baby|babies|lullab\w*|"
+    r"meditation|spa|yoga|white noise|nature sounds|piano bar|lounge|ambience|ambient sounds|hits|"
+    r"karaoke|instrumentals?|tones|healing|binaural|asmr|focus|concentration|deep sleep)\b",
+    re.I,
+)
+
+
+def _functional(name: str | None) -> bool:
+    from app.recommendations.anti_ai_filter import AntiAIFilter
+
+    return bool(name) and (bool(_FUNCTIONAL.search(name)) or AntiAIFilter().is_blocked_text(name))
+
+
 async def genre_extras(c: Category) -> dict[str, Any]:
     """Obsah stránky žánru navíc (a ukázka na Domů): nová alba, hlavní
     interpreti, zásadní alba, popis žánru, podobné žánry. Deezer napřed,
@@ -883,6 +911,13 @@ async def genre_extras(c: Category) -> dict[str, Any]:
     async def build() -> dict[str, Any]:
         dz = get_deezer_client()
         tags = LASTFM_TAGS.get(c.id) or (c.query,)
+        if c.group == "mood":
+            # Interpreti a alba nálady ze stylů, které k ní patří (chill ->
+            # lo-fi, downtempo, trip-hop) -- štítek "chill" sám vrací hlavně
+            # výplňovou hudbu.
+            from app.tags import SUBGENRES
+
+            tags = SUBGENRES.get(c.id, ())[:3] or tags
         # Interpreti: nejposlouchanější se štítkem žánru (Last.fm), u
         # bluegrassu doplní vlastní výběr. Deezer "chart artists" je jen
         # místní žebříček (CZ rap u country), ne žánr.
@@ -890,6 +925,8 @@ async def genre_extras(c: Category) -> dict[str, Any]:
         for tag in tags[:2]:
             names += await lastfm.tag_top_artists(tag, 40)
         names += list(SEED_ARTISTS.get(c.id, ()))
+        if c.group == "mood":
+            names = [n for n in names if not _functional(n)]
         artist_ids = await _resolve_artists(names, 24, set())
         # Nová alba: co hlavní interpreti žánru vydali za poslední rok (alba
         # a EP). Redakce Deezeru míchala reedice klasik s novým datem
@@ -905,12 +942,15 @@ async def genre_extras(c: Category) -> dict[str, Any]:
                         if rec is not None and rec.release_id and rec.release_id not in new_ids:
                             new_ids.append(rec.release_id)
                 new_ids = new_ids[:15]
-        if not new_ids:
+        if not new_ids and c.group == "genre":
+            # (Nálada nemá "nová alba" -- interpreti štítku chill nejsou žánr.)
             new_ids = await _recent_albums(artist_ids[:20], 15)
         # Zásadní alba: nejposlouchanější alba se štítkem žánru (Last.fm).
         classic_items: list[dict[str, str]] = []
         for tag in tags[:2]:
             classic_items += await lastfm.tag_top_albums(tag, 30)
+        if c.group == "mood":
+            classic_items = [i for i in classic_items if not _functional(i.get("artist")) and not _functional(i.get("title"))]
         classic_ids = await _resolve_albums(classic_items, 15)
         about = await lastfm.tag_summary(tags[0])
         return {
@@ -921,7 +961,7 @@ async def genre_extras(c: Category) -> dict[str, Any]:
             "related": [r for r in RELATED_GENRES.get(c.id, ()) if r in _BY_ID],
         }
 
-    return await cached_json(f"browse:extras:v7:{c.id}", EXTRAS_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    return await cached_json(f"browse:extras:v9:{c.id}", EXTRAS_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
 
 
 def extras_cards(extras: dict[str, Any]) -> dict[str, Any]:
@@ -974,15 +1014,16 @@ async def category_page(c: Category) -> dict[str, Any]:
             "albums": [],
             "artists": [],
         }
-        if c.group == "genre":
-            # Stejná řada jako na Domů (žebříček/výběr + tagy ListenBrainz).
+        if c.group in ("genre", "mood"):
+            # Stejná řada jako na Domů (žebříček/výběr + tagy ListenBrainz);
+            # nálady na stejném základu jako žánry (Deezer + Last.fm).
             playlist_id = await genre_rail(c)
             page.update(_genre_tracks_and_more(c, _playlist_ids(playlist_id) if playlist_id else []))
             page["playlistId"] = playlist_id
         return page
 
-    page = await cached_json(f"browse:v3:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
-    if c.group == "genre":
+    page = await cached_json(f"browse:v5:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
+    if c.group in ("genre", "mood"):
         page = {**page, **extras_cards(await genre_extras(c))}
         # Česky (vlastní text) místo anglického popisu z Last.fm.
         from app.genre_about import ABOUT_CS

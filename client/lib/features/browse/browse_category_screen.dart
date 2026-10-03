@@ -134,12 +134,12 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
         if (data.mixes.isNotEmpty) SliverToBoxAdapter(child: _HeroMix(card: data.mixes.first, accent: c.color)),
         // Podžánry -- každý má vlastní stránku (mix, interpreti, alba).
         if (data.subgenres.isNotEmpty) ...[
-          const SliverToBoxAdapter(child: SectionHeader('Podžánry')),
+          SliverToBoxAdapter(child: SectionHeader(c.group == 'mood' ? 'Styly k náladě' : 'Podžánry')),
           SliverToBoxAdapter(child: _Subgenres(categoryId: c.id, subgenres: data.subgenres)),
         ],
         // 2. Pro tebe -- tvůj mix žánru, alba od tvých interpretů, koho ještě neznáš.
         SliverToBoxAdapter(child: _YourMix(categoryId: c.id)),
-        if (c.group == 'genre') SliverToBoxAdapter(child: _ForYou(categoryId: c.id)),
+        if (c.group != 'soundtrack') SliverToBoxAdapter(child: _ForYou(categoryId: c.id)),
         // 3. Novinky.
         if (data.mixes.length > 1 || data.newReleases.isNotEmpty) ...[
           const SliverToBoxAdapter(child: SectionHeader('Novinky')),

@@ -93,4 +93,44 @@ ABOUT_CS: dict[str, str] = {
         "punjabský bhangra i súfijská hudba."
     ),
     "kids": "Písničky pro děti -- na zpívání, tancování, učení i usínání.",
+    # Nálady a chvíle
+    "sleep": (
+        "Hudba, u které se dobře usíná: pomalé tempo, žádné prudké změny hlasitosti, hodně prostoru a ticha. "
+        "Ambient, klavír, drone a neoklasika -- od Briana Ena a Maxe Richtera po Nilse Frahma."
+    ),
+    "focus": (
+        "Na práci a učení: stálý rytmus, málo slov, nic, co by tahalo pozornost. Lo-fi, post-rock, minimal, "
+        "neoklasika a ambient -- a samozřejmě herní a filmové soundtracky."
+    ),
+    "chill": (
+        "Pohodová hudba na odpočinek: lo-fi, downtempo, trip-hop a dream pop. Měkké beaty, teplý zvuk "
+        "a nálada, při které se nikam nespěchá."
+    ),
+    "workout": (
+        "Energie do posilovny a na běh: rychlé tempo, výrazný beat a gradace. EDM, trap, drum and bass, "
+        "hard rock i metalcore -- cokoli, co tě vyhecuje k dalšímu opakování."
+    ),
+    "party": (
+        "Na tancování a večírky: house, disco, dance-pop a reggaeton. Refrény, které zná každý, a beat, "
+        "u kterého se nedá stát."
+    ),
+    "feelgood": (
+        "Hudba pro dobrou náladu: funk, disco, soul, indie pop a power pop -- slunné melodie a rytmus, "
+        "který zvedne den."
+    ),
+    "romance": (
+        "Písně o lásce a na romantický večer: soul, R&B, slow jams, šanson a jazzové zpěvačky -- "
+        "od Marvina Gaye po Norah Jones."
+    ),
+    "sad": (
+        "Na chvíle, kdy je smutno: slowcore, emo, dream pop a písničkáři. Hudba, která nepřebíjí, "
+        "ale sedne si vedle tebe."
+    ),
+    "morning": (
+        "Na pomalé ráno a první kávu: akustické písničky, indie folk, bossa nova a lehký jazz."
+    ),
+    "roadtrip": (
+        "Do auta a na cesty: classic rock, americana, heartland rock a synthwave -- refrény na zpívání "
+        "a kilometry, které rychle ubíhají."
+    ),
 }
