@@ -190,6 +190,7 @@ def users(_admin=Depends(require_admin)):
                 "devices": len(tokens),
                 "deviceList": [
                     {
+                        "id": t.id,
                         "label": device_label(t.label),
                         "lastUsedAt": (aware(t.last_used_at) or aware(t.created_at)).isoformat(),
                     }
@@ -255,6 +256,22 @@ def revoke_devices(user_id: str, _admin=Depends(require_admin)):
             session.delete(row)
         session.commit()
     return {"userId": user_id, "revoked": True}
+
+
+@auth_router.delete("/devices/{device_id}")
+def revoke_device(device_id: str, request: Request, _admin=Depends(require_admin)):
+    """Odhlásit jedno zařízení (ztracený telefon). Tohle zařízení ne --
+    na to je Odhlásit se."""
+    token = token_from_request(request)
+    with Session(engine) as session:
+        row = session.get(AuthToken, device_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Zařízení už odhlášené.")
+        if token and row.token_hash == hash_secret(token):
+            raise HTTPException(status_code=400, detail="Tohle zařízení odhlas přes Odhlásit se.")
+        session.delete(row)
+        session.commit()
+    return {"id": device_id, "revoked": True}
 
 
 class ActAsIn(BaseModel):

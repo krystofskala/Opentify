@@ -270,6 +270,16 @@ class ProfilesSection extends ConsumerWidget {
     );
   }
 
+  Future<void> _revokeDevice(BuildContext context, WidgetRef ref, DeviceRow d) async {
+    try {
+      await ref.read(apiClientProvider).deleteJson('/auth/devices/${d.id}');
+      ref.invalidate(profilesProvider);
+      if (context.mounted) toast(context, '${d.label} odhlášeno');
+    } catch (e) {
+      if (context.mounted) _snack(context, e);
+    }
+  }
+
   Future<void> _switch(WidgetRef ref, String? userId) async {
     await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': userId});
     await saveActAs(userId);
@@ -318,7 +328,21 @@ class ProfilesSection extends ConsumerWidget {
                         ].join(' · '),
                         style: muted,
                       ),
-                      for (final d in p.deviceList) Text('${d.label} · ${_ago(d.lastUsedAt)}', style: muted),
+                      for (final d in p.deviceList)
+                        Row(
+                          children: [
+                            Flexible(child: Text('${d.label} · ${_ago(d.lastUsedAt)}', style: muted)),
+                            // Ztracený telefon: odhlásit jen tohle zařízení.
+                            InkWell(
+                              borderRadius: BorderRadius.circular(AppRadii.pill),
+                              onTap: () => _revokeDevice(context, ref, d),
+                              child: Padding(
+                                padding: const EdgeInsets.all(AppSpacing.xs),
+                                child: Icon(Symbols.close_rounded, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                            ),
+                          ],
+                        ),
                     ],
                   ),
                 ),

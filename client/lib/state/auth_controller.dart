@@ -74,7 +74,7 @@ String deviceName() {
 }
 
 /// Admin: všechny profily.
-typedef DeviceRow = ({String label, String lastUsedAt});
+typedef DeviceRow = ({String id, String label, String lastUsedAt});
 typedef ProfileRow = ({
   String id,
   String name,
@@ -98,7 +98,11 @@ final profilesProvider = FutureProvider.autoDispose<List<ProfileRow>>((ref) asyn
         hasPassword: j['hasPassword'] as bool? ?? false,
         deviceList: [
           for (final d in (j['deviceList'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
-            (label: d['label'] as String? ?? 'Zařízení', lastUsedAt: d['lastUsedAt'] as String? ?? ''),
+            (
+              id: d['id'] as String? ?? '',
+              label: d['label'] as String? ?? 'Zařízení',
+              lastUsedAt: d['lastUsedAt'] as String? ?? '',
+            ),
         ],
       ),
   ];
