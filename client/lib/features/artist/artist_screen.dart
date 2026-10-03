@@ -25,6 +25,7 @@ import '../release/release_screen.dart' show releaseTracksProvider;
 import '../../widgets/collection_actions.dart';
 import 'artist_support.dart';
 import '../browse/tag_screen.dart' show TagChips;
+import '../../state/disliked_artists_controller.dart';
 import '../../state/favorite_artists_controller.dart';
 
 final discographyProvider = FutureProvider.autoDispose.family<DiscographyModel, String>((ref, artistId) {
@@ -176,15 +177,30 @@ class _ArtistBody extends ConsumerWidget {
               // Audit UI: jen ⋯ (rádio, na později, sdílení v menu interpreta).
               actions: [
                 // Hlavní "uložit" akce interpreta (jako + Do knihovny u alba).
-                HeroAction(
-                  icon: Symbols.favorite_rounded,
-                  filled: ref.watch(favoriteArtistsProvider
-                      .select((s) => s.valueOrNull?.any((a) => a.id == artist.id) ?? false)),
-                  tooltip: 'Oblíbený interpret',
-                  onPressed: () => ref
-                      .read(favoriteArtistsProvider.notifier)
-                      .toggle(context, id: artist.id, name: artist.name, imageUrl: artist.coverImageUrl),
-                ),
+                // Klepnutí = oblíbený, podržení = zlomené srdce (nelíbí se,
+                // pryč ze všech mixů) -- jako srdíčko u skladeb.
+                if (ref.watch(dislikedArtistsProvider.select((s) => s.valueOrNull?.contains(artist.id) ?? false)))
+                  HeroAction(
+                    icon: Symbols.heart_broken_rounded,
+                    filled: true,
+                    tooltip: 'Nelíbí se mi (podržením zrušíš)',
+                    onPressed: () =>
+                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
+                    onLongPress: () =>
+                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
+                  )
+                else
+                  HeroAction(
+                    icon: Symbols.favorite_rounded,
+                    filled: ref.watch(
+                        favoriteArtistsProvider.select((s) => s.valueOrNull?.any((a) => a.id == artist.id) ?? false)),
+                    tooltip: 'Oblíbený interpret (podržením: nelíbí se mi)',
+                    onPressed: () => ref
+                        .read(favoriteArtistsProvider.notifier)
+                        .toggle(context, id: artist.id, name: artist.name, imageUrl: artist.coverImageUrl),
+                    onLongPress: () =>
+                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
+                  ),
                 HeroAction(
                   icon: Symbols.more_horiz_rounded,
                   tooltip: 'Další možnosti',
@@ -212,8 +228,7 @@ class _ArtistBody extends ConsumerWidget {
                 ),
               ),
               // Styly interpreta (štítky Last.fm) -- stránka stylu s mixem.
-              if (stats?.tags case final tags? when tags.isNotEmpty)
-                SliverToBoxAdapter(child: TagChips(tags: tags)),
+              if (stats?.tags case final tags? when tags.isNotEmpty) SliverToBoxAdapter(child: TagChips(tags: tags)),
               SliverToBoxAdapter(
                 child: _PopularTracksSection(
                   artistId: artist.id,
@@ -318,9 +333,9 @@ class _ArtistBody extends ConsumerWidget {
   }
 }
 
-final artistStatsProvider =
-    FutureProvider.autoDispose.family<({int? listeners, List<String> popularReleaseIds, List<String> tags}), String>(
-    (ref, artistId) => ref.watch(catalogRepositoryProvider).getArtistStats(artistId));
+final artistStatsProvider = FutureProvider.autoDispose
+    .family<({int? listeners, List<String> popularReleaseIds, List<String> tags}), String>(
+        (ref, artistId) => ref.watch(catalogRepositoryProvider).getArtistStats(artistId));
 
 /// "1,2 mil." / "345 tis." -- počet posluchačů do hlavičky.
 String _compactCount(int n) {
@@ -400,7 +415,9 @@ class _PopularTracksSectionState extends ConsumerState<_PopularTracksSection> {
                       TrackTile(
                         recording: recording,
                         leadingIndex: i + 1,
-                        subtitle: recording.listenCount == null ? null : _listensLabel(recording.listenCount!, recording.listenSource),
+                        subtitle: recording.listenCount == null
+                            ? null
+                            : _listensLabel(recording.listenCount!, recording.listenSource),
                         queueRecordings: all,
                         artistName: widget.artistName,
                         sourceLabel: widget.artistName,
@@ -625,7 +642,6 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
   }
 }
 
-
 final artistSoundcloudProvider = FutureProvider.autoDispose.family<List<RecordingModel>, String>((ref, artistId) async {
   final json = await ref.watch(apiClientProvider).getJson('/catalog/artists/$artistId/soundcloud');
   return (json['items'] as List<dynamic>? ?? const [])
@@ -665,7 +681,8 @@ class _SoundcloudSectionState extends ConsumerState<_SoundcloudSection> {
           child: Column(
             children: [
               for (final r in shown)
-                TrackTile(recording: r, queueRecordings: items, artistName: widget.artistName, sourceLabel: 'SoundCloud'),
+                TrackTile(
+                    recording: r, queueRecordings: items, artistName: widget.artistName, sourceLabel: 'SoundCloud'),
             ],
           ),
         ),
