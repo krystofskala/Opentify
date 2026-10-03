@@ -18,9 +18,12 @@ async def publish_event(user_id: str, event_type: str, payload: dict[str, Any]) 
 
 
 async def publish_job_progress(
-    user_id: str, job_id: str, status: str, pct: int | None = None
+    user_id: str, job_id: str, status: str, pct: int | None = None, error: str | None = None
 ) -> None:
-    await publish_event(user_id, "job.progress", {"jobId": job_id, "status": status, "pct": pct})
+    payload = {"jobId": job_id, "status": status, "pct": pct}
+    if error:
+        payload["error"] = error  # srozumitelný důvod pro uživatele ("Tuhle verzi nemáme")
+    await publish_event(user_id, "job.progress", payload)
 
 
 async def publish_track_available(user_id: str, recording_id: str, stream_url: str) -> None:

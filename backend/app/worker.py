@@ -24,7 +24,9 @@ smyčky (čekání na Redis, publikování eventů).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
+import re
 import logging
 import os
 import socket
@@ -189,11 +191,18 @@ def _start_job(job_id: str) -> dict | None:
             "recording_title": recording.title if recording else "",
             "recording_mbid": recording.mbid if recording else None,
             "recording_duration_ms": recording.duration_ms if recording else None,
+            "track_number": recording.track_number if recording else None,
+            "isrc": recording.isrc if recording else None,
+            "deezer_id": recording.deezer_id if recording else None,
+            "rejected_fps": tuple((recording.external_refs or {}).get("rejectedFingerprints") or []) if recording else (),
             "artist_name": artist.name if artist else None,
             "album_title": _album_title(session, recording),
+            "version_hint": _version_hint(session, recording),
             "preferred_source": (recording.external_refs or {}).get("preferredSource") if recording else None,
-            # "Stáhnout znovu" z kontroly Shazamem: přeskočit dřívější výběr.
-            "skip_candidates": int((recording.external_refs or {}).get("youtubeSkip", 0)) if recording else 0,
+            # Dřív "přeskoč N výsledků" -- teď se zakazuje přesný zdroj a otisk
+            # zvuku (rejectedSources/rejectedFingerprints), přeskakování by jen
+            # zahodilo dobré kandidáty.
+            "skip_candidates": 0,
             "rejected_sources": list((recording.external_refs or {}).get("rejectedSources") or []) if recording else [],
             "youtube_id": (recording.external_refs or {}).get("youtubeId") if recording else None,
             "soundcloud_url": (recording.external_refs or {}).get("soundcloudUrl") if recording else None,
@@ -423,6 +432,21 @@ async def _process_due_upgrades(r) -> None:
         if not await r.zrem(UPGRADES_ZSET, item):
             continue  # vzal si ho jiný worker
         data = json.loads(item)
+        # Lepší soubor ze Soulseeku musí projít stejnou kontrolou -- dřív se
+        # správné YouTube audio dalo tiše prohodit za jinou skladbu.
+        target = await asyncio.to_thread(_target_from_db, data["recording_id"], data["source"])
+        if target is not None:
+            from app.library.verify_file import verify
+
+            verdict = await verify(Path(data["new_path"]), target, full_decode=True)
+            if not verdict.ok:
+                logger.warning("upgrade %s: soubor neprošel kontrolou (%s) -- ponechán původní", data["recording_id"], verdict.reason)
+                (verdict.path or Path(data["new_path"])).unlink(missing_ok=True)
+                await asyncio.to_thread(_reject_source, data["recording_id"], data.get("source_key"), verdict.reason)
+                continue
+            if verdict.path and str(verdict.path) != data["new_path"]:
+                data["new_path"] = str(verdict.path)
+                data["format"] = verdict.path.suffix.lstrip(".")
         applied = await asyncio.to_thread(
             _apply_upgrade,
             data["recording_id"],
@@ -581,6 +605,134 @@ async def _acquire(
         raise
 
 
+def _verify_target(track: TrackMetadata, ctx: dict, provider_name: str) -> "Target":
+    from app.library.verify_file import Target
+
+    return Target(
+        recording_id=track.recording_id,
+        title=track.title,
+        artist=track.artist_name,
+        album=track.album_title,
+        expected_ms=track.duration_ms,
+        deezer_id=ctx.get("deezer_id"),
+        isrc=track.isrc,
+        mbid=track.mbid,
+        provider=provider_name,
+        rejected_fps=tuple(ctx.get("rejected_fps") or ()),
+    )
+
+
+def _reject_source(recording_id: str, key: str | None, reason: str, fp: str | None = None) -> None:
+    """Zdroj neprošel kontrolou -- už nikdy znovu (rejectedSources), a ani
+    stejný zvuk z jiného zdroje (rejectedFingerprints)."""
+    with Session(engine) as session:
+        recording = session.get(Recording, recording_id)
+        if recording is None:
+            return
+        refs = dict(recording.external_refs or {})
+        if fp:
+            refs["rejectedFingerprints"] = [*(refs.get("rejectedFingerprints") or [])[-4:], fp]
+        if key:
+            rejected = list(refs.get("rejectedSources") or [])
+            if key not in rejected:
+                rejected.append(key)
+            refs["rejectedSources"] = rejected
+            if refs.get("sourceKey") == key:
+                refs.pop("sourceKey", None)
+            if key.startswith("youtube:") and key.split(":", 1)[1] in str(refs.get("youtubeUrl") or ""):
+                refs.pop("youtubeUrl", None)
+        refs["lastRejected"] = {"source": key, "reason": reason[:300], "at": utcnow().isoformat()}
+        recording.external_refs = refs
+        session.add(recording)
+        session.commit()
+
+
+def _target_from_db(recording_id: str, provider_name: str):
+    from app.library.verify_file import Target
+
+    with Session(engine) as session:
+        recording = session.get(Recording, recording_id)
+        if recording is None:
+            return None
+        artist = session.get(Artist, recording.artist_id) if recording.artist_id else None
+        return Target(
+            recording_id=recording_id,
+            title=recording.title,
+            artist=artist.name if artist else None,
+            album=_album_title(session, recording),
+            expected_ms=recording.duration_ms,
+            deezer_id=recording.deezer_id,
+            isrc=recording.isrc,
+            mbid=recording.mbid,
+            provider=provider_name,
+        )
+
+
+def _store_duration(recording_id: str, ms: int, deezer_id: str | None) -> None:
+    with Session(engine) as session:
+        recording = session.get(Recording, recording_id)
+        if recording is None or recording.duration_ms:
+            return
+        recording.duration_ms = ms
+        if deezer_id and not recording.deezer_id:
+            from app.models import Recording as _R
+
+            taken = session.exec(select(_R.id).where(_R.deezer_id == deezer_id)).first()
+            if taken is None:
+                recording.deezer_id = deezer_id
+        recording.external_refs = {**(recording.external_refs or {}), "durationSource": "deezer"}
+        session.add(recording)
+        session.commit()
+
+
+def _is_missing_version(message: str) -> bool:
+    """Selhání = "nenašli jsme tu verzi" (ne výpadek sítě / zdroje)."""
+    low = message.lower()
+    return "nemáme" in low or "v téhle verzi" in low or (
+        "žádný vhodný soubor" in low and ("youtube" not in low or "nemá" in low)
+    )
+
+
+MAX_VERIFY_ROUNDS = 3
+
+
+async def _acquire_verified(r, job_id: str, track: TrackMetadata, ctx: dict, interactive: bool, on_progress, on_file_located) -> FetchResult:
+    """`_acquire` + kontrola souboru PŘED zpřístupněním (app/library/verify_file.py).
+    Neprošlý soubor se smaže, zdroj se zakáže a zkusí se další kandidát --
+    radši "nemáme" než jiná verze. Přesné video/odkaz od uživatele se neověřuje."""
+    from app.library.verify_file import verify
+
+    explicit = bool(track.youtube_id or track.soundcloud_url) and not track.preferred_source
+    reasons: list[str] = []
+    for _round in range(MAX_VERIFY_ROUNDS):
+        result = await _acquire(r, job_id, track, interactive, on_progress, on_file_located)
+        if explicit:
+            return result
+        verdict = await verify(
+            result.path, _verify_target(track, ctx, result.source_provider), full_decode=result.source_provider == "slskd"
+        )
+        if verdict.ok:
+            if verdict.path and verdict.path != result.path:
+                result = dataclasses.replace(result, path=verdict.path, format=verdict.path.suffix.lstrip("."))
+            if result.bitrate_kbps is None and verdict.details.get("kbps"):
+                result = dataclasses.replace(result, bitrate_kbps=verdict.details["kbps"])
+            logger.info("job %s: soubor ověřen (%s, %s) %s", job_id, verdict.reason, verdict.confidence, verdict.details.get("ber"))
+            return result
+        logger.warning("job %s: soubor z %s NEPROŠEL kontrolou: %s (%s)", job_id, result.source_key, verdict.reason, verdict.details)
+        reasons.append(verdict.reason)
+        from app.library.verify_file import signature
+
+        fp = await signature(verdict.path or result.path)
+        (verdict.path or result.path).unlink(missing_ok=True)
+        await asyncio.to_thread(_reject_source, track.recording_id, result.source_key, verdict.reason, fp)
+        if fp:
+            ctx["rejected_fps"] = (*ctx.get("rejected_fps", ()), fp)
+        if not result.source_key:
+            break  # nevíme, co zakázat -- další kolo by stáhlo totéž
+        track = dataclasses.replace(track, rejected_sources=(*track.rejected_sources, result.source_key), preferred_source=None)
+    raise RuntimeError(f"Nemáme tuhle verzi: žádný zdroj neprošel kontrolou ({'; '.join(reasons)})")
+
+
 async def ensure_group(r, stream: str) -> None:
     try:
         await r.xgroup_create(stream, PROVISIONING_GROUP, id="0", mkstream=True)
@@ -658,6 +810,28 @@ def _album_title(session: Session, recording: Recording | None) -> str | None:
     return release.title
 
 
+_LIVE_RELEASE_RE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}|\d{4}-\d{2}|\d{1,2}\.\d{1,2}\.\d{4})\s*[:\-–]")
+
+
+def _version_hint(session: Session, recording: Recording | None) -> str | None:
+    """Verze daná vydáním, ne názvem: živák / bootleg koncertu ("2000-08-23:
+    Alltel Pavilion..."), demo. Bez téhle nápovědy se stáhla studiová verze."""
+    if recording is None or not recording.release_id:
+        return None
+    from app.models import Release
+
+    release = session.get(Release, recording.release_id)
+    if release is None:
+        return None
+    refs = release.external_refs or {}
+    rarity = refs.get("rarity")
+    if rarity == "demo":
+        return "demo"
+    if rarity in ("live", "bootleg") or _LIVE_RELEASE_RE.match(release.title or ""):
+        return "live"
+    return None
+
+
 def _remember_source_key(recording_id: str, key: str) -> None:
     """Přesný zdroj souboru -- pro "Špatná verze -- stáhnout jinou"."""
     with Session(engine) as session:
@@ -702,8 +876,21 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         soundcloud_url=ctx.get("soundcloud_url"),
         rejected_sources=tuple(ctx.get("rejected_sources") or ()),
         album_title=ctx.get("album_title"),
+        track_number=ctx.get("track_number"),
+        isrc=ctx.get("isrc"),
+        version_hint=ctx.get("version_hint"),
         preferred_source=ctx.get("preferred_source"),
     )
+
+    if not track.duration_ms and not (track.youtube_id or track.soundcloud_url):
+        # Bez délky by se kandidáti nedali ověřit -- dohledat (jistá shoda).
+        from app.library.verify_file import resolve_duration
+
+        ms, dz_id = await resolve_duration(_verify_target(track, ctx, ""))
+        if ms:
+            track = dataclasses.replace(track, duration_ms=ms)
+            ctx["deezer_id"] = ctx.get("deezer_id") or dz_id
+            await asyncio.to_thread(_store_duration, track.recording_id, ms, dz_id)
 
     async def on_progress(pct: int) -> None:
         await publish_job_progress(ctx["user_id"], job_id, ProvisioningJobStatus.RUNNING.value, pct=pct)
@@ -715,7 +902,7 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         )
 
     try:
-        result = await _acquire(r, job_id, track, interactive, on_progress, on_file_located)
+        result = await _acquire_verified(r, job_id, track, ctx, interactive, on_progress, on_file_located)
         checksum = await asyncio.to_thread(sha256_file, result.path)
         size = result.path.stat().st_size
 
@@ -745,14 +932,27 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
 
     except Exception as exc:  # noqa: BLE001 - chceme zachytit *cokoliv* z providera
         logger.exception("provisioning jobu %s selhalo (pokus %s/%s)", job_id, ctx["attempts"], ctx["max_attempts"])
+        # "Nemáme" (nic neprošlo pravidly / kontrolou) je konečný výsledek --
+        # opakování za 30 s by našlo totéž a uživatel by jen čekal.
+        missing = _is_missing_version(str(exc))
         should_retry = await asyncio.to_thread(
-            _finish_failure, job_id, str(exc), ctx["attempts"], ctx["max_attempts"]
+            _finish_failure,
+            job_id,
+            str(exc),
+            ctx["max_attempts"] if missing else ctx["attempts"],
+            ctx["max_attempts"],
         )
         if should_retry is None:
             logger.warning("job %s selhal, ale byl už uzavřený jinde (duplicita) -- nic nepublikuji", job_id)
             return
         final_status = ProvisioningJobStatus.PENDING.value if should_retry else ProvisioningJobStatus.FAILED.value
-        await publish_job_progress(ctx["user_id"], job_id, final_status, pct=None)
+        await publish_job_progress(
+            ctx["user_id"],
+            job_id,
+            final_status,
+            pct=None,
+            error=None if should_retry else ("Tuhle verzi nemáme" if missing else "Stažení se nepodařilo"),
+        )
         if should_retry:
             # Prodleva podle pokusu (30 s, 60 s, ...) -- okamžitý nový pokus
             # narážel na stejný výpadek / bot-blok. Kdyby worker mezitím

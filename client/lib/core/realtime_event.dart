@@ -45,6 +45,7 @@ sealed class RealtimeEvent {
           jobId: payload['jobId'] as String,
           status: payload['status'] as String,
           pct: payload['pct'] as int?,
+          error: payload['error'] as String?,
         );
       // Opentify Connect (app/realtime.py): seznam zařízení profilu, povely
       // a předání přehrávání mezi nimi.
@@ -104,10 +105,12 @@ final class TrackStreamingEvent extends RealtimeEvent {
 }
 
 final class JobProgressEvent extends RealtimeEvent {
-  const JobProgressEvent({required this.jobId, required this.status, this.pct});
+  const JobProgressEvent({required this.jobId, required this.status, this.pct, this.error});
   final String jobId;
   final String status; // PENDING | RUNNING | SUCCEEDED | FAILED
   final int? pct;
+  /// Důvod konečného selhání pro uživatele ("Tuhle verzi nemáme").
+  final String? error;
 }
 
 final class ConnectEvent extends RealtimeEvent {

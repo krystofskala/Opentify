@@ -32,6 +32,7 @@ import re
 import shutil
 import time
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol, Sequence
@@ -39,6 +40,7 @@ from typing import Awaitable, Callable, Protocol, Sequence
 import httpx
 
 from app.catalog.rate_limit import AsyncRateLimiter
+from app.download_match import artist_in, duration_ok, match_label
 
 logger = logging.getLogger("vault.providers")
 
@@ -165,6 +167,21 @@ class TrackMetadata:
     # Soubor z vybrané složky celého alba (`app/library/album_download.py`):
     # {"username", "filename", "size"} -- stáhne se rovnou on, bez hledání.
     preferred_source: dict | None = None
+    # Číslo stopy na albu -- soubor se stejným číslem ve složce alba má přednost.
+    track_number: int | None = None
+    # ISRC nahrávky -- na YouTube najde přesně tuhle oficiální stopu.
+    isrc: str | None = None
+    # Verze, kterou nahrávka má, i když ji název neříká: "live" u nahrávek
+    # z živých / pirátských vydání (Neil Young "2000-08-23: Alltel Pavilion"
+    # dostal studiovou verzi), "demo" u dem.
+    version_hint: str | None = None
+
+    @property
+    def match_title(self) -> str:
+        """Název pro porovnávání kandidátů (s `version_hint`)."""
+        if self.version_hint and self.version_hint.lower() not in self.title.lower():
+            return f"{self.title} ({self.version_hint})"
+        return self.title
 
     @property
     def search_query(self) -> str:
@@ -180,7 +197,9 @@ class TrackMetadata:
         # "AURORA;Pomme", "X & Y", "X feat. Y" -> jen hlavní interpret (méně
         # povinných slov = víc zásahů; skladbu stejně ověří `_rank`).
         artist = re.split(r"\s*(?:;|,|/|&|\bfeat\b\.?|\bft\b\.?)\s*", self.artist_name or "", flags=re.I)[0]
-        text = f"{artist} {title}"
+        # Zbytky po apostrofech ("I've" -> "ve", "Rock'n'Roll" -> "n") pryč --
+        # každé slovo musí v cestě být a "ve" zbytečně zužovalo hledání.
+        text = re.sub(r"['’`´]\w{1,2}\b", "", f"{artist} {title}")
         words = [w for w in re.findall(r"\w+", text) if len(w) >= 2 and w.lower() not in _SOULSEEK_STOPWORDS]
         return " ".join(words) or self.search_query
 
@@ -263,6 +282,50 @@ class PlaceholderProvider:
 class _PeerFailed(Exception):
     """Jeden konkrétní Soulseek peer nevyšel (odmítl, frontí, zasekl se) --
     `SlskdProvider.fetch()` pak zkusí dalšího kandidáta z téhož hledání."""
+
+
+_COMPILATION_WORDS = {
+    "greatest", "hits", "best", "collection", "anthology", "essential", "essentials", "various", "va",
+    "compilation", "now", "platinum", "gold", "ultimate", "classics", "legends", "hity", "nejvetsi",
+}
+
+
+def _size_of(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return -1
+
+
+def _track_no(basename: str) -> int | None:
+    """Číslo stopy ze začátku jména ("07 - X", "1-07 X", "0107 X" -> 7)."""
+    m = re.match(r"^\s*(?:(?:cd|disc)\s*\d+\s*[-_. ]\s*)?(\d{1,2}[-.])?(\d{1,4})[\s._\-)]", basename, re.I)
+    if not m:
+        return None
+    n = int(m.group(2))
+    return n % 100 if n >= 100 else n
+
+
+def _junk_reason(filename: str, basename: str, ext: str, size: int, length: float | None, bitrate) -> str | None:
+    """Soubory, které nikdy nejsou celá skladba (živě: 617 B "Skin", 97 KB
+    "the lakes" ze složky failed_imports, `._04 Harvest Moon.mp3`)."""
+    low = filename.replace("\\", "/").lower()
+    if basename.startswith("._") or "__macosx" in low:
+        return "odpad (._)"
+    if any(w in low for w in ("/incomplete/", "failed_imports", "/temp/", "/tmp/", ".part")):
+        return "nedostažené"
+    if size and size < 500_000:
+        return "příliš malý"
+    if size and length and length > 0:
+        kbps = size * 8 / length / 1000
+        if ext == ".flac" and not 300 <= kbps <= 6500:
+            return "useknutý/vadný"
+        if ext == ".mp3":
+            if kbps < 64:
+                return "useknutý/vadný"
+            if bitrate and kbps < float(bitrate) * 0.75:  # hlavička slibuje víc, než soubor má
+                return "useknutý/vadný"
+    return None
 
 
 @dataclass(frozen=True)
@@ -361,10 +424,16 @@ class SlskdProvider:
             search_id = created.json()["id"]
             loop = asyncio.get_running_loop()
             started = loop.time()
+            active_since: float | None = None  # ve frontě slskd se nepočítá (viz resolve)
             try:
-                while loop.time() - started < cap_s:
+                while loop.time() - started < cap_s + 90:
                     payload = (await client.get(f"/api/v0/searches/{search_id}")).json()
-                    if bool(payload.get("isComplete")) or str(payload.get("state", "")).lower().startswith("completed"):
+                    state = str(payload.get("state") or "").lower()
+                    if bool(payload.get("isComplete")) or state.startswith("completed"):
+                        break
+                    if active_since is None and state and not state.startswith(("queued", "requested", "none")):
+                        active_since = loop.time()
+                    if active_since is not None and loop.time() - active_since >= cap_s:
                         break
                     await asyncio.sleep(1.0)
                 responses = await client.get(f"/api/v0/searches/{search_id}/responses")
@@ -406,7 +475,8 @@ class SlskdProvider:
                     # zbytečně držel otevřené hledání dalších ~15 s.
                     json={"searchText": query, "searchTimeout": int(profile.search_cap_s * 1000)},
                 )
-                if created.status_code != 429:
+                # 429 = moc hledání naráz, 409 = stejné hledání ještě běží.
+                if created.status_code not in (409, 429):
                     break
                 await asyncio.sleep(2.0 * (attempt + 1))
             created.raise_for_status()
@@ -414,6 +484,11 @@ class SlskdProvider:
 
             loop = asyncio.get_running_loop()
             started = loop.time()
+            # slskd pouští hledání po jednom, ostatní čekají "Queued" -- limit
+            # se počítá až od skutečného startu (dřív hledání vypršelo ještě
+            # ve frontě: 47 z 60 hledání skončilo s nulou kandidátů).
+            active_since: float | None = None
+            hard_cap = profile.search_cap_s + (25.0 if interactive else 75.0)
             first_good_at: float | None = None
             ranked: list[tuple[float, str, dict]] = []
             seen_responses = -1
@@ -423,6 +498,9 @@ class SlskdProvider:
                     status_resp = await client.get(f"/api/v0/searches/{search_id}")
                     status_resp.raise_for_status()
                     payload = status_resp.json()
+                    state = str(payload.get("state") or "").lower()
+                    if active_since is None and state and not state.startswith(("queued", "requested", "none")):
+                        active_since = now
                     count = int(payload.get("responseCount") or 0)
                     complete = bool(payload.get("isComplete")) or str(payload.get("state", "")).lower().startswith(
                         "completed"
@@ -438,7 +516,9 @@ class SlskdProvider:
                         break
                     if first_good_at is not None and now - first_good_at >= profile.settle_s:
                         break
-                    if now - started >= profile.search_cap_s:
+                    if active_since is not None and now - active_since >= profile.search_cap_s:
+                        break
+                    if now - started >= hard_cap:
                         break
                     await asyncio.sleep(self.poll_interval_s)
             finally:
@@ -449,11 +529,13 @@ class SlskdProvider:
                     pass
 
         logger.info(
-            "slskd hledání '%s' (%s): %d kandidátů za %.1f s",
+            "slskd hledání '%s' (%s): %d kandidátů z %d odpovědí za %.1f s (z toho ve frontě %.1f s)",
             query,
             "interactive" if interactive else "background",
             len(ranked),
+            max(seen_responses, 0),
             loop.time() - started,
+            (active_since if active_since is not None else loop.time()) - started,
         )
         if not ranked:
             return None
@@ -478,12 +560,11 @@ class SlskdProvider:
         ohledu na to, jestli má peer volný slot nebo frontu stovek souborů,
         takže "nejlepší" kandidát často visel v "Queued, Remotely" až do
         300s timeoutu, než se spadlo na YouTube."""
-        wanted = _title_tokens(track.title)
-        qualifier = _qualifier_tokens(track.title)
-        asked_words = set(_normalize(track.title).split())
         album_words = _title_tokens(track.album_title or "")
         out: list[tuple[float, str, dict]] = []
         seen: set[tuple[str, str]] = set()
+        rejected: Counter[str] = Counter()
+        target = track.duration_ms / 1000 if track.duration_ms else None
         for response in search_responses:
             username = response.get("username")
             if not username or self._is_blocked(username):
@@ -501,31 +582,47 @@ class SlskdProvider:
                 seen.add((username, filename))
                 if f"slskd:{username}|{filename}" in track.rejected_sources:
                     continue  # uživatel ho označil jako špatnou verzi
-                # Délka úplně jiná = jiná nahrávka, i když název sedí (živě:
-                # "Holding on to You" byla ukulele verze jiné písně, 2:38).
-                length = f.get("length")
-                if length and track.duration_ms:
-                    target = track.duration_ms / 1000
-                    if abs(float(length) - target) > max(20.0, target * 0.15):
-                        continue
-                if wanted:
-                    have = set(_normalize(filename.rsplit("\\", 1)[-1]).split())
-                    if len(wanted & have) < max(1, round(len(wanted) * 0.8)):
-                        continue  # jiná skladba ze stejného alba/interpreta
-                # Verze z názvu ("Ned's Version", "Live in ...") musí být
-                # v cestě (soubor nebo složka alba); jiná verze ne.
-                path_words = set(_normalize(filename.replace("\\", " ")).split())
-                if not qualifier <= path_words and not _album_match(track.album_title, path_words):
-                    continue
-                base_words = set(_normalize(filename.rsplit("\\", 1)[-1]).split())
-                if any(m in base_words and m not in asked_words for m in _VERSION_MARKERS):
-                    continue
+                parts = filename.replace("\\", "/").split("/")
+                basename, folder = parts[-1], (parts[-2] if len(parts) > 1 else "")
                 size = int(f.get("size") or 0)
+                length = float(f.get("length") or 0) or None
                 bitrate = f.get("bitRate")
+                junk = _junk_reason(filename, basename, ext, size, length, bitrate)
+                if junk:
+                    rejected[junk] += 1
+                    continue
+                # Délka: známá délka skladby -> soubor ji musí mít (jen 2 %
+                # souborů na Soulseeku délku neuvádí), přísně, ne ±15 %
+                # (živě: "Buffalo Stance" z výběrovky Now 1989, edit místo alba).
+                folder_words = set(_normalize(folder).split())
+                album_folder = bool(album_words) and len(album_words & folder_words) >= max(1, round(len(album_words) * 0.8))
+                exact_length = False
+                if target:
+                    if length is None and not album_folder:
+                        # Bez délky jen ze složky správného alba (ověří ji
+                        # kontrola po stažení), jinak naslepo ne.
+                        rejected["bez délky"] += 1
+                        continue
+                    if length is not None and not duration_ok(target, length, strict=False):
+                        rejected["délka"] += 1
+                        continue
+                    exact_length = length is not None and duration_ok(target, length, strict=True)
+                # Interpret musí být v cestě (živě: Future "Radio" <-
+                # "SPARKLEWOLF RADIO - in the near future!").
+                if not artist_in(track.artist_name, filename):
+                    rejected["interpret"] += 1
+                    continue
+                # Název: po odebrání čísla stopy, interpreta a alba musí
+                # zbýt přesně název skladby (download_match.py).
+                why = match_label(track.match_title, basename, artist=track.artist_name, album=track.album_title, context=folder)
+                if why:
+                    rejected[why.split(" (")[0]] += 1
+                    continue
                 if ext == ".flac":
                     quality = 3.0
                 elif ext == ".mp3":
-                    quality = 2.0 if (bitrate is None or bitrate >= 256) else (1.2 if bitrate >= 192 else 0.4)
+                    # Bez udané bitrate radši opatrně (bývá to 128 kbps).
+                    quality = 1.2 if bitrate is None else (2.0 if bitrate >= 256 else (1.2 if bitrate >= 192 else 0.4))
                 else:
                     quality = 1.5
                 est_s = size / max(speed, 50_000) if size else 30.0
@@ -535,13 +632,21 @@ class SlskdProvider:
                     score = (500 if free else 0) - queue * 20 + quality * 200 - est_s
                 # Soubor ze složky správného alba: výrazná přednost (ne ale
                 # víc než volný slot u interaktivního přehrání).
-                if album_words:
-                    folder = set(_normalize(filename.replace("\\", "/").rsplit("/", 1)[0]).split())
-                    if len(album_words & folder) >= max(1, round(len(album_words) * 0.8)):
-                        score += 300 if interactive else 400
+                if album_folder:
+                    score += 300 if interactive else 400
+                    # Číslo stopy ve složce správného alba sedí = ta pravá skladba.
+                    if track.track_number and _track_no(basename) == track.track_number:
+                        score += 100
+                elif folder_words & _COMPILATION_WORDS:
+                    # Výběrovka ("Greatest Hits", "Now 1989") -- bývá v ní edit.
+                    score -= 100 if interactive else 250
+                if exact_length:
+                    score += 60 if interactive else 150
                 f = {**f, "_free": free, "_speed": speed, "_est_s": est_s, "_quality": quality}
                 out.append((score, username, f))
         out.sort(key=lambda c: c[0], reverse=True)
+        if rejected:
+            logger.info("slskd '%s': odmítnuto %s, vhodných %d", track.title, dict(rejected.most_common(6)), len(out))
         return out
 
     @staticmethod
@@ -696,10 +801,15 @@ class SlskdProvider:
                 await self._cancel(client, username, transfer)
                 raise
 
-        if source_path is None:
-            source_path = await asyncio.to_thread(locate)
+        expected_size = int(peer.get("size") or 0)
+        if source_path is None or (expected_size and _size_of(source_path) != expected_size):
+            # Po dokončení přesně podle velikosti -- se třemi workery mohl
+            # rostoucí soubor patřit jinému stažení se stejným jménem.
+            source_path = await asyncio.to_thread(self._locate_downloaded_file, basename, remote_dir, since, expected_size)
         if source_path is None:
             raise _PeerFailed(f"dokončený transfer '{basename}' se nenašel pod {self.downloads_dir}")
+        if expected_size and _size_of(source_path) != expected_size:
+            raise _PeerFailed(f"'{basename}' má {_size_of(source_path)} B místo {expected_size} B (nedostažený)")
 
         dest_path = dest_stem.with_suffix(source_path.suffix.lower())
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -727,7 +837,9 @@ class SlskdProvider:
         except httpx.HTTPError:
             pass
 
-    def _locate_downloaded_file(self, basename: str, remote_dir: str = "", since: float = 0.0) -> Path | None:
+    def _locate_downloaded_file(
+        self, basename: str, remote_dir: str = "", since: float = 0.0, size: int = 0
+    ) -> Path | None:
         """Soubor tohohle stažení pod `downloads_dir` -- `rglob` místo pevné
         cesty, slskd strukturu zplošťuje po svém. Jen soubory změněné od
         začátku stažení (ne stejnojmenný pozůstatek z dřívějška), přednost má
@@ -744,7 +856,7 @@ class SlskdProvider:
                     mtime = path.stat().st_mtime
                 except OSError:
                     continue
-                if mtime >= since:
+                if mtime >= since and (not size or _size_of(path) == size):
                     candidates.append((path, mtime))
         if not candidates:
             return None
@@ -908,81 +1020,12 @@ class YoutubeProvider:
             ],
         }
 
-        def pick_video() -> str:
-            """Explicitní `ytsearch5:` + výběr podle délky -- `default_search`
-            u některých dotazů (diakritika/rozbité kódování) vůbec nehledal,
-            a první výsledek býval hodinový mix (živě: 112 MB "2 Hour
-            Mashups Mix" místo skladby). Ploché hledání trvá ~1 s."""
-            search_opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 15}
-            with yt_dlp.YoutubeDL({**search_opts, **_ytdlp_proxy_opts()}) as ydl:
-                info = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            entries = [
-                e
-                for e in (info or {}).get("entries") or []
-                if e and e.get("id") and f"youtube:{e['id']}" not in track.rejected_sources
-            ]
-            if not entries:
-                raise RuntimeError(f"YouTube nic nenašel pro '{query}'")
-            target = track.duration_ms / 1000 if track.duration_ms else None
-
-            def acceptable(e: dict) -> bool:
-                d = e.get("duration")
-                if d is None:
-                    return e.get("live_status") not in ("is_live", "is_upcoming")
-                if target:
-                    return abs(d - target) <= max(20.0, target * 0.15)
-                return 30 <= d <= 15 * 60
-
-            # Přednost videím, jejichž název obsahuje název skladby (dřív
-            # vyhrál první výsledek s dobrou délkou -- občas úplně jiná
-            # skladba stejného interpreta, viz kontrola Shazamem).
-            wanted = _title_tokens(track.title)
-
-            def title_hit(e: dict) -> bool:
-                return bool(wanted) and wanted <= _title_tokens(e.get("title") or "")
-
-            # Jiná verze (live, cover, remix...) jen když ji skladba sama nese
-            # v názvu (živě: "Guns for Hands" se stáhla živá verze).
-            asked = _normalize(track.title)
-
-            def other_version(e: dict) -> bool:
-                title = _normalize(e.get("title") or "")
-                return any(m in title.split() and m not in asked.split() for m in _VERSION_MARKERS)
-
-            # Přísně: celý název, slova verze, žádná jiná verze -- radši
-            # "nemáme" než jiná píseň/verze (živě: "Trees (Ned's Version)"
-            # se stáhlo jako ukulele Heathens).
-            entries = [e for e in entries if _matches_title(track.title, e.get("title") or "", track.album_title)]
-            if not entries:
-                raise RuntimeError(f"YouTube nemá '{track.title}' v téhle verzi")
-            ok = [e for e in entries if acceptable(e)]
-            album_words = _title_tokens(track.album_title or "")
-
-            def album_hit(e: dict) -> bool:
-                return bool(album_words) and album_words <= _title_tokens(e.get("title") or "")
-
-            ok.sort(key=lambda e: (0 if title_hit(e) else 1, 1 if other_version(e) else 0, 0 if album_hit(e) else 1))
-            if track.skip_candidates and ok:
-                ok = ok[track.skip_candidates % len(ok):] + ok[: track.skip_candidates % len(ok)]
-            chosen = ok[0] if ok else None
-            if chosen is None:
-                # Nic délkou nesedí (katalog může mít jinou verzi) -- aspoň ne
-                # mixy/streamy: nejkratší rozumný výsledek.
-                sane = [e for e in entries if e.get("duration") and 30 <= e["duration"] <= 15 * 60]
-                if target:
-                    # Známá délka: jen mírně jiný střih/fade, ne 14min video
-                    # místo 4min písně (živě: "Norman fucking Rockwell" 847 s).
-                    sane = [e for e in sane if abs(e["duration"] - target) <= max(45.0, target * 0.35)]
-                if not sane:
-                    raise RuntimeError(f"YouTube: žádný výsledek pro '{query}' nemá délku skladby")
-                chosen = sane[0]
-            return f"https://www.youtube.com/watch?v={chosen['id']}"
+        def pick_videos() -> list[str]:
+            return [f"https://www.youtube.com/watch?v={e['id']}" for e in youtube_pick(track, query)]
 
         chosen_url: list[str] = []
 
-        def run_download() -> tuple[Path, int | None]:
-            url = f"https://www.youtube.com/watch?v={track.youtube_id}" if track.youtube_id else pick_video()
-            chosen_url[:] = [url]
+        def download_one(url: str) -> tuple[Path, int | None]:
             try:
                 try:
                     with yt_dlp.YoutubeDL(m4a_opts) as ydl:
@@ -1004,8 +1047,35 @@ class YoutubeProvider:
                 if "format is not available" not in str(exc):
                     raise
             with yt_dlp.YoutubeDL(mp3_opts) as ydl:
-                ydl.download([url])
-            return dest_stem.with_suffix(".mp3"), self.preferred_bitrate_kbps
+                info = ydl.extract_info(url, download=True)
+            # Skutečná kvalita zdroje, ne nominálních 320 po převodu.
+            abr = (info or {}).get("abr")
+            return dest_stem.with_suffix(".mp3"), int(abr) if abr else None
+
+        def run_download() -> tuple[Path, int | None]:
+            if track.youtube_id:
+                urls = [f"https://www.youtube.com/watch?v={track.youtube_id}"]
+            else:
+                urls = pick_videos()
+            last: Exception | None = None
+            for url in urls:
+                chosen_url[:] = [url]
+                try:
+                    try:
+                        return download_one(url)
+                    except yt_dlp.utils.DownloadError as exc:
+                        if "reload" not in str(exc).lower() and "timed out" not in str(exc).lower():
+                            raise
+                        time.sleep(2)  # dočasná chyba YouTube -- jednou znovu
+                        return download_one(url)
+                except yt_dlp.utils.DownloadError as exc:
+                    # Věkové omezení / nedostupné video -> další kandidát, ne
+                    # konec celého YouTube pokusu.
+                    if _is_bot_block(exc):
+                        raise
+                    last = exc
+                    logger.info("YouTube %s nešlo stáhnout (%s), zkouším dalšího", url, str(exc)[:120])
+            raise last or RuntimeError("YouTube: nic ke stažení")
 
         try:
             dest_path, bitrate = await asyncio.to_thread(run_download)
@@ -1028,6 +1098,110 @@ class YoutubeProvider:
             source_url=chosen_url[0] if chosen_url else None,
             source_key=f"youtube:{chosen_url[0].rsplit('=', 1)[-1]}" if chosen_url else None,
         )
+
+
+def _yt_search(track: TrackMetadata, q: str, n: int) -> list[dict]:
+    import yt_dlp
+
+    search_opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "socket_timeout": 15}
+    with yt_dlp.YoutubeDL({**search_opts, **_ytdlp_proxy_opts()}) as ydl:
+        info = ydl.extract_info(f"ytsearch{n}:{q}", download=False)
+    return [
+        e for e in (info or {}).get("entries") or []
+        if e and e.get("id") and f"youtube:{e['id']}" not in track.rejected_sources
+        and e.get("live_status") not in ("is_live", "is_upcoming", "was_live")
+    ]
+
+
+def youtube_pick(track: TrackMetadata, query: str) -> list[dict]:
+    """Seřazení kandidáti (nejvýš 3), nejlepší první -- viz `_youtube_tier`.
+    Radši žádný než jiná verze: bez shody délky, názvu a interpreta nic (dřív
+    "nejkratší rozumný výsledek" -> 14min video místo písně, fanouškovský
+    "filters" kanál místo "Trees (Ned's Version)"). Synchronní (yt-dlp)."""
+    target = track.duration_ms / 1000 if track.duration_ms else None
+    seen: set[str] = set()
+    ranked: list[tuple[tuple, dict]] = []
+    reasons: Counter[str] = Counter()
+
+    def consider(entries: list[dict], *, by_isrc: bool) -> None:
+        for pos, e in enumerate(entries):
+            if e["id"] in seen:
+                continue
+            seen.add(e["id"])
+            verdict = _youtube_verdict(track, e, target, by_isrc=by_isrc)
+            if isinstance(verdict, str):
+                reasons[verdict.split(" (")[0]] += 1
+                continue
+            ranked.append(((*verdict, 0 if by_isrc else 1, pos), {**e, "_tier": verdict[0]}))
+
+    if track.isrc:
+        # ISRC = přesná nahrávka; na YouTube najde oficiální audio stopu.
+        consider(_yt_search(track, track.isrc, 3), by_isrc=True)
+    if not any(key[0] == 0 for key, _ in ranked):
+        consider(_yt_search(track, query, 8), by_isrc=False)
+    if not ranked:
+        consider(_yt_search(track, f"{query} audio", 6), by_isrc=False)
+    if not ranked:
+        raise RuntimeError(f"YouTube nemá '{track.title}' v téhle verzi ({dict(reasons.most_common(4))})")
+    ranked.sort(key=lambda r: r[0])
+    picks = [e for _key, e in ranked]
+    # "Stáhnout znovu" (starší cesta): přeskočit dřív vybrané, bez otáčení
+    # dokola zpátky na stejné video.
+    picks = picks[track.skip_candidates:] if track.skip_candidates else picks
+    if not picks:
+        raise RuntimeError(f"YouTube: žádný další kandidát pro '{track.title}'")
+    return picks[:3]
+
+
+def _youtube_tier(track: TrackMetadata, entry: dict) -> int:
+    """0 = oficiální audio stopa (art track: "Provided to YouTube by ...",
+    kanál "X - Topic"), 1 = oficiální kanál interpreta ("neilyoungchannel",
+    "XVEVO", ověřený kanál s jeho jménem), 2 = kdokoli jiný (lyric kanály,
+    fanoušci, živáky)."""
+    from app.download_match import fold
+
+    channel = entry.get("channel") or entry.get("uploader") or ""
+    desc = fold(entry.get("description") or "")
+    if desc.startswith("provided to youtube by") or channel.endswith(" - Topic"):
+        return 0
+    artist_key = re.sub(r"[^0-9a-z]", "", fold(re.split(r"\s*(?:;|,|/|&|\bfeat\b)\s*", track.artist_name or "")[0]))
+    channel_key = re.sub(r"[^0-9a-z]", "", fold(channel))
+    if len(artist_key) >= 4 and artist_key in channel_key:
+        if entry.get("channel_is_verified") or channel_key == artist_key or channel_key.endswith(
+            ("vevo", "official", "channel", "music", "tv", "band", "records")
+        ):
+            return 1
+    return 2
+
+
+def _youtube_verdict(track: TrackMetadata, entry: dict, target: float | None, *, by_isrc: bool) -> tuple | str:
+    """Řadicí klíč (vrstva, přesnost délky), nebo důvod odmítnutí."""
+    title = entry.get("title") or ""
+    channel = entry.get("channel") or entry.get("uploader") or ""
+    tier = _youtube_tier(track, entry)
+    if not artist_in(track.artist_name, f"{title} {channel} {(entry.get('description') or '')[:300]}"):
+        return "interpret"
+    why = match_label(track.match_title, title, artist=track.artist_name, album=track.album_title)
+    d = entry.get("duration")
+    exact = bool(target and d and duration_ok(target, d, strict=True))
+    # ISRC + oficiální stopa + přesná délka = ta nahrávka i s jinak napsaným
+    # názvem (překlad, přepis) -- ale nikdy se značkou jiné verze (živě: ISRC
+    # hledání "Simple Twist of Fate" vrátilo živák z Budokanu).
+    translated = bool(why) and why.startswith(("chybí název", "název bez"))
+    if why and not (by_isrc and tier == 0 and exact and translated):
+        return why
+    if d is None:
+        return (tier, 1) if by_isrc and tier == 0 else "bez délky"
+    if target:
+        if tier == 2 and not exact:
+            return "délka"  # neoficiální jen s přesnou délkou
+        if not duration_ok(target, d, strict=False):
+            return "délka"
+        return (tier, 0 if exact else 1)
+    # Délku skladby neznáme: jen oficiální zdroje, a ne hodinové mixy.
+    if tier == 2:
+        return "neznámá délka"
+    return (tier, 1) if 30 <= d <= 15 * 60 else "délka"
 
 
 def _tag_file(path: Path, *, mbid: str | None, title: str, artist: str | None) -> None:
@@ -1124,18 +1298,21 @@ class SoundcloudProvider:
                 return track.soundcloud_url
             with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", **_ytdlp_proxy_opts()}) as ydl:
                 info = ydl.extract_info(f"scsearch8:{candidate.source_ref}", download=False) or {}
-            wanted = _title_tokens(track.title)
             target = track.duration_ms / 1000 if track.duration_ms else None
-            asked = _normalize(track.title)
             for e in info.get("entries") or []:
                 if not e or not e.get("url"):
                     continue
                 d = e.get("duration")
                 if d is not None and d <= 31:
                     continue  # Go+ ukázka
-                if target and d and abs(d - target) > max(20.0, target * 0.15):
+                # Nahrát může kdokoli: přesná délka (je-li známá), interpret
+                # v názvu nebo u nahrávajícího, přesný název.
+                if target and not (d and duration_ok(target, d, strict=True)):
                     continue
-                if not _matches_title(track.title, e.get("title") or "", track.album_title):
+                uploader = e.get("uploader") or e.get("channel") or ""
+                if not artist_in(track.artist_name, f"{e.get('title') or ''} {uploader}"):
+                    continue
+                if match_label(track.match_title, e.get("title") or "", artist=track.artist_name, album=track.album_title):
                     continue
                 if f"soundcloud:{e['url']}" in track.rejected_sources:
                     continue

@@ -99,24 +99,17 @@ def _context(recording_id: str) -> dict | None:
 
 
 async def _expected_ms(recording_id: str, ctx: dict) -> int | None:
-    """Délka z katalogu; chybí-li (asi polovina stažených), dohledá se na
-    Deezeru -- jen při shodě interpreta i názvu -- a uloží k nahrávce."""
+    """Délka z katalogu; chybí-li, dohledá se na Deezeru (jen jistá shoda,
+    viz verify_file.resolve_duration) a uloží k nahrávce."""
     if ctx["expectedMs"]:
         return ctx["expectedMs"]
-    from app.catalog.deezer import get_deezer_client
-    from app.tools.verify_downloads import _similar
+    from app.library.verify_file import Target, resolve_duration
 
-    if not ctx["artist"]:
+    ms, _dz = await resolve_duration(
+        Target(recording_id=recording_id, title=ctx["title"], artist=ctx["artist"], album=ctx.get("album"), expected_ms=None)
+    )
+    if not ms:
         return None
-    try:
-        track = await get_deezer_client().find_track(ctx["artist"], ctx["title"])
-    except Exception:  # noqa: BLE001 - bez délky se prostě nekontroluje
-        return None
-    if not track or not track.get("duration"):
-        return None
-    if _similar(track.get("title") or "", ctx["title"]) < 0.6 or _similar((track.get("artist") or {}).get("name") or "", ctx["artist"]) < 0.6:
-        return None
-    ms = int(track["duration"]) * 1000
     with Session(engine) as session:
         rec = session.get(Recording, recording_id)
         if rec is not None and not rec.duration_ms:

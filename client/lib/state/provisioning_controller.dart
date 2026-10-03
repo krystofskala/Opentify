@@ -211,7 +211,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
               return TrackProvisioningState(status: 'PENDING', jobId: s.jobId);
             }
             final keepStreaming = s.status == 'STREAMING' && event.status == 'RUNNING';
-            return s.copyWith(status: keepStreaming ? null : event.status, pct: event.pct);
+            return s.copyWith(status: keepStreaming ? null : event.status, pct: event.pct, error: event.error);
           },
         );
       case PlaybackStateEvent():

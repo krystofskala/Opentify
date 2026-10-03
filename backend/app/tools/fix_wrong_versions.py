@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 from app.auth import ADMIN_ID
 from app.db import engine
 from app.models import MediaAsset, MediaAssetStatus, Recording
-from app.providers import _matches_title
+from app.download_match import match_label
 from app.worker import MEDIA_ROOT
 
 
@@ -61,13 +61,14 @@ async def main(dry_run: bool, artist_id: str | None) -> None:
             filename = key.split("|", 1)[-1]
             # Název i verze v souboru, verze může být i ve složce alba.
             text = filename.replace("\\", " ")
-            ok = _matches_title(title, text, album)
+            parts = filename.replace("\\", "/").split("/")
+            ok = match_label(title, parts[-1], album=album, context=parts[-2] if len(parts) > 1 else "") is None
         elif provider == "youtube" and (refs.get("youtubeUrl") or key.startswith("youtube:")) and not refs.get("youtubeId"):
             url = refs.get("youtubeUrl") or f"https://www.youtube.com/watch?v={key.split(':', 1)[1]}"
             video_title = await asyncio.to_thread(_youtube_title, url)
             if video_title is None:
                 continue
-            ok = _matches_title(title, video_title, album)
+            ok = match_label(title, video_title, album=album) is None
             filename = video_title
         else:
             continue

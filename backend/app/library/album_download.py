@@ -19,7 +19,8 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import Artist, Recording, Release
-from app.providers import SlskdProvider, TrackMetadata, _normalize, _title_tokens
+from app.download_match import duration_ok, match_label
+from app.providers import SlskdProvider, TrackMetadata, _junk_reason, _normalize
 
 logger = logging.getLogger("vault.album_download")
 
@@ -31,19 +32,26 @@ def _folder(filename: str) -> str:
     return filename.replace("\\", "/").rsplit("/", 1)[0]
 
 
-def _match(rec_title: str, duration_ms: int | None, files: list[dict]) -> dict | None:
-    wanted = _title_tokens(rec_title)
+def _match(rec_title: str, duration_ms: int | None, files: list[dict], artist: str = "", album: str = "") -> dict | None:
+    """Soubor skladby ve složce alba -- stejná přísná pravidla jako při
+    hledání po skladbách (app/download_match.py): přesný název, žádná jiná
+    verze, délka sedí (živě: "Old King" se stáhl jako "Harvest Moon")."""
+    target = duration_ms / 1000 if duration_ms else None
     best: tuple[float, dict] | None = None
     for f in files:
-        name = f["filename"].replace("\\", "/").rsplit("/", 1)[-1]
-        have = set(_normalize(Path(name).stem).split())
-        if not wanted or len(wanted & have) < max(1, round(len(wanted) * 0.8)):
+        path = f["filename"].replace("\\", "/")
+        name = path.rsplit("/", 1)[-1]
+        folder = path.rsplit("/", 2)[-2] if path.count("/") else ""
+        ext = Path(name).suffix.lower()
+        length = float(f.get("length") or 0) or None
+        if _junk_reason(f["filename"], name, ext, int(f.get("size") or 0), length, f.get("bitRate")):
             continue
-        length = f.get("length")
-        if length and duration_ms and abs(float(length) - duration_ms / 1000) > max(20.0, duration_ms / 1000 * 0.15):
+        # Bez délky v souboru jen tady (složka alba) -- ověří ji kontrola po stažení.
+        if target and length is not None and not duration_ok(target, length, strict=False):
             continue
-        # Kratší název souboru = přesnější shoda ("Drown" vs "Drown (Live)").
-        score = len(wanted & have) - 0.1 * len(have - wanted)
+        if match_label(rec_title, name, artist=artist, album=album, context=folder):
+            continue
+        score = 2.0 if target and length and duration_ok(target, length) else 1.0
         if best is None or score > best[0]:
             best = (score, f)
     return best[1] if best else None
@@ -103,7 +111,7 @@ async def plan_album(release_id: str) -> dict[str, Any]:
         # podle názvu by z ní šla "Trees" z jiné desky (živě: Trench 28/28).
         if len(entry["files"]) > distinct * 1.6 + 3:
             continue
-        matches = {rid: m for rid, title, dur in recs if (m := _match(title, dur, entry["files"]))}
+        matches = {rid: m for rid, title, dur in recs if (m := _match(title, dur, entry["files"], artist_name, album))}
         coverage = len(matches) / len(recs)
         if coverage < MIN_COVERAGE:
             continue

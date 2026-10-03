@@ -1138,6 +1138,7 @@ async def verify_redownload(
     from app.provisioning_service import enqueue, get_or_create_job
 
     user_id, device_id = current
+    fp = await _file_signature(recording_id)
     async with _VERIFY_LOCK:
         report = _read_verify_report()
         entry = report.get(recording_id)
@@ -1152,8 +1153,18 @@ async def verify_redownload(
                 raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby -- ten appka nemaže.")
             rec = session.get(Recording, recording_id)
             if rec is not None:
+                # Stejně jako "Špatné audio": přesný zdroj i otisk zvuku zakázat
+                # (dřív jen "přeskoč první výsledek" -- stáhlo se často totéž).
                 refs = dict(rec.external_refs or {})
-                refs["youtubeSkip"] = int(refs.get("youtubeSkip", 0)) + 1
+                key = refs.get("sourceKey")
+                if not key and asset.source_provider == "youtube" and refs.get("youtubeUrl"):
+                    key = f"youtube:{str(refs['youtubeUrl']).rsplit('=', 1)[-1]}"
+                if key:
+                    refs["rejectedSources"] = [*[k for k in refs.get("rejectedSources") or [] if k != key], key]
+                if fp:
+                    refs["rejectedFingerprints"] = [*(refs.get("rejectedFingerprints") or [])[-4:], fp]
+                refs.pop("sourceKey", None)
+                refs.pop("youtubeUrl", None)
                 rec.external_refs = refs
                 session.add(rec)
                 session.commit()
@@ -1313,6 +1324,21 @@ async def delete_imported_release(release_id: str, current: tuple[str, str] = De
     return {"deleted": deleted, "keptWithHistory": kept}
 
 
+async def _file_signature(recording_id: str) -> str | None:
+    """Otisk zvuku staženého souboru, než se smaže (viz verify_file.signature)."""
+    from app.library.verify_file import signature
+
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, recording_id)
+        path = Path(asset.storage_path) if asset and asset.storage_path else None
+    if path is None or not path.exists() or not path.resolve().is_relative_to(MEDIA_ROOT.resolve()):
+        return None
+    try:
+        return await signature(path)
+    except Exception:  # noqa: BLE001 - bez otisku se jen zakáže zdroj
+        return None
+
+
 @library_router.post("/tracks/{recording_id}/wrong-version")
 async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(get_current_user)):
     """"Špatná verze -- stáhnout jinou": zapamatuje si přesný zdroj staženého
@@ -1323,6 +1349,7 @@ async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(ge
     from app.provisioning_service import enqueue, get_or_create_job
 
     user_id, device_id = current
+    fp = await _file_signature(recording_id)
     with Session(engine) as session:
         rec = session.get(Recording, recording_id)
         asset = session.get(MediaAsset, recording_id)
@@ -1341,9 +1368,10 @@ async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(ge
         if key and key not in rejected:
             rejected.append(key)
         refs["rejectedSources"] = rejected
-        # Starší stažení bez uloženého zdroje: aspoň přeskočit dřívější výběr.
-        if not key:
-            refs["youtubeSkip"] = int(refs.get("youtubeSkip", 0)) + 1
+        # Starší stažení bez uloženého zdroje: aspoň otisk zvuku -- stejný
+        # soubor z jakéhokoli zdroje se pak při kontrole odmítne.
+        if fp:
+            refs["rejectedFingerprints"] = [*(refs.get("rejectedFingerprints") or [])[-4:], fp]
         refs.pop("sourceKey", None)
         refs.pop("youtubeUrl", None)
         # Přesný odkaz z importu (YouTube video / SoundCloud skladba) byl ten

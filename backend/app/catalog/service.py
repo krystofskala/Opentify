@@ -733,7 +733,13 @@ class CatalogService:
                 {**rg, "artist-credit": [{"artist": {"id": artist.mbid, "name": artist.name, "sort-name": artist.sort_name}}]}
             )
             if release is not None:
+                if (release.external_refs or {}).get("rarity") != rarity:
+                    # Worker podle toho chce u stahování živou / demo verzi
+                    # (worker._version_hint), ne studiovou.
+                    release.external_refs = {**(release.external_refs or {}), "rarity": rarity}
+                    self._session.add(release)
                 out.append(self._to_release_out(release).model_copy(update={"rarity": rarity}))
+        self._session.commit()
         out.sort(key=lambda r: (self._RARITY_ORDER[r.rarity or "bootleg"], r.release_date or "9999"))
         return out[:150]
 

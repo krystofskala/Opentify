@@ -117,6 +117,24 @@ def _canonical(session: Session, artist: Artist | None) -> Artist | None:
     return artist
 
 
+# Slova v závorce u alba, která znamenají JINÉ nahrávky ("Limit of Love
+# (Commentary)" není "Limit of Love") -- "Deluxe", "Remastered" ne.
+_EDITION_VERSION = {
+    "commentary", "live", "acoustic", "instrumental", "instrumentals", "remixes", "remix", "karaoke", "demos",
+    "demo", "unplugged", "sessions", "session", "orchestral", "piano", "lullaby", "reimagined", "stripped",
+}
+
+
+def album_key(title: str | None) -> str:
+    """`norm` + slova verze ze závorky (viz `_EDITION_VERSION`)."""
+    words = {
+        w for part in _PARENS_RE.findall(title or "")
+        for w in _NON_ALNUM_RE.split(unicodedata.normalize("NFKD", part).encode("ascii", "ignore").decode().lower())
+        if w in _EDITION_VERSION
+    }
+    return norm(title) + ("|" + ",".join(sorted(words)) if words else "")
+
+
 def ingest_album(session: Session, dz: dict[str, Any], artist: Artist) -> Release | None:
     title = (dz.get("title") or "").strip()
     if not dz.get("id") or not title:
@@ -124,12 +142,12 @@ def ingest_album(session: Session, dz: dict[str, Any], artist: Artist) -> Releas
     dzid = str(dz["id"])
     release = session.exec(select(Release).where(Release.deezer_id == dzid)).first()
     if release is None:
-        wanted = norm(title)
+        wanted = album_key(title)
         release = next(
             (
                 r
                 for r in session.exec(select(Release).where(Release.artist_id == artist.id)).all()
-                if r.deezer_id in (None, dzid) and norm(r.title) == wanted
+                if r.deezer_id in (None, dzid) and album_key(r.title) == wanted
             ),
             None,
         )
@@ -167,7 +185,14 @@ def ingest_track(
     isrc = dz.get("isrc") or None
     recording = session.exec(select(Recording).where(Recording.deezer_id == dzid)).first()
     if recording is None and isrc:
-        recording = session.exec(select(Recording).where(Recording.isrc == isrc)).first()
+        # Stejné ISRC mívají i jiné verze ("Just Dumb" a "Just Dumb
+        # (Commentary)") -- jen se stejným názvem včetně verze.
+        from app.download_match import match_label
+
+        recording = next(
+            (r for r in session.exec(select(Recording).where(Recording.isrc == isrc)).all() if match_label(r.title, title) is None),
+            None,
+        )
     if recording is None and artist is not None:
         # Název i s verzí v závorce -- "Heathens" a "Heathens (Live In Mexico
         # City)" jsou různé nahrávky (dřív `norm` závorky zahodil a živá verze
