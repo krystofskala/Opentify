@@ -26,6 +26,14 @@ class UserIdle {
     _timer = Timer(idleAfter, () => idle.value = true);
     _longTimer = Timer(idleLongAfter, () => idleLong.value = true);
   }
+
+  /// Zrušit časovače (appka se zavírá / odpojuje).
+  static void stop() {
+    _timer?.cancel();
+    _longTimer?.cancel();
+    _timer = null;
+    _longTimer = null;
+  }
 }
 
 /// Nad celou appkou -- každý ukazatel (dotek, tažení, kolečko, pohyb myši)
@@ -44,6 +52,12 @@ class _UserActivityListenerState extends State<UserActivityListener> {
   void initState() {
     super.initState();
     UserIdle.poke();
+  }
+
+  @override
+  void dispose() {
+    UserIdle.stop();
+    super.dispose();
   }
 
   @override
