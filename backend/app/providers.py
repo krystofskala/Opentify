@@ -1440,8 +1440,15 @@ class SoundcloudProvider:
                 "final_ext": "m4a",
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
             }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.extract_info(url, download=True)
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.extract_info(url, download=True)
+            except yt_dlp.utils.DownloadError as exc:
+                if "format is not available" in str(exc):
+                    # Jen 30s ukázka (Go+ / omezení) -- konečný výsledek, ne
+                    # opakovat (dřív job visel "Ve frontě" s pokusy po 30 s).
+                    raise RuntimeError("SoundCloud nabízí jen 30s ukázku (Go+), plnou verzi nemáme") from exc
+                raise
             return dest_stem.with_suffix(".m4a")
 
         path = await asyncio.to_thread(run)

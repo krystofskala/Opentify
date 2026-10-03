@@ -563,6 +563,8 @@ async def build_soundcloud(user_id: str) -> int:
                     continue
                 rec = soundcloud.recording_for(s, artist, {**item, "title": title})
                 s.flush()
+                if (rec.external_refs or {}).get("soundcloudPreviewOnly"):
+                    continue  # jen 30s ukázka (Go+), plnou verzi nestáhneme
                 ids.append(rec.id)
                 taken += 1
                 if taken >= 2:

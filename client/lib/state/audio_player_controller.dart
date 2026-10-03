@@ -1676,6 +1676,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       return;
     }
 
+    // Skladba se teprve obstarává: předchozí zvuk (i iOS rádio stream fronty)
+    // ztlumit hned -- dřív dál hrála stará skladba, zatímco UI ukazovalo
+    // novou "Ve frontě..." (živě: SoundCloud remix, který se nikdy nestáhl).
+    _awaitingProvisioning = true; // pauza níž nesmí schovat načítání
+    if (_player.playing) unawaited(_player.pause());
+
     // `interactive` -- tuhle skladbu uživatel chce slyšet TEĎ (prioritní
     // fronta + závod slskd/YouTube na backendu), na rozdíl od prefetche.
     await provisioning.provision(info.recordingId, interactive: true);

@@ -686,6 +686,16 @@ def _store_duration(recording_id: str, ms: int, deezer_id: str | None) -> None:
         session.commit()
 
 
+def _mark_soundcloud_preview_only(recording_id: str) -> None:
+    """Go+ skladba (jen ukázka) -- Domů ji už nenabídne."""
+    with Session(engine) as session:
+        recording = session.get(Recording, recording_id)
+        if recording is not None:
+            recording.external_refs = {**(recording.external_refs or {}), "soundcloudPreviewOnly": True}
+            session.add(recording)
+            session.commit()
+
+
 def _is_missing_version(message: str) -> bool:
     """Selhání = "nenašli jsme tu verzi" (ne výpadek sítě / zdroje)."""
     low = message.lower()
@@ -984,6 +994,8 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
         # "Nemáme" (nic neprošlo pravidly / kontrolou) je konečný výsledek --
         # opakování za 30 s by našlo totéž a uživatel by jen čekal.
         missing = _is_missing_version(str(exc))
+        if "30s ukázku" in str(exc):
+            await asyncio.to_thread(_mark_soundcloud_preview_only, ctx["recording_id"])
         should_retry = await asyncio.to_thread(
             _finish_failure,
             job_id,
