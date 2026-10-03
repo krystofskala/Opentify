@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/physics.dart';
@@ -297,7 +298,9 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
                 // Zvednutá kapka zvětšuje, co je skutečně pod ní (lišta
                 // i obsah) -- ikony pod ní pak sedí přesně pod barevnou
                 // kopií (dřív prosvítaly nezvětšené a byly dvakrát).
-                if (magnify > 1.001 && !solid) Positioned.fill(child: _MagnifyBackdrop(scale: magnify)),
+                // Jen na webu: v nativní appce (Impeller) bere zvětšení pozadí
+                // souřadnice jinak -- posunutá kopie ("rozbitá lupa", živě).
+                if (kIsWeb && magnify > 1.001 && !solid) Positioned.fill(child: _MagnifyBackdrop(scale: magnify)),
                 // Sklo kapky: v klidu jemné (jako dřív), zvednuté čiré.
                 Positioned.fill(
                   child: ColoredBox(
