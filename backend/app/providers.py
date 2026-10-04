@@ -1250,12 +1250,14 @@ def youtube_pick(track: TrackMetadata, query: str) -> list[dict]:
     seen: set[str] = set()
     ranked: list[tuple[tuple, dict]] = []
     reasons: Counter[str] = Counter()
+    pool: list[dict] = []  # všichni kandidáti (pro záchranu "věta díla" níž)
 
     def consider(entries: list[dict], *, by_isrc: bool) -> None:
         for pos, e in enumerate(entries):
             if e["id"] in seen:
                 continue
             seen.add(e["id"])
+            pool.append(e)
             verdict = _youtube_verdict(track, e, target, by_isrc=by_isrc)
             if not isinstance(verdict, str) and track.official_audio_only and verdict[0] != 0:
                 verdict = "není oficiální audio"
@@ -1276,6 +1278,20 @@ def youtube_pick(track: TrackMetadata, query: str) -> list[dict]:
     if not ranked:
         consider(_yt_search(track, f"{query} audio", 6), by_isrc=False)
     if not ranked:
+        # Klasické dílo: oficiální stopa má název "Dílo. Suita - Věta" a kanál
+        # interpreta, ne skladatele (živě: Stivínův Zvěrokruh hraje Talichovo
+        # kvarteto -- "Nálady. Suita - Cholerici", 168 s, album "Zvěrokruh").
+        if track.album_title:
+            # Věta díla se hledá líp s názvem alba ("Zvěrokruh Oheň").
+            album_part = re.split(r"\s*/\s*", track.album_title)[0]
+            consider(_yt_search(track, f"{album_part} {track.title}", 8), by_isrc=False)
+            # Oficiální stopy (kanál interpreta díla) najde i "... topic".
+            consider(_yt_search(track, f"{track.artist_name or ''} {track.title} topic".strip(), 8), by_isrc=False)
+        for e in pool:
+            if _work_movement_ok(track, e, target):
+                ranked.append(((0, 0, 1, 0), {**e, "_tier": 0}))
+                break
+    if not ranked:
         raise RuntimeError(f"YouTube nemá '{track.title}' v téhle verzi ({dict(reasons.most_common(4))})")
     ranked.sort(key=lambda r: r[0])
     picks = [e for _key, e in ranked]
@@ -1285,6 +1301,47 @@ def youtube_pick(track: TrackMetadata, query: str) -> list[dict]:
     if not picks:
         raise RuntimeError(f"YouTube: žádný další kandidát pro '{track.title}'")
     return picks[:3]
+
+
+def _work_movement_ok(track: TrackMetadata, entry: dict, target: float | None) -> bool:
+    """Věta klasického díla na oficiálním "- Topic" kanálu: přijmout jen když
+    sedí VŠECHNO -- poslední část názvu je přesně název skladby (před ní jen
+    dílo/suita), délka do max(3 s, 2 %), a podle metadat YouTube je to stopa
+    z TÉHOŽ alba a náš interpret je mezi jejími interprety. Jiná nahrávka
+    stejného díla tak neprojde (jiné album / jiný interpret / jiná délka)."""
+    import yt_dlp
+
+    from app.download_match import core_tokens, fold, tokens
+
+    channel = entry.get("channel") or entry.get("uploader") or ""
+    d = entry.get("duration")
+    if not channel.endswith(" - Topic") or not target or not d or not track.album_title:
+        return False
+    if abs(d - target) > max(3.0, target * 0.02):
+        return False
+    segments = re.split(r"\s+[-–—]\s+|:\s+", entry.get("title") or "")
+    if len(segments) < 2:
+        return False
+    last = segments[-1]
+    # Kredity v závorce ("Oheň (Jiří Stivín, Gabriel Jonáš)") -- jen když je
+    # v nich náš interpret (skladatel), jinak by to mohla být verze.
+    credits = re.search(r"\s*\(([^)]*)\)\s*$", last)
+    if credits and artist_in(track.artist_name, credits.group(1)):
+        last = last[: credits.start()]
+    if track.label_mismatch(last) is not None:
+        return False
+    try:
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 15, **_ytdlp_proxy_opts()}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={entry['id']}", download=False) or {}
+    except Exception:  # noqa: BLE001 -- bez metadat nic neriskovat
+        return False
+    yt_album = set(tokens(info.get("album") or ""))
+    ours = [core_tokens(part) for part in re.split(r"\s*/\s*", track.album_title) if core_tokens(part)]
+    if not yt_album or not any(part <= yt_album for part in ours):
+        return False
+    people = " ".join(info.get("artists") or info.get("creators") or [info.get("artist") or ""])
+    return bool(people) and artist_in(track.artist_name, people) and fold(channel) != ""
 
 
 def _youtube_tier(track: TrackMetadata, entry: dict) -> int:
