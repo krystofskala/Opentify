@@ -597,6 +597,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> _setPlaying(bool playing) async {
     if (state.nowPlaying == null) return;
     if (_deferWhileLoading(play: playing)) return;
+    // Po konečné chybě (i z rádia) Play ze zámku/sluchátek zkusí znovu.
+    if (playing && state.error != null) return retryCurrent();
     if (_player.playing == playing) return;
     await togglePlayPause();
   }
@@ -1055,6 +1057,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
     _restoredIdle = false;
+    // Nová fronta (i "Pokračovat" / převzetí) = nový poslech, ne pokračování
+    // dřívějšího přehrání téže skladby (viz `_announceStart`).
+    _scrobbleId = null;
     _rememberProgress = rememberProgress;
     // "Pokračovat" v albu/playlistu: skladba začne tam, kde uživatel skončil.
     _resumeAt = startPosition;
@@ -2328,6 +2333,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// neobnoví. Nastavení (hlasitost, rychlost, opakování...) zůstává.
   Future<void> dismiss() async {
     if (state.nowPlaying == null) return;
+    _scrobbleId = null;
     _stopRadio();
     // Zavřený přehrávač nemá co uspávat -- jinak by časovač později tiše
     // ztlumil hlasitost další, nově puštěné skladby.
@@ -2400,6 +2406,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Skladba se teprve obstarává -- `_player` nechat být (rozehrál by zbytek
     // předchozí skladby / pauza by na webu rozbila tiché odemknutí). Jen
     // přepnout záměr: po načtení hrát, nebo zůstat pozastavená.
+    if (!_loadingTrack && state.error != null && !_player.playing) return retryCurrent();
     if (_loadingTrack) {
       _startPausedWhenReady = !_startPausedWhenReady;
       return;
