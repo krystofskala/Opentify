@@ -286,6 +286,20 @@ class InviteCode(SQLModel, table=True):
     used_at: datetime | None = None
 
 
+class PairCode(SQLModel, table=True):
+    """Jednorázový kód pro přihlášení NOVÉHO zařízení (k jménu a heslu).
+    Vytvoří ho admin pro profil, nebo člověk sám na zařízení, kde už je
+    přihlášený; platí krátce a jen jednou. V DB jen SHA-256."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    code_hash: str = Field(index=True, unique=True)
+    user_id: str = Field(index=True)
+    created_by: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+    used_at: datetime | None = None
+
+
 class LibraryEntry(SQLModel, table=True):
     """Skladba v knihovně profilu (ne admina -- ten má všechno stažené).
     Přidá se, když si ji profil pustí, stáhne nebo lajkne; soubor je

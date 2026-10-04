@@ -40,6 +40,7 @@ ADMIN = {
     ("DELETE", "/api/v1/auth/devices/{device_id}"),
     ("POST", "/api/v1/auth/act-as"),
     ("POST", "/api/v1/auth/signup-link"),
+    ("POST", "/api/v1/auth/users/{user_id}/pair-code"),
     ("POST", "/api/v1/library/scan"),
     ("GET", "/api/v1/library/verify-report"),
     ("POST", "/api/v1/library/verify/{recording_id}"),

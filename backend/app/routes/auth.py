@@ -30,13 +30,54 @@ from app.auth import (
     verify_password,
 )
 from app.db import engine
-from app.models import AppUser, AuthToken, InviteCode
+from app.models import AppUser, AuthToken, InviteCode, PairCode
 from app.utils import utcnow
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 _TEN_YEARS = 10 * 365 * 24 * 3600
 _INVITE_DAYS = 14
+
+# --- Kód zařízení (druhý faktor k jménu a heslu) ---------------------------
+# Nové zařízení se přihlásí jen s jednorázovým kódem, který vytvoří admin
+# (pro profil) nebo člověk sám na už přihlášeném zařízení. Uhodnuté nebo
+# uniklé heslo samo nestačí. Přihlášená zařízení zůstávají (klíč v DB).
+# Vypnout jde `LOGIN_DEVICE_CODE=0` (jen pro nouzi; výchozí zapnuto).
+_PAIR_HOURS = 24
+_PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # bez 0/O, 1/I/L
+
+
+def pair_code_required() -> bool:
+    return os.environ.get("LOGIN_DEVICE_CODE", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _norm_pair(code: str | None) -> str:
+    return "".join(ch for ch in (code or "").upper() if ch.isalnum())
+
+
+def new_pair_code(session: Session, user_id: str, created_by: str | None) -> tuple[str, object]:
+    """Nový kód (`ABCD-EFGH`) pro profil; starší nepoužité kódy profilu
+    přestanou platit (platí vždy jen ten poslední)."""
+    for old in session.exec(select(PairCode).where(PairCode.user_id == user_id, PairCode.used_at.is_(None))).all():  # type: ignore[union-attr]
+        session.delete(old)
+    raw = "".join(secrets.choice(_PAIR_ALPHABET) for _ in range(8))
+    expires = utcnow() + timedelta(hours=_PAIR_HOURS)
+    session.add(PairCode(code_hash=hash_secret(raw), user_id=user_id, created_by=created_by, expires_at=expires))
+    session.commit()
+    return f"{raw[:4]}-{raw[4:]}", expires
+
+
+def _take_pair_code(session: Session, user_id: str, code: str | None) -> bool:
+    """Platný nepoužitý kód TOHOTO profilu -> spotřebovat."""
+    norm = _norm_pair(code)
+    if len(norm) != 8:
+        return False
+    row = session.exec(select(PairCode).where(PairCode.code_hash == hash_secret(norm))).first()
+    if row is None or row.user_id != user_id or row.used_at is not None or aware(row.expires_at) < utcnow():
+        return False
+    row.used_at = utcnow()
+    session.add(row)
+    return True
 
 
 def _set_cookie(response: Response, name: str, value: str) -> None:
@@ -70,7 +111,7 @@ def me(request: Request, response: Response):
     admina vezme samo (nic se nezadává)."""
     user, acting = resolve_user(request)
     if user is None:
-        return {"user": None, "acting": None, "mode": auth_mode()}
+        return {"user": None, "acting": None, "mode": auth_mode(), "deviceCode": pair_code_required()}
     issued = None
     # Bez Tailscale účtu (ten zařízení pozná sám) a bez klíče: admin si ho
     # v otevřeném režimu vezme potichu.
@@ -81,7 +122,7 @@ def me(request: Request, response: Response):
         # Web: cookie; nativní appka si klíč vezme z těla a posílá ho jako Bearer.
         _set_cookie(response, TOKEN_COOKIE, issued)
     return {"user": _user_out(user), "acting": _user_out(acting), "mode": auth_mode(), "token": issued,
-            "tailscaleLogin": request.headers.get("tailscale-user-login")}
+            "tailscaleLogin": request.headers.get("tailscale-user-login"), "deviceCode": pair_code_required()}
 
 
 class JoinIn(BaseModel):
@@ -467,6 +508,8 @@ class LoginIn(BaseModel):
     device: str | None = None
     # První přihlášení / po vynulování: nové heslo (klient ho chce 2×).
     new_password: str | None = None
+    # Kód zařízení (viz `pair_code_required`).
+    code: str | None = None
 
 
 _MIN_PASSWORD = 6
@@ -512,13 +555,28 @@ async def login(body: LoginIn, request: Request, response: Response):
     pozvánku (`/claim`), jinak by si ho mohl zvolit kdokoli, kdo zná jméno."""
     username = body.username.strip()
     await _login_throttle(request, username)
+    need_code = pair_code_required()
+    # Chybějící kód se hlásí PŘED ověřením hesla -- odpověď tak neprozradí,
+    # jestli heslo sedělo.
+    if need_code and len(_norm_pair(body.code)) != 8:
+        raise HTTPException(
+            status_code=401,
+            detail="Zadej kód zařízení – vytvoří ho správce, nebo ty v Profilu na zařízení, kde už jsi přihlášený.",
+        )
     with Session(engine) as session:
         rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
         user = next((u for u in rows if u.username.lower() == username.lower()), None)
-        if user is None or user.password_hash is None or not verify_password(body.password, user.password_hash):
+        ok = user is not None and user.password_hash is not None and verify_password(body.password, user.password_hash)
+        if ok and need_code:
+            ok = _take_pair_code(session, user.id, body.code)
+        if not ok:
+            session.rollback()
             await _login_failed(request, username)
             await asyncio.sleep(1.0)  # zpomalit hádání
-            raise HTTPException(status_code=401, detail="Špatné jméno nebo heslo.")
+            raise HTTPException(
+                status_code=401,
+                detail="Špatné jméno, heslo nebo kód zařízení." if need_code else "Špatné jméno nebo heslo.",
+            )
         token = _issue_token(session, user.id, _token_label(request, body.device))
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
@@ -608,6 +666,25 @@ def update_user(user_id: str, body: UserPatchIn, _admin=Depends(require_admin)):
         session.commit()
         session.refresh(user)
         return _user_out(user)
+
+
+@auth_router.post("/pair-code")
+def my_pair_code(current: tuple[str, str] = Depends(get_current_user)):
+    """"Přidat zařízení": kód pro přihlášení dalšího vlastního zařízení."""
+    user_id, _device = current
+    with Session(engine) as session:
+        code, expires = new_pair_code(session, user_id, user_id)
+    return {"code": code, "expiresAt": expires, "hours": _PAIR_HOURS}
+
+
+@auth_router.post("/users/{user_id}/pair-code")
+def user_pair_code(user_id: str, admin=Depends(require_admin)):
+    """Admin: kód pro nové zařízení profilu (táta, kamarád)."""
+    with Session(engine) as session:
+        if session.get(AppUser, user_id) is None:
+            raise HTTPException(status_code=404, detail="Profil neexistuje.")
+        code, expires = new_pair_code(session, user_id, ADMIN_ID)
+    return {"code": code, "expiresAt": expires, "hours": _PAIR_HOURS}
 
 
 @auth_router.post("/users/{user_id}/reset-password")

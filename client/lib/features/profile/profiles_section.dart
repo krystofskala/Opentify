@@ -24,6 +24,58 @@ import '../../theme/shapes.dart';
 /// (docker-compose `tailscale`), ne celé PC.
 const _sharedOrigin = AppConfig.sharedOrigin;
 
+/// Kód zařízení (k jménu a heslu při přihlášení nového zařízení) --
+/// ukázat a nabídnout ke zkopírování. Platí krátce a jen jednou.
+Future<void> showPairCodeDialog(BuildContext context, String name, Map<String, dynamic> json) async {
+  final code = json['code'] as String;
+  final hours = json['hours'] as int? ?? 24;
+  final text = 'Kód zařízení do Opentify: $code\n'
+      'Zadej ho při přihlášení spolu se jménem a heslem. Platí $hours h a jen jednou.';
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Kód pro nové zařízení – $name'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Na novém zařízení ho zadej při přihlášení (spolu se jménem a heslem). '
+              'Platí $hours h a jen jednou; nový kód ten starý zruší.'),
+          const SizedBox(height: AppSpacing.md),
+          Center(
+            child: SelectableText(
+              code,
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 2,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        GlassButton(
+          label: 'Zavřít',
+          style: GlassButtonStyle.plain,
+          compact: true,
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        GlassButton(
+          label: 'Kopírovat',
+          icon: Symbols.content_copy_rounded,
+          style: GlassButtonStyle.prominent,
+          compact: true,
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: text));
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
+    ),
+  );
+}
+
 class ProfilesSection extends ConsumerWidget {
   const ProfilesSection({super.key});
 
@@ -116,6 +168,15 @@ class ProfilesSection extends ConsumerWidget {
     try {
       final json = await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/invite');
       if (context.mounted) await _showInvite(context, p.name, json['invite'] as String);
+    } catch (e) {
+      if (context.mounted) _snack(context, e);
+    }
+  }
+
+  Future<void> _newPairCode(BuildContext context, WidgetRef ref, ProfileRow p) async {
+    try {
+      final json = await ref.read(apiClientProvider).postJson('/auth/users/${p.id}/pair-code');
+      if (context.mounted) await showPairCodeDialog(context, p.name, json);
     } catch (e) {
       if (context.mounted) _snack(context, e);
     }
@@ -270,6 +331,9 @@ class ProfilesSection extends ConsumerWidget {
   void _profileMenu(BuildContext context, WidgetRef ref, ProfileRow p) {
     final actions = <(IconData, String, VoidCallback)>[
       (Symbols.edit_rounded, 'Upravit jméno', () => _edit(context, ref, p)),
+      // Nové zařízení se přihlásí jménem, heslem a tímhle kódem.
+      if (p.hasPassword || p.role == 'admin')
+        (Symbols.devices_rounded, 'Kód pro nové zařízení', () => _newPairCode(context, ref, p)),
       if (p.username == null && p.role != 'admin')
         (Symbols.mail_rounded, 'Nová pozvánka', () => _newInvite(context, ref, p)),
       if (p.username != null && !p.hasPassword && p.role != 'admin')

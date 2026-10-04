@@ -43,6 +43,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
   final _password = TextEditingController();
   final _newPassword = TextEditingController();
   final _confirm = TextEditingController();
+  final _code = TextEditingController();
 
   /// Profil bez hesla: druhý krok -- vytvořit heslo (jméno z odpovědi).
   String? _createFor;
@@ -51,7 +52,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
 
   @override
   void dispose() {
-    for (final c in [_username, _password, _newPassword, _confirm, _invite]) {
+    for (final c in [_username, _password, _newPassword, _confirm, _invite, _code]) {
       c.dispose();
     }
     super.dispose();
@@ -82,6 +83,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
         'username': username,
         'password': _password.text,
         'device': deviceName(),
+        'code': _code.text.trim(),
         if (_createFor != null) 'new_password': _newPassword.text,
       });
       if (json['needsPassword'] == true) {
@@ -224,8 +226,8 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                     controller: _password,
                     obscureText: true,
                     autofillHints: const [AutofillHints.password],
+                    textInputAction: TextInputAction.next,
                     decoration: const InputDecoration(labelText: 'Heslo', hintText: 'poprvé nech prázdné'),
-                    onSubmitted: (_) => _submit(),
                   )
                 else ...[
                   TextField(
@@ -242,6 +244,26 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                     obscureText: true,
                     autofillHints: const [AutofillHints.newPassword],
                     decoration: const InputDecoration(labelText: 'Heslo znovu'),
+                    onSubmitted: (_) => _submit(),
+                  ),
+                ],
+                // Kód zařízení: nové zařízení se přihlásí jen s ním (heslo
+                // samo nestačí). Vytvoří ho správce, nebo člověk sám v Profilu
+                // na zařízení, kde už je přihlášený.
+                if (!creating) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _code,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textCapitalization: TextCapitalization.characters,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    decoration: const InputDecoration(
+                      labelText: 'Kód zařízení',
+                      hintText: 'ABCD-EFGH',
+                      helperText: 'Od správce, nebo z Profilu na zařízení, kde už jsi přihlášený.',
+                      helperMaxLines: 2,
+                    ),
                     onSubmitted: (_) => _submit(),
                   ),
                 ],

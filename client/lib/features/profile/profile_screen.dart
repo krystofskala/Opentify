@@ -1116,23 +1116,41 @@ class _LogoutButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider).valueOrNull;
     if (auth?.mode != 'login' || auth?.user == null) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: GlassButton(
-        label: 'Odhlásit se (${auth!.user!.name})',
-        icon: Symbols.logout_rounded,
-        compact: true,
-        onPressed: () async {
-          try {
-            await ref.read(apiClientProvider).postJson('/auth/logout');
-          } catch (_) {}
-          await clearDeviceToken();
-          // Další přihlášený nemá vidět frontu ani historii hledání.
-          await clearProfilePrefs();
-          ref.invalidate(authProvider);
-          reloadPage();
-        },
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        // Přihlásit další vlastní zařízení: kód k jménu a heslu.
+        GlassButton(
+          label: 'Přidat zařízení',
+          icon: Symbols.devices_rounded,
+          compact: true,
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.maybeOf(context);
+            try {
+              final json = await ref.read(apiClientProvider).postJson('/auth/pair-code');
+              if (context.mounted) await showPairCodeDialog(context, auth!.user!.name, json);
+            } catch (_) {
+              showToast(messenger, 'Kód se nepodařilo vytvořit.');
+            }
+          },
+        ),
+        GlassButton(
+          label: 'Odhlásit se (${auth!.user!.name})',
+          icon: Symbols.logout_rounded,
+          compact: true,
+          onPressed: () async {
+            try {
+              await ref.read(apiClientProvider).postJson('/auth/logout');
+            } catch (_) {}
+            await clearDeviceToken();
+            // Další přihlášený nemá vidět frontu ani historii hledání.
+            await clearProfilePrefs();
+            ref.invalidate(authProvider);
+            reloadPage();
+          },
+        ),
+      ],
     );
   }
 }
