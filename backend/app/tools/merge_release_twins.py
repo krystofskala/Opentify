@@ -5,7 +5,8 @@ později z diskografie -- diskografie pak deezerové dvojče jako duplikát
 vynechala a otevřené album "chybělo" (živě: Texican Badman, Peter Rowan).
 
 Shoda: stejný interpret, stejný `album_key` (název + slova verze), stejná
-třída (album/kompilace vs singl/EP). Deezerový řádek se sloučí do MB řádku
+třída (album/kompilace vs singl/EP) a stejný rok (± 1) -- reedice s jiným
+rokem zůstává zvlášť (může mít jiné nahrávky, živě: Texican Badman 2019). Deezerový řádek se sloučí do MB řádku
 (`dedupe.merge_release`: skladby se stejným názvem sloučí, ostatní přesune,
 poslechy/knihovna/playlisty přemapuje) -- nic unikátního se nemaže.
 Vlastní hudba a importy z YouTube/SoundCloudu se vynechávají.
@@ -52,6 +53,11 @@ def _distance(a: Release, b: Release) -> int:
     return abs((da - db).days) if da and db else 10**6
 
 
+def _years_close(a: Release, b: Release) -> bool:
+    ya, yb = (a.release_date or "")[:4], (b.release_date or "")[:4]
+    return ya.isdigit() and yb.isdigit() and abs(int(ya) - int(yb)) <= 1
+
+
 def pairs(session: Session) -> list[tuple[Release, Release]]:
     groups: dict[tuple[str, str], list[Release]] = defaultdict(list)
     for r in session.exec(select(Release)).all():
@@ -68,7 +74,11 @@ def pairs(session: Session) -> list[tuple[Release, Release]]:
                 (_distance(d, m), d.id, m.id, d, m)
                 for d in dz
                 for m in mb
-                if release_class(m) is None or release_class(d) is None or release_class(m) == release_class(d)
+                if (release_class(m) is None or release_class(d) is None or release_class(m) == release_class(d))
+                # Jen totéž vydání (rok ± 1) -- reedice s jiným rokem může mít
+                # jiné nahrávky (Texican Badman 2019) a slučování podle názvu
+                # skladeb by verze slilo.
+                and _years_close(d, m)
             ),
             key=lambda c: c[:3],
         )

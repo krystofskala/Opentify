@@ -95,10 +95,14 @@ def _deezer_twin(
         and album_key(r.title) == wanted
         and (cls is None or release_class(r) in (None, cls))
     ]
+    # Jen TOTÉŽ vydání (rok ± 1). Reedice / nová nahrávka s jiným rokem je
+    # jiná deska (Texican Badman 2019 má jinou "Sweet Melinda" než 1981) --
+    # nepřevzít, jinak by se verze slily.
+    year = _year(release_date)
+    candidates = [r for r in candidates if year and _year(r.release_date) and abs(_year(r.release_date) - year) <= 1]
     if not candidates:
         return None
-    year = _year(release_date)
-    return min(candidates, key=lambda r: abs((_year(r.release_date) or 9999) - (year or 9999)))
+    return min(candidates, key=lambda r: abs(_year(r.release_date) - year))
 
 
 def upsert_release(

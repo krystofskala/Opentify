@@ -218,6 +218,10 @@ def _effective_type(release: Release) -> str:
     return (release.external_refs or {}).get("typeByTracks") or release.release_type
 
 
+def _year_of(date: str | None) -> int | None:
+    return int(date[:4]) if date and date[:4].isdigit() else None
+
+
 class CatalogService:
     def __init__(
         self,
@@ -823,15 +827,26 @@ class CatalogService:
             deezer_releases = []
         # Rozhovory/mluvené slovo pryč -- ale jejich názvy zůstanou "známé",
         # ať se nevrátí deezerovou kopií (Deezer je vede jako běžné album).
-        known_titles = {norm(r.title) for r in releases}
+        non_music_titles = {norm(r.title) for r in releases if is_non_music(r)}
         releases = [r for r in releases if not is_non_music(r)]
         deezer_releases = [r for r in deezer_releases if not is_non_music(r)]
+        # Stejný název = totéž album, jen když sedí i rok (± 1). Vydání
+        # s jiným rokem je reedice / nová nahrávka -- ukázat ho (živě:
+        # Texican Badman 2019 s jinou "Sweet Melinda" se schovávalo za 1981).
+        known: dict[str, list[int | None]] = {}
+        for r in releases:
+            known.setdefault(norm(r.title), []).append(_year_of(r.release_date))
+        ids = {r.id for r in releases}
         for extra in deezer_releases:
             if release_type and _effective_type(extra) != release_type:
                 continue
-            if norm(extra.title) in known_titles or extra.id in {r.id for r in releases}:
+            key, year = norm(extra.title), _year_of(extra.release_date)
+            if key in non_music_titles or extra.id in ids:
                 continue
-            known_titles.add(norm(extra.title))
+            if key in known and any(y is None or year is None or abs(y - year) <= 1 for y in known[key]):
+                continue
+            known.setdefault(key, []).append(year)
+            ids.add(extra.id)
             releases.append(extra)
 
         # Alba jen z YouTube (import odkazu jako album/koncert interpreta).
