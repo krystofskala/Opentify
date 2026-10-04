@@ -36,7 +36,7 @@ from sqlmodel import Session, select
 
 from app.auth import ADMIN_ID, get_current_user, require_admin
 from app.utils import utcnow
-from app.catalog.availability import compute_availability, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
 from app.catalog.schemas import Availability, CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library
@@ -469,7 +469,7 @@ def _local_recording_out(session: Session, recording: Recording) -> RecordingOut
         mbid=recording.mbid,
         release_id=recording.release_id,
         artist_id=recording.artist_id,
-        artist_name=resolve_artist_name(session, recording.artist_id),
+        artist_name=recording_artist_name(session, recording),
         title=recording.title,
         duration_ms=recording.duration_ms,
         isrc=recording.isrc,
@@ -960,7 +960,7 @@ def liked_songs(
                 mbid=recording.mbid,
                 release_id=recording.release_id,
                 artist_id=recording.artist_id,
-                artist_name=resolve_artist_name(session, recording.artist_id),
+                artist_name=recording_artist_name(session, recording),
                 title=recording.title,
                 duration_ms=recording.duration_ms,
                 isrc=recording.isrc,

@@ -54,6 +54,23 @@ def prefetch_recordings(session: Session, recording_ids: list[str]) -> list[obje
     return keep
 
 
+def recording_artist_name(session: Session, recording) -> str | None:
+    """Jméno interpreta skladby -- u spolupráce celé ("Norman Blake & Tony
+    Rice"), když skladba patří hlavnímu interpretovi alba, které má víc
+    interpretů (`Release.external_refs.credits`). Jinak jako dřív."""
+    from app.models import Release
+
+    own = (recording.external_refs or {}).get("credits")
+    if own and len(own) > 1:
+        return "".join(f"{c['name']}{c.get('join') or ''}" for c in own).strip()
+    if recording.release_id and recording.artist_id:
+        release = session.get(Release, recording.release_id)
+        credits = (release.external_refs or {}).get("credits") if release is not None else None
+        if credits and release.artist_id == recording.artist_id and len(credits) > 1:
+            return "".join(f"{c['name']}{c.get('join') or ''}" for c in credits).strip()
+    return resolve_artist_name(session, recording.artist_id)
+
+
 def resolve_artist_name(session: Session, artist_id: str | None) -> str | None:
     """`RecordingOut.artist_name` -- denormalizovaný jméno interpreta přímo
     v odpovědi. Bez tohohle by klient u smíšených seznamů (Domů, Knihovna,

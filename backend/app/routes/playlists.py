@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
 from app.auth import get_current_user
-from app.catalog.availability import compute_availability, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
 from app.catalog.schemas import RecordingOut
 from app.db import get_session
 from app.home.generators import _covers_for
@@ -53,7 +53,7 @@ def _to_recording_out(session: Session, recording_id: str) -> RecordingOut | Non
         mbid=recording.mbid,
         release_id=recording.release_id,
         artist_id=recording.artist_id,
-        artist_name=resolve_artist_name(session, recording.artist_id),
+        artist_name=recording_artist_name(session, recording),
         title=recording.title,
         duration_ms=recording.duration_ms,
         isrc=recording.isrc,

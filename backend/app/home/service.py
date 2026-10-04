@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from sqlmodel import Session, select
 
-from app.catalog.availability import compute_availability, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
 from app.catalog.cache import CACHE_PREFIX, cached_json
 from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine
@@ -305,7 +305,7 @@ def _recording_out(session: Session, recording: Recording) -> RecordingOut:
         mbid=recording.mbid,
         release_id=recording.release_id,
         artist_id=recording.artist_id,
-        artist_name=resolve_artist_name(session, recording.artist_id),
+        artist_name=recording_artist_name(session, recording),
         title=recording.title,
         duration_ms=recording.duration_ms,
         isrc=recording.isrc,

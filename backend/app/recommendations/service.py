@@ -22,7 +22,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.library.dislikes import disliked_artist_ids, disliked_ids
-from app.catalog.availability import compute_availability, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
 from app.catalog.cache import cached_json
 from app.catalog.schemas import ArtistOut, RecordingOut
 from app.catalog.upsert import upsert_artist, upsert_recording
@@ -107,7 +107,7 @@ class RecommendationService:
             mbid=recording.mbid,
             release_id=recording.release_id,
             artist_id=recording.artist_id,
-            artist_name=resolve_artist_name(self._session, recording.artist_id),
+            artist_name=recording_artist_name(self._session, recording),
             title=recording.title,
             duration_ms=recording.duration_ms,
             isrc=recording.isrc,

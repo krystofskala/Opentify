@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
-from app.catalog.availability import resolve_artist_name
+from app.catalog.availability import recording_artist_name, resolve_artist_name
 from app.db import engine, get_session
 from app.home.generators import _covers_for
 from app.models import Artist, Listen, Playlist, PlaylistItem, Recording, Release
@@ -65,7 +65,7 @@ def recent(
         if key in seen:
             continue
         seen.add(key)
-        artist_name = resolve_artist_name(session, recording.artist_id)
+        artist_name = recording_artist_name(session, recording)
         if release is not None:
             image = release.images[0] if release.images else None
             items.append(

@@ -239,8 +239,47 @@ def ingest_album(
         if not release.images and cover and not is_placeholder_picture(cover):
             release.images = [cover]
         release.updated_at = utcnow()
+    if dz.get("contributors") and not release.mbid:
+        # Detail alba nese hlavní účinkující ("Norman Blake & Tony Rice 2").
+        session.flush()
+        apply_credits(release, main_credits(session, dz["contributors"]), release.artist_id)
     session.add(release)
     return release
+
+
+def main_credits(session: Session, contributors: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Deezer `contributors` s rolí Main -> [{id, name, join}] (VŠICHNI
+    hlavní účinkující, ne jen dva: "A, B, C & D"). Prázdné, když je jen
+    jeden -- obyčejná skladba/album jednoho interpreta."""
+    credits: list[dict[str, Any]] = []
+    for c in contributors or []:
+        if c.get("role") != "Main" or not c.get("id") or not c.get("name"):
+            continue
+        artist = ingest_artist(session, c)
+        if artist is not None and artist.id not in {x["id"] for x in credits}:
+            credits.append({"id": artist.id, "name": artist.name, "join": ""})
+    if len(credits) < 2:
+        return []
+    for c in credits[:-2]:
+        c["join"] = ", "
+    credits[-2]["join"] = " & "
+    return credits
+
+
+def apply_credits(row: Release | Recording, credits: list[dict[str, Any]], owner_id: str | None) -> bool:
+    """Uloží obsazení do `external_refs.credits` (+ `creditsChecked`) -- jen
+    když hlavní interpret řádku je mezi nimi. Vrací, jestli se něco změnilo."""
+    refs = {k: v for k, v in (row.external_refs or {}).items() if k != "credits"}
+    if credits and owner_id in {c["id"] for c in credits}:
+        # Hlavní interpret řádku první (Deezer ho tak většinou řadí taky).
+        ordered = sorted(credits, key=lambda c: c["id"] != owner_id)
+        joins = [c["join"] for c in credits]
+        refs["credits"] = [{**c, "join": j} for c, j in zip(ordered, joins)]
+    refs["creditsChecked"] = True
+    if refs == (row.external_refs or {}):
+        return False
+    row.external_refs = refs
+    return True
 
 
 def ingest_track(
@@ -304,6 +343,9 @@ def ingest_track(
         recording.updated_at = utcnow()
     if dz.get("preview") and not (recording.external_refs or {}).get("previewUrl"):
         recording.external_refs = {**(recording.external_refs or {}), "previewUrl": dz["preview"]}
+    if dz.get("contributors"):
+        # Detail skladby nese účinkující -- celé obsazení skladby.
+        apply_credits(recording, main_credits(session, dz["contributors"]), recording.artist_id)
     session.add(recording)
     return recording
 

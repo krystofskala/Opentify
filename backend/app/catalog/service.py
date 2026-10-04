@@ -34,7 +34,7 @@ from app.catalog.identity import is_own_artist, is_own_id
 
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.cache import CACHE_PREFIX
-from app.catalog.availability import compute_availability, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
 from app.catalog.deezer import DeezerClient
 from app.catalog.deezer_ingest import deezer_image, ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
 from app.catalog.fanart import fill_artist_banner
@@ -354,7 +354,7 @@ class CatalogService:
             mbid=_real_id(recording.mbid),
             release_id=recording.release_id,
             artist_id=recording.artist_id,
-            artist_name=resolve_artist_name(self._session, recording.artist_id),
+            artist_name=recording_artist_name(self._session, recording),
             title=recording.title,
             duration_ms=recording.duration_ms,
             isrc=_real_id(recording.isrc),
@@ -1216,7 +1216,12 @@ class CatalogService:
         versions_out = None
         if versions is not None:
             v_artist, v_title, v_tracks = versions
-            recs = [r for r in (ingest_track_with_context(self._session, t) for t in v_tracks) if r is not None]
+            recs = []
+            for t in v_tracks:
+                r = ingest_track_with_context(self._session, t)
+                if r is None:
+                    continue
+                recs.append(r)
             self._session.commit()
             versions_out = {
                 "artistName": v_artist.get("name"),
@@ -1728,8 +1733,25 @@ class CatalogService:
             self._session.add(release)
             self._session.commit()
 
+    def store_deezer_credits(self, release: Release, contributors: list[dict[str, Any]]) -> None:
+        """Hlavní účinkující alba z Deezeru (viz deezer_ingest.main_credits)."""
+        from app.catalog.deezer_ingest import apply_credits, main_credits
+
+        if apply_credits(release, main_credits(self._session, contributors), release.artist_id):
+            self._session.add(release)
+            self._session.commit()
+
     async def _enrich_release_credits(self, release: Release) -> None:
-        if (release.external_refs or {}).get("creditsChecked") or not release.mbid or is_own_id(release.mbid):
+        refs = release.external_refs or {}
+        if refs.get("creditsChecked") or is_own_id(release.mbid) or is_own_id(release.deezer_id):
+            return
+        if not release.mbid:
+            # Album jen z Deezeru: hlavní účinkující alba ("Norman Blake &
+            # Tony Rice 2" -- Deezer má oba jako Main, dřív jen první).
+            if release.deezer_id and release.deezer_id.isdigit():
+                album = await self._dz.album(release.deezer_id)
+                if album is not None:
+                    self.store_deezer_credits(release, album.get("contributors") or [])
             return
         try:
             data = await self._mb.get_release_group(release.mbid)
