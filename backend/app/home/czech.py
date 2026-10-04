@@ -9,6 +9,7 @@ profily, které sekci mají zapnutou / žánr připnutý; Domů čte uložený s
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -40,6 +41,62 @@ CZECH_GENRES: dict[str, tuple[str, str, str]] = {
 TAG_TITLES = {tag: title for tag, title, _c in CZECH_GENRES.values()}
 
 
+# Ručně vybraní interpreti, kde štítek Last.fm skoro nic nemá (živě: táta
+# si připnul Český bluegrass a sekce zůstala prázdná -- 2 interpreti, žádný
+# mix). Jen jednoznačná jména (přesná shoda na Deezeru).
+SEED_ARTISTS: dict[str, tuple[str, ...]] = {
+    "cz-bluegrass": (
+        "Druhá tráva", "Poutníci", "Robert Křesťan", "Malina Brothers", "Taxmeni",
+        "G-Runs 'n' Roses", "Banjo Band Ivana Mládka",
+    ),
+}
+
+
+def _own_artists_for(tag: str) -> list[str]:
+    """Vlastní interpreti s tímhle stylem (Kontrast = czech bluegrass)."""
+    from sqlmodel import select
+
+    from app.catalog.identity import is_own_artist
+    from app.models import Artist
+
+    with Session(engine) as session:
+        return [
+            a.id
+            for a in session.exec(select(Artist)).all()
+            if is_own_artist(a) and tag in [str(s).lower() for s in (a.external_refs or {}).get("styles") or []]
+        ]
+
+
+async def _seed_mix(genre_id: str, user_id: str) -> tuple[str | None, list[str]]:
+    """Mix z vybraných interpretů -> (id playlistu, id interpretů)."""
+    from app import browse
+    from app.home import generators as g
+    from app.models import PlaylistKind, Recording
+
+    ids = await browse.seed_tracks(genre_id, SEED_ARTISTS[genre_id])
+    if not ids:
+        return None, []
+    with Session(engine) as session:
+        artists: list[str] = []
+        for rid in ids:
+            rec = session.get(Recording, rid)
+            if rec and rec.artist_id and rec.artist_id not in artists:
+                artists.append(rec.artist_id)
+    title = CZECH_GENRES[genre_id][1]
+    playlist_id = g._save_playlist(
+        owner=user_id,
+        source=f"czech-seed:{genre_id}",
+        title=title,
+        description=f"{title} -- výběr z české scény, každý den jinak",
+        kind=PlaylistKind.PERSONAL_MIX,
+        section="czech",
+        recording_ids=ids[:40],
+        cover_urls=g._covers_for(ids[:4]),
+        ttl=g.DAILY_TTL,
+    )
+    return playlist_id, artists
+
+
 def section_id(genre_id: str) -> str:
     return "czech" if genre_id == "cz" else f"czech_{genre_id[3:]}"
 
@@ -65,10 +122,18 @@ async def build_one(genre_id: str, user_id: str) -> int:
     page = await tags.tag_page(tag, None)
     mix = await tags.tag_mix(tag)
     for_you = await tags.tag_for_you(tag, user_id)
+    mix_id = mix.get("playlistId")
+    artist_ids = [a["id"] for a in page.get("topArtists") or []]
+    if genre_id in SEED_ARTISTS:
+        seed_mix, seed_artists = await _seed_mix(genre_id, user_id)
+        mix_id = mix_id or seed_mix
+        artist_ids = [*artist_ids, *(a for a in seed_artists if a not in artist_ids)]
+    own = await asyncio.to_thread(_own_artists_for, tag)
+    artist_ids = [*own, *(a for a in artist_ids if a not in own)]
     payload = {
         "forYouId": for_you,
-        "mixId": mix.get("playlistId"),
-        "artistIds": [a["id"] for a in page.get("topArtists") or []][:10],
+        "mixId": mix_id,
+        "artistIds": artist_ids[:10],
         "albumIds": [a["id"] for a in page.get("albums") or []][:10],
     }
     with Session(engine) as session:

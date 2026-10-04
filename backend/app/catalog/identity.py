@@ -41,6 +41,20 @@ def is_own_artist(artist: Artist | str | None) -> bool:
     return is_own_id(artist.mbid) or is_own_id(artist.deezer_id) or bool(refs.get("ownArtist"))
 
 
+def own_styles(artist_id: str) -> list[str]:
+    """Ručně zadané styly vlastního interpreta (`external_refs.styles`, např.
+    Kontrast = bluegrass, czech bluegrass). Last.fm podle jména by vrátil
+    cizí kapelu (Kontrast -> německé EBM), tak se berou tyhle."""
+    from sqlmodel import Session
+
+    from app.db import engine
+
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        styles = ((artist.external_refs or {}).get("styles") if artist else None) or []
+    return [str(s).lower() for s in styles if s]
+
+
 _OWN_IDS: set[str] = set()
 _OWN_IDS_AT = -1e9
 

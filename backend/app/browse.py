@@ -460,16 +460,21 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
 
 
 async def _seed_mix(c: Category) -> list[str]:
-    """Nejlepší skladby vybraných interpretů žánru, denně jiný výběr.
-    Interpret se páruje jen při přesné shodě jména (ne "nejbližší" výsledek)."""
+    return await seed_tracks(c.id, SEED_ARTISTS[c.id])
+
+
+async def seed_tracks(key: str, names: tuple[str, ...] | list[str]) -> list[str]:
+    """Nejlepší skladby vybraných interpretů, denně jiný výběr (bluegrass,
+    český bluegrass). Interpret se páruje jen při přesné shodě jména (ne
+    "nejbližší" výsledek)."""
     import random
 
     from app.catalog.artwork import _normalize
 
     dz = get_deezer_client()
-    rng = random.Random(f"{c.id}:{utcnow().date().isoformat()}")
+    rng = random.Random(f"{key}:{utcnow().date().isoformat()}")
     picked: list[dict[str, Any]] = []
-    for name in SEED_ARTISTS[c.id]:
+    for name in names:
         found = await dz.search_artist(name, limit=5)
         artist = next((a for a in found if _normalize(a.get("name", "")) == _normalize(name)), None)
         if artist is None or not artist.get("id"):

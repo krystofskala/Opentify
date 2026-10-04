@@ -645,9 +645,22 @@ async def build_styles() -> int:
             w += 0.3
         if w:
             weight[artist_id] += w
-    # Bez vlastních interpretů -- štítky Last.fm by byly cizí kapely.
-    top = [(taste.artist_name[a], w) for a, w in weight.most_common(60) if a in taste.artist_name and not is_own_artist(a)]
-    styles = await lt.user_styles_weighted(top, 60)
+    # Vlastní interpreti jen s ručně zadanými styly -- štítky Last.fm podle
+    # jména by byly cizí kapely (Kontrast -> německé EBM, živě u táty).
+    from app.catalog.identity import own_styles
+
+    top: list[tuple[str, float]] = []
+    manual: dict[str, list[str]] = {}
+    for a, w in weight.most_common(60):
+        if a not in taste.artist_name:
+            continue
+        if is_own_artist(a):
+            styles_of = await asyncio.to_thread(own_styles, a)
+            if not styles_of:
+                continue
+            manual[taste.artist_name[a]] = styles_of
+        top.append((taste.artist_name[a], w))
+    styles = await lt.user_styles_weighted(top, 60, manual)
     with Session(engine) as session:
         row = session.get(HomeSnapshot, styles_key(user_id)) or HomeSnapshot(key=styles_key(user_id))
         # Na Domů 20 nejsilnějších, celý seznam pro "tvé podžánry" u žánrů.

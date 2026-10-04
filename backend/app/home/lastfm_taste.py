@@ -119,10 +119,14 @@ def merge_shares(*sources: dict[str, float]) -> dict[str, float]:
 async def tag_category_shares(name: str) -> dict[str, float]:
     """Štítky interpreta -> naše žánry ({kategorie: síla 0-1}). První štítek
     nejsilnější. Podžánry se počítají k hlavnímu žánru (newgrass -> bluegrass)."""
+    return shares_from_tags((await artist_tags(name))[:6])
+
+
+def shares_from_tags(tags: list[str]) -> dict[str, float]:
+    """Seznam stylů (nejsilnější první) -> naše žánry ({kategorie: síla})."""
     from app.browse import LASTFM_TAGS
     from app.tags import SUBGENRES
 
-    tags = (await artist_tags(name))[:6]
     out: dict[str, float] = {}
     for i, tag in enumerate(tags):
         weight = max(0.3, 1.0 - i * 0.15)
@@ -140,23 +144,29 @@ _BROAD = {
 }
 
 
-async def user_styles_weighted(top_artists: list[tuple[str, float]], limit: int = 60) -> list[str]:
+async def user_styles_weighted(
+    top_artists: list[tuple[str, float]], limit: int = 60, manual: dict[str, list[str]] | None = None
+) -> list[str]:
     """Styly profilu z vážených štítků Last.fm (artist.getTopTags, 0-100) --
     víc stylů na interpreta, úzké styly ("bluegrass", "shoegaze") dostanou
-    šanci a obecné nálepky poloviční váhu."""
+    šanci a obecné nálepky poloviční váhu. `manual` = ručně zadané styly
+    (vlastní interpreti, jméno -> styly) místo Last.fm."""
     from app.catalog.lastfm import artist_top_tags
     from app.tags import is_style
 
     sem = asyncio.Semaphore(6)
 
     async def tags_of(name: str) -> list[tuple[str, int]]:
+        if manual and name in manual:
+            return [(t, 100) for t in manual[name]]
         async with sem:
             return await artist_top_tags(lastfm_name(name))
 
     tag_lists = await asyncio.gather(*(tags_of(n) for n, _w in top_artists))
     score: Counter = Counter()
     for (name, weight), tags in zip(top_artists, tag_lists):
-        styles = [(t.lower(), c) for t, c in tags if is_style(t) and c >= 10][:8]
+        own = bool(manual and name in manual)
+        styles = [(t.lower(), c) for t, c in tags if (own or is_style(t)) and c >= 10][:8]
         for tag, count in styles:
             score[tag] += weight * (count / 100) * (0.5 if tag in _BROAD else 1.0)
     return [t for t, _ in score.most_common(limit)]

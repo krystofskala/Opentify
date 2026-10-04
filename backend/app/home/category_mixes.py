@@ -177,7 +177,13 @@ async def artist_shares(taste: pm.Taste, budget: int) -> dict[str, dict[str, flo
 
     lf: dict[str, dict[str, float]] = {}
     for artist_id in ranked[: max(budget * 4, 150)]:
-        if is_own_artist(artist_id):  # štítky by patřily cizí kapele
+        if is_own_artist(artist_id):
+            # Štítky podle jména by patřily cizí kapele -- jen ručně zadané styly.
+            from app.catalog.identity import own_styles
+
+            manual = await asyncio.to_thread(own_styles, artist_id)
+            if manual:
+                lf[artist_id] = lt.shares_from_tags(manual)
             continue
         lf[artist_id] = await lt.tag_category_shares(taste.artist_name.get(artist_id, ""))
     out: dict[str, dict[str, float]] = {}
