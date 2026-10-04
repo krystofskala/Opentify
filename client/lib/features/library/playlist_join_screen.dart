@@ -31,8 +31,13 @@ class _PlaylistJoinScreenState extends ConsumerState<PlaylistJoinScreen> {
   Future<void> _join() async {
     try {
       final res = await ref.read(apiClientProvider).postJson('/playlists/join/${widget.code}');
+      final id = '${res['playlistId']}';
+      // Dřív opuštěný playlist: znovu členem -> už není "pryč" (jinak by
+      // detail dál hlásil, že neexistuje) a načíst ho znovu (stará 403).
+      ref.read(gonePlaylistsProvider.notifier).update((gone) => {...gone}..remove(id));
+      ref.invalidate(playlistDetailProvider(id));
       ref.invalidate(myPlaylistsProvider);
-      if (mounted) context.go('/playlists/${res['playlistId']}');
+      if (mounted) context.go('/playlists/$id');
     } catch (e) {
       if (mounted) setState(() => _error = e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.');
     }

@@ -231,6 +231,9 @@ class SkeletonBox extends StatelessWidget {
           child: SizedBox(width: width, height: height),
         );
     if (MediaQuery.disableAnimationsOf(context)) return box(0.75);
+    // Skeleton mimo obrazovku (tab v pozadí, Offstage): nepulzovat -- jinak
+    // držel časovač pulzu naživu napořád. Po návratu se přestaví (závislost).
+    if (!TickerMode.valuesOf(context).enabled) return box(0.75);
     // Jeden společný pulz pro všechny obdélníky (dřív vlastní controller +
     // Opacity = saveLayer na každý z ~18 obdélníků, na každý snímek).
     return ValueListenableBuilder<double>(valueListenable: _SkeletonPulse.instance, builder: (_, k, __) => box(k));

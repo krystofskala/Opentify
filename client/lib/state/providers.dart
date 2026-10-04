@@ -111,10 +111,12 @@ final recentContextsProvider = FutureProvider.autoDispose<List<RecentContext>>((
 
 /// Oblíbené skladby -- sdílené Knihovnou (karta + detail); dřív žily v Profilu.
 final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) async {
+  // Lístek před requestem -- odpověď starší než právě dokončený lajk se zahodí.
+  final ticket = ref.read(likedSongsControllerProvider.notifier).loadTicket();
   final playlist = await ref.watch(libraryRepositoryProvider).likedSongs();
   // Čerstvý seznam = čerstvá sada srdíček -- detail Oblíbených filtruje
   // podle sady, stará by schovala nově přidané (import, jiné zařízení).
-  ref.read(likedSongsControllerProvider.notifier).replaceAll(playlist.items.map((r) => r.id).toSet());
+  ref.read(likedSongsControllerProvider.notifier).replaceAll(playlist.items.map((r) => r.id).toSet(), ticket: ticket);
   return playlist;
 });
 

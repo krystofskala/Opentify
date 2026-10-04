@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -92,11 +93,9 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
   }
 
   Future<void> _start() async {
-    final player = ref.read(audioPlayerControllerProvider);
-    if (player.isPlaying) {
-      // Bez await -- mikrofon se musí otevřít ještě v rámci klepnutí.
-      ref.read(audioPlayerControllerProvider.notifier).togglePlayPause();
-    }
+    // Bez await -- mikrofon se musí otevřít ještě v rámci klepnutí. I skladba,
+    // co se teprve načítá (jinak by se po stažení rozehrála do ladění).
+    unawaited(ref.read(audioPlayerControllerProvider.notifier).pauseIfPlaying());
     setState(() {
       _phase = _Phase.starting;
       _error = null;

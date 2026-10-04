@@ -36,6 +36,15 @@ typedef AuthInfo = ({
 /// klíč zařízení (`/auth/join`).
 final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) async {
   final api = ref.watch(apiClientProvider);
+  // Klíč zařízení se přečetl až po návratu do appky (zamčený iPhone při
+  // startu na pozadí) -- znovu se přihlásit a WS připojit už s klíčem.
+  void onTokenRecovered() {
+    ref.read(realtimeClientProvider).reconnectNow(force: true);
+    ref.invalidateSelf();
+  }
+
+  deviceTokenRecovered.addListener(onTokenRecovered);
+  ref.onDispose(() => deviceTokenRecovered.removeListener(onTokenRecovered));
   final code = joinCodeFromUrl();
   var json = await api.getJson('/auth/me');
   final mode = json['mode'] as String? ?? 'open';

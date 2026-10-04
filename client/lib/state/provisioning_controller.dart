@@ -108,6 +108,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
   static const _stallAfter = Duration(seconds: 10);
   static const _streamingStallAfter = Duration(seconds: 45);
   static const _maxRechecks = 6;
+  static const _liveJobStatuses = {'PENDING', 'QUEUED', 'RUNNING'};
   late final Timer _watchdog;
   final Map<String, DateTime> _lastChange = {};
   final Map<String, int> _rechecks = {};
@@ -144,7 +145,12 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
           // Jen PŘEČÍST stav jobu -- POST /provision by po ztracené FAILED
           // zprávě tiše založil nový job a kolečko se točilo znovu.
           final job = await _repo.getJob(jobId);
-          _rechecks[id] = count + 1; // síťová chyba (výjimka) se nepočítá
+          // Server hlásí živý job (dlouhá slskd fronta) -> to není zaseknutí,
+          // nepočítat -- jinak by zdravé stahování po ~minutě skončilo chybou
+          // "Stahování se zaseklo". Na opravdu visící job má backend vlastní
+          // 40min timeout. Počítá se jen neznámý/nekonzistentní stav.
+          // (Síťová chyba = výjimka se nepočítá taky.)
+          if (!_liveJobStatuses.contains(job.status)) _rechecks[id] = count + 1;
           final current = state[id];
           if (current == null || !current.isInFlight) continue; // mezitím přes WS
           switch (job.status) {
@@ -157,10 +163,10 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
           }
         } else {
           final result = await _repo.provision(id);
-          _rechecks[id] = count + 1;
           if (result.job != null) _jobIdToRecordingId[result.job!.id] = id;
           final job = result.job;
           final status = result.streamUrl != null ? 'AVAILABLE' : (job?.status ?? result.status);
+          if (!_liveJobStatuses.contains(status)) _rechecks[id] = count + 1; // viz výš
           final current = state[id];
           // Změnilo se něco mezitím přes WS? Pak nepřepisovat.
           if (current != null && current.isInFlight) {

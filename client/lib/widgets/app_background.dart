@@ -149,7 +149,10 @@ class _AppBackgroundState extends State<AppBackground> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final wasReduced = _reducedMotion;
     _reducedMotion = MediaQuery.disableAnimationsOf(context) || systemPrefersReducedMotion();
+    // Omezení pohybu vypnuto -> smyčka mezitím usnula, rozběhnout ji znovu.
+    if (wasReduced && !_reducedMotion) _wake();
   }
 
   @override

@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show TargetPlatform, ValueNotifier, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,7 +20,60 @@ const _actAsKey = 'auth.act_as';
 
 /// Klíč zařízení v systémovém trezoru (iOS Keychain, Android Keystore), ne
 /// v běžném úložišti appky -- to Android kopíroval do zálohy na Google Disk.
-const _secure = FlutterSecureStorage();
+/// iOS: dostupný i po prvním odemčení (`first_unlock`), ne jen při odemčeném
+/// telefonu -- appka spuštěná na pozadí na zamčeném iPhonu (výchozí
+/// `unlocked`) klíč nepřečetla a běžela odhlášená.
+const _secure = FlutterSecureStorage(iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock));
+
+/// Starší položka uložená s výchozím `unlocked` -- dotaz s jinou dostupností
+/// ji nenajde (plugin dostupnost dává do dotazu), proto číst i takhle.
+const _secureLegacy = FlutterSecureStorage();
+
+/// Zvýší se, když se klíč podařilo přečíst až dodatečně (po návratu do
+/// appky) -- `authProvider` se pak načte znovu a WS se připojí s klíčem.
+final ValueNotifier<int> deviceTokenRecovered = ValueNotifier<int>(0);
+
+AppLifecycleListener? _retryOnResume;
+
+/// Přečte klíč z trezoru; starou iOS položku (`unlocked`) přestěhuje na
+/// `first_unlock`. Výjimka = trezor teď nejde (zamčený telefon).
+Future<String?> _readSecure() async {
+  final token = await _secure.read(key: _tokenKey);
+  if (token != null || defaultTargetPlatform != TargetPlatform.iOS) return token;
+  final old = await _secureLegacy.read(key: _tokenKey);
+  if (old != null) {
+    // `delete` maže bez ohledu na dostupnost; zápis s novou by jinak narazil
+    // na duplicitní položku.
+    try {
+      await _secure.delete(key: _tokenKey);
+      await _secure.write(key: _tokenKey, value: old);
+    } catch (_) {
+      // Přestěhování nevyšlo -- vrátit starou položku, ať se klíč neztratí.
+      try {
+        await _secureLegacy.write(key: _tokenKey, value: old);
+      } catch (_) {}
+    }
+  }
+  return old;
+}
+
+/// Trezor při startu nešel přečíst: nebrat to jako odhlášení natrvalo --
+/// zkusit znovu při návratu do appky (telefon už je odemčený).
+void _scheduleRetry() {
+  _retryOnResume ??= AppLifecycleListener(onResume: () async {
+    try {
+      final token = await _readSecure();
+      _retryOnResume?.dispose();
+      _retryOnResume = null;
+      if (token == null || token == deviceToken) return;
+      deviceToken = token;
+      await NativeNav.syncConfig();
+      deviceTokenRecovered.value++;
+    } catch (_) {
+      // Pořád zamčeno -- příště.
+    }
+  });
+}
 
 Future<void> loadDeviceToken() async {
   if (kIsWeb) return;
@@ -28,7 +82,7 @@ Future<void> loadDeviceToken() async {
     actAsProfile = prefs.getString(_actAsKey);
     final legacy = prefs.getString(_tokenKey);
     try {
-      deviceToken = await _secure.read(key: _tokenKey);
+      deviceToken = await _readSecure();
       // Starší verze měla klíč v běžném úložišti -- přestěhovat a smazat.
       if (deviceToken == null && legacy != null) {
         await _secure.write(key: _tokenKey, value: legacy);
@@ -36,9 +90,10 @@ Future<void> loadDeviceToken() async {
       }
       if (legacy != null) await prefs.remove(_tokenKey);
     } catch (_) {
-      // Trezor nejde (vzácné zařízení / obnova zálohy): radši přihlášený
-      // přes staré úložiště než odhlášený.
+      // Trezor teď nejde (zamčený telefon, obnova zálohy): klíč ze starého
+      // úložiště, pokud tam je, a znovu zkusit po návratu do appky.
       deviceToken = legacy;
+      _scheduleRetry();
     }
   } catch (_) {}
   await NativeNav.syncConfig();
@@ -47,8 +102,17 @@ Future<void> loadDeviceToken() async {
 Future<void> saveDeviceToken(String token) async {
   if (kIsWeb) return;
   deviceToken = token;
+  // Nový klíč z přihlášení -- dodatečné čtení starého už nemá co přepsat.
+  _retryOnResume?.dispose();
+  _retryOnResume = null;
   try {
-    await _secure.write(key: _tokenKey, value: token);
+    try {
+      await _secure.write(key: _tokenKey, value: token);
+    } catch (_) {
+      // Stará položka s jinou dostupností (iOS) -- smazat a zapsat znovu.
+      await _secure.delete(key: _tokenKey);
+      await _secure.write(key: _tokenKey, value: token);
+    }
   } catch (_) {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -62,6 +126,8 @@ Future<void> saveDeviceToken(String token) async {
 Future<void> clearDeviceToken() async {
   deviceToken = null;
   actAsProfile = null;
+  _retryOnResume?.dispose();
+  _retryOnResume = null;
   if (kIsWeb) return;
   try {
     await _secure.delete(key: _tokenKey);

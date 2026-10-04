@@ -57,6 +57,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final playlist = ref.watch(playlistDetailProvider(widget.playlistId));
+    // Nově (ne z cache) úspěšně načtený detail -> playlist zase existuje a je
+    // přístupný (např. znovu připojený) -- zrušit značku "pryč".
+    ref.listen(playlistDetailProvider(widget.playlistId), (_, next) {
+      if (next is AsyncData && !next.isLoading && ref.read(gonePlaylistsProvider).contains(widget.playlistId)) {
+        ref.read(gonePlaylistsProvider.notifier).update((gone) => {...gone}..remove(widget.playlistId));
+      }
+    });
     // Smazaný / opuštěný (i z jiného tabu nebo zařízení): jasný stav, ne
     // obecná chyba a akce, které by selhaly.
     final gone = ref.watch(gonePlaylistsProvider.select((s) => s.contains(widget.playlistId))) ||

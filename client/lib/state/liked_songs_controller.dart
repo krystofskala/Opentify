@@ -35,10 +35,21 @@ class LikedSongsController extends StateNotifier<AsyncValue<Set<String>>> {
   /// je nesmí přepsat (srdíčko by na chvíli zhaslo).
   final _pending = <String, bool>{};
 
+  /// Pořadí načtení vs. dokončených lajků: odpověď načtení, které začalo
+  /// PŘED dokončením posledního lajku, může být stará (server ho ještě
+  /// neměl) -- `_pending` je v tu chvíli už prázdné a lajk by zmizel.
+  int _seq = 0;
+  int _lastToggleDone = 0;
+
+  /// Lístek pro načtení mimo kontroler (`likedSongsProvider`) -- vzít PŘED
+  /// requestem a předat do `replaceAll`.
+  int loadTicket() => ++_seq;
+
   Future<void> _load() async {
+    final ticket = loadTicket();
     try {
       final playlist = await _repo.likedSongs();
-      if (mounted) replaceAll(playlist.items.map((r) => r.id).toSet());
+      if (mounted) replaceAll(playlist.items.map((r) => r.id).toSet(), ticket: ticket);
     } catch (e, st) {
       // Stará data nechat -- chyba jen u prvního načtení.
       if (mounted && !state.hasValue) state = AsyncValue.error(e, st);
@@ -50,8 +61,9 @@ class LikedSongsController extends StateNotifier<AsyncValue<Set<String>>> {
 
   /// Sada ze serveru (i z načteného `likedSongsProvider`) -- rozběhnuté
   /// změny se na ni přeloží.
-  void replaceAll(Set<String> ids) {
+  void replaceAll(Set<String> ids, {int? ticket}) {
     if (!mounted) return;
+    if (ticket != null && ticket < _lastToggleDone) return; // zastaralé načtení
     _loadedAt = DateTime.now();
     final next = {...ids};
     _pending.forEach((id, liked) => liked ? next.add(id) : next.remove(id));
@@ -102,6 +114,7 @@ class LikedSongsController extends StateNotifier<AsyncValue<Set<String>>> {
       return false;
     } finally {
       if (_pending[recordingId] == liked) _pending.remove(recordingId);
+      _lastToggleDone = ++_seq;
     }
   }
 

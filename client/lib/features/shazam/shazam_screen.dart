@@ -89,8 +89,8 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
   Future<void> _listen() async {
     if (_phase == _Phase.listening) return _cancel();
     final session = ++_session;
-    final player = ref.read(audioPlayerControllerProvider);
-    if (player.isPlaying) ref.read(audioPlayerControllerProvider.notifier).togglePlayPause();
+    // I skladba, co se teprve načítá -- jinak by se po stažení rozehrála do nahrávání.
+    unawaited(ref.read(audioPlayerControllerProvider.notifier).pauseIfPlaying());
     setState(() {
       _phase = _Phase.listening;
       _result = null;

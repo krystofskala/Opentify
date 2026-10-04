@@ -14,8 +14,12 @@ const _maxEntries = 12;
 /// dotaz vždy první, duplicity se přesunou navrch místo zdvojení.
 class SearchHistoryController extends StateNotifier<List<String>> {
   SearchHistoryController(this._ref) : super(const []) {
-    _load();
+    _loaded = _load().then<void>((_) {}, onError: (Object _) {});
   }
+
+  /// Zápis musí počkat na první načtení (to čeká i na přihlášení) -- jinak
+  /// `add()` během čekání přepsal uloženou historii jedním dotazem.
+  late final Future<void> _loaded;
 
   final Ref _ref;
   // Historie patří profilu -- starý kontroler po přepnutí nezapisuje.
@@ -34,7 +38,8 @@ class SearchHistoryController extends StateNotifier<List<String>> {
   }
 
   Future<void> _store() async {
-    if (_prefsGeneration != profilePrefsGeneration) return;
+    await _loaded;
+    if (!mounted || _prefsGeneration != profilePrefsGeneration) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_prefsKey, state);
   }
@@ -54,11 +59,17 @@ class SearchHistoryController extends StateNotifier<List<String>> {
 
   Future<void> remove(String query) async {
     state = state.where((q) => q != query).toList();
+    await _loaded;
+    if (!mounted) return;
+    state = state.where((q) => q != query).toList(); // načtení ho mohlo vrátit
     await _store();
   }
 
   Future<void> clear() async {
     state = const [];
+    await _loaded;
+    if (!mounted) return;
+    state = const []; // načtení mezitím mohlo doplnit uložené
     if (_prefsGeneration != profilePrefsGeneration) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);

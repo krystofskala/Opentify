@@ -133,21 +133,37 @@ class OpentifyApp extends ConsumerWidget {
 const _simulateInsets = bool.fromEnvironment('SIMULATE_INSETS');
 
 Widget _maybeSimulatedInsets(BuildContext context, bool reduceMotion, Widget child) {
-  final mq = MediaQuery.of(context);
+  // Jen `disableAnimationsOf` -- celé `MediaQuery.of` tady přestavovalo celou
+  // appku při každé změně MediaQuery (klávesnice, otočení, změna velikosti).
   // Omezení pohybu: na webu Flutter `prefers-reduced-motion` do
   // `disableAnimations` nepropisuje -- doplníme ho, ať celá appka čte jen
   // `MediaQuery.disableAnimationsOf`. Navíc ruční přepínač v Profil › Vzhled.
-  final reduce = !mq.disableAnimations && (reduceMotion || systemPrefersReducedMotion());
+  final reduce = !MediaQuery.disableAnimationsOf(context) && (reduceMotion || systemPrefersReducedMotion());
   if (!_simulateInsets && !reduce) return child;
-  const insets = EdgeInsets.only(top: 47, bottom: 34);
-  return MediaQuery(
-    data: mq.copyWith(
-      padding: _simulateInsets ? insets : null,
-      viewPadding: _simulateInsets ? insets : null,
-      disableAnimations: mq.disableAnimations || reduce,
-    ),
-    child: child,
-  );
+  return _MediaOverride(reduce: reduce, child: child);
+}
+
+/// Přepis MediaQuery v samostatném widgetu: na celé `MediaQuery.of` závisí
+/// jen tenhle (levný) build, `child` se nepřestavuje.
+class _MediaOverride extends StatelessWidget {
+  const _MediaOverride({required this.reduce, required this.child});
+
+  final bool reduce;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    const insets = EdgeInsets.only(top: 47, bottom: 34);
+    return MediaQuery(
+      data: mq.copyWith(
+        padding: _simulateInsets ? insets : null,
+        viewPadding: _simulateInsets ? insets : null,
+        disableAnimations: mq.disableAnimations || reduce,
+      ),
+      child: child,
+    );
+  }
 }
 
 /// Klepnutí kamkoli mimo textové pole zavře klávesnici. Tlačítka a pole

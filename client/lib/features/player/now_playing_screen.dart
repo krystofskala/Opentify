@@ -895,7 +895,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           if (playback.error != null) ...[
             const SizedBox(height: 8),
             Text(
-              'Nepodařilo se přehrát · ${playback.error}',
+              // Chyba přehrávače už sama začíná "Nepodařilo se…" -- nezdvojovat.
+              playback.error!.startsWith('Nepodařilo se') ? playback.error! : 'Nepodařilo se přehrát · ${playback.error}',
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
