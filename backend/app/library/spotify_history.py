@@ -56,6 +56,12 @@ def read_zip(raw: bytes) -> list[dict[str, Any]]:
 
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
         check_zip(zf)
+        names = [i.filename.rsplit("/", 1)[-1] for i in zf.infolist()]
+        has_extended = any(n.startswith("Streaming_History_Audio") and n.endswith(".json") for n in names)
+        if not has_extended:
+            # "Údaje o účtu" (Account data) – přijde za pár dní, jen poslední
+            # rok a bez alb; rozšířená historie (až 30 dní) je nadmnožina.
+            return _read_account_data(zf)
         for info in zf.infolist():
             name = info.filename.rsplit("/", 1)[-1]
             if not (name.startswith("Streaming_History_Audio") and name.endswith(".json")):
@@ -80,6 +86,33 @@ def read_zip(raw: bytes) -> list[dict[str, Any]]:
                         "skipped": bool(row.get("skipped")),
                     }
                 )
+    return plays
+
+
+def _read_account_data(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
+    """`StreamingHistory_music_*.json` z balíčku "Údaje o účtu":
+    `{endTime: "2024-05-01 10:00" (UTC), artistName, trackName, msPlayed}`.
+    Podcasty (`StreamingHistory_podcast_*`) se vynechají."""
+    plays: list[dict[str, Any]] = []
+    for info in zf.infolist():
+        name = info.filename.rsplit("/", 1)[-1]
+        if not (name.startswith("StreamingHistory_music") and name.endswith(".json")):
+            continue
+        for row in json.loads(zf.read(info).decode("utf-8-sig")):
+            track, artist, end = row.get("trackName"), row.get("artistName"), row.get("endTime")
+            if not track or not artist or not end or track == "Unknown Track":
+                continue
+            plays.append(
+                {
+                    "ts": end.replace(" ", "T") + ":00Z",
+                    "ms": int(row.get("msPlayed") or 0),
+                    "track": track,
+                    "artist": artist,
+                    "album": None,
+                    "spotify_id": None,
+                    "account": True,
+                }
+            )
     return plays
 
 
@@ -113,9 +146,19 @@ def import_history(user_id: str, plays: list[dict[str, Any]], source: str = SOUR
     poslechy, nový import nahradí jen ty z téže platformy (dohromady se pak
     sčítají ve Wrapped a mixech)."""
     counted = [p for p in plays if p["ms"] >= MIN_PLAY_MS]
+    account_only = bool(plays) and all(p.get("account") for p in plays)
     with Session(engine) as session:
         ids = _resolve(session, counted)
-        session.exec(delete(Listen).where(Listen.user_id == user_id, Listen.source == source))
+        if account_only and counted:
+            # "Údaje o účtu" kryjí jen poslední rok: nahradit jen to období,
+            # starší (třeba z rozšířené historie) zůstává. Rozšířená historie
+            # pak při svém importu nahradí všechno.
+            start = min(_parse_ts(p["ts"]) for p in counted).replace(tzinfo=None)
+            session.exec(
+                delete(Listen).where(Listen.user_id == user_id, Listen.source == source, Listen.played_at >= start)
+            )
+        else:
+            session.exec(delete(Listen).where(Listen.user_id == user_id, Listen.source == source))
         now = utcnow()
         batch = 0
         from app.models import Recording
@@ -172,6 +215,8 @@ def import_play_events(
     tím nemění; opakovaný import nahradí jen PlayEventy téhož zdroje."""
     from app.models import PlayEvent
 
+    if not any(_end_reason(p) for p in plays):
+        return 0  # zdroj to neví ("Údaje o účtu", YT Music) -- staré nemazat
     if ids is None:
         with Session(engine) as session:
             ids = _resolve(session, [p for p in plays if p["ms"] >= MIN_PLAY_MS])

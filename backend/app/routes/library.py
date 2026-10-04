@@ -795,7 +795,9 @@ async def import_spotify(
     try:
         from app.library.spotify_history import import_history, read_zip
 
-        plays = read_zip(raw)
+        # Rozbalení až stovek MB JSONu mimo event loop -- jinak stojí celé API
+        # (i přehrávání ostatních).
+        plays = await asyncio.to_thread(read_zip, raw)
     except (zipfile.BadZipFile, ValueError, KeyError):
         plays = []
     # Google Takeout (YouTube / YouTube Music): NIKDY do Spotify importu --
@@ -841,7 +843,18 @@ async def import_spotify(
             out["libraryPlaylist"] = LIBRARY_PLAYLIST
             del report
         return out
-    if plays:
+    account_history: dict | None = None
+    if plays and all(p.get("account") for p in plays):
+        # Balíček "Údaje o účtu": playlisty a knihovna jako dřív (níže) +
+        # nově i historie posledního roku (StreamingHistory_music_*).
+        from app.home import generators as g
+
+        token = g.set_home_user(user_id)
+        try:
+            account_history = await asyncio.to_thread(import_history, user_id, plays)
+        finally:
+            g.reset_home_user(token)
+    elif plays:
         from app.home import generators as g
 
         token = g.set_home_user(user_id)
@@ -858,6 +871,8 @@ async def import_spotify(
 
         result = await asyncio.to_thread(run)
     except (ValueError, zipfile.BadZipFile) as exc:  # i UnicodeDecodeError
+        if account_history is not None:  # jen historie, bez playlistů -- i to je úspěch
+            return {"kind": "history", **{k: v for k, v in account_history.items() if isinstance(v, (int, str, float, bool))}}
         raise HTTPException(
             status_code=400,
             detail="Nepodařilo se rozpoznat formát -- očekává se Spotify export (ZIP, Playlist1.json nebo YourLibrary.json).",
@@ -879,6 +894,11 @@ async def import_spotify(
             }
             for p in result.playlists
         ],
+        **(
+            {"historyListens": account_history.get("listens", 0), "historyTracks": account_history.get("tracks", 0)}
+            if account_history is not None
+            else {}
+        ),
     }
 
 
