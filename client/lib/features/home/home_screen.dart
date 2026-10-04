@@ -10,7 +10,9 @@ import 'package:go_router/go_router.dart';
 import '../library/listen_later_screen.dart' show ListenLaterReminder;
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../data/browse_repository.dart' show BrowseArtist;
 import '../../data/home_repository.dart';
+import '../../models/availability.dart';
 import '../../models/recording_model.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/providers.dart';
@@ -25,7 +27,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/track_tile.dart';
 import '../../state/audio_player_controller.dart' show audioPlayerControllerProvider;
-import '../../widgets/track_actions.dart' show nowPlayingInfoFor;
+import '../../widgets/track_actions.dart' show nowPlayingInfoFor, showTrackActionsSheet;
 import '../../widgets/collection_actions.dart';
 import '../blend/blend_screen.dart' show BlendInviteBanner;
 import '../browse/browse_grid.dart' show BrowseTile;
@@ -102,12 +104,21 @@ class HomeScreen extends ConsumerWidget {
 /// "Pokračovat v poslechu" -- mřížka kompaktních dlaždic (obal + název +
 /// interpret) jako Spotify nahoře na Domů. Ze serveru (`/home/recent`),
 /// takže přežije obnovení stránky i jiné zařízení.
-class _ContinueListening extends StatelessWidget {
+class _ContinueListening extends ConsumerWidget {
   const _ContinueListening({required this.items});
   final List<RecentContext> items;
 
+  /// Skladba bez alba jako `RecordingModel` -- pro přehrání a menu skladby.
+  static RecordingModel _recording(RecentContext item) => RecordingModel(
+        id: item.id,
+        title: item.title,
+        artistId: item.artistId,
+        artistName: item.artistName,
+        availability: Availability.available,
+      );
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -151,6 +162,9 @@ class _ContinueListening extends StatelessWidget {
                               kind: CollectionKind.liked, id: item.id, title: item.title),
                           'artist' => () =>
                               showArtistActions(context, id: item.id, name: item.title, imageUrl: item.imageUrl),
+                          // Skladba: stejné menu jako kdekoli jinde.
+                          'track' => () =>
+                              showTrackActionsSheet(context, recording: _recording(item), artworkUrl: item.imageUrl),
                           _ => null,
                         },
                         onPressed: () => switch (item.kind) {
@@ -158,6 +172,10 @@ class _ContinueListening extends StatelessWidget {
                           'playlist' => context.push('/playlists/${item.id}'),
                           'liked' => context.push('/library/liked'),
                           'artist' => context.push('/artists/${item.id}'),
+                          // Skladbu pustit (dřív vedla na interpreta -- nečekané).
+                          'track' => ref
+                              .read(audioPlayerControllerProvider.notifier)
+                              .playTrack(nowPlayingInfoFor(_recording(item), artworkUrl: item.imageUrl)),
                           _ => item.artistId != null ? context.push('/artists/${item.artistId}') : null,
                         },
                         child: DecoratedBox(
@@ -342,7 +360,9 @@ class _HomeSectionView extends StatelessWidget {
           ],
         );
       case HomeSectionType.artistCards:
-        Widget artistTile(BuildContext context, int index) {
+        void artistMenu(BrowseArtist a) =>
+            showArtistActions(context, id: a.id, name: a.name, imageUrl: a.images.isEmpty ? null : a.images.first);
+        Widget artistTile(BuildContext sheet, int index) {
           final a = section.artists[index];
           return MediaCard(
             title: a.name,
@@ -350,7 +370,8 @@ class _HomeSectionView extends StatelessWidget {
             shape: MediaCardShape.circle,
             placeholderIcon: Symbols.person_rounded,
             artworkKey: (releaseId: null, artistId: a.id),
-            onTap: () => context.push('/artists/${a.id}'),
+            onTap: _closeThen(sheet, () => context.push('/artists/${a.id}')),
+            onLongPress: _closeThen(sheet, () => artistMenu(a)),
           );
         }
         return Column(
@@ -380,6 +401,7 @@ class _HomeSectionView extends StatelessWidget {
                       placeholderIcon: Symbols.person_rounded,
                       artworkKey: (releaseId: null, artistId: a.id),
                       onTap: () => context.push('/artists/${a.id}'),
+                      onLongPress: () => artistMenu(a),
                     ),
                   );
                 },
@@ -395,8 +417,15 @@ class _HomeSectionView extends StatelessWidget {
             SectionHeader(
               section.title,
               onSeeAll: section.deezerPlaylists.length > 3
-                  ? () => _showGrid(context, section.title, section.deezerPlaylists.length,
-                      (context, i) => DeezerPlaylistTile(playlist: section.deezerPlaylists[i]), 0.72)
+                  ? () => _showGrid(
+                      context,
+                      section.title,
+                      section.deezerPlaylists.length,
+                      (sheet, i) => DeezerPlaylistTile(
+                            playlist: section.deezerPlaylists[i],
+                            onBeforeOpen: () => Navigator.of(sheet).pop(),
+                          ),
+                      0.72)
                   : null,
             ),
             SizedBox(
@@ -413,12 +442,13 @@ class _HomeSectionView extends StatelessWidget {
           ],
         );
       case HomeSectionType.genreShowcase:
-        Widget showcaseTile(BuildContext context, ShowcaseItem item) {
+        // `sheet` = v mřížce "Zobrazit vše" (nejdřív zavřít, pak otevřít).
+        Widget showcaseTile(ShowcaseItem item, {BuildContext? sheet}) {
           if (item.playlist case final card?) {
             return PlaylistCardView(
               card: card,
-              onTap: () => context.push('/playlists/${card.id}'),
-              onLongPress: () => _playlistActions(context, card),
+              onTap: _closeThen(sheet, () => context.push('/playlists/${card.id}')),
+              onLongPress: _closeThen(sheet, () => _playlistActions(context, card)),
             );
           }
           if (item.album case final album?) {
@@ -426,7 +456,7 @@ class _HomeSectionView extends StatelessWidget {
               width: 150,
               child: Stack(
                 children: [
-                  _albumCard(context, album, null),
+                  _albumCard(context, album, null, sheet: sheet),
                   if (item.badge != null)
                     Positioned(
                       top: 8,
@@ -461,7 +491,13 @@ class _HomeSectionView extends StatelessWidget {
               shape: MediaCardShape.circle,
               placeholderIcon: Symbols.person_rounded,
               artworkKey: (releaseId: null, artistId: item.artistId),
-              onTap: () => context.push('/artists/${item.artistId}'),
+              onTap: _closeThen(sheet, () => context.push('/artists/${item.artistId}')),
+              onLongPress: item.artistId == null
+                  ? null
+                  : _closeThen(
+                      sheet,
+                      () => showArtistActions(context,
+                          id: item.artistId!, name: item.artistName ?? '', imageUrl: item.artistImage)),
             ),
           );
         }
@@ -478,7 +514,7 @@ class _HomeSectionView extends StatelessWidget {
                       // Bez vlastní stránky (Tvoje výběry): celá řada v mřížce.
                       : (section.showcase.length > 3
                           ? () => _showGrid(context, section.title, section.showcase.length,
-                              (context, i) => showcaseTile(context, section.showcase[i]), 0.72)
+                              (sheet, i) => showcaseTile(section.showcase[i], sheet: sheet), 0.72)
                           : null)),
             ),
             SizedBox(
@@ -488,7 +524,7 @@ class _HomeSectionView extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 itemCount: section.showcase.length,
                 separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-                itemBuilder: (context, index) => showcaseTile(context, section.showcase[index]),
+                itemBuilder: (_, index) => showcaseTile(section.showcase[index]),
               ),
             ),
           ],
@@ -505,7 +541,10 @@ class _HomeSectionView extends StatelessWidget {
                 context,
                 section.title,
                 section.categories.length,
-                (context, index) => BrowseTile(category: section.categories[index]),
+                (sheet, index) => BrowseTile(
+                  category: section.categories[index],
+                  onBeforeOpen: () => Navigator.of(sheet).pop(),
+                ),
                 1.75,
               ),
             ),
@@ -529,24 +568,39 @@ class _HomeSectionView extends StatelessWidget {
   }
 }
 
-Widget _albumCard(BuildContext context, HomeAlbumCard album, int? index) => MediaCard(
+/// `sheet` = karta v mřížce "Zobrazit vše": nejdřív sheet zavřít, jinak se
+/// album otevřelo POD ním.
+Widget _albumCard(BuildContext context, HomeAlbumCard album, int? index, {BuildContext? sheet}) => MediaCard(
       title: album.title,
       // Poznámka sekce ("30 let", "zbývá 6 skladeb") za interpretem.
       subtitle:
           album.badge == null ? album.artistName : [album.artistName, album.badge].whereType<String>().join(' · '),
       imageUrl: album.images.isEmpty ? null : album.images.first,
       artworkKey: (releaseId: album.id, artistId: album.artistId),
-      onTap: () => context.push('/releases/${album.id}'),
-      onLongPress: () => showCollectionActions(
-        context,
-        kind: CollectionKind.album,
-        id: album.id,
-        title: album.title,
-        subtitle: album.artistName,
-        imageUrl: album.images.isEmpty ? null : album.images.first,
+      onTap: _closeThen(sheet, () => context.push('/releases/${album.id}')),
+      onLongPress: _closeThen(
+        sheet,
+        () => showCollectionActions(
+          context,
+          kind: CollectionKind.album,
+          id: album.id,
+          title: album.title,
+          subtitle: album.artistName,
+          imageUrl: album.images.isEmpty ? null : album.images.first,
+          // Přejít na interpreta + jméno do sdílení; "v knihovně" dopočítá menu.
+          artistId: album.artistId,
+          artistName: album.artistName,
+        ),
       ),
       animationIndex: index == null ? null : index % 8,
     );
+
+/// Akce z karty v mřížce "Zobrazit vše": nejdřív zavřít sheet, pak akce na
+/// stránce pod ním. Bez `sheet` (karta na Domů) rovnou akce.
+VoidCallback _closeThen(BuildContext? sheet, VoidCallback action) => () {
+      if (sheet != null) Navigator.of(sheet).pop();
+      action();
+    };
 
 void _playlistActions(BuildContext context, HomePlaylistCard card) => showCollectionActions(
       context,
@@ -712,32 +766,23 @@ Future<void> _showPlaylistGrid(BuildContext context, String title, List<HomePlay
       context,
       title,
       cards.length,
-      (context, index) => LayoutBuilder(
-        builder: (context, c) => PlaylistCardView(
+      (sheet, index) => LayoutBuilder(
+        builder: (_, c) => PlaylistCardView(
           card: cards[index],
           width: c.maxWidth,
-          onTap: () {
-            Navigator.of(context).pop();
-            context.push('/playlists/${cards[index].id}');
-          },
+          onTap: _closeThen(sheet, () => context.push('/playlists/${cards[index].id}')),
+          onLongPress: _closeThen(sheet, () => _playlistActions(context, cards[index])),
         ),
       ),
       0.72,
     );
 
+// Stejná karta jako v řadě na Domů (obal z artworkKey, menu, poznámka).
 Future<void> _showAlbumGrid(BuildContext context, String title, List<HomeAlbumCard> albums) => _showGrid(
       context,
       title,
       albums.length,
-      (context, index) => MediaCard(
-        title: albums[index].title,
-        subtitle: albums[index].artistName,
-        imageUrl: albums[index].images.isEmpty ? null : albums[index].images.first,
-        onTap: () {
-          Navigator.of(context).pop();
-          context.push('/releases/${albums[index].id}');
-        },
-      ),
+      (sheet, index) => _albumCard(context, albums[index], null, sheet: sheet),
       0.74,
     );
 

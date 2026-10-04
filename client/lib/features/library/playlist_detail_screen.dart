@@ -1,6 +1,5 @@
 import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
-import '../../widgets/collection_actions.dart' show CollectionKind, showCollectionActions;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -22,9 +21,6 @@ import '../../widgets/glass/glass.dart';
 import '../../core/cz_plural.dart';
 import '../../widgets/toast.dart';
 import '../../theme/shapes.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/services.dart';
-import '../../core/config.dart';
 import '../../widgets/playlist_removal.dart';
 
 final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
@@ -140,19 +136,24 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 HeroAction(
                   icon: Symbols.more_horiz_rounded,
                   tooltip: 'Další možnosti',
-                  onPressed: () => showCollectionActions(
+                  // Stejné menu jako dlouhý stisk v Knihovně (playlist_removal.dart).
+                  onPressed: () => showPlaylistActions(
                     context,
-                    kind: CollectionKind.playlist,
+                    ref,
                     id: detail.id,
                     title: detail.title,
-                    subtitle: detail.description,
+                    description: detail.description,
                     imageUrl: detail.coverUrls.firstOrNull,
+                    readOnly: readOnly,
+                    member: detail.isMember,
+                    pinned: pinned,
                     isRadio: detail.source?.startsWith('radio:') ?? false,
                     onSaveCopy: readOnly && !pinned ? () => _saveToLibrary(context, detail) : null,
-                    onDelete: readOnly || detail.isMember ? null : () => _confirmDelete(context),
-                    onEdit: readOnly || detail.isMember ? null : () => _editPlaylist(context, detail),
-                    onInvite: readOnly || detail.isMember ? null : () => _invite(context, detail),
-                    onLeave: detail.isMember ? () => _leave(context, detail) : null,
+                    onChanged: () => ref.invalidate(playlistDetailProvider(detail.id)),
+                    // Smazaný / opuštěný playlist už nemá co ukazovat.
+                    onGone: () {
+                      if (context.mounted) context.pop();
+                    },
                   ),
                 ),
               ],
@@ -357,122 +358,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     return counts.length > top.length ? '${top.join(', ')} a další' : top.join(' a ');
   }
 
-  /// Pozvat do společného playlistu: odkaz s kódem (seznam profilů se
-  /// nikomu neukazuje). Kdo ho otevře, může přidávat a odebírat skladby.
-  Future<void> _invite(BuildContext context, PlaylistDetailModel detail) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    try {
-      final res = await ref.read(apiClientProvider).postJson('/playlists/${detail.id}/invite');
-      final url = '${AppConfig.sharedOrigin}/#${res['path']}'; // router je hashový (jako share_link)
-      await Clipboard.setData(ClipboardData(text: url));
-      showToast(messenger, 'Odkaz na společný playlist zkopírován – pošli ho, kdo ho otevře, může ho upravovat s tebou');
-    } catch (e) {
-      showToast(messenger, 'Pozvánku se nepodařilo vytvořit: $e');
-    }
-  }
-
-  Future<void> _leave(BuildContext context, PlaylistDetailModel detail) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    try {
-      await ref.read(apiClientProvider).deleteJson('/playlists/${detail.id}/members/me');
-      ref.invalidate(myPlaylistsProvider);
-      showToast(messenger, 'Opustil(a) jsi „${detail.title}“');
-      if (context.mounted) context.pop();
-    } catch (e) {
-      showToast(messenger, 'Nepodařilo se: $e');
-    }
-  }
-
-  /// ⋯ › Upravit: název, krátký popis a vlastní obal (místo mozaiky).
-  Future<void> _editPlaylist(BuildContext context, PlaylistDetailModel detail) async {
-    final title = TextEditingController(text: detail.title);
-    final description = TextEditingController(text: detail.description ?? '');
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final api = ref.read(apiClientProvider);
-    final saved = await showGlassSheet<bool>(
-      context,
-      builder: (sheet) => GlassSheet(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-              AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md + MediaQuery.viewInsetsOf(sheet).bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Upravit playlist', style: Theme.of(sheet).textTheme.titleLarge),
-              const SizedBox(height: AppSpacing.sm),
-              TextField(controller: title, decoration: const InputDecoration(labelText: 'Název')),
-              const SizedBox(height: AppSpacing.xs),
-              TextField(
-                controller: description,
-                maxLines: 3,
-                minLines: 1,
-                maxLength: 500,
-                decoration: const InputDecoration(labelText: 'Krátký popis (nepovinné)'),
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: GlassButton(
-                      label: 'Vybrat obal…',
-                      icon: Symbols.image_rounded,
-                      style: GlassButtonStyle.tonal,
-                      onPressed: () async {
-                        final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
-                        final file = picked?.files.firstOrNull;
-                        if (file?.bytes == null) return;
-                        try {
-                          await api.postMultipart('/playlists/${detail.id}/cover',
-                              fieldName: 'file', bytes: file!.bytes!, filename: file.name);
-                          showToast(messenger, 'Obal nastaven');
-                        } catch (e) {
-                          showToast(messenger, 'Obal se nepodařilo nahrát: $e');
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  GlassButton(
-                    label: 'Mozaika',
-                    icon: Symbols.grid_view_rounded,
-                    style: GlassButtonStyle.plain,
-                    onPressed: () async {
-                      try {
-                        await api.deleteJson('/playlists/${detail.id}/cover');
-                        showToast(messenger, 'Zpátky na mozaiku z obalů skladeb');
-                      } catch (_) {}
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              GlassButton(
-                label: 'Uložit',
-                style: GlassButtonStyle.prominent,
-                expand: true,
-                onPressed: () => Navigator.of(sheet).pop(true),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (saved == true) {
-      try {
-        await api.patchJson('/playlists/${detail.id}', body: {
-          'title': title.text.trim(),
-          'description': description.text.trim(),
-        });
-      } catch (e) {
-        showToast(messenger, 'Uložení selhalo: $e');
-      }
-    }
-    title.dispose();
-    description.dispose();
-    ref.invalidate(myPlaylistsProvider);
-    ref.invalidate(playlistDetailProvider(detail.id));
-  }
-
   /// Uložit mix / žebříček: zachytit dnešní stav (kopie), nebo připnout živý.
   Future<void> _saveToLibrary(BuildContext context, PlaylistDetailModel detail) async {
     final choice = await showGlassSheet<String>(
@@ -539,11 +424,5 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     } catch (e) {
       showToast(messenger, 'Přidání selhalo: $e');
     }
-  }
-
-  Future<void> _confirmDelete(BuildContext context) async {
-    final title = ref.read(playlistDetailProvider(widget.playlistId)).valueOrNull?.title ?? 'playlist';
-    final deleted = await confirmDeletePlaylist(context, ref, id: widget.playlistId, title: title);
-    if (deleted && context.mounted) Navigator.of(context).pop();
   }
 }

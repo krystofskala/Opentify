@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/lyrics_repository.dart';
 import '../state/audio_player_controller.dart';
+import '../state/glass_settings.dart';
 import '../state/providers.dart';
 import '../theme/glass_tokens.dart';
 import 'glass/expressive_shapes.dart';
@@ -482,7 +482,8 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
                 duration: const Duration(milliseconds: 200),
                 style: TextStyle(
                   color: isCurrent ? fg : fg.withValues(alpha: 0.45),
-                  fontSize: isCurrent ? 22 : 18,
+                  // Stejné velikosti jako dřív (22/18), jen ze škály.
+                  fontSize: isCurrent ? AppFontSize.heading : AppFontSize.titleLarge,
                   fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w400,
                 ),
                 child: Text(line.text.isEmpty ? '♪' : line.text),
@@ -500,7 +501,21 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
   /// ostré, ať jde číst dopředu.
   Widget _immersiveLine(LyricLine line, int index, bool isCurrent, Color fg) {
     final distance = _currentIndex < 0 ? index + 1 : index - _currentIndex;
-    final sigma = _userScrolling || distance == 0 ? 0.0 : (distance > 0 ? math.min(3.2, distance * 0.9) : 0.8);
+    // Bez skla (slabší zařízení) a s omezeným pohybem jen ztlumení, žádné
+    // rozmazání. Jinak tři stupně (minulé / další 1-2 / zbytek) místo
+    // sigmy pro každý řádek zvlášť -- vzdálené řádky se při posunu textu
+    // nemění, takže se jejich rozmazání nepřepočítává (výkon).
+    final noBlur = GlassSettings.solidOf(context) || MediaQuery.disableAnimationsOf(context);
+    final double sigma;
+    if (noBlur || _userScrolling || distance == 0) {
+      sigma = 0;
+    } else if (distance < 0) {
+      sigma = 0.8;
+    } else if (distance <= 2) {
+      sigma = 1.4;
+    } else {
+      sigma = 3.2;
+    }
     return Padding(
       key: _keys[index],
       padding: const EdgeInsets.symmetric(vertical: 10),

@@ -91,6 +91,7 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
           // Široké okno: vycentrovaný sloupec jako stránka interpreta (dřív
           // obsah v úzkém pruhu vlevo a zbytek prázdný) a osa uprostřed se
           // střídáním vydání vlevo/vpravo.
+          final artistName = data.artist.name;
           final width = MediaQuery.sizeOf(context).width;
           final wide = width >= 840;
           final side = wide ? math.max(AppSpacing.md, (width - _wideMaxWidth) / 2) : 0.0;
@@ -135,6 +136,7 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
                         release: release,
                         year: firstOfYear ? year : null,
                         onLeft: i.isOdd,
+                        artistName: artistName,
                         isFirst: i == 0,
                         isLast: i == releases.length - 1,
                         endsYear: lastOfYear,
@@ -143,6 +145,7 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
                     return _TimelineRow(
                       release: release,
                       year: firstOfYear ? year : null,
+                      artistName: artistName,
                       isFirst: i == 0,
                       isLast: i == releases.length - 1,
                       endsYear: lastOfYear,
@@ -179,6 +182,7 @@ class _TimelineRow extends ConsumerWidget {
   const _TimelineRow({
     required this.release,
     required this.year,
+    required this.artistName,
     required this.isFirst,
     required this.isLast,
     required this.endsYear,
@@ -186,6 +190,9 @@ class _TimelineRow extends ConsumerWidget {
 
   final ReleaseModel release;
   final String? year;
+
+  /// Interpret do menu alba (sdílení) -- `subtitle` je rok, ne jméno.
+  final String? artistName;
   final bool isFirst;
   final bool isLast;
   final bool endsYear;
@@ -206,6 +213,8 @@ class _TimelineRow extends ConsumerWidget {
         title: release.title,
         subtitle: release.yearLabel,
         imageUrl: cover,
+        artistId: release.artistId,
+        artistName: artistName,
         fromArtistId: release.artistId,
         onNotArtist: () => ref.invalidate(discographyProvider),
       ),
@@ -281,6 +290,7 @@ class _WideTimelineRow extends ConsumerWidget {
   const _WideTimelineRow({
     required this.release,
     required this.year,
+    required this.artistName,
     required this.onLeft,
     required this.isFirst,
     required this.isLast,
@@ -289,6 +299,9 @@ class _WideTimelineRow extends ConsumerWidget {
 
   final ReleaseModel release;
   final String? year;
+
+  /// Interpret do menu alba (sdílení) -- `subtitle` je rok, ne jméno.
+  final String? artistName;
   final bool onLeft;
   final bool isFirst;
   final bool isLast;
@@ -311,6 +324,8 @@ class _WideTimelineRow extends ConsumerWidget {
         title: release.title,
         subtitle: release.yearLabel,
         imageUrl: cover,
+        artistId: release.artistId,
+        artistName: artistName,
         fromArtistId: release.artistId,
         onNotArtist: () => ref.invalidate(discographyProvider),
       ),

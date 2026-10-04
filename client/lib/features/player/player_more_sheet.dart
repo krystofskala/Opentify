@@ -22,6 +22,9 @@ import 'player_buttons_sheet.dart';
 import '../../widgets/connect_sheet.dart';
 import '../../widgets/report_problem.dart';
 import '../../widgets/toast.dart';
+import '../../state/liked_songs_controller.dart' show dislikedProvider;
+import '../../state/library_scope.dart' show addTrackToLibrary, libraryIdsProvider;
+import '../../state/offline_controller.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -43,30 +46,20 @@ class _PlayerMoreSheet extends ConsumerStatefulWidget {
 }
 
 class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
-  Timer? _tick;
-
-  @override
-  void initState() {
-    super.initState();
-    // Jen pro překreslení odpočtu uspávače -- `sleepTimerEndAt` je absolutní
-    // čas (viz `AudioPlayerState`), appka ho jinak nikde sekundově netikuje.
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _tick?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final playback = ref.watch(audioPlayerControllerProvider);
+    // Jen to, co sheet ukazuje -- celý stav se mění s polohou několikrát za
+    // vteřinu a překresloval celý sheet (poloha je v malém Consumeru níž).
+    final nowPlaying = ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying));
+    final accentColor = ref.watch(audioPlayerControllerProvider.select((s) => s.accentColor));
+    final speed = ref.watch(audioPlayerControllerProvider.select((s) => s.speed));
+    final volume = ref.watch(audioPlayerControllerProvider.select((s) => s.volume));
+    final normalization = ref.watch(audioPlayerControllerProvider.select((s) => s.normalizationEnabled));
+    final sleepEndAt = ref.watch(audioPlayerControllerProvider.select((s) => s.sleepTimerEndAt));
+    final hasDuration = ref.watch(audioPlayerControllerProvider.select((s) => s.duration != null));
     final controller = ref.read(audioPlayerControllerProvider.notifier);
     final theme = Theme.of(context);
-    final accent = playback.accentColor ?? theme.colorScheme.primary;
+    final accent = accentColor ?? theme.colorScheme.primary;
 
     // Stejné hustě namrzlé, skladbou tónované sklo jako přehrávač. Nejvýš
     // 85 % výšky -- nahoře musí zůstat vidět přehrávač (klepnutím tam se
@@ -86,22 +79,15 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
           builder: (context) => SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, AppSpacing.lg),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Úchyt MIMO scroll -- tažení za něj sheet vždy zavře (scroll
-                  // by svislé tažení jinak spolkl).
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-                      decoration: BoxDecoration(
-                          color: theme.colorScheme.outlineVariant, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
+                  // by svislé tažení jinak spolkl). Stejný jako u GlassSheet.
+                  const SheetGrabber(),
+                  const SizedBox(height: AppSpacing.xs),
                   Flexible(
                     // Scrollovatelné -- s dalšími řádky (normalizace, předvolby rychlosti)
                     // by se sheet na nízkém displeji telefonu jinak přetekl.
@@ -111,27 +97,31 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Posun časování textu -- jen když je text vidět.
-                          if (playback.nowPlaying != null)
+                          if (nowPlaying != null)
                             Consumer(
                               builder: (context, ref, _) => ref.watch(lyricsVisibleProvider) > 0
-                                  ? LyricsTimingRow(recordingId: playback.nowPlaying!.recordingId)
+                                  ? LyricsTimingRow(recordingId: nowPlaying.recordingId)
                                   : const SizedBox.shrink(),
                             ),
                           // Fronta je dole v přehrávači jako tlačítko -- tady už ne (audit UI).
-                          if (playback.nowPlaying != null) const _SectionLabel('Skladba'),
-                          if (playback.nowPlaying != null)
+                          if (nowPlaying != null) const _SectionLabel('Skladba'),
+                          if (nowPlaying != null)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.playlist_add_rounded),
-                              title: const Text('Přidat do playlistu'),
+                              // Stejné znění jako menu skladby (track_actions.dart).
+                              title: const Text('Přidat do playlistu…'),
                               trailing: const Icon(Symbols.chevron_right_rounded),
                               onTap: () {
+                                final host = Navigator.of(context).context;
                                 Navigator.of(context).pop();
-                                showAddToPlaylistSheet(context, recordingId: playback.nowPlaying!.recordingId);
+                                showAddToPlaylistSheet(host, recordingId: nowPlaying.recordingId);
                               },
                             ),
-                          if (playback.nowPlaying != null) _laterTile(context, playback),
-                          if (playback.nowPlaying != null)
+                          if (nowPlaying != null) _laterTile(context, nowPlaying),
+                          if (nowPlaying != null) _libraryTile(context, nowPlaying),
+                          if (nowPlaying != null) _offlineTile(context, nowPlaying),
+                          if (nowPlaying != null)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.radio_rounded),
@@ -141,7 +131,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               onTap: () {
                                 // Přehrávač zasunout, rádio se otevře pod ním.
                                 final sheet = NowPlayingSheetController.of(context);
-                                final id = playback.nowPlaying!.recordingId;
+                                final id = nowPlaying.recordingId;
                                 final closed = Completer<bool>();
                                 goToRadio(context, RadioSeed.track, id,
                                     openAfter: closed.future, replaceTop: true);
@@ -150,7 +140,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               },
                             ),
                           // Jediné „Sdílet…" (Poslat v Opentify / odkaz / jako obrázek).
-                          if (playback.nowPlaying != null) _shareAllTile(context, playback),
+                          if (nowPlaying != null) _shareAllTile(context, nowPlaying),
+                          if (nowPlaying != null) _dislikeTile(context, nowPlaying),
                           const Divider(),
                           const _SectionLabel('Přehrávání'),
                           ListTile(
@@ -177,28 +168,37 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               showPlayerButtonsSheet(host);
                             },
                           ),
-                          if (playback.nowPlaying != null) _abRepeatTile(context, playback),
-                          if (playback.nowPlaying != null)
+                          // Poslouchá polohu jen tenhle řádek, ne celý sheet.
+                          if (nowPlaying != null)
+                            Consumer(
+                              builder: (context, ref, _) => _abRepeatTile(
+                                context,
+                                ref,
+                                nowPlaying.recordingId,
+                                ref.watch(audioPlayerControllerProvider.select((s) => s.position)),
+                              ),
+                            ),
+                          if (nowPlaying != null)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.sync_problem_rounded),
-                              title: const Text('Nahlásit špatné audio'),
-                              subtitle: const Text('Jiná verze nebo píseň – stáhne se správná'),
+                              title: const Text('Nahlásit špatné audio – stáhnout správné'),
+                              subtitle: const Text('Jiná verze nebo píseň'),
                               onTap: () {
-                                final np = playback.nowPlaying!;
+                                final np = nowPlaying;
                                 final container = ProviderScope.containerOf(context, listen: false);
                                 final messenger = ScaffoldMessenger.maybeOf(context);
                                 Navigator.of(context).pop();
                                 reportWrongAudio(container, messenger, recordingId: np.recordingId, title: np.title);
                               },
                             ),
-                          if (playback.nowPlaying?.releaseId != null)
+                          if (nowPlaying?.releaseId != null)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.hide_image_rounded),
-                              title: const Text('Nahlásit špatný obal'),
+                              title: const Text('Nahlásit špatný obal alba'),
                               onTap: () {
-                                final releaseId = playback.nowPlaying!.releaseId!;
+                                final releaseId = nowPlaying!.releaseId!;
                                 final container = ProviderScope.containerOf(context, listen: false);
                                 final messenger = ScaffoldMessenger.maybeOf(context);
                                 Navigator.of(context).pop();
@@ -222,7 +222,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             segments: [
                               for (final speed in _speeds) GlassSegment(value: speed, label: '${_formatSpeed(speed)}×'),
                             ],
-                            selected: _speeds.firstWhere((v) => (playback.speed - v).abs() < 0.01, orElse: () => 1.0),
+                            selected: _speeds.firstWhere((v) => (speed - v).abs() < 0.01, orElse: () => 1.0),
                             onChanged: controller.setSpeed,
                           ),
                           const SizedBox(height: AppSpacing.sm),
@@ -230,16 +230,16 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             children: [
                               const Icon(Symbols.volume_up_rounded),
                               const SizedBox(width: AppSpacing.sm),
-                              Text('Hlasitost: ${(playback.volume * 100).round()} %'),
+                              Text('Hlasitost: ${(volume * 100).round()} %'),
                             ],
                           ),
-                          Slider(value: playback.volume, onChanged: controller.setVolume),
+                          Slider(value: volume, onChanged: controller.setVolume),
                           // Přepínač jen v řádku seznamu (HIG Toggles).
                           GlassSwitchRow(
                             leading: const Icon(Symbols.graphic_eq_rounded),
                             title: 'Normalizace hlasitosti',
                             subtitle: 'Srovná hlasité a tiché skladby na podobnou úroveň',
-                            value: playback.normalizationEnabled,
+                            value: normalization,
                             onChanged: controller.setNormalizationEnabled,
                           ),
                           if (kIsWeb)
@@ -257,14 +257,13 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           const SizedBox(height: AppSpacing.sm),
                           Text('Uspávač', style: theme.textTheme.titleSmall),
                           const SizedBox(height: AppSpacing.xs),
-                          if (playback.sleepTimerEndAt != null)
+                          if (sleepEndAt != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: AppSpacing.xs),
                               child: Row(
                                 children: [
-                                  Text(_isFading(playback.sleepTimerEndAt!)
-                                      ? 'Ztlumuje se...'
-                                      : 'Zbývá ${_formatRemaining(playback.sleepTimerEndAt!)}'),
+                                  // Sekundový tik jen tady a jen když uspávač běží.
+                                  _SleepCountdown(endAt: sleepEndAt),
                                   const Spacer(),
                                   GlassButton(
                                       label: 'Zrušit',
@@ -287,16 +286,19 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               GlassButton(
                                 label: 'Konec skladby',
                                 compact: true,
-                                onPressed: playback.duration == null
+                                onPressed: !hasDuration
                                     ? null
-                                    : () => controller.startSleepTimer(playback.duration! - playback.position),
+                                    : () {
+                                        final s = ref.read(audioPlayerControllerProvider);
+                                        controller.startSleepTimer(s.duration! - s.position);
+                                      },
                               ),
                             ],
                           ),
                           // Nevratné (zastaví hudbu, vyprázdní frontu) -- až úplně dole
                           // a červeně, ne mezi neškodnými položkami.
-                          if (playback.nowPlaying != null) const Divider(),
-                          if (playback.nowPlaying != null)
+                          if (nowPlaying != null) const Divider(),
+                          if (nowPlaying != null)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: Icon(Symbols.close_rounded, color: Theme.of(context).colorScheme.error),
@@ -326,8 +328,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   }
 
   /// "Poslechnout později" pro právě hrající skladbu (přepínač).
-  Widget _laterTile(BuildContext context, AudioPlayerState playback) {
-    final id = playback.nowPlaying!.recordingId;
+  Widget _laterTile(BuildContext context, NowPlayingInfo np) {
+    final id = np.recordingId;
     final isLater = ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, id) != null));
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -341,8 +343,70 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     );
   }
 
-  Widget _shareAllTile(BuildContext context, AudioPlayerState playback) {
-    final np = playback.nowPlaying!;
+  /// "Přidat do knihovny" -- jen když tam skladba ještě není (jako menu skladby).
+  Widget _libraryTile(BuildContext context, NowPlayingInfo np) {
+    final inLibrary = ref.watch(libraryIdsProvider.select((s) => s.valueOrNull?.contains(np.recordingId) ?? true));
+    if (inLibrary) return const SizedBox.shrink();
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Symbols.library_add_rounded),
+      title: const Text('Přidat do knihovny'),
+      onTap: () async {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        Navigator.of(context).pop();
+        try {
+          await addTrackToLibrary(ref, np.recordingId);
+          showToast(messenger, 'Přidáno do knihovny');
+        } catch (_) {
+          showToast(messenger, 'Nepodařilo se přidat do knihovny');
+        }
+      },
+    );
+  }
+
+  /// Stáhnout do zařízení / smazat ze zařízení (stejně jako menu skladby).
+  Widget _offlineTile(BuildContext context, NowPlayingInfo np) {
+    final offlineState = ref.watch(offlineControllerProvider);
+    final isOffline = offlineState.tracks.containsKey(np.recordingId);
+    final pending = offlineState.pending.containsKey(np.recordingId);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(isOffline
+          ? Symbols.mobile_off_rounded
+          : (pending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded)),
+      title: Text(isOffline ? 'Smazat ze zařízení' : (pending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení')),
+      onTap: () {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        Navigator.of(context).pop();
+        final offline = ref.read(offlineControllerProvider.notifier);
+        if (isOffline) {
+          offline.remove(np.recordingId);
+          showToast(messenger, 'Smazáno ze zařízení');
+        } else if (!pending) {
+          offline.add([np]);
+          showToast(messenger, 'Stahuje se do zařízení');
+        }
+      },
+    );
+  }
+
+  /// "Nelíbí se mi" -- přepínač jako v menu skladby.
+  Widget _dislikeTile(BuildContext context, NowPlayingInfo np) {
+    final isDisliked = ref.watch(dislikedProvider.select((d) => d.contains(np.recordingId)));
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(isDisliked ? Symbols.heart_check_rounded : Symbols.heart_broken_rounded),
+      title: Text(isDisliked ? 'Zrušit „Nelíbí se mi“' : 'Nelíbí se mi'),
+      onTap: () async {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        Navigator.of(context).pop();
+        final ok = await ref.read(dislikedProvider.notifier).toggle(np.recordingId);
+        if (ok) showToast(messenger, isDisliked ? 'Zrušeno: Nelíbí se mi' : 'Označeno: Nelíbí se mi');
+      },
+    );
+  }
+
+  Widget _shareAllTile(BuildContext context, NowPlayingInfo np) {
     final ShareTarget target = (kind: 'recordings', id: np.recordingId);
     ref.watch(shareLinkProvider(target)); // načíst dopředu (Safari)
     return ListTile(
@@ -368,15 +432,14 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
 
   /// A-B opakování: 1. klepnutí = bod A (aktuální pozice), 2. = bod B a
   /// smyčka běží, 3. = vypnout.
-  Widget _abRepeatTile(BuildContext context, AudioPlayerState playback) {
+  Widget _abRepeatTile(BuildContext context, WidgetRef ref, String id, Duration position) {
     final ab = ref.watch(abRepeatProvider);
-    final id = playback.nowPlaying!.recordingId;
     final active = ab != null && ab.recordingId == id ? ab : null;
     final String subtitle;
     if (active == null) {
-      subtitle = 'Klepni pro bod A (${_formatPosition(playback.position)})';
+      subtitle = 'Klepni pro bod A (${_formatPosition(position)})';
     } else if (active.b == null) {
-      subtitle = 'A ${_formatPosition(active.a)} · klepni pro bod B (${_formatPosition(playback.position)})';
+      subtitle = 'A ${_formatPosition(active.a)} · klepni pro bod B (${_formatPosition(position)})';
     } else {
       subtitle = 'Opakuje ${_formatPosition(active.a)} – ${_formatPosition(active.b!)} · klepni pro vypnutí';
     }
@@ -388,7 +451,6 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
       trailing: active != null ? const Icon(Symbols.check_rounded) : null,
       onTap: () {
         final notifier = ref.read(abRepeatProvider.notifier);
-        final position = playback.position;
         if (active == null) {
           notifier.state = (recordingId: id, a: position, b: null);
         } else if (active.b == null) {
@@ -412,18 +474,52 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   String _formatSpeed(double speed) =>
       (speed == speed.roundToDouble() ? speed.toStringAsFixed(0) : speed.toString()).replaceAll('.', ',');
 
-  bool _isFading(DateTime endAt) {
-    final remaining = endAt.difference(DateTime.now());
+}
+
+/// Odpočet uspávače -- `sleepTimerEndAt` je absolutní čas, appka ho jinak
+/// sekundově netikuje. Časovač žije jen s tímhle widgetem, tedy jen když
+/// uspávač běží (dřív tikal celý sheet pořád).
+class _SleepCountdown extends StatefulWidget {
+  const _SleepCountdown({required this.endAt});
+
+  final DateTime endAt;
+
+  @override
+  State<_SleepCountdown> createState() => _SleepCountdownState();
+}
+
+class _SleepCountdownState extends State<_SleepCountdown> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  bool get _isFading {
+    final remaining = widget.endAt.difference(DateTime.now());
     return !remaining.isNegative && remaining <= AudioPlayerController.sleepTimerFadeDuration;
   }
 
-  String _formatRemaining(DateTime endAt) {
-    final remaining = endAt.difference(DateTime.now());
+  String get _remaining {
+    final remaining = widget.endAt.difference(DateTime.now());
     if (remaining.isNegative) return '0:00';
     final minutes = remaining.inMinutes;
     final seconds = remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
   }
+
+  @override
+  Widget build(BuildContext context) => Text(_isFading ? 'Ztlumuje se...' : 'Zbývá $_remaining');
 }
 
 /// Nadpis sekce v menu přehrávače (Skladba / Přehrávání).

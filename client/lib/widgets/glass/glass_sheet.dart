@@ -26,6 +26,30 @@ Future<T?> showGlassSheet<T>(BuildContext context, {required WidgetBuilder build
   );
 }
 
+/// Úchyt sheetu (`GlassTokens.grabberSize`) -- jeden pro `GlassSheet`
+/// i sheety s vlastním sklem (menu přehrávače, fronta), ať nemají každý jiný.
+class SheetGrabber extends StatelessWidget {
+  const SheetGrabber({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 6),
+      child: Center(
+        child: Container(
+          width: GlassTokens.grabberSize.width,
+          height: GlassTokens.grabberSize.height,
+          decoration: BoxDecoration(
+            color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Skleněný sheet. HIG Sheets
 /// (https://developer.apple.com/design/human-interface-guidelines/sheets):
 /// - úchyt ("Include a grabber in a resizable sheet"),
@@ -50,25 +74,11 @@ class GlassSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final grabber = Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 6),
-      child: Center(
-        child: Container(
-          width: GlassTokens.grabberSize.width,
-          height: GlassTokens.grabberSize.height,
-          decoration: BoxDecoration(
-            color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-      ),
-    );
     final body = Column(
       mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showGrabber) grabber,
+        if (showGrabber) const SheetGrabber(),
         // Obsah nad home indikátorem, pozadí sheetu až k okraji.
         if (expand)
           Expanded(child: SafeArea(top: false, child: child))

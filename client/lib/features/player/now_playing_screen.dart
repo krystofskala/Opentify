@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/physics.dart';
@@ -889,9 +890,21 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               ),
             ),
           ],
+          // Chyba přehrávání -- jako mini přehrávač (dřív tady nebylo nic
+          // vidět a tlačítko jen dál zkoušelo play).
+          if (playback.error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Nepodařilo se přehrát · ${playback.error}',
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: AppFontSize.small),
+            ),
+          ]
           // Načítání bez známého stavu stahování (stav ještě nedorazil) --
           // jinak jen nekonečný spinner bez vysvětlení (nález vizuálního auditu).
-          if (isProvisioning || (playback.isBuffering && playback.position == Duration.zero)) ...[
+          else if (isProvisioning || (playback.isBuffering && playback.position == Duration.zero)) ...[
             const SizedBox(height: 8),
             Text(
               isProvisioning ? provisioningState!.statusLabel : 'Načítám…',
@@ -980,10 +993,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 ),
                 // M3 Expressive: play = "cookie" tvar, pauza = squircle --
                 // tvar pružinou morfuje se stavem.
+                // Chyba: tlačítko zkusí skladbu znovu (jako mini přehrávač).
                 GlassPressable(
-                  onPressed: playback.isBuffering ? null : controller.togglePlayPause,
+                  onPressed: playback.isBuffering
+                      ? null
+                      : playback.error != null
+                          ? controller.retryCurrent
+                          : controller.togglePlayPause,
                   shape: const CircleBorder(),
-                  semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
+                  semanticLabel: playback.error != null
+                      ? 'Zkusit znovu'
+                      : playback.isPlaying
+                          ? 'Pozastavit'
+                          : 'Přehrát',
                   child: ExpressiveMorph(
                     size: 76,
                     // Plocha černá/bílá podle motivu, barva alba jen uvnitř.
@@ -999,7 +1021,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                     strokeWidth: 3, color: accent, value: provisioningPct / 100),
                               )
                             : ExpressiveLoadingIndicator(size: 40, color: accent))
-                        : Icon(
+                        : playback.error != null
+                            ? Icon(Symbols.refresh_rounded, size: 40, color: Theme.of(context).colorScheme.error)
+                            : Icon(
                             playback.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded,
                             size: 44,
                             color: accent,
@@ -1340,8 +1364,15 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
   static const _morphSeconds = 3.2;
 
   // Čas běží jen při přehrávání; `_live` = síla tvaru (0 = čtverec).
-  late final AnimationController _clock = AnimationController(
-      vsync: this, duration: Duration(milliseconds: (_morphSeconds * 1000 * _shapes.length).round()));
+  // Hodiny časovačem ~24x/s (jako fáze vlny ve WavySeekBar), ne
+  // `repeat()` každým vsyncem -- to drželo celý přehrávač na 60/120 fps.
+  late final _SteppedClock _clock = _SteppedClock(
+    _morphSeconds * _shapes.length,
+    () =>
+        mounted &&
+        TickerMode.valuesOf(context).enabled &&
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) == AppLifecycleState.resumed,
+  );
   late final AnimationController _live =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 600), value: widget.playing ? 1 : 0);
 
@@ -1372,6 +1403,10 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
     }
   }
 
+  /// Tvar bez otočení podle (tvar, zaokrouhlené t, velikost) -- otočení je
+  /// jen transformace, takže se 160 bodů nepočítá každý snímek znovu.
+  final Map<String, Path> _pathCache = {};
+
   @override
   void dispose() {
     _clock.dispose();
@@ -1396,9 +1431,11 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
             clipper: _LivingClipper(
               a: _shapes[i],
               b: _shapes[(i + 1) % _shapes.length],
-              t: t,
+              // Zaokrouhlené t -> cesta jde znovu použít z keše.
+              t: (t * 50).round() / 50,
               spin: _clock.value * 2 * math.pi,
               live: _live.value,
+              cache: _pathCache,
             ),
             child: child,
           );
@@ -1410,16 +1447,42 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
 }
 
 class _LivingClipper extends CustomClipper<Path> {
-  const _LivingClipper({required this.a, required this.b, required this.t, required this.spin, required this.live});
+  const _LivingClipper({
+    required this.a,
+    required this.b,
+    required this.t,
+    required this.spin,
+    required this.live,
+    this.cache,
+  });
 
   final ExpressiveShape a;
   final ExpressiveShape b;
   final double t;
   final double spin;
   final double live;
+  final Map<String, Path>? cache;
 
   @override
   Path getClip(Size size) {
+    // Plně živý tvar = jen otočená cesta -- z keše, otočení maticí.
+    if (live >= 1 && cache != null) {
+      if (cache!.length > 400) cache!.clear();
+      final key = '${a.hashCode}:${b.hashCode}:$t:${size.width}x${size.height}';
+      final base = cache![key] ??= _build(size, 0, 1);
+      final c = size.center(Offset.zero);
+      final cs = math.cos(spin), sn = math.sin(spin);
+      return base.transform(Float64List.fromList([
+        cs, sn, 0, 0, //
+        -sn, cs, 0, 0,
+        0, 0, 1, 0,
+        c.dx - cs * c.dx + sn * c.dy, c.dy - sn * c.dx - cs * c.dy, 0, 1,
+      ]));
+    }
+    return _build(size, spin, live);
+  }
+
+  Path _build(Size size, double spin, double live) {
     const steps = 160;
     final c = size.center(Offset.zero);
     final radius = size.shortestSide / 2;
@@ -1441,6 +1504,44 @@ class _LivingClipper extends CustomClipper<Path> {
   @override
   bool shouldReclip(_LivingClipper old) =>
       old.t != t || old.spin != spin || old.live != live || old.a != a || old.b != b;
+}
+
+/// Hodiny 0..1 s periodou [seconds], posouvané časovačem ~24x za sekundu
+/// (vzor: `_SteppedPhase` ve wavy_seek_bar.dart).
+class _SteppedClock extends ChangeNotifier {
+  _SteppedClock(this.seconds, this._visible);
+
+  final double seconds;
+  final bool Function() _visible;
+  Timer? _timer;
+  double _value = 0;
+  DateTime _last = DateTime.now();
+
+  double get value => _value;
+
+  void repeat() {
+    if (_timer != null) return;
+    _last = DateTime.now();
+    _timer = Timer.periodic(const Duration(milliseconds: 42), (_) {
+      final now = DateTime.now();
+      final dt = now.difference(_last).inMicroseconds / 1e6;
+      _last = now;
+      if (!_visible()) return;
+      _value = (_value + dt / seconds) % 1.0;
+      notifyListeners();
+    });
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  @override
+  void dispose() {
+    stop();
+    super.dispose();
+  }
 }
 
 /// Album nahrávky, když ho položka fronty nenese (`GET /catalog/recordings`).

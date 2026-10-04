@@ -195,10 +195,18 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   @override
   bool get wantKeepAlive => true;
 
-  final List<RecordingModel> _items = [];
+  // Ne `final`: obnova dává nový seznam -- `TrackCollectionController.apply`
+  // kešuje podle identity+délky a stejně dlouhý obnovený seznam by ukázal
+  // starý výsledek.
+  List<RecordingModel> _items = [];
   final _collection = TrackCollectionController();
   int _total = 0;
   bool _loading = false;
+
+  /// Právě běžící `_loadMore` -- `_loadAll` na něj počká místo toho, aby
+  /// skončil (jinak "Načítám celou knihovnu…" viselo navždy).
+  Future<void>? _inFlight;
+  bool _loadingAll = false;
   bool _initialLoadDone = false;
   Object? _error;
   ViewMode _viewMode = ViewMode.list;
@@ -230,8 +238,14 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   /// obnovou, se zahodí (jinak se do vyčištěného seznamu přidala stará data).
   int _generation = 0;
 
-  Future<void> _loadMore({int pageSize = _pageSize}) async {
-    if (_loading) return;
+  Future<void> _loadMore({int pageSize = _pageSize}) {
+    if (_loading) return _inFlight ?? Future.value();
+    final future = _fetchPage(pageSize);
+    _inFlight = future;
+    return future;
+  }
+
+  Future<void> _fetchPage(int pageSize) async {
     final gen = _generation;
     setState(() => _loading = true);
     try {
@@ -255,18 +269,30 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
   }
 
   Future<void> _loadAll() async {
-    while (mounted && _items.length < _total && _error == null) {
-      final before = _items.length;
-      await _loadMore(pageSize: _fullLoadPageSize);
-      if (_items.length == before) break;
+    if (_loadingAll) return;
+    _loadingAll = true;
+    final gen = _generation;
+    try {
+      // Rozběhnuté stránkování nejdřív doběhne, ať se nepočítá jako "nic nepřibylo".
+      if (_loading) await _inFlight;
+      while (mounted && gen == _generation && _items.length < _total && _error == null) {
+        final before = _items.length;
+        await _loadMore(pageSize: _fullLoadPageSize);
+        if (_items.length == before) break;
+      }
+    } finally {
+      _loadingAll = false;
     }
   }
+
+  /// Načítá se celá knihovna (filtr/řazení/Oblíbené) a ještě není hotová.
+  bool get _needsAll => (_collection.isModified || _likedOnly) && _items.length < _total;
 
   Future<void> _refresh() async {
     _generation++;
     setState(() {
       _loading = false;
-      _items.clear();
+      _items = [];
       _initialLoadDone = false;
       _error = null;
     });
@@ -324,18 +350,40 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   // Počet + filtr "Oblíbené" (na liště nad tím už není místo).
                   child: Row(
                     children: [
-                      Expanded(
-                        child: Text(
-                          (_collection.isModified || _likedOnly) && _items.length < _total
-                              ? 'Načítám celou knihovnu… ${_items.length}/$_total'
-                              : _likedOnly
-                                  ? '${songsCount(visible.length)} se srdíčkem'
-                                      // Oblíbené (playlist) počítá i nestažené -- ať čísla nevypadají rozbitě.
-                                      '${!_collection.isModified && liked.length > visible.length ? ' · ${liked.length - visible.length} ještě nestažené' : ''}'
-                                  : songsCount(_total),
-                          style: Theme.of(context).textTheme.bodySmall,
+                      // Dotažení celé knihovny selhalo -- jinak by "Načítám…" viselo.
+                      if (_needsAll && _error != null) ...[
+                        Expanded(
+                          child: Text(
+                            'Celou knihovnu se nepodařilo načíst (${_items.length}/$_total).',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: Theme.of(context).colorScheme.error),
+                          ),
                         ),
-                      ),
+                        GlassButton(
+                          label: 'Zkusit znovu',
+                          icon: Symbols.refresh_rounded,
+                          style: GlassButtonStyle.plain,
+                          compact: true,
+                          onPressed: () {
+                            setState(() => _error = null);
+                            _loadAll();
+                          },
+                        ),
+                      ] else
+                        Expanded(
+                          child: Text(
+                            _needsAll
+                                ? 'Načítám celou knihovnu… ${_items.length}/$_total'
+                                : _likedOnly
+                                    ? '${songsCount(visible.length)} se srdíčkem'
+                                        // Oblíbené (playlist) počítá i nestažené -- ať čísla nevypadají rozbitě.
+                                        '${!_collection.isModified && liked.length > visible.length ? ' · ${liked.length - visible.length} ještě nestažené' : ''}'
+                                    : songsCount(_total),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
                       FilterChip(
                         avatar: const Icon(Symbols.favorite_rounded, size: 16),
                         label: const Text('Oblíbené'),
@@ -353,7 +401,11 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                   ),
                 ),
               ),
-              if (visible.isEmpty)
+              // Prázdno jen zatím (zbytek knihovny se dotahuje) -- skeleton,
+              // ne "Zatím žádné oblíbené".
+              if (visible.isEmpty && _needsAll && _error == null)
+                const SliverToBoxAdapter(child: SkeletonTrackList())
+              else if (visible.isEmpty)
                 SliverToBoxAdapter(
                   child: EmptyState(
                     compact: true,
@@ -484,17 +536,20 @@ int _byAddedDesc(String? a, String? b) => (b ?? '').compareTo(a ?? '');
 int _byName(String a, String b) => a.toLowerCase().compareTo(b.toLowerCase());
 
 class _SortButton extends ConsumerWidget {
-  const _SortButton({required this.tab, required this.options});
+  const _SortButton({required this.tab, required this.options, this.labelOverrides = const {}});
 
   final String tab;
   final List<LibrarySort> options;
+
+  /// Jiný popisek pro tenhle tab (Playlisty: "Upraveno").
+  final Map<LibrarySort, String> labelOverrides;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final current = ref.watch(_librarySortProvider(tab));
     return SortButton<LibrarySort>(
       value: current,
-      labels: {for (final option in options) option: _librarySortLabels[option]!},
+      labels: {for (final option in options) option: labelOverrides[option] ?? _librarySortLabels[option]!},
       onChanged: (value) => ref.read(_librarySortProvider(tab).notifier).state = value,
     );
   }
@@ -861,18 +916,8 @@ class _PlaylistsTab extends ConsumerWidget {
                 ? '${playlist.description} · ${songsCount(playlist.itemCount)}'
                 : '$who · ${songsCount(playlist.itemCount)}',
         onTap: () => context.push('/playlists/${playlist.id}'),
-        onLongPress: () {
-          final removal = removalFor(context, ref, playlist);
-          showCollectionActions(
-            context,
-            kind: CollectionKind.playlist,
-            id: playlist.id,
-            title: playlist.title,
-            imageUrl: playlist.coverUrls.firstOrNull,
-            onDelete: removal.run,
-            deleteLabel: removal.label,
-          );
-        },
+        // Stejné menu jako ⋯ v detailu playlistu (Upravit, Pozvat, Opustit…).
+        onLongPress: () => showPlaylistSummaryActions(context, ref, playlist),
       );
     }
 
@@ -899,68 +944,72 @@ class _PlaylistsTab extends ConsumerWidget {
             for (final p in all)
               if (!p.isShared) p
           ]..sort((a, b) => switch (sort) {
+              // Backend dává jen `updatedAt` -- proto popisek "Upraveno", ne "Přidáno".
               LibrarySort.added => _byAddedDesc(a.updatedAt, b.updatedAt),
               LibrarySort.count => b.itemCount.compareTo(a.itemCount),
               _ => _byName(a.title, b.title),
             });
+          // Slivery (jako Alba) -- stovky playlistů se staví jen na obrazovce,
+          // ne všechny najednou v Column.
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(myPlaylistsProvider);
               ref.invalidate(likedSongsProvider);
             },
-            child: ListView(
+            child: CustomScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 96 + navBottomInset(context)),
-              children: [
-                liked,
-                // Moje playlisty: seznam, nebo galerie (mřížka obalů).
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.xs, 0),
-                  child: Row(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, 0),
+                  sliver: SliverList.list(
                     children: [
-                      Expanded(child: Text('Moje playlisty', style: Theme.of(context).textTheme.titleMedium)),
-                      const _SortButton(
-                        tab: 'playlists',
-                        options: [LibrarySort.added, LibrarySort.name, LibrarySort.count],
+                      liked,
+                      // Moje playlisty: seznam, nebo galerie (mřížka obalů).
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.xs, 0),
+                        child: Row(
+                          children: [
+                            Expanded(child: Text('Moje playlisty', style: Theme.of(context).textTheme.titleMedium)),
+                            const _SortButton(
+                              tab: 'playlists',
+                              options: [LibrarySort.added, LibrarySort.name, LibrarySort.count],
+                              labelOverrides: {LibrarySort.added: 'Upraveno'},
+                            ),
+                            const SizedBox(width: 4),
+                            ViewModeToggle(
+                              mode: grid ? ViewMode.grid : ViewMode.list,
+                              onChanged: (mode) => ref.read(_playlistGridProvider.notifier).set(mode == ViewMode.grid),
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(width: 4),
-                      ViewModeToggle(
-                        mode: grid ? ViewMode.grid : ViewMode.list,
-                        onChanged: (mode) => ref.read(_playlistGridProvider.notifier).set(mode == ViewMode.grid),
-                      ),
+                      create,
                     ],
                   ),
                 ),
-                create,
                 if (!grid)
-                  for (final p in own) card(p)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+                    sliver: SliverList.builder(
+                      itemCount: own.length,
+                      itemBuilder: (context, index) => card(own[index]),
+                    ),
+                  )
                 else
-                  LayoutBuilder(builder: (context, constraints) {
-                    final columns = (constraints.maxWidth / 180).floor().clamp(2, 8);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                      child: Column(
-                        children: [
-                          for (var i = 0; i < own.length; i += columns)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  for (var j = i; j < i + columns; j++)
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                                        child: j < own.length ? card(own[j]) : const SizedBox.shrink(),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                        ],
+                  SliverPadding(
+                    padding: const EdgeInsets.all(AppSpacing.sm),
+                    sliver: SliverGrid.builder(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
+                        childAspectRatio: 0.72,
+                        crossAxisSpacing: AppSpacing.sm,
+                        mainAxisSpacing: AppSpacing.sm,
                       ),
-                    );
-                  }),
+                      itemCount: own.length,
+                      itemBuilder: (context, index) => card(own[index]),
+                    ),
+                  ),
+                SliverToBoxAdapter(child: SizedBox(height: 96 + navBottomInset(context))),
               ],
             ),
           );

@@ -18,6 +18,7 @@ import '../../widgets/media_card.dart';
 import '../../widgets/net_image.dart';
 import '../../widgets/playlist_card.dart';
 import '../../widgets/state_views.dart';
+import '../../widgets/track_list_sheet.dart';
 import '../../widgets/track_tile.dart';
 import 'browse_grid.dart' show BrowseTile, categoryIcon;
 import 'tag_screen.dart' show TagChips;
@@ -180,7 +181,15 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
           ),
         ],
         if (data.tracks.isNotEmpty) ...[
-          const SliverToBoxAdapter(child: SectionHeader('Populární skladby')),
+          // Ukáže se 10, zbytek přes "Zobrazit vše" (dřív schované bez možnosti).
+          SliverToBoxAdapter(
+            child: SectionHeader(
+              'Populární skladby',
+              onSeeAll: data.tracks.length > 10
+                  ? () => showTrackListSheet(context, title: '${c.title} · Populární skladby', recordings: data.tracks)
+                  : null,
+            ),
+          ),
           SliverList.builder(
             itemCount: data.tracks.length.clamp(0, 10),
             itemBuilder: (context, i) => Padding(
@@ -341,8 +350,12 @@ class _Rail extends StatelessWidget {
 /// točí kolečko) a přejde na jeho stránku. Pro Hledat a další místa mimo
 /// stránku kategorie.
 class DeezerPlaylistTile extends ConsumerStatefulWidget {
-  const DeezerPlaylistTile({super.key, required this.playlist});
+  const DeezerPlaylistTile({super.key, required this.playlist, this.onBeforeOpen});
   final BrowsePlaylist playlist;
+
+  /// Těsně před přechodem na playlist (mřížka v sheetu: zavřít sheet, jinak
+  /// se stránka otevře pod ním).
+  final VoidCallback? onBeforeOpen;
 
   @override
   ConsumerState<DeezerPlaylistTile> createState() => _DeezerPlaylistTileState();
@@ -356,7 +369,11 @@ class _DeezerPlaylistTileState extends ConsumerState<DeezerPlaylistTile> {
     setState(() => _opening = true);
     try {
       final id = await ref.read(browseRepositoryProvider).openDeezerPlaylist(widget.playlist.deezerId);
-      if (mounted) context.push('/playlists/$id');
+      if (mounted) {
+        final router = GoRouter.of(context);
+        widget.onBeforeOpen?.call();
+        router.push('/playlists/$id');
+      }
     } catch (_) {
       if (mounted) {
         toast(context, 'Playlist se nepodařilo otevřít, zkus to znovu.');
@@ -440,6 +457,8 @@ Widget _albumCard(BuildContext context, HomeAlbumCard a) => MediaCard(
         title: a.title,
         subtitle: a.artistName,
         imageUrl: a.images.isEmpty ? null : a.images.first,
+        artistId: a.artistId,
+        artistName: a.artistName,
       ),
     );
 

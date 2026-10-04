@@ -120,8 +120,12 @@ IconData categoryIcon(BrowseCategory c) => c.group == 'genre' ? _genreIcon(c.id)
 /// a v něm symbol kategorie. Nálady = cookie, žánry = květ, soundtracky =
 /// čtyřlístek; natočení podle id, takže každá dlaždice je stálá a jiná.
 class BrowseTile extends StatelessWidget {
-  const BrowseTile({super.key, required this.category});
+  const BrowseTile({super.key, required this.category, this.onBeforeOpen});
   final BrowseCategory category;
+
+  /// Těsně před přechodem (mřížka v sheetu: zavřít sheet, jinak se stránka
+  /// otevře pod ním).
+  final VoidCallback? onBeforeOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -135,7 +139,11 @@ class BrowseTile extends StatelessWidget {
     return GlassPressable(
       shape: shape,
       minSize: Size.zero,
-      onPressed: () => context.push('/browse/${category.id}'),
+      onPressed: () {
+        final router = GoRouter.of(context);
+        onBeforeOpen?.call();
+        router.push('/browse/${category.id}');
+      },
       // Přes celou buňku -- jinak se dlaždice scvrkla na velikost textu.
       child: SizedBox.expand(
         child: ClipPath(

@@ -377,7 +377,11 @@ class _HeroFlexible extends StatelessWidget {
                       height: imageHeight,
                       child: _AmbientFade(
                         enabled: !iconOnly,
-                        child: _FadedMedia(hero: hero, darken: iconOnly ? 0 : collapse * 0.45),
+                        // Vlastní vrstva -- překreslení textu/lišty nad ní
+                        // nepřekresluje obraz (a jeho případné rozmazání).
+                        child: RepaintBoundary(
+                          child: _FadedMedia(hero: hero, darken: iconOnly ? 0 : collapse * 0.45),
+                        ),
                       ),
                     ),
                   ],
@@ -391,15 +395,16 @@ class _HeroFlexible extends StatelessWidget {
               left: 0,
               right: 0,
               height: top + kToolbarHeight + 24,
-              child: const _AmbientFade(
+              // Průhlednost rovnou do barev (ne Opacity = saveLayer navíc).
+              child: _AmbientFade.alpha(
                 enabled: true,
-                child: IgnorePointer(
+                builder: (a) => IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0x66000000), Color(0x00000000)],
+                        colors: [Colors.black.withValues(alpha: 0.4 * a), const Color(0x00000000)],
                       ),
                     ),
                   ),
@@ -415,26 +420,25 @@ class _HeroFlexible extends StatelessWidget {
               // Ani závoj nesmí sahat až na hranu (stejný důvod jako fotka).
               bottom: _edgeGap,
               height: height * 0.62,
-              child: _AmbientFade(
+              // titleT i ambientní stopa rovnou v alfě barev -- dřív dvě
+              // vnořené Opacity (dva saveLayery) i v klidu.
+              child: _AmbientFade.alpha(
                 enabled: true,
-                child: IgnorePointer(
-                  child: Opacity(
-                    opacity: titleT,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          // Dole zase do nuly -- jinak by na hraně hlavičky
-                          // vznikl ostrý tmavý předěl proti pozadí seznamu.
-                          colors: [
-                            theme.colorScheme.surface.withValues(alpha: 0),
-                            theme.colorScheme.surface.withValues(alpha: 0.45),
-                            theme.colorScheme.surface.withValues(alpha: 0.4),
-                            theme.colorScheme.surface.withValues(alpha: 0),
-                          ],
-                          stops: const [0, 0.42, 0.78, 1],
-                        ),
+                builder: (a) => IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        // Dole zase do nuly -- jinak by na hraně hlavičky
+                        // vznikl ostrý tmavý předěl proti pozadí seznamu.
+                        colors: [
+                          theme.colorScheme.surface.withValues(alpha: 0),
+                          theme.colorScheme.surface.withValues(alpha: 0.45 * titleT * a),
+                          theme.colorScheme.surface.withValues(alpha: 0.4 * titleT * a),
+                          theme.colorScheme.surface.withValues(alpha: 0),
+                        ],
+                        stops: const [0, 0.42, 0.78, 1],
                       ),
                     ),
                   ),
@@ -536,16 +540,22 @@ class _HeroFlexible extends StatelessWidget {
 /// pomalu rozplyne do živého pozadí (zůstane jen slabá stopa), dotek ji
 /// hned vrátí. Rozvržení se nehýbe -- mizí jen obraz, ne místo.
 class _AmbientFade extends ConsumerWidget {
-  const _AmbientFade({required this.enabled, required this.child});
+  const _AmbientFade({required this.enabled, required Widget this.child}) : builder = null;
+
+  /// Varianta pro plochy barvy (gradienty): průhlednost dostane `builder`
+  /// a vloží ji do alfy barev -- bez `Opacity`, tedy bez saveLayeru.
+  const _AmbientFade.alpha({required this.enabled, required Widget Function(double opacity) this.builder})
+      : child = null;
 
   final bool enabled;
-  final Widget child;
+  final Widget? child;
+  final Widget Function(double opacity)? builder;
 
   static const _trace = 0.14;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (!enabled) return child;
+    if (!enabled) return child ?? builder!(1);
     // S hudbou po ~5 s, bez ní po ~10 s (stránku si nejspíš prohlížíš).
     final playing = ref.watch(audioPlayerControllerProvider.select((s) => s.isPlaying));
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
@@ -562,7 +572,11 @@ class _AmbientFade extends ConsumerWidget {
               ? Duration.zero
               : (idle ? const Duration(milliseconds: 2200) : const Duration(milliseconds: 700)),
           curve: Curves.easeInOutCubic,
-          builder: (context, v, child) => v >= 0.999 ? child! : Opacity(opacity: v, child: child),
+          builder: (context, v, child) => builder != null
+              ? builder!(v)
+              : v >= 0.999
+                  ? child!
+                  : Opacity(opacity: v, child: child),
           child: child,
         );
       },
@@ -961,19 +975,28 @@ class _Blurred extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRect(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 28, sigmaY: 28, tileMode: TileMode.mirror),
-            child: NetImage(url: url),
-          ),
-          AnimatedAccent(
-            color: accent ?? Colors.black,
-            builder: (context, c) => ColoredBox(color: c.withValues(alpha: 0.25)),
-          ),
-        ],
+    // Výkon: obrázek se dekóduje malý (NetImage bere velikost z rozvržení,
+    // tady 64 px) a jen roztáhne -- už sám je rozmazaný, stačí menší sigma.
+    // Dřív se plná fotka rozmazávala sigmou 28 každý snímek scrollu.
+    // RepaintBoundary: překreslení okolí nenutí blur počítat znovu.
+    return RepaintBoundary(
+      child: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 10, sigmaY: 10, tileMode: TileMode.mirror),
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox.square(dimension: 64, child: NetImage(url: url)),
+              ),
+            ),
+            AnimatedAccent(
+              color: accent ?? Colors.black,
+              builder: (context, c) => ColoredBox(color: c.withValues(alpha: 0.25)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1453,6 +1476,8 @@ class _HeroCircleButton extends StatelessWidget {
     // Profil › Vzhled › "Skleněná tlačítka": skleněná kapka -- rozmazání
     // a lom toho, co je pod ní (fotka i pozadí), přirozený odlesk.
     if (GlassSettings.maybeOf(context)?.glassButtons ?? false) {
+      // Bez skla (plná plocha, ve světlém motivu světlá) by bílá ikona zmizela.
+      final iconColor = GlassSettings.solidOf(context) ? Theme.of(context).colorScheme.onSurface : Colors.white;
       return Tooltip(
         message: tooltip,
         child: GestureDetector(
@@ -1462,7 +1487,7 @@ class _HeroCircleButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadii.lg),
             rim: true,
             liquid: true,
-            child: SizedBox.square(dimension: 44, child: Icon(icon, color: Colors.white, size: 22, fill: filled ? 1 : 0)),
+            child: SizedBox.square(dimension: 44, child: Icon(icon, color: iconColor, size: 22, fill: filled ? 1 : 0)),
           ),
         ),
       );

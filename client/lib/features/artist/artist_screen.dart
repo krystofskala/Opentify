@@ -13,6 +13,8 @@ import '../../models/release_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../theme/glass_tokens.dart';
+import '../../theme/shapes.dart';
+import '../../widgets/toast.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/media_card.dart';
@@ -184,8 +186,9 @@ class _ArtistBody extends ConsumerWidget {
                     icon: Symbols.heart_broken_rounded,
                     filled: true,
                     tooltip: 'Nelíbí se mi (podržením zrušíš)',
-                    onPressed: () =>
-                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
+                    // Klepnutí nic neruší (popisek říká "podržením") -- jen
+                    // ukáže nápovědu; tooltipy jsou v appce skryté.
+                    onPressed: () => toast(context, 'Nelíbí se mi – podržením srdce to zrušíš'),
                     onLongPress: () =>
                         ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
                   )
@@ -288,7 +291,7 @@ class _ArtistBody extends ConsumerWidget {
               // Jako "Populární vydání" na Spotify -- pořadí podle Last.fm.
               if (popularReleases.length >= 3) ...[
                 const SliverToBoxAdapter(child: SectionHeader('Populární vydání')),
-                SliverToBoxAdapter(child: _ReleaseRail(releases: popularReleases)),
+                SliverToBoxAdapter(child: _ReleaseRail(releases: popularReleases, artistName: artist.name)),
               ],
               SliverToBoxAdapter(
                 child: bio.maybeWhen(
@@ -317,11 +320,11 @@ class _ArtistBody extends ConsumerWidget {
                       onSeeAll: () => context.push('/artists/${artist.id}/discography?type=${entry.key}'),
                     ),
                   ),
-                  SliverToBoxAdapter(child: _ReleaseRail(releases: entry.value)),
+                  SliverToBoxAdapter(child: _ReleaseRail(releases: entry.value, artistName: artist.name)),
                 ],
               // Vrácené id (ne to z adresy) -- Deezer duplikát se na serveru
               // slučuje do kanonického interpreta s MBID.
-              SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id)),
+              SliverToBoxAdapter(child: _RaritiesSection(artistId: artist.id, artistName: artist.name)),
               SliverToBoxAdapter(child: _SoundcloudSection(artistId: artist.id, artistName: artist.name)),
               SliverToBoxAdapter(child: ArtistSupportSection(artistId: artist.id, artistName: artist.name)),
               const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
@@ -498,8 +501,11 @@ class _RelatedArtistsSection extends StatelessWidget {
 }
 
 class _ReleaseRail extends ConsumerWidget {
-  const _ReleaseRail({required this.releases});
+  const _ReleaseRail({required this.releases, required this.artistName});
   final List<ReleaseModel> releases;
+
+  /// Do menu alba (sdílení) -- `subtitle` je tu rok, ne interpret.
+  final String artistName;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -528,6 +534,8 @@ class _ReleaseRail extends ConsumerWidget {
                   title: release.title,
                   subtitle: release.yearLabel,
                   imageUrl: release.coverImageUrl,
+                  artistId: release.artistId,
+                  artistName: artistName,
                   fromArtistId: release.artistId,
                   onNotArtist: () => ref.invalidate(discographyProvider),
                 ),
@@ -547,8 +555,9 @@ const _rarityBadges = {'demo': 'DEMO', 'live': 'ŽIVĚ', 'bootleg': 'BOOTLEG'};
 /// bootlegy z MusicBrainz. Líně, se skeletonem; prázdné/nedostupné (503) se
 /// vůbec neukáže.
 class _RaritiesSection extends ConsumerStatefulWidget {
-  const _RaritiesSection({required this.artistId});
+  const _RaritiesSection({required this.artistId, required this.artistName});
   final String artistId;
+  final String artistName;
 
   @override
   ConsumerState<_RaritiesSection> createState() => _RaritiesSectionState();
@@ -577,7 +586,18 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SectionHeader('Nevydané a vzácné'),
+            SectionHeader(
+              'Nevydané a vzácné',
+              // Všechny koncerty chronologicky (oficiální živá alba i záznamy).
+              trailing: items.any((i) => i.rarity == 'live' || i.rarity == 'bootleg')
+                  ? GlassButton(
+                      label: 'Koncertní archiv',
+                      icon: Symbols.stadium_rounded,
+                      compact: true,
+                      onPressed: () => showConcertArchive(context, widget.artistId),
+                    )
+                  : null,
+            ),
             if (kinds.length > 1)
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
@@ -621,6 +641,8 @@ class _RaritiesSectionState extends ConsumerState<_RaritiesSection> {
                               title: release.title,
                               subtitle: release.yearLabel,
                               imageUrl: release.coverImageUrl,
+                              artistId: release.artistId,
+                              artistName: widget.artistName,
                             ),
                           ),
                           Positioned(
@@ -689,4 +711,86 @@ class _SoundcloudSectionState extends ConsumerState<_SoundcloudSection> {
       ],
     );
   }
+}
+
+/// Koncertní archiv interpreta (`/catalog/artists/{id}/concerts`).
+typedef _Concert = ({String id, String title, String? date, String? venue, bool official, String? cover});
+
+final _artistConcertsProvider = FutureProvider.autoDispose.family<List<_Concert>, String>((ref, artistId) async {
+  final json = await ref.watch(apiClientProvider).getJson('/catalog/artists/$artistId/concerts');
+  return [
+    for (final c in (json['items'] as List<dynamic>).cast<Map<String, dynamic>>())
+      (
+        id: c['id'] as String,
+        title: c['title'] as String? ?? '',
+        date: c['concertDate'] as String?,
+        venue: c['venue'] as String?,
+        official: c['official'] as bool? ?? false,
+        cover: c['coverImageUrl'] as String?,
+      ),
+  ];
+});
+
+/// Všechny koncerty chronologicky, po letech -- ať se dají najít i stovky
+/// záznamů (Nirvana, Grateful Dead), které se do řady nevejdou.
+void showConcertArchive(BuildContext context, String artistId) {
+  showGlassSheet<void>(
+    context,
+    builder: (sheet) => GlassSheet(
+      expand: true,
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (_, scroll) => Consumer(
+          builder: (inner, ref, _) {
+            final concerts = ref.watch(_artistConcertsProvider(artistId));
+            final theme = Theme.of(inner);
+            return concerts.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (_, __) => const EmptyState(compact: true, message: 'Archiv se nepodařilo načíst.'),
+              data: (items) {
+                final rows = <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
+                    child: Text('Koncertní archiv · ${items.length}', style: theme.textTheme.titleLarge),
+                  ),
+                ];
+                String? year;
+                for (final c in items) {
+                  final y = (c.date ?? '').length >= 4 ? c.date!.substring(0, 4) : 'Bez data';
+                  if (y != year) {
+                    year = y;
+                    rows.add(Padding(
+                      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xs),
+                      child: Text(y, style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
+                    ));
+                  }
+                  rows.add(ListTile(
+                    shape: AppShapes.md,
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadii.xs),
+                      child: SizedBox.square(dimension: 44, child: ArtworkImage(url: c.cover, icon: Symbols.stadium_rounded)),
+                    ),
+                    title: Text(c.venue ?? c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                      [if (c.date != null) c.date!, if (c.official) 'oficiální živé album' else 'záznam koncertu'].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () {
+                      Navigator.of(sheet).pop();
+                      context.push('/releases/${c.id}');
+                    },
+                  ));
+                }
+                return ListView(controller: scroll, children: rows);
+              },
+            );
+          },
+        ),
+      ),
+    ),
+  );
 }

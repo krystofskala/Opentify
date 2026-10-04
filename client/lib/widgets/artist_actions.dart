@@ -86,8 +86,9 @@ class _ArtistActionsSheet extends ConsumerWidget {
                   .toggle(hostContext, id: id, name: name, imageUrl: imageUrl),
             ),
             // Nelíbí se: pryč ze všech mixů, rádií a doporučení.
+            // Ikona podle stavu, stejně jako menu skladby.
             row(
-              Symbols.heart_broken_rounded,
+              disliked ? Symbols.heart_check_rounded : Symbols.heart_broken_rounded,
               disliked ? 'Zrušit „Nelíbí se mi“' : 'Nelíbí se mi',
               () => ref.read(dislikedArtistsProvider.notifier).toggle(hostContext, id: id, name: name),
             ),

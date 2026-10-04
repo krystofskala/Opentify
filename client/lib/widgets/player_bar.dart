@@ -296,7 +296,14 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                                         color: fg,
                                         size: 38,
                                       ),
-                            tooltip: hasError ? 'Zkusit znovu' : null,
+                            // Popisek i pro čtečku obrazovky (dřív jen u chyby).
+                            tooltip: hasError
+                                ? 'Zkusit znovu'
+                                : playback.isBuffering
+                                    ? 'Načítám…'
+                                    : playback.isPlaying
+                                        ? 'Pozastavit'
+                                        : 'Přehrát',
                             onPressed: playback.isBuffering
                                 ? null
                                 : hasError

@@ -27,6 +27,16 @@ import '../state/listen_later_controller.dart' show listenLaterProvider;
 import '../data/listen_later_repository.dart' show LaterKind;
 import 'report_problem.dart';
 import 'toast.dart';
+import '../state/library_scope.dart' show libraryIdsProvider;
+
+/// Je celé album v knihovně (všechny jeho skladby)? Pro menu otevřená
+/// odjinud než z Knihovny -- volající to většinou neví a menu pak vždy
+/// nabízelo "Přidat do knihovny" i u alba, které tam už je.
+final _albumInLibraryProvider = FutureProvider.autoDispose.family<bool, String>((ref, releaseId) async {
+  final ids = await ref.watch(libraryIdsProvider.future);
+  final tracks = await ref.watch(catalogRepositoryProvider).getReleaseTracks(releaseId);
+  return tracks.isNotEmpty && tracks.every((t) => ids.contains(t.id));
+});
 
 /// Co se dlouhým stiskem otevírá: album, playlist, nebo Oblíbené.
 enum CollectionKind { album, playlist, liked }
@@ -224,6 +234,10 @@ class _CollectionActionsSheet extends ConsumerWidget {
     }
 
     String songs(int n) => songsCount(n);
+
+    // Volající stav knihovny neznal -- dopočítat (do načtení jako dřív "Přidat").
+    final inLibrary = this.inLibrary ??
+        (kind == CollectionKind.album ? ref.watch(_albumInLibraryProvider(id)).valueOrNull : null);
 
     return GlassSheet(
       child: Padding(
@@ -426,7 +440,8 @@ class _CollectionActionsSheet extends ConsumerWidget {
                   showShareSheet(
                     hostContext,
                     title: title,
-                    artistName: kind == CollectionKind.album ? (artistName ?? subtitle) : null,
+                    // Ne `subtitle` -- bývá v něm rok/typ alba, ne interpret.
+                    artistName: kind == CollectionKind.album ? artistName : null,
                     opentifyPath: kind == CollectionKind.album ? '/releases/$id' : '/playlists/$id',
                     external: kind == CollectionKind.album ? (kind: 'releases', id: id) : null,
                   );
@@ -440,10 +455,10 @@ class _CollectionActionsSheet extends ConsumerWidget {
                 destructive: true,
                 onTap: () {
                   Navigator.of(context).pop();
-                  _load(container).then((_) async {
-                    final tracks = await container.read(catalogRepositoryProvider).getReleaseTracks(id);
+                  // Tracklist jen jednou; chyba jako toast (dřív tiše nic).
+                  container.read(catalogRepositoryProvider).getReleaseTracks(id).then((tracks) async {
                     if (hostContext.mounted) await confirmRemoveFromLibrary(hostContext, tracks);
-                  });
+                  }).catchError((Object _) => toast('Nepodařilo se načíst skladby, zkus to znovu'));
                 },
               ),
             if (onLeave != null)

@@ -52,13 +52,9 @@ class _QueuePanel extends ConsumerWidget {
             fit: StackFit.expand,
             child: Builder(builder: (context) => Column(
               children: [
-                const SizedBox(height: 10),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(color: _fg(context).withValues(alpha: 0.24), borderRadius: BorderRadius.circular(2)),
-                ),
-                const SizedBox(height: 14),
+                // Stejný úchyt jako všechny sheety (GlassSheet).
+                const SheetGrabber(),
+                const SizedBox(height: 8),
                 Text(
                   playback.queueSourceLabel != null
                       ? 'PŘEHRÁVÁNO Z ${playback.queueSourceLabel!.toUpperCase()}'
@@ -204,6 +200,9 @@ class _QueueListState extends ConsumerState<_QueueList> {
                 artworkUrl: info.artworkUrl,
                 onToggle: () => setState(() => expanded ? _expanded.remove(group) : _expanded.add(group)),
                 onRemove: () => controller.removeGroup(group),
+                // Sbalený blok jde přetáhnout celý (`onReorderItem` přesune
+                // celou skupinu) -- dřív neměl úchyt, takže to nešlo.
+                dragIndex: expanded ? null : i,
               );
               if (!expanded) {
                 return _dismissible(
@@ -254,6 +253,7 @@ class _GroupHeader extends StatelessWidget {
     required this.onToggle,
     required this.onRemove,
     this.artworkUrl,
+    this.dragIndex,
   });
 
   final String label;
@@ -262,6 +262,9 @@ class _GroupHeader extends StatelessWidget {
   final String? artworkUrl;
   final VoidCallback onToggle;
   final VoidCallback onRemove;
+
+  /// Index v `SliverReorderableList` pro úchyt (jen sbalený blok).
+  final int? dragIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -310,6 +313,14 @@ class _GroupHeader extends StatelessWidget {
                 icon: Icon(Symbols.playlist_remove_rounded, color: _fg(context)),
                 onPressed: onRemove,
               ),
+              if (dragIndex != null)
+                ReorderableDragStartListener(
+                  index: dragIndex!,
+                  child: SizedBox.square(
+                    dimension: 48,
+                    child: Center(child: Icon(Symbols.drag_handle_rounded, color: _fg(context).withValues(alpha: 0.54))),
+                  ),
+                ),
             ],
           ),
         ),

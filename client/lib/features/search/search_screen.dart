@@ -66,6 +66,9 @@ const _libraryScopeFor = {
 
 typedef _SectionKey = ({String query, String type, int limit});
 
+/// Kolik výsledků načte náhled sekce (Skladby/Interpreti/Alba).
+const _previewLimit = 10;
+
 /// Jeden typ výsledků zvlášť -- backend u kombinovaného dotazu bez `type`
 /// ořízne výsledky na `limit` CELKEM (interpreti jdou první a zbytek
 /// vytlačí), takže sekce "Vše" se skládá ze tří samostatných dotazů, které
@@ -370,9 +373,9 @@ class _AllResults extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tracks = ref.watch(searchSectionProvider((query: query, type: 'recording', limit: 10)));
-    final artists = ref.watch(searchSectionProvider((query: query, type: 'artist', limit: 10)));
-    final albums = ref.watch(searchSectionProvider((query: query, type: 'release', limit: 10)));
+    final tracks = ref.watch(searchSectionProvider((query: query, type: 'recording', limit: _previewLimit)));
+    final artists = ref.watch(searchSectionProvider((query: query, type: 'artist', limit: _previewLimit)));
+    final albums = ref.watch(searchSectionProvider((query: query, type: 'release', limit: _previewLimit)));
     void show(SearchFilter f) => ref.read(searchFilterProvider.notifier).state = f;
 
     final playlists = ref.watch(searchPlaylistsProvider(query));
@@ -389,7 +392,7 @@ class _AllResults extends ConsumerWidget {
         message: _errorMessage(tracks.error!),
         onRetry: () {
           for (final type in ['recording', 'artist', 'release']) {
-            ref.invalidate(searchSectionProvider((query: query, type: type, limit: 10)));
+            ref.invalidate(searchSectionProvider((query: query, type: type, limit: _previewLimit)));
           }
         },
       );
@@ -416,6 +419,7 @@ class _AllResults extends ConsumerWidget {
           title: 'Skladby',
           value: tracks,
           onSeeAll: () => show(SearchFilter.tracks),
+          shown: 5,
           loading: const SkeletonTrackList(count: 4),
           builder: (items) {
             final recordings = items.map((i) => i.toRecordingModel()).toList();
@@ -491,6 +495,7 @@ class _Section extends StatelessWidget {
     required this.onSeeAll,
     required this.loading,
     required this.builder,
+    this.shown,
   });
 
   final String title;
@@ -499,13 +504,24 @@ class _Section extends StatelessWidget {
   final Widget loading;
   final Widget Function(List<SearchResultItem> items) builder;
 
+  /// Kolik položek náhled ukáže (null = všechny načtené).
+  final int? shown;
+
+  bool get _hasMore {
+    final items = value.valueOrNull;
+    if (items == null) return false;
+    return items.length > (shown ?? items.length) || items.length >= _previewLimit;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (value.hasValue && value.value!.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SectionHeader(title, onSeeAll: value.hasValue ? onSeeAll : null),
+        // "Zobrazit vše" jen když je co víc ukázat: náhled něco schoval, nebo
+        // narazil na limit (dřív i u dvou výsledků, které už byly vidět).
+        SectionHeader(title, onSeeAll: _hasMore ? onSeeAll : null),
         value.when(
           data: builder,
           loading: () => loading,
@@ -580,6 +596,8 @@ class _ReleaseCard extends ConsumerWidget {
         title: item.title,
         subtitle: item.subtitle,
         imageUrl: item.imageUrl,
+        // Hledání jméno interpreta alba nenese -- aspoň Přejít na interpreta.
+        artistId: item.artistId,
       ),
     );
   }

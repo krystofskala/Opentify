@@ -12,6 +12,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/toast.dart';
+import '../../theme/glass_tokens.dart';
 import '../../theme/shapes.dart';
 
 /// Profil › Profily -- jen pro admina. Založit profil (jméno + přihlašovací
@@ -372,13 +373,16 @@ class ProfilesSection extends ConsumerWidget {
                           children: [
                             Flexible(child: Text('${d.label} · ${_ago(d.lastUsedAt)}', style: muted)),
                             // Ztracený telefon: odhlásit jen tohle zařízení.
-                            InkWell(
-                              borderRadius: BorderRadius.circular(AppRadii.pill),
-                              onTap: () => _revokeDevice(context, ref, d),
-                              child: Padding(
-                                padding: const EdgeInsets.all(AppSpacing.xs),
-                                child: Icon(Symbols.close_rounded, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                            // IconButton = popisek pro čtečku a plocha 48 px
+                            // (holé ✕ 16 px se špatně trefovalo).
+                            IconButton(
+                              tooltip: 'Odhlásit zařízení',
+                              constraints: const BoxConstraints(
+                                minWidth: GlassTokens.minHitTarget,
+                                minHeight: GlassTokens.minHitTarget,
                               ),
+                              onPressed: () => _revokeDevice(context, ref, d),
+                              icon: Icon(Symbols.close_rounded, size: 16, color: theme.colorScheme.onSurfaceVariant),
                             ),
                           ],
                         ),
