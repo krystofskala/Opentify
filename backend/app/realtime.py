@@ -120,7 +120,8 @@ class ConnectionManager:
             # Stejné zařízení po znovupřipojení: staré (napůl mrtvé) spojení pryč,
             # jinak by povely šly do něj (iOS po návratu z pozadí).
             for key, other in list(self._connections.get(user_id, {}).items()):
-                if other is not me and other.device_id == me.device_id:
+                # Jen se skutečným id (None == None by zavřelo cizí spojení).
+                if me.device_id and other is not me and other.device_id == me.device_id:
                     self._connections[user_id].pop(key, None)
                     try:
                         await other.ws.close()

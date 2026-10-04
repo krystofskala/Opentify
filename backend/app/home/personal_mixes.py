@@ -130,9 +130,13 @@ def load_taste(user_id: str) -> Taste:
             if now - played <= timedelta(days=30):
                 taste.recent_listens[listen.recording_id] += 1
 
+        # Nelíbení interpreti nesmí být semínkem mixů ani jejich obalem.
+        from app.library.dislikes import disliked_artist_ids
+
+        banned = disliked_artist_ids(session, user_id)
         for recording_id in taste.known:
             recording = session.get(Recording, recording_id)
-            if recording is None or not recording.artist_id:
+            if recording is None or not recording.artist_id or recording.artist_id in banned:
                 continue
             taste.artist_of[recording_id] = recording.artist_id
             if recording.release_id:

@@ -62,7 +62,19 @@ def _seed(user_id: str, kind: str, target_id: str) -> tuple[str, list[str], list
                 raise StationError("interpret nenalezen")
             return artist.name, [artist.id], []
         playlist = session.get(Playlist, target_id)
-        if playlist is None:
+        # Jen čitelné playlisty (vlastní, společné, globální) -- jinak by šlo
+        # podle UUID postavit rádio z cizích soukromých Oblíbených.
+        from app.models import PlaylistMember
+        from app.models import GLOBAL_PLAYLIST_OWNER
+
+        member = (
+            playlist is not None
+            and session.exec(
+                select(PlaylistMember).where(PlaylistMember.playlist_id == playlist.id, PlaylistMember.user_id == user_id)
+            ).first()
+            is not None
+        )
+        if playlist is None or (playlist.owner_user_id not in (user_id, GLOBAL_PLAYLIST_OWNER) and not member):
             raise StationError("playlist nenalezen")
         counts: Counter = Counter()
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():

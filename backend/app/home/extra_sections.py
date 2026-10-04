@@ -100,6 +100,10 @@ def _artist_weights(user_id: str, days: int = 365, half_life: float = 60.0) -> t
                 weights[artist_id] += 0.5 ** ((now - _aware(played)).total_seconds() / 86400 / half_life)
         for fav in s.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all():
             weights[fav] += 3.0
+        from app.library.dislikes import disliked_artist_ids
+
+        for banned in disliked_artist_ids(s, user_id):
+            weights.pop(banned, None)  # nelíbení interpreti nic nedoporučují
         names = {a.id: a.name for a in s.exec(select(Artist).where(Artist.id.in_(list(weights)))).all()}  # type: ignore[attr-defined]
     return weights, names
 

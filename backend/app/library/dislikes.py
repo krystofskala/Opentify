@@ -27,12 +27,12 @@ LB_API = os.environ.get("LISTENBRAINZ_SUBMIT_BASE_URL", "https://api.listenbrain
 
 
 def disliked_ids(session: Session, user_id: str | None) -> set[str]:
-    """`None`/globální vlastník = všechny zlomená srdce (appka je pro jednoho
-    uživatele, globální žebříčky ho taky nemají strašit)."""
-    query = select(RecordingDislike.recording_id)
-    if user_id and user_id != GLOBAL_PLAYLIST_OWNER:
-        query = query.where(RecordingDislike.user_id == user_id)
-    return set(session.exec(query).all())
+    """Zlomená srdce profilu. Globální žebříčky (společné všem profilům) se
+    podle jednoho profilu nemění -- dřív admin "nelíbí" vyřadil skladbu
+    z Top Česko i tátovi."""
+    if not user_id or user_id == GLOBAL_PLAYLIST_OWNER:
+        return set()
+    return set(session.exec(select(RecordingDislike.recording_id).where(RecordingDislike.user_id == user_id)).all())
 
 
 def disliked_artist_ids(session: Session, user_id: str | None) -> set[str]:
@@ -84,7 +84,7 @@ async def send_feedback(recording_id: str, score: int, user_id: str) -> None:
     with Session(engine) as session:
         recording = session.get(Recording, recording_id)
         mbid = recording.mbid if recording else None
-    if not mbid:
+    if not mbid or mbid.startswith("own:"):  # vlastní interpret -- LB ho nezná
         return
     try:
         async with httpx.AsyncClient(timeout=15) as client:

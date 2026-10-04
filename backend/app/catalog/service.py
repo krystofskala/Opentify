@@ -1232,6 +1232,10 @@ class CatalogService:
         if refs.get("tracklistIds") != ids:
             release.external_refs = {**refs, "tracklistIds": ids}
             self._session.add(release)
+        # Hned potvrdit: nepotvrzený zápis (flush) jinak držel zámek SQLite
+        # až do konce požadavku a ostatní zápisy (i v jiných požadavcích)
+        # na něj čekaly -- při zátěži stálo celé API 5 s (zátěžový test).
+        self._session.commit()
         self._ingest_other_editions(release, mb_releases, chosen)
         return [self._to_recording_out(r) for r in recordings]
 

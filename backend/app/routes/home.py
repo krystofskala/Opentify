@@ -396,6 +396,15 @@ async def set_share_listening(body: ShareListeningIn, current: tuple[str, str] =
         row.payload = {"on": body.on}
         row.generated_at = utcnow()
         session.add(row)
+        if not body.on:
+            # Vypnuté sdílení: stažení řady "Co poslouchá rodina" u ostatních
+            # (playlist s mými posledními skladbami by jinak zůstal otevíratelný).
+            from app.models import Playlist, PlaylistItem
+
+            for pl in session.exec(select(Playlist).where(Playlist.source == f"home:rail:family_{current[0][:8]}")).all():
+                for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == pl.id)).all():
+                    session.delete(item)
+                session.delete(pl)
         session.commit()
     await invalidate_home_cache()
     return {"on": body.on}
