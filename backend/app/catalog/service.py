@@ -1256,6 +1256,113 @@ class CatalogService:
             "versions": versions_out,
         }
 
+    async def _mb_group_for_credits(self, release: Release) -> str | None:
+        """Album jen z Deezeru: jeho skupina v MusicBrainz -- napřed MB dvojče
+        v katalogu (stejný interpret, název a rok +-1; živě: Drive od Bély
+        Flecka dvakrát, obsazení jen u MB řádku), jinak hledání v MB. Jen pro
+        obsazení; řádky se neslučují (verze se nesmí slít)."""
+        from app.catalog.deezer_ingest import _year, album_key
+
+        refs = release.external_refs or {}
+        if "creditsMbid" in refs:
+            return refs["creditsMbid"] or None
+        year = _year(release.release_date)
+        # Deezer dává jména interpretů i do názvu ("Norman Blake & Tony Rice
+        # 2" = v MB "2" od Norman Blake & Tony Rice) -- zkusit i bez nich.
+        names = [c.get("name") or "" for c in refs.get("credits") or []]
+        primary = self._session.get(Artist, release.artist_id) if release.artist_id else None
+        if primary is not None:
+            names.append(primary.name)
+        stripped = release.title
+        for _ in range(4):
+            before = stripped
+            for n in sorted({n for n in names if n}, key=len, reverse=True):
+                stripped = re.sub(rf"^\s*{re.escape(n)}\s*(?:&|and|a|,|-|–|:)?\s*", "", stripped, flags=re.I)
+            if stripped == before:
+                break
+        titles = [release.title] + ([stripped] if stripped and stripped != release.title else [])
+        keys = {album_key(t) for t in titles}
+        wanted = album_key(release.title)
+
+        def close(date: str | None) -> bool:
+            y = _year(date)
+            return bool(year and y and abs(y - year) <= 1)
+
+        twin = next(
+            (
+                r for r in self._session.exec(
+                    select(Release).where(Release.artist_id == release.artist_id, Release.mbid.is_not(None))  # type: ignore[union-attr]
+                ).all()
+                if not is_own_id(r.mbid) and album_key(r.title) in keys and close(r.release_date)
+            ),
+            None,
+        )
+        found = twin.mbid if twin else None
+        artist = self._session.get(Artist, release.artist_id) if release.artist_id else None
+        if found is None and artist is not None:
+            groups = []
+            for t in titles:
+                try:
+                    res = await self._mb.search(
+                        "release-group",
+                        f'releasegroup:"{t.replace(chr(34), "")}" AND artist:"{artist.name.replace(chr(34), "")}"',
+                        5,
+                        0,
+                    )
+                except MusicBrainzError:
+                    return None  # zkusí se příště (nic se neuloží)
+                groups += [
+                    g for g in res.get("release-groups") or []
+                    if (g.get("score") or 0) >= 90 and album_key(g.get("title") or "") in keys
+                ]
+                if groups:
+                    break
+            found = next((g["id"] for g in groups if close(g.get("first-release-date"))), None)
+            # Deezer mívá datum digitální reedice (Norman Blake & Tony Rice 2:
+            # 2015 vs 1990) -- pak rozhodnou skladby: stejné názvy SE STEJNOU
+            # délkou = tytéž nahrávky. Nová nahrávka (Texican Badman 2019) má
+            # jiné délky a neprojde.
+            for g in groups[:2]:
+                if found:
+                    break
+                if await self._same_recordings(release, g["id"]):
+                    found = g["id"]
+        release.external_refs = {**refs, "creditsMbid": found or ""}
+        self._session.add(release)
+        self._session.commit()
+        return found
+
+    async def _same_recordings(self, release: Release, rgid: str) -> bool:
+        """Deezer album a MB skupina mají tytéž nahrávky: >= 70 % skladeb
+        stejného názvu a z nich >= 80 % s délkou do 4 s."""
+        from app.download_match import core_title
+
+        if not (release.deezer_id or "").isdigit():
+            return False
+        album = await self._dz.album(release.deezer_id)
+        dz_tracks = {
+            norm(core_title(t.get("title") or "")): t.get("duration")
+            for t in ((album or {}).get("tracks") or {}).get("data") or []
+        }
+        try:
+            data = await self._mb.get_release_group_tracks(rgid)
+        except MusicBrainzError:
+            return False
+        editions = [r for r in data.get("releases") or [] if any(m.get("tracks") for m in r.get("media") or [])]
+        if not editions or not dz_tracks:
+            return False
+        mb_tracks = {
+            norm(core_title((t.get("recording") or {}).get("title") or t.get("title") or "")):
+            ((t.get("recording") or {}).get("length") or t.get("length"))
+            for m in _canonical_edition(editions).get("media") or [] for t in m.get("tracks") or []
+        }
+        common = [k for k in dz_tracks if k in mb_tracks]
+        if len(common) < 0.7 * max(len(dz_tracks), len(mb_tracks)):
+            return False
+        timed = [k for k in common if dz_tracks[k] and mb_tracks[k]]
+        same = [k for k in timed if abs(dz_tracks[k] - mb_tracks[k] / 1000) <= 4]
+        return bool(timed) and len(same) >= 0.8 * len(timed)
+
     async def get_release_credits(self, release_id: str) -> dict[str, Any] | None:
         """Obsazení alba (viz app/catalog/credits.py) z kanonické edice MB.
         Vlastní / importované album a album jen z Deezeru: prázdné."""
@@ -1265,10 +1372,13 @@ class CatalogService:
         if release is None:
             return None
         empty = {"musicians": [], "writers": [], "production": [], "tracks": 0}
-        if not release.mbid or is_own_id(release.mbid):
+        if is_own_id(release.mbid) or is_own_id(release.deezer_id):
+            return empty
+        mbid = release.mbid or await self._mb_group_for_credits(release)
+        if not mbid:
             return empty
         try:
-            data = await self._mb.get_release_group_tracks(release.mbid)
+            data = await self._mb.get_release_group_tracks(mbid)
             editions = [r for r in data.get("releases") or [] if any(m.get("tracks") for m in r.get("media") or [])]
             if not editions:
                 return empty
