@@ -74,6 +74,30 @@ class Activation:
     peak_at: dict[str, datetime] = field(default_factory=dict)
     artist_of: dict[str, str] = field(default_factory=dict)
     heard_keys: set[str] = field(default_factory=set)
+    # (čas, skladba) všech započtených poslechů, chronologicky -- co se
+    # poslouchá spolu (Pusť teď / nekonečné hraní).
+    timeline: list[tuple[datetime, str]] = field(default_factory=list)
+
+    def co_listened_artists(self, seed_artists: set[str], window_min: int = 60) -> Counter:
+        """Interpreti, které profil pouští ve stejných chvílích jako semínka
+        (do `window_min` minut od poslechu semínka). Podobnost z vlastní
+        historie, ne z cizích dat."""
+        out: Counter = Counter()
+        times = [(t, self.artist_of.get(r)) for t, r in self.timeline]
+        j = 0
+        seed_idx = [i for i, (_t, a) in enumerate(times) if a in seed_artists]
+        for i in seed_idx:
+            t = times[i][0]
+            j = i
+            while j > 0 and (t - times[j - 1][0]).total_seconds() <= window_min * 60:
+                j -= 1
+            k = i
+            while k + 1 < len(times) and (times[k + 1][0] - t).total_seconds() <= window_min * 60:
+                k += 1
+            for _t, a in times[j : k + 1]:
+                if a and a not in seed_artists:
+                    out[a] += 1
+        return out
 
     def artist_scores(self, profile: str) -> Counter:
         """Interpret -> podíl v profilu (součet 1). Přímé podíly, ne `ln` --
@@ -169,6 +193,7 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
         act.first.setdefault(rid, played)
         act.last[rid] = played
         times[rid].append(played)
+        act.timeline.append((played, rid))
     # Vrchol: nejvíc poslechů v klouzavém 60denním okně.
     for rid, ts in times.items():
         best, best_at, j = 0, ts[0], 0

@@ -25,6 +25,29 @@ async def home(current: tuple[str, str] = Depends(get_current_user)):
     return await get_home(user_id)
 
 
+class PlayNowIn(BaseModel):
+    seedIds: list[str] = []  # co právě hrálo (nekonečné hraní); prázdné = Pusť teď
+    playedIds: list[str] = []  # už ve frontě / zahrané v téhle session
+    size: int = 8
+
+
+@home_router.post("/play-now")
+async def play_now(body: PlayNowIn, current: tuple[str, str] = Depends(get_current_user)):
+    """Další várka pro "Pusť teď" / nekonečné hraní (app/home/play_now.py)."""
+    from app.home import play_now as pn
+    from app.home.service import _recording_out
+
+    size = max(1, min(body.size, 20))
+    chunk = await pn.next_chunk(current[0], body.seedIds[-5:], body.playedIds[-300:], size)
+    with Session(engine) as session:
+        tracks = [
+            _recording_out(session, rec).model_dump(mode="json", by_alias=True)
+            for rec in (session.get(Recording, rid) for rid in chunk["recordingIds"])
+            if rec is not None
+        ]
+    return {"tracks": tracks, "reason": chunk["reason"]}
+
+
 @home_router.get("/recent")
 def recent(
     limit: int = 8,

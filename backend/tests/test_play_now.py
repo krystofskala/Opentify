@@ -1,0 +1,75 @@
+"""Pusť teď / nekonečné hraní: známé skladby podle vlastní historie, bez
+právě zahraných, nekonečné hraní navazuje na interprety semínka."""
+import asyncio
+import random
+import uuid
+from datetime import timedelta
+
+from sqlmodel import Session
+
+from app.db import engine
+from app.home import play_now as pn
+from app.models import Artist, Listen, Recording
+from app.utils import utcnow
+
+_RUN = uuid.uuid4().hex[:8]
+
+
+def _setup(user):
+    now = utcnow().replace(tzinfo=None)
+    ids = {}
+    with Session(engine) as s:
+        for name in ("Bluegrass Band", "Folk Duo", "Metal Act"):
+            artist = Artist(name=f"{name} {_RUN}")
+            s.add(artist)
+            s.flush()
+            for n in range(4):
+                rec = Recording(title=f"{name} song {n}", artist_id=artist.id, duration_ms=200_000)
+                s.add(rec)
+                s.flush()
+                ids[(name, n)] = rec.id
+        # Bluegrass a Folk se poslouchají spolu (stejné večery), Metal jindy.
+        for day in range(1, 30, 2):
+            base = now - timedelta(days=day)
+            for n in range(4):
+                s.add(Listen(user_id=user, recording_id=ids[("Bluegrass Band", n)], played_at=base + timedelta(minutes=4 * n),
+                             duration_played_ms=200_000))
+                s.add(Listen(user_id=user, recording_id=ids[("Folk Duo", n)], played_at=base + timedelta(minutes=20 + 4 * n),
+                             duration_played_ms=200_000))
+                s.add(Listen(user_id=user, recording_id=ids[("Metal Act", n)], played_at=base - timedelta(hours=10, minutes=4 * n),
+                             duration_played_ms=200_000))
+        s.commit()
+    return ids
+
+
+def test_endless_follows_seed_and_skips_played(monkeypatch):
+    user = "pn-u1-" + _RUN
+    ids = _setup(user)
+    pn._cache.clear()
+    seed = ids[("Bluegrass Band", 0)]
+    played = [ids[("Bluegrass Band", 1)]]
+    familiar, _new_seeds, reason = pn.pick(user, [seed], played, 2, random.Random(1))
+    assert seed not in familiar and played[0] not in familiar
+    names = set()
+    with Session(engine) as s:
+        for rid in familiar:
+            names.add(s.get(Artist, s.get(Recording, rid).artist_id).name)
+    # Navazuje na semínko a na to, co se pouští spolu s ním -- metal ne na prvních místech.
+    assert names and all("Metal" not in n for n in names)
+    assert reason.startswith("Navazuje")
+
+
+def test_next_chunk_without_network(monkeypatch):
+    user = "pn-u2-" + _RUN
+    _setup(user)
+    pn._cache.clear()
+
+    async def no_similar(*_a, **_k):
+        return []
+
+    from app.home import lastfm_taste as lt
+
+    monkeypatch.setattr(lt, "similar_track_ids", no_similar)
+    out = asyncio.run(pn.next_chunk(user, [], [], 5))
+    assert 1 <= len(out["recordingIds"]) <= 5
+    assert len(set(out["recordingIds"])) == len(out["recordingIds"])
