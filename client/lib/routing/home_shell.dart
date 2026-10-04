@@ -4,9 +4,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../state/audio_player_controller.dart' show audioPlayerControllerProvider;
 import '../theme/glass_tokens.dart';
 import '../widgets/glass/glass.dart';
 import '../widgets/glass/liquid_glass.dart';
@@ -144,9 +146,15 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
     if (delta == 0) return false;
     if (delta.sign != _travel.sign) _travel = 0;
     _travel += delta;
-    if (!_collapsed && _travel > _collapseAfter) _setCollapsed(true);
+    // Bez mini přehrávače (nic nehraje) se lišta nesmršťuje -- kapsle by
+    // visela sama, není vedle čeho.
+    if (!_collapsed && _travel > _collapseAfter && _hasPlayer) _setCollapsed(true);
     return false;
   }
+
+  // Hraje něco (je mini přehrávač)? Sleduje se přes provider -- přehrávač
+  // mizí bez překreslení lišty.
+  bool _hasPlayer = false;
 
   // Kapsle: podržení / tah -> rozbalit a táhnout kapku výběru v liště.
   void _pillDragStart(Offset global) {
@@ -202,9 +210,20 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
             heightFactor: 1,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: kFloatingBarMaxWidth),
-              child: AnimatedBuilder(
-                animation: _t,
-                builder: (context, _) => _bars(context, _t.value.clamp(0.0, 1.0)),
+              child: Consumer(
+                builder: (context, ref, _) {
+                  _hasPlayer = ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying != null));
+                  // Přehrávač zmizel (zavřený) a lišta je smrštěná -> rozbalit.
+                  if (!_hasPlayer && _collapsed && !_pillDragging) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && _collapsed && !_hasPlayer) _setCollapsed(false);
+                    });
+                  }
+                  return AnimatedBuilder(
+                    animation: _t,
+                    builder: (context, _) => _bars(context, _t.value.clamp(0.0, 1.0)),
+                  );
+                },
               ),
             ),
           ),
