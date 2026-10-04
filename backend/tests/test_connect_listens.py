@@ -64,6 +64,39 @@ def test_no_duplicate_when_app_reported(monkeypatch):
     assert _count("cl-user2-" + _RUN) == 1
 
 
+def test_play_events_record_how_each_play_ended(monkeypatch):
+    from app.models import PlayEvent, Playlist, PlaylistKind
+
+    user = "cl-user4-" + _RUN
+    t = [4_000_000.0]
+    monkeypatch.setattr(cl.time, "time", lambda: t[0])
+    with Session(engine) as s:
+        s.add(Playlist(title="Denní mix 1 " + _RUN, owner_user_id=user, kind=PlaylistKind.PERSONAL_MIX))
+        s.commit()
+    tr = cl.ConnectListens()
+    done, skipped, mid = _rec("P", 60_000), _rec("Q", 200_000), _rec("R", 200_000)
+
+    def st(rid, pos, dur):
+        return {**_state(rid, pos, dur=dur), "sourceLabel": "Denní mix 1 " + _RUN}
+
+    for i in range(5):  # P dohraje (60 s)
+        tr.update(user, "dev", st(done, i * 15_000, 60_000))
+        t[0] += 15
+    tr.update(user, "dev", st(skipped, 0, 200_000))
+    t[0] += 5
+    tr.update(user, "dev", st(mid, 0, 200_000))  # Q přeskočena po 5 s
+    for i in range(1, 5):
+        t[0] += 15
+        tr.update(user, "dev", st(mid, i * 15_000, 200_000))
+    tr.update(user, "dev", {"nowPlaying": None, "isPlaying": False})  # R zastavena v půlce
+    with Session(engine) as s:
+        rows = {e.recording_id: e for e in s.exec(select(PlayEvent).where(PlayEvent.user_id == user)).all()}
+    assert rows[done].end_reason == "completed"
+    assert rows[skipped].end_reason == "skipped"
+    assert rows[mid].end_reason == "stopped"
+    assert all(e.algorithmic and e.playlist_id for e in rows.values())
+
+
 def test_skip_twice_in_a_row_then_reset_by_listen(monkeypatch):
     from app.models import SkipStreak
 

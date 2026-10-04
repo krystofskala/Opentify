@@ -101,10 +101,20 @@ class ConnectListens:
         duration = (s.duration_ms or 0) / 1000
         if duration and duration < 30:
             return
+        skipped = switched and s.played_s < min(30.0, (duration or 120) / 4)
+        if duration and s.played_s >= duration * 0.9:
+            reason = "completed"
+        elif skipped:
+            reason = "skipped"
+        elif switched:
+            reason = "next"
+        else:
+            reason = "stopped"
+        self._run(_play_event, s.user_id, key[1], s.recording_id, s.started_wall, s.played_s, s.duration_ms, reason, s.source)
         threshold = min(duration / 2, 240) if duration else 240
         if s.played_s < threshold:
             # Přeskočeno: do 30 s (a do čtvrtiny skladby) a hned jiná skladba.
-            if switched and s.played_s < min(30.0, (duration or 120) / 4):
+            if skipped:
                 self._run(_skip, s.user_id, s.recording_id)
             return
         played_at = datetime.fromtimestamp(s.started_wall, tz=timezone.utc)
@@ -144,6 +154,52 @@ def _record(user_id: str, recording_id: str, played_at: datetime, played_ms: int
             logger.info("connect %s: poslech zapsán serverem %s (%d s)", user_id[:8], recording_id[:8], played_ms // 1000)
     except Exception:  # noqa: BLE001 -- záloha nesmí shodit Connect
         logger.exception("záložní poslech se nepodařilo zapsat")
+
+
+def _play_event(
+    user_id: str, device_key: str, recording_id: str, started_wall: float, played_s: float,
+    duration_ms: int | None, reason: str, source: str | None,
+) -> None:
+    """Zapsat přehrání (PlayEvent). Fronta se pozná podle názvu: playlist
+    profilu se stejným názvem -> jeho id; generovaný (mix) = algoritmický."""
+    from sqlmodel import Session, select
+
+    from app.db import engine
+    from app.models import GLOBAL_PLAYLIST_OWNER, PlayEvent, Playlist, PlaylistKind
+    from app.utils import utcnow
+
+    try:
+        with Session(engine) as session:
+            playlist = None
+            if source:
+                playlist = session.exec(
+                    select(Playlist).where(
+                        Playlist.title == source,
+                        Playlist.owner_user_id.in_([user_id, GLOBAL_PLAYLIST_OWNER]),  # type: ignore[attr-defined]
+                    )
+                ).first()
+            session.add(
+                PlayEvent(
+                    user_id=user_id,
+                    recording_id=recording_id,
+                    started_at=datetime.fromtimestamp(started_wall, tz=timezone.utc),
+                    ended_at=utcnow(),
+                    played_ms=int(played_s * 1000),
+                    duration_ms=duration_ms,
+                    end_reason=reason,
+                    source_label=source,
+                    playlist_id=playlist.id if playlist else None,
+                    algorithmic=bool(
+                        playlist
+                        and playlist.kind
+                        in (PlaylistKind.PERSONAL_MIX, PlaylistKind.GENERATED_RECOMMENDATION, PlaylistKind.RADIO)
+                    ),
+                    device_key=device_key,
+                )
+            )
+            session.commit()
+    except Exception:  # noqa: BLE001 -- měření nesmí shodit Connect
+        logger.exception("přehrání se nepodařilo zapsat")
 
 
 def _skip(user_id: str, recording_id: str) -> None:

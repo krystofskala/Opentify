@@ -74,6 +74,10 @@ def read_zip(raw: bytes) -> list[dict[str, Any]]:
                         "artist": artist,
                         "album": row.get("master_metadata_album_album_name"),
                         "spotify_id": uri.rsplit(":", 1)[-1] if uri.startswith("spotify:track:") else None,
+                        # Jak přehrání skončilo -- pro měření přeskakování
+                        # (PlayEvent). Zařízení/platforma se dál nečtou.
+                        "reason_end": row.get("reason_end"),
+                        "skipped": bool(row.get("skipped")),
                     }
                 )
     return plays
@@ -141,8 +145,61 @@ def import_history(user_id: str, plays: list[dict[str, Any]], source: str = SOUR
             if batch % 5000 == 0:
                 session.commit()
         session.commit()
+    events = import_play_events(user_id, plays, ids, source)
     years = build_year_playlists(user_id)
-    return {"plays": len(plays), "listens": len(counted), "tracks": len(ids), "years": years}
+    return {"plays": len(plays), "listens": len(counted), "tracks": len(ids), "years": years, "playEvents": events}
+
+
+def _end_reason(play: dict[str, Any]) -> str | None:
+    reason = play.get("reason_end")
+    if reason is None and "skipped" not in play:
+        return None  # zdroj to neví (YouTube Music)
+    if play.get("skipped") or (reason == "fwdbtn" and play["ms"] < MIN_PLAY_MS):
+        return "skipped"
+    if reason == "trackdone":
+        return "completed"
+    if reason in ("fwdbtn", "clickrow", "backbtn", "playbtn"):
+        return "next"
+    return "stopped"
+
+
+def import_play_events(
+    user_id: str, plays: list[dict[str, Any]], ids: dict[tuple[str, str], str] | None = None, source: str = SOURCE
+) -> int:
+    """Přehrání z importu jako PlayEvent i s tím, jak skončila (přeskočení,
+    dohrání). Jen skladby, které profil aspoň jednou opravdu poslouchal --
+    kvůli pouhým přeskočením se katalog nerozšiřuje. Poslechy (`Listen`) se
+    tím nemění; opakovaný import nahradí jen PlayEventy téhož zdroje."""
+    from app.models import PlayEvent
+
+    if ids is None:
+        with Session(engine) as session:
+            ids = _resolve(session, [p for p in plays if p["ms"] >= MIN_PLAY_MS])
+    written = 0
+    with Session(engine) as session:
+        session.exec(delete(PlayEvent).where(PlayEvent.user_id == user_id, PlayEvent.origin == source))
+        for play in plays:
+            reason = _end_reason(play)
+            rid = ids.get((play["artist"].strip().lower(), play["track"].strip().lower()))
+            if reason is None or rid is None:
+                continue
+            ended = _parse_ts(play["ts"]).replace(tzinfo=None)  # Spotify ts = konec přehrání
+            session.add(
+                PlayEvent(
+                    user_id=user_id,
+                    recording_id=rid,
+                    started_at=ended - timedelta(milliseconds=play["ms"]),
+                    ended_at=ended,
+                    played_ms=play["ms"],
+                    end_reason=reason,
+                    origin=source,
+                )
+            )
+            written += 1
+            if written % 5000 == 0:
+                session.commit()
+        session.commit()
+    return written
 
 
 def _playlist_owner() -> str:
@@ -202,11 +259,18 @@ def build_year_playlists(user_id: str) -> dict[int, int]:
 
 
 def main() -> None:
-    path = sys.argv[1]
-    user_id = sys.argv[2] if len(sys.argv) > 2 else g.HOME_USER_ID
+    """`<zip> [user_id] [--events-only]` -- `--events-only` doplní jen
+    PlayEventy (jak přehrání skončila) a poslechy nechá, jak jsou."""
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    path = args[0]
+    user_id = args[1] if len(args) > 1 else g.HOME_USER_ID
     with open(path, "rb") as fh:
         plays = read_zip(fh.read())
     started = datetime.now(timezone.utc)
+    if "--events-only" in sys.argv:
+        result: dict[str, Any] = {"playEvents": import_play_events(user_id, plays)}
+        print(json.dumps(result), "za", round((datetime.now(timezone.utc) - started).total_seconds()), "s")
+        return
     g.set_home_user(user_id)  # roční playlisty patří tomu profilu
     result = import_history(user_id, plays)
     print(json.dumps(result, default=str), "za", round((datetime.now(timezone.utc) - started).total_seconds()), "s")

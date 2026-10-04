@@ -212,6 +212,34 @@ class Listen(SQLModel, table=True):
     lastfm_attempts: int | None = None
 
 
+class PlayEvent(SQLModel, table=True):
+    """Každé přehrání skladby i s tím, jak skončilo -- dohráno, přeskočeno,
+    přepnuto v půlce, zastaveno. `Listen` je jen to, co se počítá jako poslech
+    (polovina / 4 min); tady je i to ostatní, aby šlo měřit, jestli mixy
+    sedí (podíl brzkých přeskočení, dokončení) a učit doporučování.
+
+    Zdroj zatím server ze stavu Opentify Connect (app/connect_listens.py), takže
+    funguje i se staršími buildy appky."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    recording_id: str = Field(index=True)
+    started_at: datetime = Field(index=True)
+    ended_at: datetime
+    played_ms: int = 0
+    duration_ms: int | None = None
+    # completed | skipped (do 30 s a čtvrtiny) | next (přepnuto později)
+    # | stopped (zastaveno / zařízení zmizelo)
+    end_reason: str = Field(index=True)
+    # Název fronty z appky ("Denní mix 1", album, interpret...) a když
+    # odpovídá playlistu profilu, i jeho id a jestli je generovaný (mix).
+    source_label: str | None = None
+    playlist_id: str | None = Field(default=None, index=True)
+    algorithmic: bool = False
+    device_key: str | None = None
+    origin: str = "connect"
+
+
 class RecordingDislike(SQLModel, table=True):
     """Zlomené srdce -- skladba, kterou uživatel nechce slyšet (viz
     app/library/dislikes.py)."""
