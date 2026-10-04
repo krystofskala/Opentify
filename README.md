@@ -6,8 +6,8 @@ and Deezer, and gives you a Spotify-like experience on your own hardware.
 
 > Osobní hudební server pro vlastní hardware. Rozhraní appky je česky.
 
-**Status:** a personal hobby project. The app's interface is in Czech, there is no
-support, and things change without notice. Use it as a reference or a starting point.
+**Status:** a personal hobby project, not released for use by others yet (see License).
+The app's interface is in Czech, there is no support, and things change without notice.
 
 ## Important: legal notice
 
@@ -89,8 +89,8 @@ For local development: `flutter run --dart-define=API_BASE_URL=http://localhost:
 
 ## License
 
-[GNU AGPL-3.0](LICENSE). If you run a modified version for others, you must share
-your changes under the same license.
+**No license is granted yet** — all rights reserved. The code is visible, but please
+do not use, copy or redistribute it for now.
 
 Third-party services (MusicBrainz, Deezer, Last.fm, ListenBrainz, Wikipedia, …)
 have their own terms; follow them, including rate limits and an identifying User-Agent.

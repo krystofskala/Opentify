@@ -44,6 +44,16 @@ jobs:
             echo "::warning::Bez ANDROID_KEYSTORE_BASE64 -- podpis ladicím klíčem, update přes starou verzi nepůjde."
           fi
 
+      # Adresa serveru je v nastavení repozitáře (Settings › Secrets and variables ›
+
+      # Actions › Variables › OPENTIFY_HOST), ne v kódu.
+
+      - name: Adresa serveru (OPENTIFY_HOST)
+
+        run: test -n "${{ vars.OPENTIFY_HOST }}" || { echo '::error::Nastav proměnnou repozitáře OPENTIFY_HOST (adresa serveru)'; exit 1; }
+
+        shell: bash
+
       - name: Build APK
         working-directory: client
         env:
@@ -52,9 +62,9 @@ jobs:
           flutter build apk --release
           --build-name=0.1.${{ github.run_number }}
           --build-number=${{ github.run_number }}
-          --dart-define=API_BASE_URL=https://${{ vars.OPENTIFY_HOST || (github.repository == 'krystofskala/Opentify' && 'opentify.tail343940.ts.net' || '') }}/api/v1
-          --dart-define=WS_BASE_URL=wss://${{ vars.OPENTIFY_HOST || (github.repository == 'krystofskala/Opentify' && 'opentify.tail343940.ts.net' || '') }}/ws
-          --dart-define=SHARED_ORIGIN=https://${{ vars.OPENTIFY_HOST || (github.repository == 'krystofskala/Opentify' && 'opentify.tail343940.ts.net' || '') }}
+          --dart-define=API_BASE_URL=https://${{ vars.OPENTIFY_HOST }}/api/v1
+          --dart-define=WS_BASE_URL=wss://${{ vars.OPENTIFY_HOST }}/ws
+          --dart-define=SHARED_ORIGIN=https://${{ vars.OPENTIFY_HOST }}
           --dart-define=UPDATE_REPO=${{ github.repository }}
 
       - name: Přejmenovat

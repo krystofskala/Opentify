@@ -27,13 +27,23 @@ jobs:
         working-directory: client
         run: flutter pub get
 
+      # Adresa serveru je v nastavení repozitáře (Settings › Secrets and variables ›
+
+      # Actions › Variables › OPENTIFY_HOST), ne v kódu.
+
+      - name: Adresa serveru (OPENTIFY_HOST)
+
+        run: test -n "${{ vars.OPENTIFY_HOST }}" || { echo '::error::Nastav proměnnou repozitáře OPENTIFY_HOST (adresa serveru)'; exit 1; }
+
+        shell: bash
+
       - name: Build
         working-directory: client
         run: >
           flutter build windows --release
-          --dart-define=API_BASE_URL=https://${{ vars.OPENTIFY_HOST || (github.repository == 'krystofskala/Opentify' && 'desktop-2lissjt.tail343940.ts.net' || '') }}/api/v1
-          --dart-define=WS_BASE_URL=wss://${{ vars.OPENTIFY_HOST || (github.repository == 'krystofskala/Opentify' && 'desktop-2lissjt.tail343940.ts.net' || '') }}/ws
-          --dart-define=SHARED_ORIGIN=https://${{ vars.OPENTIFY_HOST || (github.repository == 'krystofskala/Opentify' && 'desktop-2lissjt.tail343940.ts.net' || '') }}
+          --dart-define=API_BASE_URL=https://${{ vars.OPENTIFY_HOST }}/api/v1
+          --dart-define=WS_BASE_URL=wss://${{ vars.OPENTIFY_HOST }}/ws
+          --dart-define=SHARED_ORIGIN=https://${{ vars.OPENTIFY_HOST }}
           --dart-define=UPDATE_REPO=${{ github.repository }}
 
       - name: Zabalit
