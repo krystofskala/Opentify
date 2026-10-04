@@ -95,8 +95,33 @@ def find_referenced_twin(
         and compatible(duration_ms, track_number, r, effective_duration(session, r))
         and has_refs(session, r.id)
     ]
+    if not found:
+        found = [r for r in candidates if r.id not in exclude and _loose_file_twin(session, r, title, duration_ms)]
     found.sort(key=lambda r: (not has_file(session, r.id), is_other_edition(r)))
     return found[0] if found else None
+
+
+def _loose_file_twin(session: Session, rec: Recording, title: str, duration_ms: int | None) -> bool:
+    """Stažený soubor, jehož název z tagů se liší jen překlepem nebo
+    doplňkem ("Tanguska" / "Tunguska", "Come Together (Remastered 2009)",
+    "Wolfcreek Pass (Great)"). Jen se souborem, jen se známou délkou obou
+    (±3 s) a jen se stejnými slovy verze -- "(Acoustic)" / "(Live at...)"
+    je jiná nahrávka a zůstává zvlášť. Jinak by "stáhnout album" stahovalo
+    tutéž skladbu znovu a soubor visel mimo tracklist."""
+    from difflib import SequenceMatcher
+
+    from app.download_match import core_title, fold
+    from app.tools.fix_merged_versions import _versions
+
+    if not duration_ms or not has_file(session, rec.id):
+        return False
+    other = effective_duration(session, rec)
+    if not other or abs(other - duration_ms) > TOLERANCE_MS:
+        return False
+    if _versions(rec.title or "") != _versions(title or ""):
+        return False
+    a, b = fold(core_title(rec.title or "")).strip(), fold(core_title(title or "")).strip()
+    return bool(a and b) and SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
 def adopt_mbid(session: Session, twin: Recording, mbid: str) -> None:
