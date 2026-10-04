@@ -415,6 +415,7 @@ class _AllResults extends ConsumerWidget {
             ),
           ),
         _GenreChips(query: query),
+        _CollabSection(query: query),
         _Section(
           title: 'Skladby',
           value: tracks,
@@ -703,6 +704,53 @@ class _GenreChips extends ConsumerWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Spolupráce dvou interpretů ("Mark O'Connor Tony Rice", i s překlepy):
+/// skladby a alba, kde jsou mezi účinkujícími oba (backend
+/// app/catalog/collabs.py). Prázdná, když dotaz nejsou dva interpreti.
+final collabSearchProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, query) async {
+  if (query.trim().split(RegExp(r'\s+')).length < 2) return const {};
+  return ref.watch(apiClientProvider).getJson('/catalog/collabs', query: {'q': query});
+});
+
+class _CollabSection extends ConsumerWidget {
+  const _CollabSection({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final data = ref.watch(collabSearchProvider(query)).valueOrNull ?? const {};
+    final artists = (data['artists'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
+    final recordings = [
+      for (final r in (data['recordings'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        RecordingModel.fromJson(r),
+    ];
+    final albums = [
+      for (final r in (data['releases'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        SearchResultItem.fromJson({...r, 'entityType': 'release'}),
+    ];
+    if (artists.length < 2 || (recordings.isEmpty && albums.isEmpty)) return const SizedBox.shrink();
+    final names = artists.map((a) => a['name'] as String).join(' & ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader('Spolupráce · $names'),
+        if (albums.isNotEmpty)
+          _Rail(height: 190, width: 140, children: [for (final a in albums) _ReleaseCard(item: a)]),
+        if (recordings.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+            child: Column(
+              children: [
+                for (final r in recordings.take(6))
+                  TrackTile(recording: r, queueRecordings: recordings, sourceLabel: 'Spolupráce · $names'),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

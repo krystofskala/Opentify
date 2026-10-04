@@ -1203,6 +1203,37 @@ class CatalogService:
         await self._enrich_release_date(release)
         return self._to_release_out(release)
 
+    async def search_collabs(self, query: str) -> dict[str, Any]:
+        """Viz app/catalog/collabs.py -- výsledky převzaté do katalogu."""
+        from app.catalog import collabs
+
+        empty: dict[str, Any] = {"artists": [], "recordings": [], "releases": []}
+        try:
+            pair = await collabs.resolve_pair(self._dz, query)
+            if pair is None:
+                return empty
+            found = await collabs.find(self._dz, *pair)
+        except Exception:  # noqa: BLE001 -- doplněk hledání, nesmí ho shodit
+            logger.exception("hledání spoluprací selhalo: %s", query)
+            return empty
+        if not found["tracks"] and not found["albums"]:
+            return empty
+        artists = [ingest_artist(self._session, a) for a in pair]
+        recordings = [r for r in (ingest_track_with_context(self._session, t) for t in found["tracks"]) if r is not None]
+        releases = []
+        for al in found["albums"]:
+            owner = ingest_artist(self._session, al.get("artist") or {}) if al.get("artist") else None
+            if owner is not None:
+                rel = ingest_album(self._session, al, owner)
+                if rel is not None:
+                    releases.append(rel)
+        self._session.commit()
+        return {
+            "artists": [self._to_artist_out(a).model_dump(by_alias=True) for a in artists if a is not None],
+            "recordings": [self._to_recording_out(r).model_dump(by_alias=True) for r in recordings],
+            "releases": [self._to_release_out(r).model_dump(by_alias=True) for r in releases],
+        }
+
     async def get_release_credits(self, release_id: str) -> dict[str, Any] | None:
         """Obsazení alba (viz app/catalog/credits.py) z kanonické edice MB.
         Vlastní / importované album a album jen z Deezeru: prázdné."""

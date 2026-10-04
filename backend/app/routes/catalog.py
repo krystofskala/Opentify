@@ -33,6 +33,18 @@ def get_catalog_service(
     return CatalogService(session, mb_client, dz_client)
 
 
+@catalog_router.get("/collabs")
+async def search_collabs(
+    q: str = Query(..., min_length=3),
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    """Spolupráce dvou interpretů ("Mark O'Connor Tony Rice"): skladby a alba,
+    kde jsou mezi účinkujícími oba (viz app/catalog/collabs.py). Prázdné,
+    když dotaz nejsou dva interpreti."""
+    return await service.search_collabs(q)
+
+
 @catalog_router.get("/search")
 async def search_catalog(
     q: str = Query(..., min_length=1),
