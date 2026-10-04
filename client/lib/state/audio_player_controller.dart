@@ -1709,9 +1709,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _awaitingProvisioning = true; // zastavení níž nesmí schovat načítání
     // Zastavit, ne jen pauznout: s pauzou zůstal starý zdroj načtený a Play
     // (sluchátka, zamčená obrazovka) ho rozehrálo pod názvem nové skladby.
-    if (_player.playing || _player.processingState != ProcessingState.idle) {
-      if (!kIsWeb) unawaited(_player.stop());
-      if (kIsWeb && _player.playing) unawaited(_player.pause());
+    // Web ne: tam už starou skladbu nahradilo tiché "odemknutí" přehrávače
+    // (`_primeAudioElement`) a jeho pauza rozbila následné spuštění streamu
+    // (přehrávač pak visel v "Načítám…").
+    if (!kIsWeb && (_player.playing || _player.processingState != ProcessingState.idle)) {
+      unawaited(_player.stop());
     }
     provisioning.awaitedRecordingId = info.recordingId;
 
