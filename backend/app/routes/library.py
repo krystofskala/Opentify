@@ -148,6 +148,29 @@ def _in_library(user_id: str):
     return and_(_IN_LIBRARY, mine)
 
 
+def _added_at(user_id: str):
+    """Kdy skladba přibyla do knihovny profilu (řazení "Přidáno"): přidání
+    do knihovny, jinak dostupnost souboru -- a novější lajk (Oblíbené) ji
+    posune nahoru, dřív lajk řazení ignoroval. Vrací (výraz, poddotazy pro
+    outer join); poddotazy jsou po skladbě seskupené, ať join nezdvojí řádky."""
+    entry = (
+        select(LibraryEntry.recording_id.label("rid"), func.max(LibraryEntry.added_at).label("at"))  # type: ignore[attr-defined]
+        .where(LibraryEntry.user_id == user_id)
+        .group_by(LibraryEntry.recording_id)
+        .subquery()
+    )
+    liked = (
+        select(PlaylistItem.recording_id.label("rid"), func.max(PlaylistItem.added_at).label("at"))  # type: ignore[attr-defined]
+        .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+        .where(Playlist.owner_user_id == user_id, Playlist.source == LIKED_SONGS_SOURCE)
+        .group_by(PlaylistItem.recording_id)
+        .subquery()
+    )
+    base = func.coalesce(entry.c.at, MediaAsset.available_at, MediaAsset.updated_at)
+    # SQLite max(a, b) s NULL vrací NULL -> coalesce.
+    return func.max(base, func.coalesce(liked.c.at, base)), entry, liked
+
+
 def _progress_dict(p: ScanProgress) -> dict:
     return {
         "status": p.status,
@@ -203,12 +226,15 @@ def local_tracks(
     disku a šly rovnou přehrát -- odsud "proč to nemám v knihovně"."""
     total = session.exec(select(func.count()).select_from(MediaAsset).where(_in_library(current[0]))).one()
     # Jeden dotaz (asset + nahrávka + interpret) místo tří na každý řádek.
+    added_at, entry, liked = _added_at(current[0])
     rows = session.exec(
         select(Recording, Artist.name)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .outerjoin(Artist, Artist.id == Recording.artist_id)
+        .outerjoin(entry, entry.c.rid == Recording.id)
+        .outerjoin(liked, liked.c.rid == Recording.id)
         .where(_in_library(current[0]))
-        .order_by(func.coalesce(MediaAsset.available_at, MediaAsset.updated_at).desc())
+        .order_by(added_at.desc())
         .offset(offset)
         .limit(limit)
     ).all()
@@ -242,6 +268,7 @@ def local_albums(
     """Alba seskupená z lokální knihovny -- jeden SQL dotaz místo N+1 dotazů
     z klienta (viz `LocalLibraryScreen` záložka "Alba"). Vrací jen alba, ke
     kterým je zaevidovaná aspoň jedna lokální nahrávka."""
+    added_at, entry, liked = _added_at(current[0])
     rows = session.exec(
         select(
             Release.id,
@@ -250,16 +277,15 @@ def local_albums(
             Release.artist_id,
             Artist.name,
             func.count(func.distinct(Recording.id)),
-            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.available_at, MediaAsset.updated_at)),
+            # Agregační max(...) nad skalárním max(a, b) z `_added_at`.
+            func.max(added_at),
             Release.external_refs,
         )
         .join(Recording, Recording.release_id == Release.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .join(Artist, Artist.id == Release.artist_id)
-        .outerjoin(
-            LibraryEntry,
-            (LibraryEntry.recording_id == Recording.id) & (LibraryEntry.user_id == current[0]),  # type: ignore[arg-type]
-        )
+        .outerjoin(entry, entry.c.rid == Recording.id)
+        .outerjoin(liked, liked.c.rid == Recording.id)
         .where(_in_library(current[0]))
         .group_by(Release.id)
         .order_by(Artist.name, Release.title)
@@ -316,20 +342,19 @@ def local_artists(
 ):
     """Interpreti seskupení z lokální knihovny -- viz `local_albums`, stejný
     princip (jeden GROUP BY dotaz, ne N+1 z klienta)."""
+    added_at, entry, liked = _added_at(current[0])
     rows = session.exec(
         select(
             Artist.id,
             Artist.name,
             Artist.images,
             func.count(func.distinct(Recording.id)),
-            func.max(func.coalesce(LibraryEntry.added_at, MediaAsset.available_at, MediaAsset.updated_at)),
+            func.max(added_at),
         )
         .join(Recording, Recording.artist_id == Artist.id)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
-        .outerjoin(
-            LibraryEntry,
-            (LibraryEntry.recording_id == Recording.id) & (LibraryEntry.user_id == current[0]),  # type: ignore[arg-type]
-        )
+        .outerjoin(entry, entry.c.rid == Recording.id)
+        .outerjoin(liked, liked.c.rid == Recording.id)
         .where(_in_library(current[0]))
         .group_by(Artist.id)
         .order_by(Artist.name)
@@ -577,23 +602,38 @@ def _remove_from_library(session: Session, recording_id: str, dry_run: bool = Fa
 def _remove_for(session: Session, user_id: str, recording_id: str, dry_run: bool = False) -> dict:
     """Odebrat z knihovny profilu. Soubor se smaže (uvolní místo) jen
     u admina a jen když ho v knihovně nemá nikdo jiný; jinak zůstává
-    sdílený pro rychlé přehrání."""
-    if not dry_run:
-        remove_entry(session, user_id, recording_id)
+    sdílený pro rychlé přehrání. Oblíbená skladba se zároveň odlajkuje
+    (jako Spotify) -- lajk ji v knihovně držel a odebrání dřív nic neudělalo."""
+    # Soubor nemazat, když ho kdokoli (i sám admin) má v knihovně, v
+    # Oblíbených nebo v jakémkoli svém playlistu -- zjištěno PŘED odlajkováním.
     others = session.exec(
-        select(LibraryEntry).where(LibraryEntry.recording_id == recording_id, LibraryEntry.user_id != user_id)
+        select(LibraryEntry.id).where(LibraryEntry.recording_id == recording_id, LibraryEntry.user_id != user_id)
     ).first()
     if others is None:
-        # Oblíbená skladba jiného profilu je taky v jeho knihovně -- soubor nemazat.
         others = session.exec(
-            select(PlaylistItem)
+            select(PlaylistItem.id)
             .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
-            .where(
-                PlaylistItem.recording_id == recording_id,
-                Playlist.source == "liked-songs",
-                Playlist.owner_user_id != user_id,
-            )
+            .where(PlaylistItem.recording_id == recording_id, Playlist.kind == PlaylistKind.USER)
         ).first()
+    liked = session.exec(
+        select(PlaylistItem)
+        .join(Playlist, Playlist.id == PlaylistItem.playlist_id)
+        .where(
+            PlaylistItem.recording_id == recording_id,
+            Playlist.owner_user_id == user_id,
+            Playlist.source == LIKED_SONGS_SOURCE,
+        )
+    ).all()
+    if not dry_run:
+        remove_entry(session, user_id, recording_id)
+        for item in liked:
+            playlist = session.get(Playlist, item.playlist_id)
+            if playlist is not None:
+                playlist.updated_at = utcnow()
+                session.add(playlist)
+            session.delete(item)
+        if liked:
+            session.commit()
     if user_id == ADMIN_ID and others is None:
         return _remove_from_library(session, recording_id, dry_run)
     return {"recordingId": recording_id, "result": "hidden", "freedBytes": 0}
@@ -729,9 +769,9 @@ def remove_track(
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
 ):
-    """"Odebrat z knihovny" -- neodebírá z Oblíbených ani z playlistů (to
-    jsou samostatné akce), jen z "Moje knihovna". Jiný profil než admin
-    maže jen svou položku, sdílený soubor zůstává."""
+    """"Odebrat z knihovny" -- z "Moje knihovna" i z Oblíbených (lajk =
+    v knihovně, jako Spotify); z ostatních playlistů ne. Jiný profil než
+    admin maže jen svou položku, sdílený soubor zůstává."""
     return _remove_for(session, current[0], recording_id)
 
 

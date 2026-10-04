@@ -46,8 +46,8 @@ logger = logging.getLogger("vault.providers")
 
 ProgressCallback = Callable[[int], Awaitable[None]]
 
-# Zavolá se (nejvýš jednou za `fetch()`) hned, jak provider najde/vytvoří
-# soubor na disku -- i uprostřed stahování, ne až na konci. Umožňuje
+# Zavolá se hned, jak provider najde/vytvoří soubor na disku -- i uprostřed
+# stahování, ne až na konci (a znovu s cílovou cestou po přesunu). Umožňuje
 # `GET /tracks/{id}/stream` začít servírovat ještě rostoucí soubor (viz
 # `routes/provisioning.py:_tail_growing_file`), místo čekání na úplné
 # dokončení. Jen `SlskdProvider` ho reálně volá -- stahuje rovnou ve
@@ -339,6 +339,33 @@ _COMPILATION_WORDS = {
     "greatest", "hits", "best", "collection", "anthology", "essential", "essentials", "various", "va",
     "compilation", "now", "platinum", "gold", "ultimate", "classics", "legends", "hity", "nejvetsi",
 }
+
+
+def place_file(src: Path, dest: Path) -> Path:
+    """Přesune hotový soubor do `dest`, ale NIKDY nepřepíše existující soubor
+    -- stejné jméno mohl mít živý soubor jiného jobu (živě: čekající upgrade
+    přepsal čerstvě stažený soubor). Obsazené jméno -> `<stem>_<n>`. Přes
+    dočasné jméno + `os.replace`, ať nikdo nečte napůl zkopírovaný soubor
+    (`shutil.move` mezi Docker volumes = kopie). Vrací skutečnou cestu."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    while True:
+        final = dest if n == 0 else dest.with_name(f"{dest.stem}_{n}{dest.suffix}")
+        try:
+            # Rezervace jména (O_EXCL) -- souběžný přesun ho nedostane.
+            os.close(os.open(final, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            n += 1
+    tmp = final.with_name(f".{final.name}.part")
+    try:
+        shutil.move(str(src), str(tmp))
+        os.replace(tmp, final)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        final.unlink(missing_ok=True)  # jen naše prázdná rezervace
+        raise
+    return final
 
 
 def _size_of(path: Path) -> int:
@@ -803,6 +830,7 @@ class SlskdProvider:
         basename = filename.rsplit("\\", 1)[-1]
         remote_dir = filename.rsplit("\\", 2)[-2] if filename.count("\\") >= 1 else ""
         source_path: Path | None = None
+        announced = False
         since = time.time() - 5
 
         def locate() -> Path | None:
@@ -855,13 +883,16 @@ class SlskdProvider:
                         if transferred > last_bytes:
                             last_bytes = transferred
                             last_change = now
-                        if source_path is None and transferred > 0:
+                        state = str(transfer.get("state", "")).lower()
+                        # Už dokončený přenos neohlašovat -- soubor se hned
+                        # přesune a stream by ukazoval na zmizelou cestu (409).
+                        if source_path is None and transferred > 0 and "completed" not in state:
                             found = await asyncio.to_thread(locate)
                             if found is not None:
                                 source_path = found
+                                announced = True
                                 await on_file_located(found)
 
-                        state = str(transfer.get("state", "")).lower()
                         if "completed" in state:
                             if "succeeded" in state:
                                 break
@@ -900,11 +931,13 @@ class SlskdProvider:
         if expected_size and _size_of(source_path) != expected_size:
             raise _PeerFailed(f"'{basename}' má {_size_of(source_path)} B místo {expected_size} B (nedostažený)")
 
-        dest_path = dest_stem.with_suffix(source_path.suffix.lower())
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
         # `shutil.move` mezi Docker volumes = kopie + smazání; otevřený handle
         # progresivního streamu (`_tail_growing_file`) přežije díky POSIX inode.
-        await asyncio.to_thread(shutil.move, str(source_path), str(dest_path))
+        dest_path = await asyncio.to_thread(place_file, source_path, dest_stem.with_suffix(source_path.suffix.lower()))
+        if announced:
+            # Stream musí hned číst přesunutý soubor, ne zmizelou cestu ve
+            # slskd složce (do konce kontroly by jinak vracel 409).
+            await on_file_located(dest_path)
         await on_progress(100)
 
         return FetchResult(

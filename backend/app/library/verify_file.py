@@ -168,8 +168,8 @@ def best_ber(haystack: np.ndarray, needle: np.ndarray) -> float:
     return float(diff.min())
 
 
-async def _preview_url(target: Target) -> tuple[str | None, int | None]:
-    """URL 30s ukázky PŘESNĚ té verze + délka té verze na Deezeru."""
+async def _preview_url(target: Target) -> tuple[str | None, int | None, str | None]:
+    """URL 30s ukázky PŘESNĚ té verze + délka a album té verze na Deezeru."""
     from app.catalog.deezer import get_deezer_client
 
     dz = get_deezer_client()
@@ -184,16 +184,17 @@ async def _preview_url(target: Target) -> tuple[str | None, int | None]:
                 track = found
     except Exception as exc:  # noqa: BLE001 - doplněk
         logger.info("verify %s: Deezer nedostupný (%s)", target.recording_id, exc)
-        return None, None
+        return None, None, None
     if not track or not track.get("preview"):
-        return None, None
-    return track["preview"], (int(track["duration"]) * 1000 if track.get("duration") else None)
+        return None, None, None
+    album = (track.get("album") or {}).get("title") or None
+    return track["preview"], (int(track["duration"]) * 1000 if track.get("duration") else None), album
 
 
-async def _reference(target: Target) -> tuple[np.ndarray | None, int | None]:
-    url, dz_ms = await _preview_url(target)
+async def _reference(target: Target) -> tuple[np.ndarray | None, int | None, str | None]:
+    url, dz_ms, album = await _preview_url(target)
     if not url:
-        return None, None
+        return None, None, None
     import httpx
 
     try:
@@ -201,11 +202,11 @@ async def _reference(target: Target) -> tuple[np.ndarray | None, int | None]:
             resp = await client.get(url)
             resp.raise_for_status()
     except Exception:  # noqa: BLE001
-        return None, None
+        return None, None, None
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         tmp.write(resp.content)
     try:
-        return await fingerprint(tmp.name), dz_ms
+        return await fingerprint(tmp.name), dz_ms, album
     finally:
         os.unlink(tmp.name)
 
@@ -321,10 +322,39 @@ async def _fix_extension(path: Path, info: dict) -> Path:
         want = ".opus"
     if want and path.suffix.lower() != want and not (want == ".m4a" and path.suffix.lower() in (".mp4", ".m4a")):
         fixed = path.with_suffix(want)
+        n = 0
+        while fixed.exists():  # rename by přepsal cizí (třeba živý) soubor
+            n += 1
+            fixed = path.with_name(f"{path.stem}_{n}{want}")
         await asyncio.to_thread(path.rename, fixed)
         logger.warning("verify: %s je ve skutečnosti %s -> %s", path.name, info["container"], fixed.name)
         return fixed
     return path
+
+
+def _len_fits(want_s: float | None, actual: float, target: Target) -> bool:
+    if duration_ok(want_s, actual, strict=False):
+        return True
+    return bool(want_s) and target.allow_padding and want_s <= actual <= want_s + max(45.0, want_s * 0.25)
+
+
+def _cut_fits(
+    target: Target, expected: float | None, ref_ms: int | None, actual: float, trusted: bool, ref_album: str | None
+) -> bool:
+    """Sedí délka souboru ke shodnému otisku? Důvěryhodná ukázka -> délka
+    ukázky. Jinak délka z katalogu, nebo délka Deezeru, je-li ukázka ze
+    stejného alba (katalog má špatnou délku, Deezer správnou -- živě)."""
+    from app.download_match import core_tokens
+
+    ref_s = ref_ms / 1000 if ref_ms else None
+    if trusted:
+        return _len_fits(ref_s, actual, target)
+    if expected and _len_fits(expected, actual, target):
+        return True
+    same_album = bool(target.album and ref_album and core_tokens(ref_album) == core_tokens(target.album))
+    if ref_s and (same_album or not expected):
+        return _len_fits(ref_s, actual, target)
+    return not expected and not ref_s
 
 
 async def verify(path: Path, target: Target, *, full_decode: bool = False, fix_ext: bool = True) -> Verdict:
@@ -342,7 +372,7 @@ async def verify(path: Path, target: Target, *, full_decode: bool = False, fix_e
     expected = target.expected_ms / 1000 if target.expected_ms else None
     details: dict = {**info}
 
-    ref, ref_ms = await _reference(target)
+    ref, ref_ms, ref_album = await _reference(target)
     file_fp = await fingerprint(str(path), seconds=900) if (ref is not None or target.rejected_fps) else None
     # Otisk dřív zamítnutého souboru platí jen tehdy, když ukázka z Deezeru
     # shodu nepotvrdí -- zkrácený edit ("A Forest" z Greatest Hits) sdílí zvuk
@@ -365,6 +395,11 @@ async def verify(path: Path, target: Target, *, full_decode: bool = False, fix_e
                 if expected and actual > expected * 1.6 + 30:
                     # Ukázka je uvnitř, ale soubor je mnohem delší (celé album, mix).
                     return Verdict(False, f"obsahuje víc než skladbu ({actual:.0f} s místo {expected:.0f} s)", path=path, details=details)
+                # Stejný zvuk ještě neznamená stejný střih (radio edit vs.
+                # albová verze sdílí ukázku) -- musí sedět i délka.
+                if not _cut_fits(target, expected, ref_ms, actual, trusted, ref_album):
+                    want = expected or (ref_ms / 1000 if ref_ms else 0)
+                    return Verdict(False, f"otisk sedí, ale jiný střih ({actual:.0f} s místo {want:.0f} s)", path=path, details=details)
                 return Verdict(True, "otisk sedí", "high", path=path, details=details)
             # Pásmo těsně nad hranicí (0.33-0.38) může být jen jiný master --
             # zamítnout jen když nesedí ani délka.

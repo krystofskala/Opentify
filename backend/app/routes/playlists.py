@@ -195,11 +195,30 @@ def _drop_pins(session: Session, playlist_id: str, user_ids: list[str] | None = 
         session.delete(row)
 
 
+LIKED_SONGS = "liked-songs"
+
+
+def _require_user_kind(playlist: Playlist) -> None:
+    """Generované playlisty (mixy, Denní mix, rádia, žebříčky) přegeneruje
+    server -- ruční úpravy by se ztratily a klient je stejně ukazuje jen
+    pro čtení (`isReadOnly`). Do knihovny se jen připínají (`/pin`)."""
+    if playlist.kind != PlaylistKind.USER:
+        raise HTTPException(status_code=403, detail="Tenhle playlist se generuje automaticky, upravit ho nejde.")
+
+
+def _require_not_liked(playlist: Playlist) -> None:
+    """Oblíbené (`source == liked-songs`) jsou pevný playlist profilu -- lajky
+    jdou přes `/library/liked-songs`; smazání by vzalo všechny lajky."""
+    if playlist.source == LIKED_SONGS:
+        raise HTTPException(status_code=403, detail="Oblíbené skladby nejde přejmenovat, smazat ani sdílet.")
+
+
 def _editable_playlist_or_404(session: Session, playlist_id: str, user_id: str) -> Playlist:
     """Skladby mění vlastník i členové společného playlistu."""
     playlist = session.get(Playlist, playlist_id)
     if playlist is None or (playlist.owner_user_id != user_id and user_id not in _member_ids(session, playlist_id)):
         raise HTTPException(status_code=404, detail="playlist nenalezen")
+    _require_user_kind(playlist)
     return playlist
 
 
@@ -227,7 +246,7 @@ def list_playlists(
     ).all()
     results = []
     for p in playlists:
-        if p.source == "liked-songs":
+        if p.source == LIKED_SONGS:
             continue
         items = _playlist_items(session, p.id)
         covers, artist_names = _preview(session, p, items)
@@ -315,6 +334,9 @@ def update_playlist(
     """Název a krátký popis vlastního playlistu."""
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    _require_user_kind(playlist)
+    if body.title is not None and body.title.strip() != playlist.title:
+        _require_not_liked(playlist)
     if body.title is not None:
         title = body.title.strip()
         if not title:
@@ -344,6 +366,7 @@ async def upload_playlist_cover(
 
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    _require_user_kind(playlist)
     raw = await read_limited(file, 15 * 1024 * 1024, "Obrázek")
     if not await asyncio.to_thread(_save_resized, raw, artwork_path(playlist.id)):
         raise HTTPException(status_code=400, detail="Tohle není obrázek (nebo je moc malý).")
@@ -366,6 +389,7 @@ def remove_playlist_cover(
     """Zpátky na mozaiku z obalů skladeb."""
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    _require_user_kind(playlist)
     playlist.cover_urls = []
     session.add(playlist)
     session.commit()
@@ -466,6 +490,8 @@ def delete_playlist(
 ):
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    _require_user_kind(playlist)
+    _require_not_liked(playlist)
     from app.models import PinnedPlaylist, PlaylistMember
 
     for item in _playlist_items(session, playlist.id):
@@ -531,6 +557,9 @@ def reorder_items(
     for position, recording_id in enumerate(body.recording_ids):
         by_recording[recording_id].position = position
         session.add(by_recording[recording_id])
+    # Řazení "Upraveno" v Knihovně a obnova otevřeného detailu jinde.
+    playlist.updated_at = utcnow()
+    session.add(playlist)
     session.commit()
     return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
 
@@ -551,6 +580,8 @@ def remove_item(
     ).first()
     if existing is not None:
         session.delete(existing)
+        playlist.updated_at = utcnow()
+        session.add(playlist)
         session.commit()
     return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
 
@@ -570,6 +601,8 @@ def invite_to_playlist(
 
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
+    _require_user_kind(playlist)
+    _require_not_liked(playlist)
     code = secrets.token_urlsafe(8)
     from app.models import HomeSnapshot
 

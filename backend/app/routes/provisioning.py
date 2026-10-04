@@ -19,7 +19,15 @@ from app.auth import get_current_user
 from app.db import engine, get_session
 from app.loudness import WAVEFORM_BUCKETS, decode_waveform, gain_for_client
 from app.models import MediaAsset, MediaAssetStatus, ProvisioningJob
-from app.provisioning_service import enqueue, escalate, get_or_create_job, stream_url_for
+from app.provisioning_service import (
+    MEDIA_ROOT,
+    enqueue,
+    escalate,
+    get_or_create_job,
+    heal_missing_file,
+    mark_streaming,
+    stream_url_for,
+)
 
 tracks_router = APIRouter(prefix="/tracks", tags=["provisioning"])
 jobs_router = APIRouter(prefix="/jobs", tags=["provisioning"])
@@ -182,11 +190,27 @@ async def stream_track(recording_id: str, session: Session = Depends(get_session
         )
     path = Path(asset.storage_path)
     media_type = _MEDIA_TYPES.get(path.suffix.lower())
+    # Každý (range) request prodlouží -- přetagování / upgrade souboru počká.
+    await mark_streaming(recording_id)
 
     if asset.status == MediaAssetStatus.AVAILABLE:
         if not path.exists():
-            raise HTTPException(status_code=409, detail="soubor chybí na disku i přes AVAILABLE stav")
+            # Soubor zmizel -> MISSING, další /provision ho stáhne znovu
+            # (dřív trvalé 409 až do ručního zásahu).
+            healed = heal_missing_file(session, asset)
+            raise HTTPException(
+                status_code=409,
+                detail="soubor chybí na disku, zavolej znovu POST /provision" if healed
+                else "soubor chybí na disku i přes AVAILABLE stav",
+            )
         return FileResponse(path, media_type=media_type)
+
+    if asset.status == MediaAssetStatus.DOWNLOADING and path.is_relative_to(MEDIA_ROOT):
+        # Hotový soubor už přesunutý do MEDIA_ROOT, jen ještě běží kontrola
+        # -- celý soubor s Content-Length a Range (seek), ne tail.
+        if await asyncio.to_thread(path.is_file):
+            return FileResponse(path, media_type=media_type)
+        raise HTTPException(status_code=409, detail="soubor se právě ověřuje, zkus to za chvíli")
 
     if asset.status == MediaAssetStatus.DOWNLOADING:
         # Progresivní stream ještě rostoucího souboru -- viz `OnFileLocated`

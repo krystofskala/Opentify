@@ -102,8 +102,43 @@ _VERSION_RE = re.compile(
 )
 
 
-# "1993-11-08: The Armory, ..." / "1991-09: Club X" / "1989 Live at Y"
-_CONCERT_TITLE_RE = re.compile(r"^(\d{4}(?:[-‐]\d{2}){0,2})\s*[:–—-]?\s*(.+)$")
+# "1993-11-08: The Armory, ..." / "1991-09: Club X" / "1989 Live at Y" /
+# neúplná data z MB "1994-0x-xx", "1993-06-2x" (bere se jen známá část).
+_CONCERT_TITLE_RE = re.compile(r"^(\d{4})(?:-([0-9x?]{1,2}))?(?:-([0-9x?]{1,2}))?(?![0-9a-z])(.*)$", re.IGNORECASE)
+# "2008-04-01, evening: ..." / "2008-04-01 (Matinee): ..." / "2000-12-14 PRE-FM: ..."
+# (nejvýš 3 slova) -- jen před dvojtečkou.
+_CONCERT_QUALIFIER_RE = re.compile(
+    r"^(?:\s*,\s*([^:()]+?)|\s*\(([^)]+)\)|\s+([^\s:,()]+(?:\s[^\s:,()]+){0,2}))\s*:(.*)$"
+)
+_DASHES_RE = re.compile(r"[‐-―−﹘﹣－]")
+
+
+def parse_concert_title(title: str | None, artist_name: str | None = None) -> tuple[str | None, str | None]:
+    """(datum, místo) z názvu bootlegu/živáku. MB píše data s Unicode
+    pomlčkami a "x" za neznámé číslice; ponechá se jen známá část
+    ("1995-08-xx" -> "1995-08"), upřesnění ("evening", "Matinee") jde za
+    místo do závorky. `(None, None)`, když název datem nezačíná."""
+    text = _DASHES_RE.sub("-", title or "").strip()
+    if artist_name and text.lower().startswith(artist_name.lower() + " "):
+        text = text[len(artist_name):].lstrip(" :-,")  # "Radiohead 1995-02-27: ..."
+    m = _CONCERT_TITLE_RE.match(text)
+    if not m:
+        return None, None
+    year, month, day, rest = m.groups()
+    date = year
+    if month and month.isdigit() and len(month) == 2 and 1 <= int(month) <= 12:
+        date += f"-{month}"
+        if day and day.isdigit() and len(day) == 2 and 1 <= int(day) <= 31:
+            date += f"-{day}"
+    qualifier = None
+    q = _CONCERT_QUALIFIER_RE.match(rest)
+    if q:
+        qualifier = (q.group(1) or q.group(2) or q.group(3) or "").strip() or None
+        rest = q.group(4)
+    venue = rest.strip(" \t:;,-–—") or None
+    if qualifier:
+        venue = f"{venue} ({qualifier})" if venue else qualifier
+    return date, venue
 
 
 def _official_first(results: list[dict], query: str) -> list[dict]:
@@ -817,10 +852,16 @@ class CatalogService:
             return None if not groups else groups
         # Search na rozdíl od browse vrací i skupiny, kde je interpret jen
         # jedním z více -- necháme jen ty, kde ho MB uvádí jako interpreta.
-        return [
-            g for g in groups
-            if any((c.get("artist") or {}).get("id") == artist_mbid for c in g.get("artist-credit") or [])
-        ]
+        # Stránkování searche se při změnách v MB překrývá -> bez duplicit.
+        seen: set[str] = set()
+        out = []
+        for g in groups:
+            if g.get("id") in seen:
+                continue
+            seen.add(g.get("id"))
+            if any((c.get("artist") or {}).get("id") == artist_mbid for c in g.get("artist-credit") or []):
+                out.append(g)
+        return out
 
     _RARITY_ORDER = {"demo": 0, "live": 1, "bootleg": 2}
 
@@ -831,17 +872,23 @@ class CatalogService:
         rarities = await self.get_rarities(artist_id, limit=1000)
         if rarities is None:
             return None
-        items: list[tuple[ReleaseOut, bool]] = [(r, False) for r in rarities if r.rarity in ("live", "bootleg")]
-        seen = {r.id for r, _ in items}
+        items: list[tuple[ReleaseOut, bool]] = []
+        seen: set[str] = set()
+        for r in rarities:
+            if r.rarity in ("live", "bootleg") and r.id not in seen:
+                seen.add(r.id)
+                items.append((r, False))
         for rel in self._session.exec(select(Release).where(Release.artist_id == artist_id)).all():
             secondary = [t.lower() for t in (rel.external_refs or {}).get("mbSecondary") or []]
             if "live" in secondary and rel.id not in seen:
+                seen.add(rel.id)
                 items.append((self._to_release_out(rel), True))
+        artist = self._get_artist_row(artist_id)
         out = []
         for release, official in items:
-            m = _CONCERT_TITLE_RE.match(release.title or "")
-            date = m.group(1).replace("‐", "-") if m else (str(release.release_date) if release.release_date else None)
-            venue = m.group(2).strip() if m else None
+            date, venue = parse_concert_title(release.title, artist.name if artist else None)
+            if date is None:
+                date = str(release.release_date) if release.release_date else None
             out.append({
                 **release.model_dump(by_alias=True),
                 "concertDate": date,
@@ -869,6 +916,7 @@ class CatalogService:
         groups = await self._search_release_groups(artist.mbid, query, 300) or []
 
         out: list[ReleaseOut] = []
+        seen: set[str] = set()  # dvě MB skupiny můžou vést na jeden náš řádek
         for rg in groups:
             statuses = {(r.get("status") or "").lower() for r in rg.get("releases") or []}
             if "official" in statuses:
@@ -880,7 +928,8 @@ class CatalogService:
             release = self._ingest_release_group_json(
                 {**rg, "artist-credit": [{"artist": {"id": artist.mbid, "name": artist.name, "sort-name": artist.sort_name}}]}
             )
-            if release is not None:
+            if release is not None and release.id not in seen:
+                seen.add(release.id)
                 if (release.external_refs or {}).get("rarity") != rarity:
                     # Worker podle toho chce u stahování živou / demo verzi
                     # (worker._version_hint), ne studiovou.

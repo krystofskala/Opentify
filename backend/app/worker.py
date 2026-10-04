@@ -29,9 +29,11 @@ import json
 import re
 import logging
 import os
+import secrets
 import socket
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from datetime import timedelta
 
@@ -51,6 +53,7 @@ from app.models import (
     Recording,
     Release,
 )
+from app.provisioning_service import UPGRADES_ZSET, is_streaming
 from app.providers import (
     CompositeProvider,
     FetchResult,
@@ -69,6 +72,9 @@ from app.redis_bus import (
     job_lock_key,
 )
 from app.utils import sha256_file, utcnow
+
+if TYPE_CHECKING:
+    from app.library.verify_file import Target
 
 logging.basicConfig(level=logging.INFO)
 try:
@@ -107,7 +113,12 @@ MAX_BACKGROUND_JOBS = int(os.environ.get("WORKER_MAX_BACKGROUND_JOBS", "2"))
 # přehrávání dělá range requesty na stejnou URL a prohození souboru uprostřed
 # skladby by mu podstrčilo bajty z jiného souboru.
 UPGRADE_DELAY_S = int(os.environ.get("PROVISIONING_UPGRADE_DELAY_S", "900"))
-UPGRADES_ZSET = "vault:provisioning:upgrades"
+# Hraje-li skladba, upgrade se odloží o tolik (viz provisioning_service.is_streaming).
+UPGRADE_POSTPONE_S = 300
+# Celkový strop na obstarání + kontrolu jednoho jobu -- zaseknuté vlákno
+# (yt-dlp, ffmpeg) jinak drželo slot navždy. Štědře: složka alba na
+# Soulseeku smí čekat ve frontě peeru až 20 min a kola kontroly jsou tři.
+JOB_TIMEOUT_S = int(os.environ.get("WORKER_JOB_TIMEOUT_S", "2400"))
 
 provider = build_provider()
 # Závod slskd vs. YouTube (a jejich samostatné řízení) jen pro výchozí
@@ -170,6 +181,20 @@ def _start_job(job_id: str) -> dict | None:
             return {"skip": True}
 
         asset = session.get(MediaAsset, job.recording_id)
+        if job.attempts >= job.max_attempts:
+            # Pokusy vyčerpané (job převzatý po pádu workeru / requeue) --
+            # dřív se počítadlo zvyšovalo donekonečna a job se nikdy neuzavřel.
+            job.status = ProvisioningJobStatus.FAILED
+            job.finished_at = utcnow()
+            job.error_message = job.error_message or "vyčerpány pokusy"
+            if asset is not None and asset.status != MediaAssetStatus.AVAILABLE:
+                asset.status = MediaAssetStatus.FAILED
+                asset.storage_path = None
+                asset.last_error = job.error_message
+                session.add(asset)
+            session.add(job)
+            session.commit()
+            return {"skip": True, "exhausted": True, "user_id": job.requested_by_user_id}
         recording = session.get(Recording, job.recording_id)
         artist = (
             session.get(Artist, recording.artist_id)
@@ -283,11 +308,24 @@ def _finish_success(
         asset.waveform_duration_ms = None
         asset.last_error = None
         asset.updated_at = utcnow()
+        _forget_tags(session, job.recording_id)
 
         session.add(job)
         session.add(asset)
         session.commit()
         return f"/api/v1/tracks/{job.recording_id}/stream"
+
+
+def _forget_tags(session: Session, recording_id: str) -> None:
+    """Nový soubor -> tagy z katalogu do něj ještě nikdo nezapsal; bez
+    tohohle ho `file_tags.sweep` přeskočí (otisk metadat se nezměnil)."""
+    recording = session.get(Recording, recording_id)
+    if recording is not None and (recording.external_refs or {}).get("tagsData"):
+        refs = dict(recording.external_refs)
+        refs.pop("tagsData", None)
+        refs.pop("tagsLyrics", None)
+        recording.external_refs = refs
+        session.add(recording)
 
 
 def _finish_failure(job_id: str, error_message: str, attempts: int, max_attempts: int) -> bool | None:
@@ -361,6 +399,7 @@ def _apply_upgrade(
         asset.waveform_duration_ms = None
         asset.updated_at = utcnow()
         session.add(asset)
+        _forget_tags(session, recording_id)
         recording = session.get(Recording, recording_id)
         if recording is not None and source_key:
             # Zdroj je teď slskd soubor -- "Špatná verze" musí odmítnout ten,
@@ -411,6 +450,8 @@ def _spawn_upgrade(recording_id: str, slskd_task: asyncio.Task, replaces: Path) 
         except Exception as exc:  # noqa: BLE001
             logger.info("upgrade %s: slskd nedodal lepší soubor (%s)", recording_id, exc)
             return
+        # Platnost (asset pořád ukazuje na `replaces`) se ověří až při
+        # prohození -- job teď ještě může YouTube soubor kontrolovat.
         item = json.dumps(
             {
                 "recording_id": recording_id,
@@ -428,27 +469,58 @@ def _spawn_upgrade(recording_id: str, slskd_task: asyncio.Task, replaces: Path) 
     _keep(asyncio.create_task(run()))
 
 
+def _asset_path(recording_id: str) -> str | None:
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, recording_id)
+        return asset.storage_path if asset is not None else None
+
+
+async def _postpone_upgrade(r, data: dict) -> None:
+    await r.zadd(UPGRADES_ZSET, {json.dumps(data): time.time() + UPGRADE_POSTPONE_S})
+    logger.info("upgrade %s: skladba se právě přehrává, odloženo o %d s", data["recording_id"], UPGRADE_POSTPONE_S)
+
+
 async def _process_due_upgrades(r) -> None:
     items = await r.zrangebyscore(UPGRADES_ZSET, 0, time.time(), start=0, num=5)
     for item in items:
         if not await r.zrem(UPGRADES_ZSET, item):
             continue  # vzal si ho jiný worker
         data = json.loads(item)
+        rid = data["recording_id"]
+        current = await asyncio.to_thread(_asset_path, rid)
+        if current == data["new_path"]:
+            # Soubor upgradu je mezitím živý soubor skladby (živě: kolize
+            # jmen s novým jobem) -- nekontrolovat, nemazat, nic.
+            logger.warning("upgrade %s: %s je teď živý soubor skladby -- zahozeno", rid, data["new_path"])
+            continue
+        if current != data["replaces"]:
+            Path(data["new_path"]).unlink(missing_ok=True)
+            logger.info("upgrade %s: zahozeno (asset se mezitím změnil)", rid)
+            continue
+        if await is_streaming(r, rid):
+            await _postpone_upgrade(r, data)
+            continue
         # Lepší soubor ze Soulseeku musí projít stejnou kontrolou -- dřív se
         # správné YouTube audio dalo tiše prohodit za jinou skladbu.
-        target = await asyncio.to_thread(_target_from_db, data["recording_id"], data["source"])
+        target = None if data.get("verified") else await asyncio.to_thread(_target_from_db, rid, data["source"])
         if target is not None:
             from app.library.verify_file import verify
 
             verdict = await verify(Path(data["new_path"]), target, full_decode=True)
             if not verdict.ok:
-                logger.warning("upgrade %s: soubor neprošel kontrolou (%s) -- ponechán původní", data["recording_id"], verdict.reason)
-                (verdict.path or Path(data["new_path"])).unlink(missing_ok=True)
-                await asyncio.to_thread(_reject_source, data["recording_id"], data.get("source_key"), verdict.reason)
+                logger.warning("upgrade %s: soubor neprošel kontrolou (%s) -- ponechán původní", rid, verdict.reason)
+                bad = verdict.path or Path(data["new_path"])
+                if await asyncio.to_thread(_asset_path, rid) != str(bad):
+                    bad.unlink(missing_ok=True)
+                await asyncio.to_thread(_reject_source, rid, data.get("source_key"), verdict.reason)
                 continue
             if verdict.path and str(verdict.path) != data["new_path"]:
                 data["new_path"] = str(verdict.path)
                 data["format"] = verdict.path.suffix.lstrip(".")
+            data["verified"] = True  # odložený upgrade se znovu nedekóduje
+        if await is_streaming(r, rid):  # kontrola trvá -- mezitím mohl začít hrát
+            await _postpone_upgrade(r, data)
+            continue
         applied = await asyncio.to_thread(
             _apply_upgrade,
             data["recording_id"],
@@ -468,6 +540,17 @@ async def _no_file_located(_path: Path) -> None:
     return None
 
 
+def _fresh_stem(recording_id: str, tag: str) -> Path:
+    """Vlastní jméno pro každý pokus (`<id>_yt3f9a1c`) -- pozdní úklid
+    prohraného / zamítnutého pokusu tak nesmaže soubor jiného pokusu a
+    yt-dlp nenaváže na starý soubor stejného jména ("already downloaded")."""
+    while True:
+        stem = MEDIA_ROOT / f"{recording_id}_{tag}{secrets.token_hex(4)}"
+        # Jen pár přípon (glob přes celou /data/media by blokoval smyčku).
+        if not any(stem.with_suffix(ext).exists() for ext in (".m4a", ".mp3", ".flac", ".opus", ".ogg", ".webm", ".wav")):
+            return stem
+
+
 async def _no_progress(_pct: int) -> None:
     return None
 
@@ -485,17 +568,18 @@ async def _acquire(
     s kvalitním profilem a YouTube jen jako fallback -- ale když mezitím
     přijde eskalace (uživatel zmáčkl Přehrát na prefetchované skladbě),
     YouTube se přidá hned."""
+    # slskd: `<id>.<ext>`, obsazené jméno řeší `place_file` (nikdy nepřepíše).
     dest_stem = MEDIA_ROOT / track.recording_id
     if track.soundcloud_url and not track.preferred_source:
         # Přesná skladba ze SoundCloudu (odkaz / nevydaná věc) -- rovnou ona.
         candidate = await _soundcloud.resolve(track)
-        return await _soundcloud.fetch(track, candidate, dest_stem, on_progress, on_file_located)
+        return await _soundcloud.fetch(track, candidate, _fresh_stem(track.recording_id, "sc"), on_progress, on_file_located)
     if track.youtube_id and _youtube is not None and not track.preferred_source:
         # Přesné YouTube video (odkaz / album jen na YouTube) -- rovnou ono.
         # Když je album ale nalezené jako složka na Soulseeku (preferredSource),
         # má přednost Soulseek (lepší kvalita), video zůstává jako záloha.
         candidate = await _youtube.resolve(track)
-        return await _youtube.fetch(track, candidate, dest_stem, on_progress, on_file_located)
+        return await _youtube.fetch(track, candidate, _fresh_stem(track.recording_id, "yt"), on_progress, on_file_located)
     if _slskd is None or _youtube is None:
         candidate = await provider.resolve(track, interactive=interactive)
         if candidate is None:
@@ -533,15 +617,15 @@ async def _acquire(
         candidate = await _slskd.resolve(track, interactive=False)
         if candidate is None:
             raise RuntimeError("slskd: žádný vhodný soubor")
-        return await _slskd.fetch(track, candidate, dest_stem, _no_progress, _no_file_located)
+        # Vlastní jméno -- dřív stejné `<id>` jako nový job a upgrade pak
+        # přepsal / smazal živý soubor (živě).
+        return await _slskd.fetch(track, candidate, _fresh_stem(track.recording_id, "up"), _no_progress, _no_file_located)
 
     async def run_youtube() -> FetchResult:
         candidate = await _youtube.resolve(track)
         if candidate is None:
             raise RuntimeError("youtube: prázdný dotaz")
-        return await _youtube.fetch(
-            track, candidate, MEDIA_ROOT / f"{track.recording_id}_yt", progress, _no_file_located
-        )
+        return await _youtube.fetch(track, candidate, _fresh_stem(track.recording_id, "yt"), progress, _no_file_located)
 
     started = time.monotonic()
     s_task = asyncio.create_task(run_slskd())
@@ -586,7 +670,9 @@ async def _acquire(
                         sc_candidate = await _soundcloud.resolve(track)
                         if sc_candidate is not None:
                             logger.info("job %s: slskd i YouTube nevyšly -> SoundCloud", job_id)
-                            return await _soundcloud.fetch(track, sc_candidate, dest_stem, progress, _no_file_located)
+                            return await _soundcloud.fetch(
+                                track, sc_candidate, _fresh_stem(track.recording_id, "sc"), progress, _no_file_located
+                            )
                     except Exception as sc_exc:  # noqa: BLE001
                         raise RuntimeError(
                             f"slskd: {s_task.exception()}; youtube: {y_exc}; soundcloud: {sc_exc}"
@@ -667,6 +753,8 @@ def _target_from_db(recording_id: str, provider_name: str):
             isrc=recording.isrc,
             mbid=recording.mbid,
             provider=provider_name,
+            # Upgrade nesmí prohodit zvuk, který už byl jednou zamítnut.
+            rejected_fps=tuple((recording.external_refs or {}).get("rejectedFingerprints") or ()),
         )
 
 
@@ -700,9 +788,13 @@ def _mark_soundcloud_preview_only(recording_id: str) -> None:
 def _is_missing_version(message: str) -> bool:
     """Selhání = "nenašli jsme tu verzi" (ne výpadek sítě / zdroje)."""
     low = message.lower()
-    return "nemáme" in low or "v téhle verzi" in low or (
-        "žádný vhodný soubor" in low and ("youtube" not in low or "nemá" in low)
-    )
+    if "nemáme" in low or "v téhle verzi" in low:
+        return True
+    # YouTube nenašel nic / nemá koho dalšího zkusit -- opakování za 30 s
+    # najde totéž (deterministické, ne výpadek).
+    if "youtube" in low and any(w in low for w in ("prázdný dotaz", "žádný další kandidát", "nic ke stažení")):
+        return True
+    return "žádný vhodný soubor" in low and ("youtube" not in low or "nemá" in low)
 
 
 async def _deezer_title(deezer_id: str) -> str | None:
@@ -899,6 +991,12 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
     if ctx is None:
         logger.warning("job %s nenalezen v DB, ACKnuto a zahozeno", job_id)
         return
+    if ctx.get("exhausted"):
+        logger.warning("job %s: vyčerpané pokusy -> FAILED", job_id)
+        await publish_job_progress(
+            ctx["user_id"], job_id, ProvisioningJobStatus.FAILED.value, pct=None, error="Stažení se nepodařilo"
+        )
+        return
     if ctx["skip"]:
         return  # už vyřešeno dřívějším pokusem / duplicitní doručení
 
@@ -956,12 +1054,19 @@ async def handle_job(r, stream: str, job_id: str, interactive: bool) -> None:
 
     async def on_file_located(path: Path) -> None:
         await asyncio.to_thread(_mark_downloading_path, ctx["recording_id"], str(path))
+        if path.is_relative_to(MEDIA_ROOT):
+            return  # jen přesun hotového souboru -- klient už o streamu ví
         await publish_track_streaming(
             ctx["user_id"], ctx["recording_id"], f"/api/v1/tracks/{ctx['recording_id']}/stream"
         )
 
     try:
-        result = await _acquire_verified(r, job_id, track, ctx, interactive, on_progress, on_file_located)
+        try:
+            result = await asyncio.wait_for(
+                _acquire_verified(r, job_id, track, ctx, interactive, on_progress, on_file_located), JOB_TIMEOUT_S
+            )
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError(f"obstarání nedoběhlo do {JOB_TIMEOUT_S} s -- přerušeno") from exc
         checksum = await asyncio.to_thread(sha256_file, result.path)
         size = result.path.stat().st_size
 
@@ -1109,6 +1214,52 @@ async def requeue_orphaned_jobs(r) -> None:
         logger.warning("job %s visel (bez workeru), posílám znovu do fronty", job_id)
 
 
+_housekeeping: dict[str, asyncio.Task] = {}
+
+
+def _housekeep(name: str, error: str, factory) -> None:
+    """Spustí úklidovou úlohu na pozadí, pokud ta předchozí stejného druhu
+    ještě neběží (mezi replikami hlídají souběh jejich Redis zámky)."""
+    running = _housekeeping.get(name)
+    if running is not None and not running.done():
+        return
+
+    async def run() -> None:
+        try:
+            await factory()
+        except Exception:  # noqa: BLE001
+            logger.exception(error)
+
+    _housekeeping[name] = asyncio.create_task(run())
+
+
+async def _janitor(r) -> None:
+    # Mezisklad Soulseeku (prázdné složky, nepoužité soubory) -- jednou
+    # za 3 h napříč replikami.
+    if await r.set("maintenance:slskd-janitor", CONSUMER_NAME, nx=True, ex=3 * 3600):
+        from app.library import slskd_janitor
+
+        await asyncio.to_thread(slskd_janitor.clean, slskd_janitor.downloads_root())
+
+
+async def _tags_and_share(r) -> None:
+    # Plné tagy do stažených souborů + sdílená složka s čitelnými
+    # jmény pro Soulseek -- po dávkách každých 15 min.
+    if await r.set("maintenance:file-tags", CONSUMER_NAME, nx=True, ex=15 * 60):
+        from app.library import file_tags, share_view
+
+        await file_tags.sweep(150)
+        await asyncio.to_thread(share_view.sync)
+
+
+async def _db_backup(r) -> None:
+    # Noční záloha databáze na houbaře (jednou za ~den, jen jeden worker).
+    from app.maintenance import db_backup
+
+    if db_backup.due() and await r.set("maintenance:db-backup", CONSUMER_NAME, nx=True, ex=3600):
+        await asyncio.to_thread(db_backup.backup)
+
+
 async def main() -> None:
     init_db()
     r = get_redis()
@@ -1128,41 +1279,13 @@ async def main() -> None:
         if time.monotonic() - last_housekeeping > 15:
             last_housekeeping = time.monotonic()
             await reclaim_stale(r)
-            try:
-                await requeue_orphaned_jobs(r)
-            except Exception:  # noqa: BLE001
-                logger.exception("úklid zaseklých jobů selhal")
-            # Mezisklad Soulseeku (prázdné složky, nepoužité soubory) -- jednou
-            # za 3 h napříč replikami.
-            try:
-                if await r.set("maintenance:slskd-janitor", CONSUMER_NAME, nx=True, ex=3 * 3600):
-                    from app.library import slskd_janitor
-
-                    await asyncio.to_thread(slskd_janitor.clean, slskd_janitor.downloads_root())
-            except Exception:  # noqa: BLE001
-                logger.exception("úklid meziskladu slskd selhal")
-            # Plné tagy do stažených souborů + sdílená složka s čitelnými
-            # jmény pro Soulseek -- po dávkách každých 15 min.
-            try:
-                if await r.set("maintenance:file-tags", CONSUMER_NAME, nx=True, ex=15 * 60):
-                    from app.library import file_tags, share_view
-
-                    await file_tags.sweep(150)
-                    await asyncio.to_thread(share_view.sync)
-            except Exception:  # noqa: BLE001
-                logger.exception("tagy / sdílená složka selhaly")
-            # Noční záloha databáze na houbaře (jednou za ~den, jen jeden worker).
-            try:
-                from app.maintenance import db_backup
-
-                if db_backup.due() and await r.set("maintenance:db-backup", CONSUMER_NAME, nx=True, ex=3600):
-                    await asyncio.to_thread(db_backup.backup)
-            except Exception:  # noqa: BLE001
-                logger.exception("záloha databáze selhala")
-            try:
-                await _process_due_upgrades(r)
-            except Exception:  # noqa: BLE001
-                logger.exception("zpracování upgradů selhalo")
+            # Úklid běží na pozadí -- tagy (texty písní), záloha DB nebo
+            # kontrola upgradu trvají minuty a smyčka by mezitím nebrala joby.
+            _housekeep("orphans", "úklid zaseklých jobů selhal", lambda: requeue_orphaned_jobs(r))
+            _housekeep("slskd-janitor", "úklid meziskladu slskd selhal", lambda: _janitor(r))
+            _housekeep("file-tags", "tagy / sdílená složka selhaly", lambda: _tags_and_share(r))
+            _housekeep("db-backup", "záloha databáze selhala", lambda: _db_backup(r))
+            _housekeep("upgrades", "zpracování upgradů selhalo", lambda: _process_due_upgrades(r))
 
         # Prioritní stream první (Redis vrací v pořadí klíčů); běžnou frontu
         # čteme jen s volnou kapacitou -- jinak by si worker zprávy

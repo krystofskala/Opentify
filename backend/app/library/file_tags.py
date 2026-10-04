@@ -17,7 +17,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from sqlmodel import Session, select
 
@@ -217,8 +217,11 @@ def _write_m4a(path: Path, data: dict[str, Any], lyrics: str | None, picture: by
 _WRITERS = {".flac": _write_flac, ".mp3": _write_mp3, ".m4a": _write_m4a, ".ogg": _write_ogg, ".opus": _write_ogg}
 
 
-def write(path: Path, data: dict[str, Any], lyrics: str | None) -> None:
-    """Zapsat do kopie a tu atomicky prohodit (rozehraný stream čte dál starý soubor)."""
+def write(path: Path, data: dict[str, Any], lyrics: str | None, still_current: Callable[[], bool] | None = None) -> bool:
+    """Zapsat do kopie a tu atomicky prohodit (rozehraný stream čte dál starý soubor).
+    `still_current` se ptá těsně před prohozením -- soubor mezitím smazaný /
+    nahrazený (Špatná verze, upgrade) by se jinak vrátil jako sirotek.
+    Vrací False, když se nic nezapsalo."""
     writer = _WRITERS.get(path.suffix.lower())
     if writer is None:
         raise ValueError(f"formát {path.suffix} se netaguje")
@@ -226,10 +229,23 @@ def write(path: Path, data: dict[str, Any], lyrics: str | None) -> None:
     shutil.copy2(path, tmp)
     try:
         writer(tmp, data, lyrics, _picture(data))
+        if (still_current is not None and not still_current()) or not path.exists():
+            return False
         os.replace(tmp, path)
+        return True
     finally:
         if tmp.exists():
             tmp.unlink()
+
+
+def _still_current(recording_id: str, storage_path: str) -> bool:
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, recording_id)
+        return (
+            asset is not None
+            and asset.status == MediaAssetStatus.AVAILABLE
+            and asset.storage_path == storage_path
+        )
 
 
 async def _lyrics(data: dict[str, Any], duration_ms: int | None) -> str | None:
@@ -269,18 +285,32 @@ async def sweep(limit: int = 150) -> dict[str, int]:
             if (rec.external_refs or {}).get("tagsData") == signature(data):
                 continue
             todo.append((rec.id, asset.storage_path, data, rec.duration_ms))
-    done = failed = 0
+    from app.provisioning_service import is_streaming
+    from app.redis_bus import get_redis
+
+    r = get_redis()
+    done = failed = postponed = 0
     for rec_id, storage_path, data, duration_ms in todo[:limit]:
+        # Právě se přehrává -- přepis by range requestům podstrčil posunuté
+        # bajty; zkusí se při dalším průchodu.
+        if await is_streaming(r, rec_id):
+            postponed += 1
+            continue
         lyrics = await _lyrics(data, duration_ms)
         path = Path(storage_path)
         try:
-            await _to_thread(write, path, data, lyrics)
+            if await is_streaming(r, rec_id):  # text se mohl hledat dlouho
+                postponed += 1
+                continue
+            written = await _to_thread(write, path, data, lyrics, lambda: _still_current(rec_id, storage_path))
+            if not written:
+                continue
+            size = path.stat().st_size
+            checksum = await _to_thread(sha256_file, path)
         except Exception as exc:  # noqa: BLE001 - jeden soubor nesmí zastavit ostatní
             failed += 1
             logger.info("tagy %s: %s", path.name, exc)
             continue
-        size = path.stat().st_size
-        checksum = await _to_thread(sha256_file, path)
         with Session(engine) as session:
             rec = session.get(Recording, rec_id)
             asset = session.get(MediaAsset, rec_id)
@@ -294,8 +324,10 @@ async def sweep(limit: int = 150) -> dict[str, int]:
             session.commit()
         done += 1
     if todo:
-        logger.info("tagy: zapsáno %d, chyb %d, zbývá %d", done, failed, max(0, len(todo) - limit))
-    return {"done": done, "failed": failed, "left": max(0, len(todo) - limit)}
+        logger.info(
+            "tagy: zapsáno %d, chyb %d, odloženo (hraje) %d, zbývá %d", done, failed, postponed, max(0, len(todo) - limit)
+        )
+    return {"done": done, "failed": failed, "postponed": postponed, "left": max(0, len(todo) - limit)}
 
 
 async def _to_thread(fn, *args):

@@ -408,6 +408,14 @@ async def get_release_tracks(
     return [t.model_dump(by_alias=True) for t in tracks]
 
 
+def same_song_key(title: str | None) -> str:
+    """`track_key` bez přívěsku "Album Version" ("X (Album Version)" == "X")."""
+    from app.maintenance.dedupe import track_key
+
+    key = track_key(title or "")
+    return key[: -len("albumversion")] if key.endswith("albumversion") and len(key) > len("albumversion") else key
+
+
 @catalog_router.get("/releases/{release_id}/other-editions")
 async def get_release_other_editions(
     release_id: str,
@@ -426,9 +434,20 @@ async def get_release_other_editions(
         service._session.refresh(release)
         canonical = set((release.external_refs or {}).get("tracklistIds") or [])
     rows = service._session.exec(select(Recording).where(Recording.release_id == release_id)).all()
+    # Kopie skladby z tracklistu (Deezer s ISRC reedice, "X (Album Version)")
+    # se stejnou délkou není jiná verze -- nemaže se, jen se tu neukazuje.
+    known: dict[str, list[int]] = {}
+    for rec in service._session.exec(select(Recording).where(Recording.id.in_(canonical))).all():  # type: ignore[attr-defined]
+        if rec.duration_ms:
+            known.setdefault(same_song_key(rec.title), []).append(rec.duration_ms)
     groups: dict[str, list] = {}
     for rec in rows:
         if rec.id in canonical or not canonical:
+            continue
+        # MB poznámka ("Peel session", "remix") = vědomě jiná nahrávka -- zůstává.
+        if rec.duration_ms and not (rec.external_refs or {}).get("mbDisambiguation") and any(
+            abs(rec.duration_ms - d) <= 3000 for d in known.get(same_song_key(rec.title), [])
+        ):
             continue
         refs = rec.external_refs or {}
         label = refs.get("mbDisambiguation") or refs.get("otherEdition") or "Další verze"

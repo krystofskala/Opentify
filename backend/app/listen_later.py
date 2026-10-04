@@ -14,7 +14,7 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, func, or_, select
 
 from app.db import engine
 from app.models import Artist, Listen, ListenLater, Recording, Release
@@ -203,6 +203,45 @@ def _distinct_listened(session: Session, user_id: str, since, where) -> int:  # 
     ).one()
 
 
+def _album_progress(session: Session, user_id: str, item: ListenLater, rec: Recording) -> tuple[int, int]:
+    """(skladeb alba, z nich poslechnutých). Podle tracklistu (`tracklistIds`
+    / `tracklistTitles`) -- řádků s `release_id` alba bývá víc (kopie z jiných
+    edic, zbloudilé skladby) a "poslechnuto" pak nešlo nikdy splnit."""
+    from app.maintenance.dedupe import track_key
+
+    release = session.get(Release, item.target_id)
+    refs = (release.external_refs or {}) if release else {}
+    ids = set(refs.get("tracklistIds") or [])
+    keys = {track_key(t) for t in refs.get("tracklistTitles") or []}
+    if ids or keys:
+        if rec.release_id != item.target_id and rec.id not in ids:
+            return 0, 0  # poslech s albem nesouvisí
+        rows = session.exec(
+            select(Recording.id, Recording.title)
+            .join(Listen, Listen.recording_id == Recording.id)
+            .where(
+                Listen.user_id == user_id,
+                Listen.played_at >= item.added_at,
+                or_(Recording.id.in_(ids), Recording.release_id == item.target_id),  # type: ignore[attr-defined]
+            )
+        ).all()
+        # Stejná skladba z jiné kopie (Deezer, jiná edice) se počítá jednou.
+        heard = set()
+        for rid, title in rows:
+            key = track_key(title)
+            if key in keys:
+                heard.add(key)
+            elif rid in ids:
+                heard.add(rid)
+        return len(keys) or len(ids), len(heard)
+    if rec.release_id != item.target_id:
+        return 0, 0
+    total = refs.get("tracklistCount") or session.exec(
+        select(func.count()).select_from(Recording).where(Recording.release_id == item.target_id)
+    ).one()
+    return int(total), _distinct_listened(session, user_id, item.added_at, Recording.release_id == item.target_id)
+
+
 def on_listen(user_id: str, recording_id: str) -> None:
     """Volá se po každém započítaném poslechu (listens.record_listen)."""
     with Session(engine) as session:
@@ -218,7 +257,9 @@ def on_listen(user_id: str, recording_id: str) -> None:
             select(ListenLater).where(
                 ListenLater.user_id == user_id,
                 ListenLater.listened_at.is_(None),  # type: ignore[union-attr]
-                ListenLater.target_id.in_([t for _, t in targets]),  # type: ignore[attr-defined]
+                # Alba všechna: skladba z tracklistu může viset na jiné
+                # edici (singl), takže `release_id` nestačí. Čekajících alb je pár.
+                or_(ListenLater.target_id.in_([t for _, t in targets]), ListenLater.kind == "album"),  # type: ignore[attr-defined]
             )
         ).all()
         changed = False
@@ -227,10 +268,7 @@ def on_listen(user_id: str, recording_id: str) -> None:
             if item.kind == "track":
                 done = item.target_id == rec.id
             elif item.kind == "album":
-                total = session.exec(
-                    select(func.count()).select_from(Recording).where(Recording.release_id == item.target_id)
-                ).one()
-                heard = _distinct_listened(session, user_id, item.added_at, Recording.release_id == item.target_id)
+                total, heard = _album_progress(session, user_id, item, rec)
                 done = total > 0 and heard >= max(1, math.ceil(total * ALBUM_SHARE))
             elif item.kind == "artist":
                 heard = _distinct_listened(session, user_id, item.added_at, Recording.artist_id == item.target_id)

@@ -135,7 +135,74 @@ def album_key(title: str | None) -> str:
     return norm(title) + ("|" + ",".join(sorted(words)) if words else "")
 
 
-def ingest_album(session: Session, dz: dict[str, Any], artist: Artist) -> Release | None:
+def _type_class(release_type: str | None) -> str | None:
+    """Album/kompilace vs singl/EP -- Deezer a MB si "single" a "ep"
+    zaměňují, takže se rozlišují jen tyhle dvě skupiny."""
+    if release_type in ("album", "compilation"):
+        return "long"
+    if release_type in ("single", "ep"):
+        return "short"
+    return None
+
+
+def release_class(release: Release) -> str | None:
+    """Jako `_type_class`, ale u alba ze skladeb (`typeByTracks`, viz
+    `CatalogService._fix_release_type`) podle skutečného počtu skladeb --
+    Deezer řádky bez record_type mají výchozí "album"."""
+    return _type_class((release.external_refs or {}).get("typeByTracks") or release.release_type)
+
+
+def _year(date: str | None) -> int | None:
+    return int(date[:4]) if date and date[:4].isdigit() else None
+
+
+def _tracklist_count(release: Release) -> int | None:
+    refs = release.external_refs or {}
+    count = refs.get("tracklistCount") or len(refs.get("tracklistIds") or [])
+    return int(count) if count else None
+
+
+def pick_album_match(
+    candidates: list[Release], dz: dict[str, Any], *, track_title: str | None = None
+) -> Release | None:
+    """Ze stejnojmenných alb interpreta vybere to, které odpovídá Deezer albu.
+    Dřív stačil název, a tak se Deezer ALBUM "The Bends" (12 skladeb)
+    přilepilo k MB SINGLU "The Bends" (3 skladby) a skladby alba se pak
+    zakládaly na singlu. Nesedí-li typ (album vs singl/EP) nebo zjevně počet
+    skladeb, kandidát se nebere; jinak přednost shodnému typu, roku a počtu."""
+    dz_class = _type_class(_RECORD_TYPE.get(dz.get("record_type") or ""))
+    dz_tracks = dz.get("nb_tracks") or None
+    dz_year = _year(dz.get("release_date"))
+    wanted_track = version_key(track_title) if track_title else ""
+
+    def compatible(r: Release) -> bool:
+        if dz_class and release_class(r) not in (None, dz_class):
+            return False
+        count = _tracklist_count(r)
+        # Singl (<= 4) proti albu (>= 8) -- jinak počet nerozhoduje (deluxe edice).
+        if dz_tracks and count and min(dz_tracks, count) <= 4 and max(dz_tracks, count) >= 8:
+            return False
+        return True
+
+    def rank(r: Release) -> tuple:
+        titles = {version_key(t) for t in (r.external_refs or {}).get("tracklistTitles") or []}
+        count, year = _tracklist_count(r), _year(r.release_date)
+        return (
+            # Skladba z hledání, která na albu opravdu je.
+            not (wanted_track and wanted_track in titles),
+            # Typ neznámý (vnořené album u skladby ho nenese) -> spíš album.
+            release_class(r) != (dz_class or "long"),
+            abs(year - dz_year) if year and dz_year else 99,
+            abs(count - dz_tracks) if count and dz_tracks else 999,
+        )
+
+    matching = [r for r in candidates if compatible(r)]
+    return min(matching, key=rank) if matching else None
+
+
+def ingest_album(
+    session: Session, dz: dict[str, Any], artist: Artist, *, track_title: str | None = None
+) -> Release | None:
     title = (dz.get("title") or "").strip()
     if not dz.get("id") or not title:
         return None
@@ -143,13 +210,14 @@ def ingest_album(session: Session, dz: dict[str, Any], artist: Artist) -> Releas
     release = session.exec(select(Release).where(Release.deezer_id == dzid)).first()
     if release is None:
         wanted = album_key(title)
-        release = next(
-            (
+        release = pick_album_match(
+            [
                 r
                 for r in session.exec(select(Release).where(Release.artist_id == artist.id)).all()
                 if r.deezer_id in (None, dzid) and album_key(r.title) == wanted
-            ),
-            None,
+            ],
+            dz,
+            track_title=track_title,
         )
     cover = deezer_image(dz.get("cover_xl") or dz.get("cover_big"))
     if release is None:
@@ -164,6 +232,10 @@ def ingest_album(session: Session, dz: dict[str, Any], artist: Artist) -> Releas
     else:
         release.deezer_id = release.deezer_id or dzid
         release.release_date = release.release_date or dz.get("release_date")
+        # Řádek založený z vnořeného alba skladby (bez record_type) dostal
+        # výchozí "album" -- typ z Deezeru ho opraví (MB řádky mají svůj).
+        if not release.mbid and release.deezer_id == dzid and dz.get("record_type") in _RECORD_TYPE:
+            release.release_type = _RECORD_TYPE[dz["record_type"]]
         if not release.images and cover and not is_placeholder_picture(cover):
             release.images = [cover]
         release.updated_at = utcnow()
@@ -236,5 +308,9 @@ def ingest_track_with_context(session: Session, dz: dict[str, Any]) -> Recording
     """Skladba z hledání/playlistu/žebříčku -- nese vnořený `artist` a
     `album`, obojí se upsertne spolu s ní."""
     artist = ingest_artist(session, dz.get("artist") or {})
-    release = ingest_album(session, dz.get("album") or {}, artist) if artist is not None else None
+    release = (
+        ingest_album(session, dz.get("album") or {}, artist, track_title=dz.get("title"))
+        if artist is not None
+        else None
+    )
     return ingest_track(session, dz, artist=artist, release=release)
