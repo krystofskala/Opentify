@@ -22,6 +22,7 @@ viz YTDLP_PROXY), jako u stahování.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Any
 
@@ -33,8 +34,10 @@ from app.library.matching import find_or_create_artist, find_or_create_recording
 from app.library.spotify_import import _get_or_create_playlist
 from app.models import MediaAsset, MediaAssetStatus, PlaylistItem, Recording, Release
 
+logger = logging.getLogger("uvicorn.error")
 _VIDEO = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})")
 _LIST = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
+_BROWSE = re.compile(r"music\.youtube\.com/browse/(MPRE[A-Za-z0-9_-]+)")
 
 
 class YoutubeLinkError(Exception):
@@ -78,11 +81,23 @@ def _normalized_url(text: str) -> str:
     if sc := sc_url(text):
         return sc
     lst = _LIST.search(text or "")
-    if lst and not lst.group(1).startswith(("RD", "UL")):  # RD* = automatický mix, ne playlist
+    # RD* / UL* = automatický mix k videu, ne playlist -- KROMĚ RDCLAK5uy*
+    # (redakční playlisty a alba YouTube Music, živě: tátův odkaz "nevypadá
+    # jako odkaz na YouTube").
+    if lst and (lst.group(1).startswith("RDCLAK") or not lst.group(1).startswith(("RD", "UL"))):
         return f"https://www.youtube.com/playlist?list={lst.group(1)}"
     video = _VIDEO.search(text or "")
     if video:
         return f"https://www.youtube.com/watch?v={video.group(1)}"
+    # Mix bez videa (jen list=RD...) -- yt-dlp ho umí načíst jako seznam.
+    if lst:
+        return f"https://www.youtube.com/playlist?list={lst.group(1)}"
+    # Album / stránka YouTube Music (music.youtube.com/browse/MPREb_...) --
+    # yt-dlp si ji převede na playlist alba sám.
+    browse = _BROWSE.search(text or "")
+    if browse:
+        return f"https://music.youtube.com/browse/{browse.group(1)}"
+    logger.info("odkaz na YouTube nerozpoznán: %s", (text or "")[:200])
     raise YoutubeLinkError("Tohle nevypadá jako odkaz na YouTube nebo SoundCloud.")
 
 

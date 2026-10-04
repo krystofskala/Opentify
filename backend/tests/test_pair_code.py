@@ -13,6 +13,17 @@ from app.models import AppUser
 from app.routes.auth import new_pair_code
 
 
+@pytest.fixture(autouse=True)
+def no_redis(monkeypatch):
+    """Omezení pokusů nesmí sahat na živý Redis (testy by si ho zablokovaly)."""
+    import app.routes.auth as auth_routes
+
+    def boom():
+        raise RuntimeError("bez Redisu v testech")
+
+    monkeypatch.setattr(auth_routes, "get_redis", boom)
+
+
 @pytest.fixture
 def users():
     with Session(engine) as s:
