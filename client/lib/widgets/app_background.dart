@@ -5,9 +5,11 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../core/reduced_motion.dart';
 import '../theme/accent_color.dart' show CoverCharacter, accentTransitionDuration, isAchromatic;
+import '../state/track_energy.dart' show TrackLevels, levelAt;
 import '../state/user_idle.dart';
 import 'glass/liquid_glass.dart' show LiquidCapture, LiquidSource;
 
@@ -32,8 +34,20 @@ class AppBackground extends StatefulWidget {
     required this.hidden,
     this.fineGrain = false,
     this.noGrain = false,
+    this.v2 = false,
+    this.levels,
+    this.position,
     required this.child,
   });
+
+  /// Profil › Vzhled › Pozadí "Nové (beta)": víc barev obalu najednou
+  /// (podle plochy), bílá/černá jako světlo, plynulá reakce na rychlost
+  /// scrollu/tahu a dýchání podle hlasitosti. `false` = klasické beze změny.
+  final bool v2;
+
+  /// Obrys hlasitosti hrající skladby a její pozice (jen `v2`).
+  final TrackLevels? levels;
+  final Duration Function()? position;
 
   final Color? selectedAccent;
 
@@ -120,16 +134,36 @@ class _AppBackgroundState extends State<AppBackground> {
   _Lab? _leaving;
   double _leavingEnv = 0;
 
+  // --- "Nové" pozadí (v2) ---
+  // Plocha slotů palety (podle zastoupení barev na obalu), přechází spolu
+  // s paletou. Klasické hodnoty = přesně původní vzorce sítě.
+  List<double> _coverFrom = _classicCover;
+  List<double> _coverTo = _classicCover;
+  int _guestSlot = 4;
+  // Rychlost vstupu (scroll/tah, px/s): okamžitá -> vyhlazený cíl -> plynulá.
+  double _velTarget = 0;
+  double _vel = 0;
+  double _lastInputAt = -10;
+  // Posun pole se směrem scrollu (jednotky šumu), plynule doháněný.
+  double _driftTarget = 0;
+  double _drift = 0;
+  double _energy = 0;
+  double _frameClock = -1;
+  bool _frameRequested = false;
+  int _tickCount = 0;
+
   double get _now => _clock.elapsedMicroseconds / 1e6;
 
   @override
   void initState() {
     super.initState();
-    final palette = _paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character)
-        .map(_Lab.fromColor)
-        .toList();
+    final target = _target();
+    final palette = target.palette.map(_Lab.fromColor).toList();
     _from = palette;
     _to = palette;
+    _coverFrom = target.cover;
+    _coverTo = target.cover;
+    _guestSlot = target.guestSlot;
     _guests = _guestsFor(widget.selectedAccent, widget.brightness, widget.character, _to);
     _program.then((program) {
       if (!mounted) return;
@@ -161,11 +195,12 @@ class _AppBackgroundState extends State<AppBackground> {
     if (old.selectedAccent != widget.selectedAccent ||
         old.brightness != widget.brightness ||
         !listEquals(old.supportTones, widget.supportTones) ||
-        old.character != widget.character) {
+        old.character != widget.character ||
+        old.v2 != widget.v2) {
       // "Záblesk" jen u samostatné změny -- při rychlém přeskakování skladeb
       // by jinak pozadí pulzovalo s každým klepnutím.
       final retarget = _tweening(_now);
-      _startTween(_paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character));
+      _startTween(_target());
       if (!retarget && old.selectedAccent != null && widget.selectedAccent != null && !_reducedMotion) _bloom = 0.3;
     }
     if (old.hidden != widget.hidden || old.isPlaying != widget.isPlaying) _wake();
@@ -177,11 +212,23 @@ class _AppBackgroundState extends State<AppBackground> {
   /// `easeOutCubic` (rozjeté hned od začátku), ne znovu od nulové rychlosti
   /// `easeInOutCubic` -- jinak by rychlé přepínání skladeb barvu "brzdilo"
   /// a přechod by působil trhaně.
-  void _startTween(List<Color> palette) {
+  /// Cílová paleta (klasická, nebo "Nové" s plochami slotů).
+  _Target _target() => widget.v2
+      ? _paletteV2(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character)
+      : (
+          palette: _paletteFor(widget.selectedAccent, widget.brightness, widget.supportTones, widget.character),
+          cover: _classicCover,
+          guestSlot: 4,
+        );
+
+  void _startTween(_Target target) {
     final now = _now;
     final retarget = _tweening(now);
     _from = List.generate(6, (i) => _slotAt(i, now, guests: false));
-    _to = palette.map(_Lab.fromColor).toList();
+    _to = target.palette.map(_Lab.fromColor).toList();
+    _coverFrom = _coverAt(now);
+    _coverTo = target.cover;
+    _guestSlot = target.guestSlot;
     // Právě viditelný host (nebo ten, co ještě dozníval) plynule zmizí
     // s přechodem; nové kolo hostů začíná klidem.
     final (lab, env) = _guestNow();
@@ -211,7 +258,12 @@ class _AppBackgroundState extends State<AppBackground> {
     final raw = ((now - _tweenStart - i * _stagger) / _tweenDuration).clamp(0.0, 1.0);
     final t = _tweenCurve.transform(raw);
     final slot = _Lab.lerp(_from[i], _to[i], t);
-    return i == 4 && guests ? _withGuest(slot, now) : slot;
+    return i == _guestSlot && guests ? _withGuest(slot, now) : slot;
+  }
+
+  List<double> _coverAt(double now) {
+    final t = _mixAt(now);
+    return [for (var i = 0; i < 6; i++) _coverFrom[i] + (_coverTo[i] - _coverFrom[i]) * t];
   }
 
   double _tweenProgress(double now) => ((now - _tweenStart) / _tweenDuration).clamp(0.0, 1.0);
@@ -268,6 +320,11 @@ class _AppBackgroundState extends State<AppBackground> {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle != null && lifecycle != AppLifecycleState.resumed) {
       _lastPaintAt = _now;
+      _frameClock = -1;
+      return;
+    }
+    if (widget.v2) {
+      _tickV2();
       return;
     }
     final now = _now;
@@ -315,7 +372,94 @@ class _AppBackgroundState extends State<AppBackground> {
     if (_reducedMotion && !_tweening(now)) _stopTicker();
   }
 
+  /// v2: o snímek se žádá z časovače, ale pohyb se počítá z časové značky
+  /// snímku (vsync) -- obsah odpovídá okamžiku, kdy se opravdu ukáže, a
+  /// rozestupy snímků jsou celé násobky 1/30 s. Klasické pozadí střídalo
+  /// 66 a 100 ms (12 fps z 30fps časovače) a pohyb na oko poskakoval.
+  void _tickV2() {
+    final now = _now;
+    if (_reducedMotion && !_tweening(now)) {
+      _frame.value++;
+      _stopTicker();
+      return;
+    }
+    _tickCount++;
+    final busy = _tweening(now) ||
+        _vel > 20 ||
+        _velTarget > 20 ||
+        _bloom > 0.01 ||
+        (_drift - _driftTarget).abs() > 0.5 ||
+        _energy.abs() > 0.02;
+    final divisor = busy || widget.isPlaying ? 1 : (UserIdle.idle.value ? 3 : 2);
+    if (_tickCount % divisor != 0 || _frameRequested) return;
+    _frameRequested = true;
+    SchedulerBinding.instance.scheduleFrameCallback(_onFrameV2);
+    SchedulerBinding.instance.scheduleFrame();
+  }
+
+  void _onFrameV2(Duration timestamp) {
+    _frameRequested = false;
+    if (!mounted) return;
+    final t = timestamp.inMicroseconds / 1e6;
+    final dt = _frameClock < 0 ? 1 / 30 : (t - _frameClock).clamp(0.0, 0.1);
+    _frameClock = t;
+    if (!_reducedMotion) {
+      final now = _now;
+      final targetSpeed = widget.isPlaying ? 3.0 : 1.5;
+      _speed += (targetSpeed - _speed) * (1 - math.exp(-dt / 0.6));
+      // Vstup utichl -> cíl plynule k nule (dobíhá jako setrvačnost).
+      if (now - _lastInputAt > 0.08) _velTarget *= math.exp(-dt / 0.18);
+      final tau = _velTarget > _vel ? 0.12 : 0.5;
+      _vel += (_velTarget - _vel) * (1 - math.exp(-dt / tau));
+      // Nasycení: pomalý scroll znatelně, rychlý víc, nikdy zběsile. Tvar
+      // pole (warp) se NEMĚNÍ -- jen rychlost toku; změna tvaru dělala
+      // "míchnutí" na konci scrollu.
+      _boost = 1 - math.exp(-_vel / 1600);
+      _drift += (_driftTarget - _drift) * (1 - math.exp(-dt / 0.2));
+      var energy = 0.0;
+      final levels = widget.levels;
+      final position = widget.position;
+      if (widget.isPlaying && levels != null && position != null) energy = levelAt(levels, position());
+      _energy += (energy - _energy) * (1 - math.exp(-dt / 0.4));
+      _bloom *= math.exp(-dt / 0.2);
+      final rate = _speed * (1 + 2.2 * _boost) * (1 + 0.3 * _energy);
+      _phase = (_phase + dt * rate) % 600;
+      _flow = (_flow + dt * rate * 0.02) % 256;
+      _guestClock += dt;
+    }
+    _frame.value++;
+  }
+
+  /// v2: rychlost scrollu/tahu (px/s) do vyhlazeného cíle.
+  void _feedVelocity(double v) {
+    _velTarget += (v.clamp(0.0, 12000.0) - _velTarget) * 0.3;
+    _lastInputAt = _now;
+    if (!_reducedMotion) _wake();
+  }
+
+  Duration? _lastPointerStamp;
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (!widget.v2) return;
+    final last = _lastPointerStamp;
+    _lastPointerStamp = event.timeStamp;
+    if (last == null) return;
+    final dt = ((event.timeStamp - last).inMicroseconds / 1e6).clamp(1 / 240, 0.1);
+    _feedVelocity(event.delta.distance / dt);
+  }
+
   bool _onScroll(ScrollNotification notification) {
+    if (widget.v2 && notification is ScrollUpdateNotification) {
+      LiquidCapture.markAllDirty(fast: true);
+      final delta = notification.scrollDelta ?? 0;
+      final now = _now;
+      final dt = (now - _lastScrollAt).clamp(1 / 120, 0.1);
+      _lastScrollAt = now;
+      _feedVelocity(delta.abs() / dt);
+      // Pole se jemně nese se směrem obsahu (15 % jeho pohybu).
+      if (notification.metrics.axis == Axis.vertical) _driftTarget += delta * 0.15;
+      return false;
+    }
     if (notification is ScrollUpdateNotification) {
       // Stránka pod skly se posunula (položky seznamu se kreslí ve vlastních
       // vrstvách, překreslení stránky by se jinak nedozvědělo).
@@ -346,7 +490,11 @@ class _AppBackgroundState extends State<AppBackground> {
         : _FallbackPainter(state: this, repaint: _frame);
     return NotificationListener<ScrollNotification>(
       onNotification: _onScroll,
-      child: _BackgroundScope(
+      child: Listener(
+        onPointerMove: _onPointerMove,
+        onPointerUp: (_) => _lastPointerStamp = null,
+        onPointerCancel: (_) => _lastPointerStamp = null,
+        child: _BackgroundScope(
         state: this,
         child: Stack(
           fit: StackFit.expand,
@@ -358,6 +506,7 @@ class _AppBackgroundState extends State<AppBackground> {
             widget.child,
           ],
         ),
+      ),
       ),
     );
   }
@@ -525,13 +674,16 @@ class _FallbackPainter extends CustomPainter {
       while (_retired.length > 3) {
         _retired.removeAt(0).dispose();
       }
+      final v2 = state.widget.v2;
       _cachedVertices = _mesh.build(
         size,
         palette,
         flow: state._flow,
-        warp: 3.2 * (1 + 0.3 * state._boost) + 0.6 * state._bloom,
-        lift: 0.05 * state._bloom,
+        warp: v2 ? 3.2 : 3.2 * (1 + 0.3 * state._boost) + 0.6 * state._bloom,
+        lift: 0.05 * state._bloom + (v2 ? 0.012 * state._energy : 0),
         dark: dark,
+        cover: v2 ? state._coverAt(now) : null,
+        driftPx: v2 ? state._drift : 0,
       );
       _cachedFrame = frame;
       _cachedSize = size;
@@ -645,10 +797,13 @@ class _FlowMesh {
     return Float64List.fromList(List.generate(256, (_) => random.nextDouble()));
   }();
 
-  void _layout(Size size) {
+  double _cell = 16;
+
+  void _layout(Size size, double cell) {
     _size = size;
-    _cols = (size.width / 16).round().clamp(24, 64);
-    _rows = (size.height / 16).round().clamp(24, 96);
+    _cell = cell;
+    _cols = (size.width / cell).round().clamp(24, 64);
+    _rows = (size.height / cell).round().clamp(24, 96);
     final vx = _cols + 1;
     final count = vx * (_rows + 1);
     _positions = Float32List(count * 2);
@@ -709,12 +864,17 @@ class _FlowMesh {
     required double warp,
     required double lift,
     required bool dark,
+    List<double>? cover,
+    double driftPx = 0,
   }) {
     // Tmavý režim: celé pole tmavší (bílý text musí být čitelný) a víc
     // prostoru pro nejhlubší tón -- pořád ale barva, žádná černá podlaha.
     final lightness = dark ? 0.66 : 1.0;
     final deepWeight = dark ? 0.95 : 0.6;
-    if (_size != size) _layout(size);
+    // v2 hustší síť (12 px) -- při 16 px byly na ostrých přechodech vidět
+    // schody trojúhelníků.
+    final cell = cover == null ? 16.0 : 12.0;
+    if (_size != size || _cell != cell) _layout(size, cell);
     final short = size.shortestSide;
     // Na telefonu hustší pole: se stejným měřítkem jako desktop zabrala
     // jedna barevná skvrna skoro celou šířku a prolínání bylo málo vidět
@@ -723,9 +883,16 @@ class _FlowMesh {
     final ax = size.width / short * density;
     final ay = size.height / short * density;
     final vx = _cols + 1;
+    // Plochy slotů (v2): střed přechodu se posune podle zastoupení barvy --
+    // klasické hodnoty dají přesně původní vzorce.
+    final c = cover ?? _classicCover;
+    final c3 = 0.625 + (0.22 - c[3]) * 0.6;
+    final c5 = 0.7308 + (0.15 - c[5]) * 0.6;
+    final c4 = 0.5714 + (0.10 - c[4]) * 0.5;
+    final drift = driftPx * ay / size.height;
 
     for (var j = 0; j <= _rows; j++) {
-      final py = j / _rows * ay;
+      final py = j / _rows * ay + drift;
       for (var i = 0; i <= _cols; i++) {
         final px = i / _cols * ax;
         // Dvojitě pokřivená doména (Quilez) -> mramorované, stáčející se
@@ -738,12 +905,12 @@ class _FlowMesh {
 
         // Barvy se do sebe vmíchávají (vážené přechody přes celou plochu),
         // nikde "díra" do černa: i nejtmavší slot palety je barevný.
-        var c = _Lab.lerp(p[1], p[2], _smooth(f * 2.2 - 0.6));
-        c = _Lab.lerp(c, p[3], _smooth(qx * 2.4 - 1.0));
-        c = _Lab.lerp(c, p[5], _smooth(ry * 2.6 - 1.4));
-        c = _Lab.lerp(c, p[0], _smooth(1.05 - (rx + qy) * 1.1) * deepWeight);
-        c = _Lab.lerp(c, p[4], _smooth(f * rx * 4.2 - 1.9) * 0.85);
-        _colors[j * vx + i] = c.toArgb(lift, lightness);
+        var mix = _Lab.lerp(p[1], p[2], _smooth(f * 2.2 - 0.6));
+        mix = _Lab.lerp(mix, p[3], _smooth((qx - c3) * 2.4 + 0.5));
+        mix = _Lab.lerp(mix, p[5], _smooth((ry - c5) * 2.6 + 0.5));
+        mix = _Lab.lerp(mix, p[0], _smooth(1.05 - (rx + qy) * 1.1) * deepWeight);
+        mix = _Lab.lerp(mix, p[4], _smooth((f * rx - c4) * 4.2 + 0.5) * 0.85);
+        _colors[j * vx + i] = mix.toArgb(lift, lightness);
       }
     }
 
@@ -896,6 +1063,102 @@ List<Color> _paletteFor(
           tone(-6, 0.5, 0.93),
           tone(dA != null ? dA / 2 : 4, 1.0, 0.8),
         ];
+}
+
+/// Paleta + plochy slotů + slot, do kterého chodí hosté.
+typedef _Target = ({List<Color> palette, List<double> cover, int guestSlot});
+
+/// Plochy slotů [základ, stín, jádro, střed, světlo, doplněk], které dávají
+/// přesně původní vzorce sítě (klasické pozadí). Jen sloty 3-5 se mění.
+const List<double> _classicCover = [1, 1, 1, 0.22, 0.10, 0.15];
+
+/// "Nové" pozadí: jako domovská obrazovka, jen z obalu -- až 4 skutečné
+/// odstíny obalu NAJEDNOU (podle plochy na obalu), každý se svou rolí ve
+/// světlosti (hloubka / plochy / střed / doplněk / světlo), ať je vidět
+/// struktura a barvy nekalí. Bílá (tmavý režim) nebo černá (světlý) z obalu
+/// = světlo; další odstíny chodí po jednom jako hosté. Bez dvou výrazných
+/// odstínů (šedé, prachové obaly) klasická paleta, jen s bílým/černým světlem.
+_Target _paletteV2(
+  Color? accent,
+  Brightness brightness,
+  List<Color> supportTones,
+  CoverCharacter? character,
+) {
+  final palette = _paletteFor(accent, brightness, supportTones, character);
+  final cover = [..._classicCover];
+  if (accent == null || character == null) return (palette: palette, cover: cover, guestSlot: 4);
+  final dark = brightness == Brightness.dark;
+  final b01 = character.lightness.clamp(0.0, 1.0) - 0.5;
+  final spread = 1 - math.max(0.0, b01) * 0.5;
+  double lit(double base) => dark
+      ? (0.40 + (base - 0.40) * spread + b01 * 0.3).clamp(0.05, 0.8)
+      : (0.84 + (base - 0.84) * spread + b01 * 0.12).clamp(0.72, 0.97);
+  Color from(Color c, double l) {
+    final src = HSLColor.fromColor(c);
+    final target = lit(l);
+    final chroma = (1 - (2 * src.lightness - 1).abs()) * src.saturation;
+    final room = math.max(0.05, 1 - (2 * target - 1).abs());
+    final sat = chroma < 0.03 ? 0.03 : math.min(0.85, chroma * 1.6 / room);
+    return _keepOkHue(HSLColor.fromAHSL(1, src.hue, sat, target).toColor(), c);
+  }
+
+  // Tmavý režim: žlutá/olivová pásma ve středních tónech vychází jako
+  // khaki (živě v náhledech) -- tam jen jako světlo, ne jako plocha.
+  bool yellowish(Color c) {
+    final h = HSLColor.fromColor(c).hue;
+    return h >= 45 && h <= 100;
+  }
+
+  final all = character.hues;
+  final yellow = dark ? all.where((h) => yellowish(h.color)).firstOrNull : null;
+  final hues = dark ? all.where((h) => !yellowish(h.color)).toList() : all;
+  final bwHighlight = dark ? character.white >= 0.05 : character.black >= 0.05;
+  if (hues.length >= 2) {
+    final s0 = hues[0].share;
+    double rel(int i) => (hues[i].share / s0).clamp(0.0, 1.0);
+    palette[1] = from(hues[0].color, dark ? 0.24 : 0.86);
+    palette[2] = from(hues[0].color, dark ? 0.42 : 0.76);
+    palette[3] = from(hues[1].color, dark ? 0.55 : 0.72);
+    cover[3] = (0.12 + 0.25 * rel(1)).clamp(0.12, 0.4);
+    if (hues.length >= 3) {
+      palette[5] = from(hues[2].color, dark ? 0.34 : 0.8);
+      cover[5] = (0.08 + 0.22 * rel(2)).clamp(0.08, 0.32);
+    } else {
+      palette[5] = from(hues[1].color, dark ? 0.32 : 0.8);
+    }
+    if (!bwHighlight && hues.length >= 4) {
+      palette[4] = from(hues[3].color, dark ? 0.68 : 0.9);
+      cover[4] = (0.07 + 0.12 * rel(3)).clamp(0.07, 0.16);
+    }
+  }
+  if (!bwHighlight && yellow != null && yellow.share >= 0.02 && (hues.length < 4)) {
+    palette[4] = from(yellow.color, 0.72);
+    cover[4] = (0.06 + 0.3 * yellow.share).clamp(0.06, 0.16);
+  }
+  final hue = HSLColor.fromColor(palette[2]).hue;
+  if (bwHighlight) {
+    // Bílá jako světlá záře (tmavý režim), černá jako inkoust (světlý) --
+    // jen malé plochy, ať zůstane čitelný text.
+    final share = dark ? character.white : character.black;
+    // Černá ve světlém režimu jako hluboký inkoust v odstínu obalu -- čistá
+    // šedá se s pastelem míchala do špinava (náhledy).
+    // Černobílý obal: neutrální inkoust (odstín 0°/40° by dal zlatou).
+    final tinted = all.isNotEmpty && !isAchromatic(accent);
+    palette[4] = dark
+        ? HSLColor.fromAHSL(1, hue, 0.06, 0.88).toColor()
+        : HSLColor.fromAHSL(1, hue, tinted ? 0.4 : 0.0, 0.48).toColor();
+    cover[4] = dark ? (0.06 + 0.4 * share).clamp(0.06, 0.2) : (0.03 + 0.15 * share).clamp(0.03, 0.08);
+  }
+  // Převážně černý obal v tmavém / bílý ve světlém režimu: hloubka/základ
+  // neutrálnější (inkoust, papír) místo dobarvené.
+  if (dark && character.black > 0.15) {
+    palette[0] = Color.lerp(palette[0], HSLColor.fromAHSL(1, hue, 0.04, 0.05).toColor(),
+        ((character.black - 0.15) * 1.6).clamp(0.0, 0.8))!;
+  } else if (!dark && character.white > 0.15) {
+    palette[0] = Color.lerp(palette[0], HSLColor.fromAHSL(1, hue, 0.04, 0.97).toColor(),
+        ((character.white - 0.15) * 1.6).clamp(0.0, 0.8))!;
+  }
+  return (palette: palette, cover: cover, guestSlot: bwHighlight ? 5 : 4);
 }
 
 /// Hosté pro světlý záblesk: výrazné barvy obalu, které paleta nemá

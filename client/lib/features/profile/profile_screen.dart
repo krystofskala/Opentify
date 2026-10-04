@@ -428,6 +428,29 @@ class _AppearanceSettings extends ConsumerWidget {
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        Text('Pozadí', style: theme.textTheme.titleSmall),
+        Text(
+          ref.watch(backgroundV2Provider)
+              ? 'Víc barev obalu najednou, plynulejší reakce na posouvání a jemné dýchání podle hlasitosti skladby.'
+              : 'Původní tekuté pozadí v barvách obalu.',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints.tightFor(width: 520),
+            child: GlassSegmentedControl<bool>(
+              selected: ref.watch(backgroundV2Provider),
+              onChanged: ref.read(backgroundV2Provider.notifier).set,
+              segments: const [
+                GlassSegment(value: false, label: 'Klasické', icon: Symbols.gradient_rounded),
+                GlassSegment(value: true, label: 'Nové (beta)', icon: Symbols.auto_awesome_rounded),
+              ],
+            ),
+          ),
+        ),
         const SizedBox(height: 12),
         _SwitchRow(
           title: 'Omezit animace',

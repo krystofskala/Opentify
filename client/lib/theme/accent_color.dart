@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -41,7 +42,7 @@ Future<PaletteGenerator> _paletteFor(String imageUrl) {
     // dával jiné poměry barev a u některých obalů divné pozadí (živě
     // nahlášeno). Sdílí se jen výsledek mezi akcentem, tóny a charakterem.
     () => PaletteGenerator.fromImageProvider(
-      CachedNetworkImageProvider(imageUrl),
+      _providerFor(imageUrl),
       size: const Size(120, 120),
       maximumColorCount: 16,
       // Výchozí filtr knihovny zahazuje i celé pásmo "pleťových" tónů
@@ -58,6 +59,128 @@ Future<PaletteGenerator> _paletteFor(String imageUrl) {
 }
 
 final Map<String, Future<PaletteGenerator>> _paletteFutures = {};
+
+/// Testy (náhledy pozadí z obalů na disku) podstrčí vlastní obrázky.
+@visibleForTesting
+ImageProvider Function(String url)? debugCoverProvider;
+
+ImageProvider _providerFor(String url) => debugCoverProvider?.call(url) ?? CachedNetworkImageProvider(url);
+
+/// Jemnější rozbor obalu pro pozadí "Nové": vlastní průchod pixely
+/// zmenšeného obalu (64×64), ne median-cut palety -- ta drobné výrazné
+/// plochy (modrý nápis na šedém obalu) slila s okolím. Výsledek: podíl skoro
+/// černé / skoro bílé plochy (krém a papír se počítají k bílé) a barevné
+/// odstíny od největší plochy (koše po 30°, sousední podobné sloučené);
+/// drobné jen když jsou opravdu syté.
+Future<({double black, double white, List<({Color color, double share})> hues})> _fineColors(String imageUrl) async {
+  const none = (black: 0.0, white: 0.0, hues: <({Color color, double share})>[]);
+  try {
+    final image = await _decodeSmall(_providerFor(imageUrl), 64);
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    final w = image.width, h = image.height;
+    image.dispose();
+    if (data == null) return none;
+    const bins = 12;
+    final count = List<double>.filled(bins, 0);
+    final chromaSum = List<double>.filled(bins, 0);
+    final r = List<double>.filled(bins, 0), g = List<double>.filled(bins, 0), b = List<double>.filled(bins, 0);
+    var total = 0, black = 0, white = 0;
+    for (var i = 0; i < w * h; i++) {
+      final o = i * 4;
+      if (data.getUint8(o + 3) < 128) continue;
+      final cr = data.getUint8(o) / 255, cg = data.getUint8(o + 1) / 255, cb = data.getUint8(o + 2) / 255;
+      total++;
+      final mx = math.max(cr, math.max(cg, cb)), mn = math.min(cr, math.min(cg, cb));
+      final l = (mx + mn) / 2, chroma = mx - mn;
+      if (l < 0.12 && chroma < 0.08) {
+        black++;
+        continue;
+      }
+      if ((l > 0.86 && chroma < 0.08) || (l > 0.72 && chroma < 0.18)) {
+        white++;
+        continue;
+      }
+      if (chroma < 0.06) continue;
+      double hue;
+      if (mx == cr) {
+        hue = 60 * (((cg - cb) / chroma) % 6);
+      } else if (mx == cg) {
+        hue = 60 * ((cb - cr) / chroma + 2);
+      } else {
+        hue = 60 * ((cr - cg) / chroma + 4);
+      }
+      final k = ((hue + 360) % 360 / (360 / bins)).floor() % bins;
+      count[k] += 1;
+      chromaSum[k] += chroma;
+      // Reprezentant koše: průměr vážený sytostí (výrazné pixely víc).
+      r[k] += cr * chroma;
+      g[k] += cg * chroma;
+      b[k] += cb * chroma;
+    }
+    if (total == 0) return none;
+    // Sousední koše slít do skupin (barva přes hranici 30° je jedna barva).
+    final groups = <({double n, double c, double r, double g, double b})>[];
+    final used = List<bool>.filled(bins, false);
+    final order = List<int>.generate(bins, (i) => i)..sort((x, y) => count[y].compareTo(count[x]));
+    for (final k in order) {
+      if (used[k] || count[k] == 0) continue;
+      var n = count[k], c = chromaSum[k], rr = r[k], gg = g[k], bb = b[k];
+      used[k] = true;
+      for (final j in [(k + 1) % bins, (k + bins - 1) % bins]) {
+        if (!used[j] && count[j] > 0 && count[j] >= count[k] * 0.25) {
+          used[j] = true;
+          n += count[j];
+          c += chromaSum[j];
+          rr += r[j];
+          gg += g[j];
+          bb += b[j];
+        }
+      }
+      groups.add((n: n, c: c, r: rr, g: gg, b: bb));
+    }
+    final hues = <({Color color, double share})>[];
+    for (final grp in groups) {
+      final share = grp.n / total;
+      final meanChroma = grp.c / grp.n;
+      // Velké plochy i tlumené; malé jen syté (nápis, detail obalu).
+      if (share < 0.006 || (share < 0.03 && meanChroma < 0.22) || meanChroma < 0.08) continue;
+      final color = Color.from(
+        alpha: 1,
+        red: (grp.r / grp.c).clamp(0.0, 1.0),
+        green: (grp.g / grp.c).clamp(0.0, 1.0),
+        blue: (grp.b / grp.c).clamp(0.0, 1.0),
+      );
+      // Stejná barva ve dvou nesousedních skupinách (slabý soused) -- k větší.
+      final hue = HSLColor.fromColor(color).hue;
+      final i = hues.indexWhere((x) => (((HSLColor.fromColor(x.color).hue - hue + 540) % 360) - 180).abs() < 25);
+      if (i >= 0) {
+        hues[i] = (color: hues[i].color, share: hues[i].share + share);
+      } else {
+        hues.add((color: color, share: share));
+      }
+    }
+    hues.sort((a, b) => b.share.compareTo(a.share));
+    return (black: black / total, white: white / total, hues: hues);
+  } catch (_) {
+    return none;
+  }
+}
+
+Future<ui.Image> _decodeSmall(ImageProvider provider, int size) {
+  final completer = Completer<ui.Image>();
+  final stream = ResizeImage(provider, width: size, height: size).resolve(ImageConfiguration.empty);
+  late final ImageStreamListener listener;
+  listener = ImageStreamListener((info, _) {
+    stream.removeListener(listener);
+    completer.complete(info.image.clone());
+    info.dispose();
+  }, onError: (e, st) {
+    stream.removeListener(listener);
+    completer.completeError(e, st);
+  });
+  stream.addListener(listener);
+  return completer.future;
+}
 
 bool _avoidBlackWhite(HSLColor color) => color.lightness > 0.05 && color.lightness < 0.95;
 final Map<String, Color> _accentCache = {};
@@ -204,6 +327,9 @@ void resetCoverRetries() => _retries.clear();
 /// `accent` = malá, ale výrazná kontrastní barva obalu (žlutá kresba na
 /// tmavě modrém) -- pozadí jí dá jedno světlo, jinak by se úplně ztratila.
 ///
+/// `black` / `white` = podíl skoro černé / skoro bílé plochy obalu (0..1),
+/// `hues` = barevné odstíny jemnějšího rozboru (pozadí "Nové").
+///
 /// `guests` = další výrazné barvy obalu (≥ 2 % plochy, zřetelně barevné,
 /// podobné odstíny sloučené), od největší plochy. Pozadí je po jedné
 /// ukazuje ve světlých záblescích (viz `AppBackground`), ať se objeví i
@@ -214,6 +340,9 @@ typedef CoverCharacter = ({
   List<Color> tones,
   Color? accent,
   List<({Color color, double share})> guests,
+  double black,
+  double white,
+  List<({Color color, double share})> hues,
 });
 
 Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
@@ -274,7 +403,17 @@ Future<CoverCharacter?> extractCoverCharacter(String imageUrl) {
           guests.add((color: swatch.color, share: share));
         }
       }
-      return (saturation: sat / total, lightness: light / total, tones: tones, accent: accent, guests: guests);
+      final fine = await _fineColors(imageUrl);
+      return (
+        saturation: sat / total,
+        lightness: light / total,
+        tones: tones,
+        accent: accent,
+        guests: guests,
+        black: fine.black,
+        white: fine.white,
+        hues: fine.hues,
+      );
     } catch (_) {
       _characterFutures.remove(imageUrl);
       return null;

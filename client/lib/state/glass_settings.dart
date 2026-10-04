@@ -196,6 +196,35 @@ class GlassGrainController extends StateNotifier<bool> {
 
 final glassGrainProvider = StateNotifierProvider<GlassGrainController, bool>((ref) => GlassGrainController());
 
+/// Profil › Vzhled › Pozadí: "Nové (beta)" -- víc barev obalu najednou,
+/// bílá/černá jako světlo, plynulejší reakce na scroll a jemné dýchání podle
+/// hlasitosti skladby. Klasické pozadí zůstává výchozí a beze změny.
+class BackgroundV2Controller extends StateNotifier<bool> {
+  BackgroundV2Controller() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.background_v2';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final backgroundV2Provider = StateNotifierProvider<BackgroundV2Controller, bool>((ref) => BackgroundV2Controller());
+
 final glassButtonsProvider = StateNotifierProvider<GlassButtonsController, bool>((ref) => GlassButtonsController());
 
 /// Profil › Vzhled › "Lom skla (test)": sklo mini přehrávače láme obsah pod

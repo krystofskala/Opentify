@@ -8,6 +8,7 @@ import 'routing/app_router.dart';
 import 'state/appearance_sync.dart';
 import 'state/audio_player_controller.dart';
 import 'state/glass_settings.dart';
+import 'state/track_energy.dart';
 import 'state/grain_controller.dart';
 import 'state/theme_mode_controller.dart';
 import 'state/user_idle.dart';
@@ -91,6 +92,9 @@ class OpentifyApp extends ConsumerWidget {
             hidden: false,
             fineGrain: ref.watch(fineGrainProvider),
             noGrain: ref.watch(noGrainProvider),
+            v2: ref.watch(backgroundV2Provider),
+            levels: ref.watch(currentTrackLevelsProvider),
+            position: () => ref.read(audioPlayerControllerProvider).position,
             // Nad Navigatorem -- sdílený stav rozbalení přehrávače pro mini
             // přehrávač (začátek tažení) i `NowPlayingScreen` (viz now_playing_sheet.dart).
             // Tón skla v barvě skladby se přebarvuje spolu s pozadím
