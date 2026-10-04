@@ -60,7 +60,9 @@ async def fetch_artist_art(mbid: str) -> dict[str, Any] | None:
     try:
         return await cached_json(f"fanart:{mbid}", _TTL_SECONDS, fetch)
     except (httpx.HTTPError, ValueError) as exc:
-        logger.info("fanart.tv selhal pro %s: %s", mbid, exc)
+        # Jen stav/druh chyby -- text výjimky obsahuje URL i s klíčem.
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+        logger.info("fanart.tv selhal pro %s: %s", mbid, status)
         return None
 
 

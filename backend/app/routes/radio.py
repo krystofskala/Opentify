@@ -40,6 +40,9 @@ async def create(session_id: str, body: CreateBody, current: tuple[str, str] = D
     if not body.recordingIds:
         raise HTTPException(status_code=400, detail="prázdná fronta")
     user_id, device_id = current
+    existing = radio.get_session(session_id)
+    if existing is not None and existing.user_id != user_id:
+        raise HTTPException(status_code=404, detail="relace nenalezena")
     ab = (body.abStartMs, body.abEndMs) if body.abStartMs is not None and body.abEndMs is not None else None
     radio.create_session(user_id, device_id, body.recordingIds, body.positionMs, session_id=session_id, ab=ab)
     return {"sessionId": session_id}

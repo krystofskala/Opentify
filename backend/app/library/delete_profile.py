@@ -28,18 +28,23 @@ from app.models import (
     LibraryEntry,
     Listen,
     ListenLater,
+    PairCode,
     PinnedPlaylist,
+    PlayEvent,
     Playlist,
     PlaylistItem,
     PlaylistMember,
     ProvisioningJob,
     RecordingDislike,
+    SkipStreak,
 )
 
 logger = logging.getLogger(__name__)
 
-_PER_USER = [Listen, RecordingDislike, HeardFully, AuthToken, InviteCode, LibraryEntry, PlaylistMember,
-             PinnedPlaylist, ArtistDislike, FavoriteArtist, CollectionProgress, ListenLater]
+# Každá tabulka se sloupcem `user_id` (hlídá test_delete_profile_covers_all).
+_PER_USER = [Listen, PlayEvent, SkipStreak, RecordingDislike, HeardFully, AuthToken, InviteCode, PairCode,
+             LibraryEntry, PlaylistMember, PinnedPlaylist, ArtistDislike, FavoriteArtist, CollectionProgress,
+             ListenLater]
 
 
 def delete_profile(user_id: str) -> dict[str, int]:

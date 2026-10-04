@@ -57,6 +57,13 @@ ProgressCallback = Callable[[int], Awaitable[None]]
 OnFileLocated = Callable[[Path], Awaitable[None]]
 
 
+def _seg(value: str) -> str:
+    """Jeden segment cesty slskd API (jméno peeru volí cizí člověk)."""
+    from urllib.parse import quote
+
+    return quote(value, safe="")
+
+
 def _normalize(text: str) -> str:
     """Bez diakritiky, malá písmena, jen alfanumerické tokeny oddělené
     mezerou -- pro porovnání názvu skladby s názvem souboru na Soulseeku."""
@@ -850,7 +857,7 @@ class SlskdProvider:
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
             try:
                 queued = await client.post(
-                    f"/api/v0/transfers/downloads/{username}",
+                    f"/api/v0/transfers/downloads/{_seg(username)}",
                     json=[{"filename": filename, "size": peer.get("size", 0)}],
                 )
                 # 409 = ten soubor od toho peeru už ve frontě je (dřívější
@@ -876,7 +883,7 @@ class SlskdProvider:
                         raise _PeerFailed(f"nedokončeno do {limit:.0f} s")
 
                     try:
-                        transfers_resp = await client.get(f"/api/v0/transfers/downloads/{username}")
+                        transfers_resp = await client.get(f"/api/v0/transfers/downloads/{_seg(username)}")
                         transfers_resp.raise_for_status()
                     except httpx.HTTPError as exc:
                         poll_errors += 1
@@ -965,7 +972,7 @@ class SlskdProvider:
             return
         try:
             await client.delete(
-                f"/api/v0/transfers/downloads/{username}/{transfer['id']}", params={"remove": "true"}
+                f"/api/v0/transfers/downloads/{_seg(username)}/{_seg(str(transfer['id']))}", params={"remove": "true"}
             )
         except httpx.HTTPError:
             pass

@@ -52,12 +52,19 @@ async def _to_wav(raw: bytes) -> bytes:
         src.write(raw)
         src.flush()
         proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-v", "error", "-i", src.name, "-t", str(MAX_SECONDS),
+            # Nahraný soubor smí být jen samotné audio -- žádné odkazy na jiné
+            # soubory nebo síť (playlisty typu HLS/concat).
+            "ffmpeg", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", src.name, "-t", str(MAX_SECONDS),
             "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        wav, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+        try:
+            wav, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RecognizeError("dekódování nahrávky trvalo moc dlouho") from None
     if proc.returncode != 0 or len(wav) < 16000:
         raise RecognizeError(f"nahrávku se nepodařilo dekódovat: {err.decode(errors='replace')[:200]}")
     return wav

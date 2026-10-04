@@ -518,9 +518,10 @@ _LOGIN_WINDOW = 15 * 60  # ... za 15 minut, pak stop do konce okna
 
 
 def _client_ip(request: Request) -> str:
-    return request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
-        request.client.host if request.client else "?"
-    )
+    # Poslední hodnotu přidává náš proxy (tailscale serve / nginx); první
+    # může poslat klient sám.
+    forwarded = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    return forwarded[-1] if forwarded else (request.client.host if request.client else "?")
 
 
 def _fail_keys(request: Request, username: str) -> list[str]:
@@ -528,23 +529,43 @@ def _fail_keys(request: Request, username: str) -> list[str]:
 
 
 async def _login_throttle(request: Request, username: str) -> None:
+    """Pokus se započítá HNED (atomický INCR) a teprve pak se porovná s
+    limitem -- souběžné pokusy tak limit neobejdou. Úspěšné přihlášení
+    čítač jména vynuluje (`_login_ok`)."""
     try:
         r = get_redis()
-        counts = [int(await r.get(k) or 0) for k in _fail_keys(request, username)]
+        counts = []
+        for k in _fail_keys(request, username):
+            n = await r.incr(k)
+            if n == 1:
+                await r.expire(k, _LOGIN_WINDOW)
+            counts.append(n)
     except Exception:  # noqa: BLE001 -- bez Redisu jen pomalé odmítnutí níž
+        logging.getLogger(__name__).warning("login: Redis nedostupný, limit pokusů neplatí")
         return
-    if any(c >= limit for c, limit in zip(counts, _LOGIN_FAILS)):
+    if any(c > limit for c, limit in zip(counts, _LOGIN_FAILS)):
         raise HTTPException(status_code=429, detail="Moc pokusů. Zkus to za čtvrt hodiny.")
 
 
-async def _login_failed(request: Request, username: str) -> None:
+async def _login_ok(request: Request, username: str) -> None:
     try:
-        r = get_redis()
-        for k in _fail_keys(request, username):
-            if await r.incr(k) == 1:
-                await r.expire(k, _LOGIN_WINDOW)
+        await get_redis().delete(f"login-fail:user:{username.lower()}")
     except Exception:  # noqa: BLE001
         pass
+
+
+# Stejná doba ověření pro neexistující jméno (jinak čas prozradí, jestli existuje).
+_DUMMY_HASH: str | None = None
+
+
+def _check_password(password: str, password_hash: str | None) -> bool:
+    global _DUMMY_HASH
+    if password_hash is None:
+        if _DUMMY_HASH is None:
+            _DUMMY_HASH = hash_password("opentify-dummy")
+        verify_password(password, _DUMMY_HASH)
+        return False
+    return verify_password(password, password_hash)
 
 
 @auth_router.post("/login")
@@ -565,12 +586,14 @@ async def login(body: LoginIn, request: Request, response: Response):
     with Session(engine) as session:
         rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
         user = next((u for u in rows if u.username.lower() == username.lower()), None)
-        ok = user is not None and user.password_hash is not None and verify_password(body.password, user.password_hash)
+        # scrypt mimo event loop -- jinak by každý pokus zastavil celé API.
+        ok = await asyncio.to_thread(_check_password, body.password, user.password_hash if user else None)
         if ok and need_code:
             ok = _take_pair_code(session, user.id, body.code)
+        if ok:
+            await _login_ok(request, username)
         if not ok:
             session.rollback()
-            await _login_failed(request, username)
             await asyncio.sleep(1.0)  # zpomalit hádání
             raise HTTPException(
                 status_code=401,

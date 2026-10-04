@@ -74,7 +74,7 @@ def recent(
             continue
         # Přehráno z playlistu / Oblíbených / interpreta -> ta položka celá,
         # ne jednotlivé album skladby.
-        context_item = _context_item(session, listen.context)
+        context_item = _context_item(session, listen.context, user_id)
         if context_item is not None:
             key = f"c:{context_item['kind']}:{context_item['id']}"
             if key not in seen:
@@ -119,9 +119,10 @@ def recent(
     return items
 
 
-def _context_item(session: Session, context: str | None) -> dict | None:
+def _context_item(session: Session, context: str | None, user_id: str) -> dict | None:
     """Položka "Pokračovat v poslechu" z cesty, odkud se hrálo; `None` pro
-    alba (řeší volající) a kontexty bez vlastní stránky (Domů, Hledat)."""
+    alba (řeší volající) a kontexty bez vlastní stránky (Domů, Hledat).
+    Playlist jen takový, který profil smí číst (vlastní, člen, globální)."""
     if not context:
         return None
     parts = context.strip("/").split("/")
@@ -131,8 +132,13 @@ def _context_item(session: Session, context: str | None) -> dict | None:
         return None
     kind, ident = parts
     if kind == "playlists":
-        playlist = session.get(Playlist, ident)
-        if playlist is None:
+        from fastapi import HTTPException as _Http
+
+        from app.routes.playlists import _readable_playlist_or_404
+
+        try:
+            playlist = _readable_playlist_or_404(session, ident, user_id)
+        except _Http:
             return None
         ids = session.exec(
             select(PlaylistItem.recording_id)
