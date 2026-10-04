@@ -70,6 +70,37 @@ def upsert_artist(
     return artist
 
 
+def _earlier(a: str | None, b: str | None) -> str | None:
+    """Dřívější z dvou ISO dat (MB "first-release-date" = původní vydání,
+    Deezer často datum reedice)."""
+    if not a or not b:
+        return a or b
+    return a if a[:10] <= b[:10] else b
+
+
+def _deezer_twin(
+    session: Session, artist_id: str, title: str, release_type: str, release_date: str | None
+) -> Release | None:
+    """Stejné album téhož interpreta, které zatím zná jen Deezer (bez MBID)."""
+    from app.catalog.deezer_ingest import _type_class, _year, album_key, release_class
+
+    wanted = album_key(title)
+    cls = _type_class(release_type)
+    candidates = [
+        r
+        for r in session.exec(select(Release).where(Release.artist_id == artist_id, Release.mbid.is_(None))).all()  # type: ignore[union-attr]
+        if r.deezer_id
+        and not r.deezer_id.startswith("own:")
+        and (r.external_refs or {}).get("source") not in ("youtube", "soundcloud", "manual")
+        and album_key(r.title) == wanted
+        and (cls is None or release_class(r) in (None, cls))
+    ]
+    if not candidates:
+        return None
+    year = _year(release_date)
+    return min(candidates, key=lambda r: abs((_year(r.release_date) or 9999) - (year or 9999)))
+
+
 def upsert_release(
     session: Session,
     *,
@@ -83,6 +114,23 @@ def upsert_release(
     release = None
     if mbid:
         release = session.exec(select(Release).where(Release.mbid == mbid)).first()
+        if release is None:
+            release = _deezer_twin(session, artist_id, title, release_type, release_date)
+            if release is not None:
+                # Album známé jen z Deezeru (hledání, Domů) -- tohle je jeho MB
+                # skupina: převzít řádek (soubory, poslechy, knihovna zůstanou)
+                # místo druhého stejného alba. Živě: "Texican Badman" z
+                # Deezeru (2019, reedice) chybělo v diskografii, kde bylo MB
+                # dvojče (1981).
+                release.mbid = mbid
+                release.title = title
+                release.release_type = release_type
+                release.release_date = _earlier(release_date, release.release_date)
+                release.updated_at = utcnow()
+                session.add(release)
+                session.commit()
+                session.refresh(release)
+                return release
     if release is None:
         release = Release(
             mbid=mbid,
