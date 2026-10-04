@@ -41,15 +41,15 @@ def splits(query: str) -> list[tuple[str, str]]:
     """Možná rozdělení dotazu na dva interprety (nejpravděpodobnější první)."""
     query = " ".join(query.split())
     parts = [p for p in _SEPARATORS.split(query) if p.strip()]
-    if len(parts) == 2:
-        return [(parts[0].strip(), parts[1].strip())]
+    first = [(parts[0].strip(), parts[1].strip())] if len(parts) == 2 else []
     words = query.split()
     if len(words) < 2 or len(words) > 8:
-        return []
+        return first
     out = [(" ".join(words[:i]), " ".join(words[i:])) for i in range(1, len(words))]
     # Dvě slova na jméno napřed ("Mark O'Connor" + "Tony Rice").
     out.sort(key=lambda s: abs(len(s[0].split()) - len(s[1].split())))
-    return out
+    # Spojka napřed, ale i podle slov -- "a" bývá i v názvu ("Dust in a Baggie").
+    return first + [s for s in out if s not in first]
 
 
 async def _artist(dz: DeezerClient, half: str) -> dict[str, Any] | None:
@@ -114,3 +114,44 @@ async def find(dz: DeezerClient, a: dict[str, Any], b: dict[str, Any], limit: in
     # Alba, ze kterých jsou nalezené skladby (spolupráce na cizím albu).
     found_albums = {str(al["id"]): al for al in album_hits if al}
     return {"tracks": list(tracks.values())[:limit], "albums": list(found_albums.values())}
+
+
+async def artist_versions(dz: DeezerClient, query: str, limit: int = 20) -> tuple[dict[str, Any], str, list[dict[str, Any]]] | None:
+    """"Tony Rice Salt Creek" -> (interpret, skladba, nahrávky té skladby, na
+    kterých interpret hraje -- i na cizích albech: Norman Blake, David
+    Grisman, Vassar Clements...). Ověřeno podle účinkujících na Deezeru.
+    None, když dotaz není "interpret + skladba"."""
+    from app.download_match import core_title
+
+    for left, right in splits(query)[:5]:
+        for artist_part, title in ((left, right), (right, left)):
+            if len(_norm(title)) < 2:
+                continue
+            artist = await _artist(dz, artist_part)
+            if artist is None:
+                continue
+            want = _norm(core_title(title))
+            searches = await asyncio.gather(
+                dz.search_typed("track", title, 50),
+                dz.search_typed("track", f"{artist.get('name')} {title}", 25),
+            )
+            candidates: dict[str, dict[str, Any]] = {}
+            for t in [*(searches[1] or []), *(searches[0] or [])]:
+                if t.get("id") and _norm(core_title(t.get("title") or "")) == want:
+                    candidates.setdefault(str(t["id"]), t)
+            if not candidates:
+                continue
+            aid = str(artist["id"])
+            sem = asyncio.Semaphore(8)
+
+            async def check(t: dict[str, Any]) -> dict[str, Any] | None:
+                if str((t.get("artist") or {}).get("id")) == aid:
+                    return t
+                async with sem:
+                    detail = await dz.track(str(t["id"])) or {}
+                return {**t, **detail} if aid in _ids(detail.get("contributors")) else None
+
+            hits = [h for h in await asyncio.gather(*(check(t) for t in list(candidates.values())[:40])) if h]
+            if hits:
+                return artist, title, hits[:limit]
+    return None

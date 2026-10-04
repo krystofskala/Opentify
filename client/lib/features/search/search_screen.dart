@@ -449,6 +449,7 @@ class _AllResults extends ConsumerWidget {
           loading: const SkeletonCardRail(height: 190, cardWidth: 140),
           builder: (items) => _Rail(height: 190, width: 140, children: [for (final a in items) _ReleaseCard(item: a)]),
         ),
+        _VersionsSection(query: query),
         _WorksSection(query: query),
         _PlaylistsSection(query: query),
         _SoundcloudSection(query: query),
@@ -750,6 +751,46 @@ class _CollabSection extends ConsumerWidget {
               ],
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// "Tony Rice Salt Creek" -> další nahrávky té skladby, na kterých interpret
+/// hraje (i na cizích albech), pod běžnými výsledky. Z odpovědi spoluprací
+/// (`versions`); bez skladeb, které už jsou nahoře.
+class _VersionsSection extends ConsumerWidget {
+  const _VersionsSection({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final versions = ref.watch(collabSearchProvider(query)).valueOrNull?['versions'] as Map<String, dynamic>?;
+    if (versions == null) return const SizedBox.shrink();
+    final shownAbove = {
+      for (final i in ref.watch(searchSectionProvider((query: query, type: 'recording', limit: _previewLimit))).valueOrNull ??
+          const <SearchResultItem>[])
+        i.id,
+    }.take(5).toSet();
+    final recordings = [
+      for (final r in (versions['recordings'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        if (!shownAbove.contains(r['id'])) RecordingModel.fromJson(r),
+    ];
+    if (recordings.isEmpty) return const SizedBox.shrink();
+    final artist = versions['artistName'] as String? ?? '';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader('Další verze s $artist'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          child: Column(
+            children: [
+              for (final r in recordings)
+                TrackTile(recording: r, queueRecordings: recordings, sourceLabel: 'Verze s $artist'),
+            ],
+          ),
+        ),
       ],
     );
   }

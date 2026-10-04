@@ -1207,7 +1207,23 @@ class CatalogService:
         """Viz app/catalog/collabs.py -- výsledky převzaté do katalogu."""
         from app.catalog import collabs
 
-        empty: dict[str, Any] = {"artists": [], "recordings": [], "releases": []}
+        empty: dict[str, Any] = {"artists": [], "recordings": [], "releases": [], "versions": None}
+        try:
+            versions = await collabs.artist_versions(self._dz, query)
+        except Exception:  # noqa: BLE001
+            logger.exception("hledání verzí selhalo: %s", query)
+            versions = None
+        versions_out = None
+        if versions is not None:
+            v_artist, v_title, v_tracks = versions
+            recs = [r for r in (ingest_track_with_context(self._session, t) for t in v_tracks) if r is not None]
+            self._session.commit()
+            versions_out = {
+                "artistName": v_artist.get("name"),
+                "title": v_title,
+                "recordings": [self._to_recording_out(r).model_dump(by_alias=True) for r in recs],
+            }
+            empty = {**empty, "versions": versions_out}
         try:
             pair = await collabs.resolve_pair(self._dz, query)
             if pair is None:
@@ -1232,6 +1248,7 @@ class CatalogService:
             "artists": [self._to_artist_out(a).model_dump(by_alias=True) for a in artists if a is not None],
             "recordings": [self._to_recording_out(r).model_dump(by_alias=True) for r in recordings],
             "releases": [self._to_release_out(r).model_dump(by_alias=True) for r in releases],
+            "versions": versions_out,
         }
 
     async def get_release_credits(self, release_id: str) -> dict[str, Any] | None:
