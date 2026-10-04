@@ -152,6 +152,7 @@ class _ListenLaterScreenState extends ConsumerState<ListenLaterScreen> {
                       badge: item.fromShazam ? const OpenShazamBadge() : null,
                       selectionMode: _collection.selecting,
                       selected: _collection.isSelected(r.id),
+                      selectionNumber: _collection.orderOf(r.id),
                       onSelectedChanged: (value) => _collection.toggle(r.id, value),
                       extraMenuActions: [
                         TrackMenuAction(

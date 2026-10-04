@@ -429,6 +429,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                         sourceLabel: _librarySourceLabel,
                         selectionMode: _collection.selecting,
                         selected: _collection.isSelected(r.id),
+                        selectionNumber: _collection.orderOf(r.id),
                         onSelectedChanged: (value) => _collection.toggle(r.id, value),
                       );
                     },

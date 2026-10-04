@@ -166,6 +166,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
                                   sourceLabel: _title,
                                   selectionMode: _collection.selecting,
                                   selected: _collection.isSelected(r.id),
+                                  selectionNumber: _collection.orderOf(r.id),
                                   onSelectedChanged: (value) => _collection.toggle(r.id, value),
                                 ),
                               ),

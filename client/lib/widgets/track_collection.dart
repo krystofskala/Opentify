@@ -62,6 +62,30 @@ class TrackCollectionController extends ChangeNotifier {
 
   bool isSelected(String id) => _selected.contains(id);
 
+  // `_selected` je LinkedHashSet -- drží pořadí, v jakém se skladby
+  // označovaly. Hromadné akce (Do playlistu, Do fronty) jdou v tomhle
+  // pořadí, ne v pořadí seznamu (přání: vytvořit playlist klepáním).
+  List<String>? _orderCache;
+
+  /// Pořadí ve výběru (1 = první označená), `null` = nevybraná.
+  int? orderOf(String id) {
+    if (!_selected.contains(id)) return null;
+    final order = _orderCache ??= _selected.toList();
+    return order.indexOf(id) + 1;
+  }
+
+  /// Vybrané skladby v pořadí označení.
+  List<RecordingModel> selectedInOrder(List<RecordingModel> all) {
+    final byId = {for (final r in all) r.id: r};
+    return [for (final id in _selected) if (byId[id] case final r?) r];
+  }
+
+  @override
+  void notifyListeners() {
+    _orderCache = null;
+    super.notifyListeners();
+  }
+
   void toggle(String id, bool value) {
     value ? _selected.add(id) : _selected.remove(id);
     notifyListeners();
@@ -208,8 +232,8 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
     super.dispose();
   }
 
-  List<RecordingModel> get _selectedTracks =>
-      widget.allTracks.where((r) => widget.controller.isSelected(r.id)).toList();
+  // V pořadí, v jakém se označovaly (playlist/fronta v tomhle pořadí).
+  List<RecordingModel> get _selectedTracks => widget.controller.selectedInOrder(widget.allTracks);
 
   void _addSelectedToQueue() {
     final tracks = _selectedTracks;

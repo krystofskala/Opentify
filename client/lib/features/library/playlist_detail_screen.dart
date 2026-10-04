@@ -233,6 +233,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           sourceLabel: detail.title,
           selectionMode: _collection.selecting,
           selected: _collection.isSelected(r.id),
+          selectionNumber: _collection.orderOf(r.id),
           onSelectedChanged: (value) => _collection.toggle(r.id, value),
           extraMenuActions: [
             if (!detail.isReadOnly)

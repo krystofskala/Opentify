@@ -353,6 +353,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                   sourceLabel: release.title,
                   selectionMode: _collection.selecting,
                   selected: _collection.isSelected(r.id),
+                  selectionNumber: _collection.orderOf(r.id),
                   onSelectedChanged: (value) => _collection.toggle(r.id, value),
                 );
                 if (r.id != widget.highlightTrackId) return tile;

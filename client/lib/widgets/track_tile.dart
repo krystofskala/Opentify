@@ -55,6 +55,7 @@ class TrackTile extends ConsumerWidget {
     this.animationIndex,
     this.selectionMode = false,
     this.selected = false,
+    this.selectionNumber,
     this.onSelectedChanged,
     this.extraMenuActions = const [],
     this.badge,
@@ -92,6 +93,10 @@ class TrackTile extends ConsumerWidget {
   /// přehrání, vlevo zaškrtávátko, vpravo nic.
   final bool selectionMode;
   final bool selected;
+
+  /// Pořadí ve výběru (1, 2, 3...) -- místo fajfky v kroužku; v tomhle
+  /// pořadí jdou vybrané skladby do playlistu.
+  final int? selectionNumber;
   final ValueChanged<bool>? onSelectedChanged;
 
   /// Akce navíc do sdíleného kontextového menu (např. "Odebrat z playlistu").
@@ -192,6 +197,7 @@ class TrackTile extends ConsumerWidget {
           onArtistTap: selectionMode ? null : artistTap,
           selectionMode: selectionMode,
           selected: selected,
+          selectionNumber: selectionNumber,
           badge: badge,
         ),
       TrackTileLayout.card => _CardTile(
@@ -269,6 +275,7 @@ class _RowTile extends StatefulWidget {
     required this.onArtistTap,
     required this.selectionMode,
     required this.selected,
+    this.selectionNumber,
   });
 
   final RecordingModel recording;
@@ -289,6 +296,7 @@ class _RowTile extends StatefulWidget {
   final VoidCallback? onArtistTap;
   final bool selectionMode;
   final bool selected;
+  final int? selectionNumber;
 
   @override
   State<_RowTile> createState() => _RowTileState();
@@ -328,7 +336,20 @@ class _RowTileState extends State<_RowTile> {
                 width: 1.5,
               ),
             ),
-            child: w.selected ? Icon(Symbols.check_rounded, size: 16, weight: 600, color: theme.colorScheme.onPrimary) : null,
+            child: !w.selected
+                ? null
+                : w.selectionNumber != null
+                    ? Center(
+                        child: Text(
+                          '${w.selectionNumber}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onPrimary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: w.selectionNumber! > 99 ? 8 : (w.selectionNumber! > 9 ? 10 : 12),
+                          ),
+                        ),
+                      )
+                    : Icon(Symbols.check_rounded, size: 16, weight: 600, color: theme.colorScheme.onPrimary),
           ),
         ),
       );
