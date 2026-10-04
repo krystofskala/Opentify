@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -48,12 +49,13 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMixin {
   // 0 = rozbalený tab bar, 1 = smrštěný do kapsle.
-  late final AnimationController _collapse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 280),
-    reverseDuration: const Duration(milliseconds: 240),
-  );
-  late final Animation<double> _t = CurvedAnimation(parent: _collapse, curve: Curves.easeOutCubic);
+  // Pružina místo pevné křivky (jako Apple Music): přechod navazuje na
+  // rozjetý pohyb a při změně směru uprostřed necukne.
+  late final AnimationController _collapse = AnimationController.unbounded(vsync: this);
+  Animation<double> get _t => _collapse;
+  static final SpringDescription _morph = SpringDescription.withDampingRatio(mass: 1, stiffness: 320, ratio: 0.9);
+  // Výška mini přehrávače (kam se kapsle ve smrštěném stavu zarovná).
+  final GlobalKey _playerKey = GlobalKey();
   bool _collapsed = false;
   double _travel = 0; // kolik px se posunulo jedním směrem
   GoRouterDelegate? _delegate;
@@ -109,7 +111,7 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
     if (MediaQuery.disableAnimationsOf(context)) {
       _collapse.value = collapsed ? 1 : 0;
     } else {
-      collapsed ? _collapse.forward() : _collapse.reverse();
+      _collapse.animateWith(SpringSimulation(_morph, _collapse.value, collapsed ? 1 : 0, _collapse.velocity));
     }
   }
 
@@ -202,7 +204,7 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
               constraints: const BoxConstraints(maxWidth: kFloatingBarMaxWidth),
               child: AnimatedBuilder(
                 animation: _t,
-                builder: (context, _) => _bars(context, _t.value),
+                builder: (context, _) => _bars(context, _t.value.clamp(0.0, 1.0)),
               ),
             ),
           ),
@@ -211,87 +213,187 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
     );
   }
 
+  /// Mini přehrávač + tab bar. Smršťování je "morf" jako v Apple Music:
+  /// skleněná kapsle lišty se plynule zúží a posune do kulatého tlačítka
+  /// vlevo od přehrávače (obsah lišty rychle zmizí, ikona záložky se objeví
+  /// až na konci), přehrávač mezitím sjede do řádku lišty.
   Widget _bars(BuildContext context, double t) {
     const pill = GlassTokens.tabBarHeight;
     const gap = 8.0;
+    const margin = GlassTokens.floatingMargin;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final bottom = safeBottom + GlassTokens.floatingBottomGap;
     final shell = widget.navigationShell;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Stack(
+    // Obsah lišty zmizí v první třetině, ikona kapsle se objeví v poslední.
+    final barOpacity = (1 - t / 0.35).clamp(0.0, 1.0);
+    final pillOpacity = ((t - 0.75) / 0.25).clamp(0.0, 1.0);
+    // Tah z kapsle: lišta hned viditelná (kapka pod prstem), bez morfu.
+    final morphing = !_pillDragging && t > 0.001 && t < 0.999;
+    final barShown = _pillDragging ? (1 - t).clamp(0.0, 1.0) : (morphing ? 0.0 : barOpacity);
+    final playerHeight = (_playerKey.currentContext?.size?.height ?? 0);
+    final rowHeight = playerHeight > pill + 8 ? playerHeight : pill + 8;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        // Kapsle: z celé lišty (dole) do kulatého tlačítka (střed řádku
+        // přehrávače ve smrštěném stavu) -- souřadnice od spodního okraje.
+        final fromBottom = bottom;
+        final toBottom = bottom + 8 + (rowHeight - 8 - pill) / 2;
+        final capsuleBottom = fromBottom + (toBottom - fromBottom) * t;
+        final capsuleWidth = (width - 2 * margin) + (pill - (width - 2 * margin)) * t;
+        return Stack(
+          clipBehavior: Clip.none,
           children: [
-            // Mini přehrávač; ve smrštěném stavu uhne kapsli záložky.
-            ConstrainedBox(
-              constraints: BoxConstraints(minHeight: t * (pill + 8)),
-              child: Padding(
-                padding: EdgeInsets.only(left: t * (pill + gap)),
-                // Vlastní měkký stín i u mini přehrávače -- průhledné sklo se
-                // jinak na tmavé stránce slévalo s okolím (živě nahlášeno).
-                child: MediaQuery.removePadding(
-                  context: context,
-                  removeBottom: true,
-                  // Mini přehrávač při prvním puštění vyjede, po zavření
-                  // zajede -- dřív se tab bar skokem posunul.
-                  child: AnimatedSize(
-                    duration: Motion.sheetIn.duration,
-                    curve: Motion.sheetIn,
-                    alignment: Alignment.bottomCenter,
-                    child: const PlayerBar(),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Stack(
+                  children: [
+                    // Mini přehrávač; ve smrštěném stavu uhne kapsli záložky.
+                    ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: t * (pill + 8)),
+                      child: Padding(
+                        padding: EdgeInsets.only(left: t * (pill + gap)),
+                        // Vlastní měkký stín i u mini přehrávače -- průhledné sklo se
+                        // jinak na tmavé stránce slévalo s okolím (živě nahlášeno).
+                        child: MediaQuery.removePadding(
+                          context: context,
+                          removeBottom: true,
+                          // Mini přehrávač při prvním puštění vyjede, po zavření
+                          // zajede -- dřív se tab bar skokem posunul.
+                          child: AnimatedSize(
+                            key: _playerKey,
+                            duration: Motion.sheetIn.duration,
+                            curve: Motion.sheetIn,
+                            alignment: Alignment.bottomCenter,
+                            child: const PlayerBar(),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Při tahu z kapsle zůstává ve stromu (neviditelná), jinak by
+                    // gesto skončilo s jejím zmizením.
+                    if (t > 0.5 || _pillDragging)
+                      Positioned(
+                        left: margin,
+                        top: 0,
+                        bottom: 8,
+                        width: pill,
+                        child: Center(
+                          child: Opacity(
+                            opacity: morphing ? 0 : pillOpacity,
+                            child: _TabPill(
+                              item: HomeShell.tabs[shell.currentIndex],
+                              onTap: () => _setCollapsed(false),
+                              onDragStart: _pillDragStart,
+                              onDragUpdate: _pillDragUpdate,
+                              onDragEnd: _pillDragEnd,
+                              onDragCancel: _pillDragCancel,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                // Lišta: výška se smršťuje (přehrávač sjede dolů), obsah
+                // zmizí hned na začátku -- kapsli kreslí morf nad tím.
+                ClipRect(
+                  clipBehavior: t > 0 ? Clip.hardEdge : Clip.none,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: 1 - t,
+                    child: IgnorePointer(
+                      ignoring: t > 0.5 && !_pillDragging,
+                      child: Opacity(
+                        opacity: barShown,
+                        child: GlassTabBar(
+                          key: _tabBar,
+                          items: HomeShell.tabs,
+                          selectedIndex: shell.currentIndex,
+                          onSelected: _select,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                // Smrštěno: přehrávač sedí tam, kde byl spodní okraj tab baru.
+                SizedBox(height: t * bottom),
+              ],
             ),
-            // Při tahu z kapsle zůstává ve stromu (neviditelná), jinak by
-            // gesto skončilo s jejím zmizením.
-            if (t > 0 || _pillDragging)
+            // Morf: jedna skleněná kapsle během přechodu (ne dvě prolínající
+            // se skla). Obsah lišty v ní dozní, ikona záložky se objeví.
+            if (morphing)
               Positioned(
-                left: GlassTokens.floatingMargin,
-                top: 0,
-                bottom: 8,
-                width: pill,
-                child: Center(
-                  child: Opacity(
-                    opacity: t,
-                    child: Transform.scale(
-                      scale: 0.7 + 0.3 * t,
-                      child: _TabPill(
-                        item: HomeShell.tabs[shell.currentIndex],
-                        onTap: t > 0.5 ? () => _setCollapsed(false) : null,
-                        onDragStart: _pillDragStart,
-                        onDragUpdate: _pillDragUpdate,
-                        onDragEnd: _pillDragEnd,
-                        onDragCancel: _pillDragCancel,
-                      ),
+                left: margin,
+                bottom: capsuleBottom,
+                width: capsuleWidth,
+                height: pill,
+                child: IgnorePointer(
+                  child: GlassContainer(
+                    borderRadius: const BorderRadius.all(Radius.circular(pill / 2)),
+                    shadow: true,
+                    rim: true,
+                    liquid: true,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (barOpacity > 0)
+                          ClipRect(
+                            child: OverflowBox(
+                              alignment: Alignment.centerLeft,
+                              maxWidth: width - 2 * margin,
+                              minWidth: width - 2 * margin,
+                              child: Opacity(
+                                opacity: barOpacity,
+                                child: _TabRowGhost(selected: shell.currentIndex),
+                              ),
+                            ),
+                          ),
+                        if (pillOpacity > 0)
+                          Center(
+                            child: Opacity(
+                              opacity: pillOpacity,
+                              child: Icon(
+                                HomeShell.tabs[shell.currentIndex].icon,
+                                size: 26,
+                                fill: 1,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
               ),
           ],
-        ),
-        // Tab bar zajede dolů a zeslábne. Ořez jen během smršťování --
-        // zvednutá kapka výběru smí přesahovat nad lištu (na PC useknutá).
-        ClipRect(
-          clipBehavior: t > 0 ? Clip.hardEdge : Clip.none,
-          child: Align(
-            alignment: Alignment.topCenter,
-            heightFactor: 1 - t,
-            child: IgnorePointer(
-              ignoring: t > 0.5,
-              child: Opacity(
-                opacity: (1 - t * 1.4).clamp(0.0, 1.0),
-                child: GlassTabBar(
-                  key: _tabBar,
-                  items: HomeShell.tabs,
-                  selectedIndex: shell.currentIndex,
-                  onSelected: _select,
-                ),
-              ),
+        );
+      },
+    );
+  }
+}
+
+/// Ikony tabů bez skla a gest -- jen obsah, který v morfující kapsli dozní.
+class _TabRowGhost extends StatelessWidget {
+  const _TabRowGhost({required this.selected});
+
+  final int selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        for (var i = 0; i < HomeShell.tabs.length; i++)
+          Expanded(
+            child: Icon(
+              HomeShell.tabs[i].icon,
+              size: 24,
+              fill: i == selected ? 1 : 0,
+              color: i == selected ? scheme.primary : scheme.onSurfaceVariant,
             ),
           ),
-        ),
-        // Smrštěno: přehrávač sedí tam, kde byl spodní okraj tab baru.
-        SizedBox(height: t * (safeBottom + GlassTokens.floatingBottomGap)),
       ],
     );
   }
