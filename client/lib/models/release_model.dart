@@ -14,7 +14,11 @@ class ReleaseModel {
     this.imported = false,
     this.youtubeOnly = false,
     this.credits = const [],
+    this.genres = const [],
   });
+
+  /// Žánry alba (MusicBrainz), nejsilnější první.
+  final List<String> genres;
 
   /// Spolupráce (víc interpretů alba): všichni, `artistId` je jen první.
   final List<({String id, String name})> credits;
@@ -55,6 +59,7 @@ class ReleaseModel {
         notes: json['notes'] as String?,
         imported: json['imported'] as bool? ?? false,
         youtubeOnly: json['youtubeOnly'] as bool? ?? false,
+        genres: (json['genres'] as List<dynamic>? ?? const []).cast<String>(),
         credits: [
           for (final c in (json['credits'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
             (id: c['id'] as String, name: c['name'] as String),

@@ -147,6 +147,19 @@ class MusicBrainzClient:
 
         return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
 
+    async def get_release_credits(self, release_id: str) -> dict[str, Any]:
+        """Konkrétní edice se vztahy interpretů k albu, nahrávkám a dílům
+        (obsazení: nástroje, zpěv, produkce, skladatelé)."""
+        cache_key = f"mb:release-credits:{release_id}"
+
+        async def fetch() -> dict[str, Any]:
+            return await self._get(
+                f"/release/{release_id}",
+                {"inc": "artist-rels+recordings+recording-level-rels+work-rels+work-level-rels"},
+            )
+
+        return await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

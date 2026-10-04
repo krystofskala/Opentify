@@ -32,6 +32,12 @@ final releaseTracksProvider = FutureProvider.autoDispose.family<List<RecordingMo
 
 /// Jméno interpreta pro hlavičku (Release má jen `artistId`).
 /// Skladby z jiných edic / pásek alba (`/other-editions`), po skupinách.
+/// Obsazení alba (`/catalog/releases/{id}/credits`): hudebníci, autoři,
+/// produkce -- kdo na čem hrál, z MusicBrainz.
+final releaseCreditsProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, releaseId) {
+  return ref.watch(apiClientProvider).getJson('/catalog/releases/$releaseId/credits');
+});
+
 final releaseOtherEditionsProvider =
     FutureProvider.autoDispose.family<List<({String label, List<RecordingModel> tracks})>, String>((ref, releaseId) async {
   final json = await ref.watch(apiClientProvider).getJsonList('/catalog/releases/$releaseId/other-editions');
@@ -284,6 +290,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
             ),
             ...detailContentSlivers(context, [
               if (release.notes != null) SliverToBoxAdapter(child: HeroTeaser(text: release.notes!)),
+              if (release.genres.isNotEmpty) SliverToBoxAdapter(child: _GenreChips(genres: release.genres)),
               ...tracks.when(
                 data: (recordings) => recordings.isEmpty
                     ? [
@@ -371,6 +378,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
           );
         },
       ),
+      SliverToBoxAdapter(child: _Credits(releaseId: release.id)),
       SliverToBoxAdapter(
         child: _OtherEditions(
           releaseId: release.id,
@@ -458,6 +466,120 @@ class _CreditLink extends ConsumerWidget {
       avatarUrl: artist?.coverImageUrl,
       icon: Symbols.person_rounded,
       onTap: () => context.push('/artists/$id'),
+    );
+  }
+}
+
+/// Žánry alba -- klepnutí otevře stránku stylu.
+class _GenreChips extends StatelessWidget {
+  const _GenreChips({required this.genres});
+
+  final List<String> genres;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+      child: Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          for (final g in genres.take(5))
+            ActionChip(
+              label: Text(g),
+              onPressed: () => context.push('/browse/tag/${Uri.encodeComponent(g)}'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Obsazení: kdo na čem hrál (a autoři, produkce). Jen když ho MusicBrainz
+/// má; prvních pár hudebníků hned, zbytek po rozbalení.
+class _Credits extends ConsumerStatefulWidget {
+  const _Credits({required this.releaseId});
+
+  final String releaseId;
+
+  @override
+  ConsumerState<_Credits> createState() => _CreditsState();
+}
+
+class _CreditsState extends ConsumerState<_Credits> {
+  bool _all = false;
+
+  static const _groups = [('musicians', 'Hudebníci'), ('writers', 'Autoři'), ('production', 'Produkce')];
+
+  @override
+  Widget build(BuildContext context) {
+    final data = ref.watch(releaseCreditsProvider(widget.releaseId)).valueOrNull;
+    if (data == null) return const SizedBox.shrink();
+    final total = (data['tracks'] as num?)?.toInt() ?? 0;
+    final groups = [
+      for (final (key, title) in _groups)
+        (title, (data[key] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>()),
+    ].where((g) => g.$2.isNotEmpty).toList();
+    if (groups.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final count = groups.fold<int>(0, (n, g) => n + g.$2.length);
+    // Sbaleně: jen hudebníci (nebo první skupina), max 6 lidí.
+    final shown = _all ? groups : [(groups.first.$1, groups.first.$2.take(6).toList())];
+
+    String roles(Map<String, dynamic> p) => [
+          for (final r in (p['roles'] as List<dynamic>).cast<Map<String, dynamic>>())
+            // "· 7 skladeb" jen když nehrál na celém albu.
+            (r['tracks'] as num) < total && total > 1
+                ? '${r['label']} (${r['tracks']})'
+                : r['label'] as String,
+        ].join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.lg, AppSpacing.md, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Obsazení', style: theme.textTheme.titleMedium),
+          Text('Kdo na albu hrál a kdo ho vytvořil (MusicBrainz). Číslo = počet skladeb.', style: muted),
+          for (final (title, people) in shown) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(title, style: theme.textTheme.titleSmall),
+            for (final p in people)
+              InkWell(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                onTap: p['artistId'] == null ? null : () => context.push('/artists/${p['artistId']}'),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          p['name'] as String,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: p['artistId'] == null ? null : theme.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(flex: 3, child: Text(roles(p), style: muted)),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+          if (!_all && count > shown.first.$2.length)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => setState(() => _all = true),
+                child: Text('Zobrazit celé obsazení ($count)'),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

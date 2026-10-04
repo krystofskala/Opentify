@@ -416,6 +416,19 @@ def same_song_key(title: str | None) -> str:
     return key[: -len("albumversion")] if key.endswith("albumversion") and len(key) > len("albumversion") else key
 
 
+@catalog_router.get("/releases/{release_id}/credits")
+async def get_release_credits(
+    release_id: str,
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    """Obsazení alba: hudebníci (nástroj/zpěv), autoři, produkce -- z MB."""
+    out = await service.get_release_credits(release_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="album nenalezen")
+    return out
+
+
 @catalog_router.get("/releases/{release_id}/other-editions")
 async def get_release_other_editions(
     release_id: str,

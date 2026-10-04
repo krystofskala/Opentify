@@ -345,6 +345,7 @@ class CatalogService:
             imported=(release.external_refs or {}).get("source") in ("youtube", "soundcloud", "manual"),
             youtube_only=(release.external_refs or {}).get("source") in ("youtube", "soundcloud"),
             credits=(release.external_refs or {}).get("credits"),
+            genres=release.genres or [],
         )
 
     def _to_recording_out(self, recording: Recording) -> RecordingOut:
@@ -1202,6 +1203,36 @@ class CatalogService:
         await self._enrich_release_date(release)
         return self._to_release_out(release)
 
+    async def get_release_credits(self, release_id: str) -> dict[str, Any] | None:
+        """Obsazení alba (viz app/catalog/credits.py) z kanonické edice MB.
+        Vlastní / importované album a album jen z Deezeru: prázdné."""
+        from app.catalog.credits import album_credits
+
+        release = self._session.get(Release, release_id)
+        if release is None:
+            return None
+        empty = {"musicians": [], "writers": [], "production": [], "tracks": 0}
+        if not release.mbid or is_own_id(release.mbid):
+            return empty
+        try:
+            data = await self._mb.get_release_group_tracks(release.mbid)
+            editions = [r for r in data.get("releases") or [] if any(m.get("tracks") for m in r.get("media") or [])]
+            if not editions:
+                return empty
+            full = await self._mb.get_release_credits(_canonical_edition(editions)["id"])
+        except MusicBrainzError:
+            return empty
+        out = album_credits(full)
+        # Lidé, které máme v katalogu (MBID) -- klepnutím na jejich stránku.
+        mbids = [p["mbid"] for g in ("musicians", "writers", "production") for p in out[g] if p.get("mbid")]
+        known = {
+            a.mbid: a.id for a in self._session.exec(select(Artist).where(Artist.mbid.in_(mbids))).all()  # type: ignore[attr-defined]
+        } if mbids else {}
+        for g in ("musicians", "writers", "production"):
+            for p in out[g]:
+                p["artistId"] = known.get(p.get("mbid"))
+        return out
+
     async def get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
         # GET nesmí spadnout na 500 jen proto, že zápis drží worker/nástroj
         # (load test: "database is locked") -- zápisy jsou jen doplňky
@@ -1620,7 +1651,9 @@ class CatalogService:
             data = await self._mb.get_release_group(release.mbid)
         except MusicBrainzError:
             return
-        genres = [g["name"] for g in data.get("genres", []) if g.get("name")]
+        # Nejsilnější první (MB je vrací abecedně, s počtem hlasů).
+        ranked = sorted((g for g in data.get("genres", []) if g.get("name")), key=lambda g: -(g.get("count") or 0))
+        genres = [g["name"] for g in ranked]
         if genres:
             release.genres = genres
             self._session.add(release)

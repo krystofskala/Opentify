@@ -55,6 +55,8 @@ class ReleaseOut(CamelModel):
     youtube_only: bool = False
     # Spolupráce: všichni interpreti [{id, name, join}] (join = " & ", " feat. "...).
     credits: list[dict] | None = None
+    # Žánry alba (MusicBrainz), nejsilnější první.
+    genres: list[str] = []
 
 
 class RecordingOut(CamelModel):
