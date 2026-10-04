@@ -99,6 +99,16 @@ class Taste:
     playlist_weight: dict[str, float] = field(default_factory=dict)
     # Přeskočené dvakrát po sobě (SkipStreak >= 2).
     skipped: set[str] = field(default_factory=set)
+    # Nový model (TASTE_MODEL=v2, app/home/activation.py): celá historie ve
+    # třech profilech. None = původní model (posledních 365 dní).
+    activation: Any = None
+
+    def track_score(self, recording_id: str) -> float:
+        """Jak moc skladba "žije" teď (v2): střední profil + půlka dlouhého."""
+        act = self.activation
+        if act is None:
+            return float(self.listen_counts.get(recording_id, 0))
+        return act.medium.get(recording_id, 0.0) + 0.5 * act.long.get(recording_id, 0.0)
 
     @property
     def known(self) -> set[str]:
@@ -107,6 +117,14 @@ class Taste:
 
 LIBRARY_ARTIST_CAP = 8.0
 PLAYLIST_ARTIST_CAP = 12.0
+
+
+def taste_v2() -> bool:
+    """Nový model vkusu (celá historie). Přepínač, ať jde vrátit jedním
+    řádkem v .env: TASTE_MODEL=v2 / v1."""
+    import os
+
+    return os.environ.get("TASTE_MODEL", "v1").lower() == "v2"
 
 
 def load_taste(user_id: str) -> Taste:
@@ -145,9 +163,14 @@ def load_taste(user_id: str) -> Taste:
             )
         taste.library = added & available
         # Dvakrát po sobě přeskočené -- do mixů ne (jednou = jen nálada).
+        # Po 90 dnech se přeskočení zapomene (vkus se mění, "teď ne" není navždy).
         taste.skipped = set(
             session.exec(
-                select(SkipStreak.recording_id).where(SkipStreak.user_id == user_id, SkipStreak.streak >= 2)
+                select(SkipStreak.recording_id).where(
+                    SkipStreak.user_id == user_id,
+                    SkipStreak.streak >= 2,
+                    SkipStreak.updated_at >= (now - timedelta(days=90)).replace(tzinfo=None),
+                )
             ).all()
         )
         from app.models import Playlist, PlaylistKind, PlaylistMember
@@ -179,6 +202,14 @@ def load_taste(user_id: str) -> Taste:
                 taste.last_played[listen.recording_id] = played
             if now - played <= timedelta(days=30):
                 taste.recent_listens[listen.recording_id] += 1
+        if taste_v2():
+            from app.home import activation as av
+
+            # Celá historie: "známé" a "naposledy" ze všech poslechů, ne z roku.
+            act = av.compute(user_id, now=now)
+            taste.activation = act
+            taste.listen_counts = Counter(act.total)
+            taste.last_played = dict(act.last)
 
         # Nelíbení interpreti nesmí být semínkem mixů ani jejich obalem.
         from app.library.dislikes import disliked_artist_ids
@@ -197,15 +228,17 @@ def load_taste(user_id: str) -> Taste:
         liked_set = set(taste.liked)
         library_count: Counter = Counter()
         playlist_sum: Counter = Counter()
+        v2 = taste.activation is not None
         for recording_id, artist_id in taste.artist_of.items():
             weight = 0.0
             if recording_id in liked_set:
                 weight += 3.0
-            for _ in range(taste.listen_counts.get(recording_id, 0)):
-                weight += 1.0
-            if recording_id in taste.last_played:
-                days = (now - taste.last_played[recording_id]).days
-                weight += 2.0 * math.exp(-days / 30)
+            if not v2:
+                for _ in range(taste.listen_counts.get(recording_id, 0)):
+                    weight += 1.0
+                if recording_id in taste.last_played:
+                    days = (now - taste.last_played[recording_id]).days
+                    weight += 2.0 * math.exp(-days / 30)
             playlist_sum[artist_id] += 1.5 * taste.playlist_weight.get(recording_id, 0.0)
             if recording_id in taste.library:
                 library_count[artist_id] += 1
@@ -219,6 +252,16 @@ def load_taste(user_id: str) -> Taste:
         # je jeden signál "mám ho rád", ne padesát poslechů.
         for artist_id, w in playlist_sum.items():
             taste.artist_weight[artist_id] += min(w, PLAYLIST_ARTIST_CAP)
+        if v2:
+            # Poslechy: podíl interpreta ve smíchaných profilech (celá historie
+            # + měsíce + teď) × počet poslechů za rok, ať je to ve stejném
+            # měřítku jako lajky (+3) a stropy knihovny/playlistů.
+            from app.home import activation as av
+
+            scale = max(50.0, float(len(listens)))
+            for artist_id, share in taste.activation.blend(av.ARTIST_BLEND).items():
+                if artist_id not in banned:
+                    taste.artist_weight[artist_id] += share * scale
         # Dvakrát po sobě přeskočené: interpret trochu ztratí.
         for recording_id in taste.skipped:
             recording = session.get(Recording, recording_id)
@@ -349,6 +392,41 @@ async def build_clusters(taste: Taste) -> list[Cluster]:
 def _is_junk(track: dict[str, Any]) -> bool:
     text = f"{track.get('title', '')} {(track.get('artist') or {}).get('name', '')}".lower()
     return any(marker in text for marker in _JUNK)
+
+
+def _drop_heard(taste: Taste, recording_ids: list[str]) -> list[str]:
+    from app.catalog.availability import recording_artist_name
+    from app.home.activation import track_key
+
+    out = []
+    with Session(engine) as session:
+        for rid in recording_ids:
+            rec = session.get(Recording, rid)
+            if rec is None:
+                continue
+            if track_key(recording_artist_name(session, rec) or "", rec.title or "") in taste.activation.heard_keys:
+                continue
+            out.append(rid)
+    return out
+
+
+def _weighted_order(items: list[str], weight, rng: random.Random, sharpen: float = 2.0, floor: float = 0.03) -> list[str]:
+    """Vážené pořadí bez opakování (Efraimidis–Spirakis: klíč u^(1/w)).
+
+    `sharpen`: váha na druhou -- jinak dlouhý ocas (tisíce jednou puštěných
+    skladeb) v součtu přebije pár oblíbených. Položky pod `floor` × max jdou
+    až za ostatní (náhodně), aby se vůbec dostaly jen při nedostatku."""
+    weights = {item: max(float(weight(item)), 0.0) for item in items}
+    top = max(weights.values(), default=0.0)
+    keyed, tail = [], []
+    for item, w in weights.items():
+        if top > 0 and w >= floor * top:
+            keyed.append((rng.random() ** (1.0 / max((w / top) ** sharpen, 1e-9)), item))
+        else:
+            tail.append(item)
+    keyed.sort(reverse=True)
+    rng.shuffle(tail)
+    return [item for _k, item in keyed] + tail
 
 
 def _cap_per_artist(recording_ids: list[str], artist_of: dict[str, str], cap: int) -> list[str]:
@@ -489,7 +567,13 @@ async def build_daily_mixes() -> int:
         cluster_artists = set(cluster.artists)
         preferred = [r for r in liked_or_played if taste.artist_of.get(r) in cluster_artists]
         fallback = [r for r in taste.library if taste.artist_of.get(r) in cluster_artists and r not in liked_or_played]
-        rng.shuffle(preferred)
+        if taste.activation is not None:
+            # v2: známé podle toho, jak moc teď "žijí" (vážené losování --
+            # oblíbené častěji, ale každý den jinak; jednou puštěné z 2014
+            # skoro nikdy). Lajk bez poslechu dostane malou základní váhu.
+            preferred = _weighted_order(preferred, lambda r: taste.track_score(r) + (0.05 if r in set(taste.liked) else 0.0), rng)
+        else:
+            rng.shuffle(preferred)
         rng.shuffle(fallback)
         familiar_target = round(DAILY_MIX_SIZE * FAMILIAR_SHARE)
         familiar = _cap_per_artist(preferred + fallback, taste.artist_of, 5)[:familiar_target]
@@ -609,6 +693,10 @@ async def build_discover_weekly() -> int:
             continue
         top = [t for t in top if not _is_junk(t)]
         ids = [r for r in await asyncio.to_thread(g._ingest_tracks, top) if r not in exclude and r not in picked]
+        if taste.activation is not None:
+            # Objevy = opravdu neslyšené: i když tutéž skladbu zná import pod
+            # jiným id (Spotify historie, jiné vydání).
+            ids = await asyncio.to_thread(_drop_heard, taste, ids)
         picked.extend(ids[: 2 if len(ranked) < 20 else 1])
         await asyncio.sleep(0.05)
     if len(picked) < 15:
@@ -655,18 +743,26 @@ async def build_throwback() -> int:
     day = _day_key()
     taste = await asyncio.to_thread(load_taste, g.home_user())
     now = utcnow()
-    candidates = [
-        r
-        for r in dict.fromkeys(list(taste.liked) + list(taste.listen_counts))
-        if r not in taste.last_played or now - taste.last_played[r] >= timedelta(days=90)
-    ]
-    # Přednost mají skladby, které jsi dřív opravdu hrál (mají historii).
-    played_before = [r for r in candidates if r in taste.listen_counts]
-    rest = [r for r in candidates if r not in taste.listen_counts]
     rng = random.Random(f"throwback:{day}")
-    rng.shuffle(played_before)
-    rng.shuffle(rest)
-    ids = _cap_per_artist(played_before + rest, taste.artist_of, 2)[:30]
+    if taste.activation is not None:
+        # v2: "bývalé lásky" -- skladby, které jsi kdysi opravdu hrál hodně
+        # (≥ 4× za dva měsíce), teď ne; ne cokoli jednou puštěného. Z nejsilnějších
+        # 150 každý den jiný výběr.
+        loves = [r for r in taste.activation.former_loves() if r in taste.artist_of and r not in taste.skipped][:150]
+        ordered = _weighted_order(loves, lambda r: taste.activation.peak.get(r, 1), rng)
+        ids = _cap_per_artist(ordered, taste.artist_of, 2)[:30]
+    else:
+        candidates = [
+            r
+            for r in dict.fromkeys(list(taste.liked) + list(taste.listen_counts))
+            if r not in taste.last_played or now - taste.last_played[r] >= timedelta(days=90)
+        ]
+        # Přednost mají skladby, které jsi dřív opravdu hrál (mají historii).
+        played_before = [r for r in candidates if r in taste.listen_counts]
+        rest = [r for r in candidates if r not in taste.listen_counts]
+        rng.shuffle(played_before)
+        rng.shuffle(rest)
+        ids = _cap_per_artist(played_before + rest, taste.artist_of, 2)[:30]
     if len(ids) < 10:
         await asyncio.to_thread(_clear_playlists, g.home_user(), ["personal:throwback"])
         return 0

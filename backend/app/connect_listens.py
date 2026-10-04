@@ -46,6 +46,8 @@ class ConnectListens:
         # (profil, zařízení) -> rozehraná skladba
         self._sessions: dict[tuple[str, str], _Session] = {}
         self._sweeper: asyncio.Task | None = None
+        # (profil, zařízení) -> časy posledních přeskočení (proklikávání)
+        self._skips: dict[tuple[str, str], list[float]] = {}
 
     def update(self, user_id: str, device_key: str, state: dict[str, Any]) -> None:
         now = time.time()
@@ -110,12 +112,20 @@ class ConnectListens:
             reason = "next"
         else:
             reason = "stopped"
-        self._run(_play_event, s.user_id, key[1], s.recording_id, s.started_wall, s.played_s, s.duration_ms, reason, s.source)
+        # Proklikávání (3+ přeskočení během minuty) = hledání, co pustit, ne
+        # "tohle nechci" -- do přeskakování se nepočítá.
+        browsing = False
+        if skipped:
+            now = time.time()
+            recent = [t for t in self._skips.get(key, []) if now - t < 60] + [now]
+            self._skips[key] = recent
+            browsing = len(recent) >= 3
+        self._run(
+            _play_event, s.user_id, key[1], s.recording_id, s.started_wall, s.played_s, s.duration_ms, reason, s.source,
+            skipped and not browsing,
+        )
         threshold = min(duration / 2, 240) if duration else 240
         if s.played_s < threshold:
-            # Přeskočeno: do 30 s (a do čtvrtiny skladby) a hned jiná skladba.
-            if skipped:
-                self._run(_skip, s.user_id, s.recording_id)
             return
         played_at = datetime.fromtimestamp(s.started_wall, tz=timezone.utc)
         self._run(_record, s.user_id, s.recording_id, played_at, int(s.played_s * 1000), s.source)
@@ -158,10 +168,14 @@ def _record(user_id: str, recording_id: str, played_at: datetime, played_ms: int
 
 def _play_event(
     user_id: str, device_key: str, recording_id: str, started_wall: float, played_s: float,
-    duration_ms: int | None, reason: str, source: str | None,
+    duration_ms: int | None, reason: str, source: str | None, count_skip: bool = False,
 ) -> None:
     """Zapsat přehrání (PlayEvent). Fronta se pozná podle názvu: playlist
-    profilu se stejným názvem -> jeho id; generovaný (mix) = algoritmický."""
+    profilu se stejným názvem -> jeho id; generovaný (mix) = algoritmický.
+
+    `count_skip`: přeskočení se do SkipStreak počítá JEN v mixu / rádiu --
+    ve vlastním playlistu nebo albu je přeskočení výběr, ne "nelíbí se"."""
+    algorithmic = False
     from sqlmodel import Session, select
 
     from app.db import engine
@@ -178,6 +192,10 @@ def _play_event(
                         Playlist.owner_user_id.in_([user_id, GLOBAL_PLAYLIST_OWNER]),  # type: ignore[attr-defined]
                     )
                 ).first()
+            algorithmic = bool(
+                playlist
+                and playlist.kind in (PlaylistKind.PERSONAL_MIX, PlaylistKind.GENERATED_RECOMMENDATION, PlaylistKind.RADIO)
+            )
             session.add(
                 PlayEvent(
                     user_id=user_id,
@@ -189,17 +207,15 @@ def _play_event(
                     end_reason=reason,
                     source_label=source,
                     playlist_id=playlist.id if playlist else None,
-                    algorithmic=bool(
-                        playlist
-                        and playlist.kind
-                        in (PlaylistKind.PERSONAL_MIX, PlaylistKind.GENERATED_RECOMMENDATION, PlaylistKind.RADIO)
-                    ),
+                    algorithmic=algorithmic,
                     device_key=device_key,
                 )
             )
             session.commit()
     except Exception:  # noqa: BLE001 -- měření nesmí shodit Connect
         logger.exception("přehrání se nepodařilo zapsat")
+    if count_skip and algorithmic:
+        _skip(user_id, recording_id)
 
 
 def _skip(user_id: str, recording_id: str) -> None:

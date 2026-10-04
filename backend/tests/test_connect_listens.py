@@ -100,16 +100,22 @@ def test_play_events_record_how_each_play_ended(monkeypatch):
 def test_skip_twice_in_a_row_then_reset_by_listen(monkeypatch):
     from app.models import SkipStreak
 
+    from app.models import Playlist, PlaylistKind
+
     t = [3_000_000.0]
     monkeypatch.setattr(cl.time, "time", lambda: t[0])
     tr = cl.ConnectListens()
     x, other = _rec("X", 200_000), _rec("Y", 200_000)
+    mix = "Objevy týdne " + _RUN
+    with Session(engine) as s:
+        s.add(Playlist(title=mix, owner_user_id="cl-user3-" + _RUN, kind=PlaylistKind.PERSONAL_MIX))
+        s.commit()
 
-    def play_and_skip():
-        tr.update("cl-user3-" + _RUN, "dev", _state(x, 0))
+    def play_and_skip(label=mix):
+        tr.update("cl-user3-" + _RUN, "dev", {**_state(x, 0), "sourceLabel": label})
         t[0] += 5
-        tr.update("cl-user3-" + _RUN, "dev", _state(other, 0))  # po 5 s jiná skladba
-        t[0] += 5
+        tr.update("cl-user3-" + _RUN, "dev", {**_state(other, 0), "sourceLabel": label})  # po 5 s jiná
+        t[0] += 120  # žádné proklikávání
         tr.update("cl-user3-" + _RUN, "dev", {"nowPlaying": None, "isPlaying": False})
 
     def streak():
@@ -117,9 +123,31 @@ def test_skip_twice_in_a_row_then_reset_by_listen(monkeypatch):
             row = s.get(SkipStreak, ("cl-user3-" + _RUN, x))
             return row.streak if row else 0
 
+    play_and_skip("Moje vlastní album")  # mimo mix: výběr, ne "nelíbí se"
+    assert streak() == 0
     play_and_skip()
     assert streak() == 1
     play_and_skip()
     assert streak() == 2
     record_listen("cl-user3-" + _RUN, x, duration_played_ms=150_000)
     assert streak() == 0
+
+
+def test_rapid_skipping_is_browsing_not_dislike(monkeypatch):
+    from app.models import Playlist, PlaylistKind, SkipStreak
+
+    user = "cl-user5-" + _RUN
+    t = [5_000_000.0]
+    monkeypatch.setattr(cl.time, "time", lambda: t[0])
+    mix = "Denní mix 2 " + _RUN
+    with Session(engine) as s:
+        s.add(Playlist(title=mix, owner_user_id=user, kind=PlaylistKind.PERSONAL_MIX))
+        s.commit()
+    tr = cl.ConnectListens()
+    recs = [_rec(f"S{i}", 200_000) for i in range(5)]
+    for rid in recs:  # 4 skladby po 3 s
+        tr.update(user, "dev", {**_state(rid, 0), "sourceLabel": mix})
+        t[0] += 3
+    with Session(engine) as s:
+        counted = [s.get(SkipStreak, (user, r)) for r in recs]
+    assert sum(1 for c in counted if c) <= 2  # třetí a další už je proklikávání
