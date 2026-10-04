@@ -53,6 +53,33 @@ def _distance(a: Release, b: Release) -> int:
     return abs((da - db).days) if da and db else 10**6
 
 
+_TRIGGERS = {"remix", "remixes", "edit", "mix", "version", "deluxe", "remaster", "remastered", "bonus", "rooftop", "expanded", "anniversary"}
+_FILLER = {"feat", "ft", "featuring", "with", "from", "the", "a", "original", "motion", "picture", "soundtrack", "series", "hbo", "an"}
+
+
+def _bracket_words(title: str | None) -> set[str]:
+    import re
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", title or "").encode("ascii", "ignore").decode().lower()
+    words: set[str] = set()
+    for part in re.findall(r"\(.*?\)|\[.*?\]", text):
+        words |= {w for w in re.split(r"[^a-z0-9]+", part) if w and w not in _FILLER}
+    return words
+
+
+def same_edition(a: Release, b: Release) -> bool:
+    """Remix / edit / verze / deluxe v závorce musí sedět celé --
+    "(Monsieur Adi remix)" není "(Cedric Gervais Remix)" a "Video Games
+    (Joris Voorn edit)" není "Video Games" (album_key bere jen slovo "remix")."""
+    wa, wb = _bracket_words(a.title), _bracket_words(b.title)
+    if not (wa | wb) & _TRIGGERS:
+        return True
+    # Stejná slova verze a jedna závorka celá obsažená v druhé ("(Young
+    # Ruffian remix)" vs "(From Maleficent / Young Ruffian Remix)").
+    return wa & _TRIGGERS == wb & _TRIGGERS and (wa <= wb or wb <= wa)
+
+
 def _years_close(a: Release, b: Release) -> bool:
     ya, yb = (a.release_date or "")[:4], (b.release_date or "")[:4]
     return ya.isdigit() and yb.isdigit() and abs(int(ya) - int(yb)) <= 1
@@ -79,6 +106,7 @@ def pairs(session: Session) -> list[tuple[Release, Release]]:
                 # jiné nahrávky (Texican Badman 2019) a slučování podle názvu
                 # skladeb by verze slilo.
                 and _years_close(d, m)
+                and same_edition(d, m)
             ),
             key=lambda c: c[:3],
         )
