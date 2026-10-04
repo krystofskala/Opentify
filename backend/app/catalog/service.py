@@ -93,6 +93,36 @@ _MB_PRIMARY_TYPE_TO_RELEASE_TYPE = {
 }
 
 
+# Verze, které ve výsledcích jdou až za oficiální studiovou nahrávkou
+# (nic se neskrývá -- jen pořadí; kdo hledá "live", dostane je normálně).
+_VERSION_RE = re.compile(
+    r"\b(live|demo|remix(ed)?|acoustic|akusticky|instrumental|karaoke|cover|session|rehearsal|"
+    r"bootleg|unplugged|atmos|edit|version|verze|mix)\b",
+    re.IGNORECASE,
+)
+
+
+# "1993-11-08: The Armory, ..." / "1991-09: Club X" / "1989 Live at Y"
+_CONCERT_TITLE_RE = re.compile(r"^(\d{4}(?:[-‐]\d{2}){0,2})\s*[:–—-]?\s*(.+)$")
+
+
+def _official_first(results: list[dict], query: str) -> list[dict]:
+    """Skladby a alba: oficiální napřed, živé/demo/remix verze za nimi --
+    stabilně (jinak pořadí Deezeru). Ostatní typy zůstávají, kde jsou."""
+    q = query.lower()
+
+    def demoted(r: dict) -> bool:
+        words = {m.group(1).lower() for m in _VERSION_RE.finditer(r.get("title") or "")}
+        return any(w not in q for w in words)
+
+    for kind in ("recording", "release"):
+        slots = [i for i, r in enumerate(results) if r.get("entityType") == kind]
+        ordered = sorted((results[i] for i in slots), key=demoted)  # sorted je stabilní
+        for i, r in zip(slots, ordered):
+            results[i] = r
+    return results
+
+
 def _canonical_edition(releases: list[dict]) -> dict:
     """Edice pro tracklist: nejméně disků (deluxe s bonusovým / živým diskem
     nevyhraje nad standardní -- živě: Angus & Julia Stone ukazovali studiové
@@ -351,6 +381,7 @@ class CatalogService:
         for t, type_ids in to_remember.items():
             await self._search_ids_set(t, query, limit, offset, type_ids)
         results = await self._merge_verified_duplicates(results)
+        results = _official_first(results, query)
         results = own + results
         return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
 
@@ -793,7 +824,34 @@ class CatalogService:
 
     _RARITY_ORDER = {"demo": 0, "live": 1, "bootleg": 2}
 
-    async def get_rarities(self, artist_id: str) -> list[ReleaseOut] | None:
+    async def get_concerts(self, artist_id: str) -> list[dict[str, Any]] | None:
+        """Koncertní archiv interpreta: oficiální živá alba + živáky a
+        bootlegy z MusicBrainz, chronologicky, s datem a místem z názvu
+        ("1993-11-08: The Armory, Philadelphia" -- tak MB bootlegy pojmenovává)."""
+        rarities = await self.get_rarities(artist_id, limit=1000)
+        if rarities is None:
+            return None
+        items: list[tuple[ReleaseOut, bool]] = [(r, False) for r in rarities if r.rarity in ("live", "bootleg")]
+        seen = {r.id for r, _ in items}
+        for rel in self._session.exec(select(Release).where(Release.artist_id == artist_id)).all():
+            secondary = [t.lower() for t in (rel.external_refs or {}).get("mbSecondary") or []]
+            if "live" in secondary and rel.id not in seen:
+                items.append((self._to_release_out(rel), True))
+        out = []
+        for release, official in items:
+            m = _CONCERT_TITLE_RE.match(release.title or "")
+            date = m.group(1).replace("‐", "-") if m else (str(release.release_date) if release.release_date else None)
+            venue = m.group(2).strip() if m else None
+            out.append({
+                **release.model_dump(by_alias=True),
+                "concertDate": date,
+                "venue": venue,
+                "official": official,
+            })
+        out.sort(key=lambda x: x["concertDate"] or "9999")
+        return out
+
+    async def get_rarities(self, artist_id: str, limit: int = 150) -> list[ReleaseOut] | None:
         """Nevydaný/vzácný materiál: dema, živáky a bootlegy -- skupiny z
         MusicBrainz, které NEMAJÍ žádné oficiální vydání. Přehrávají se stejně
         jako cokoliv jiného (obstarání přes Soulseek/YouTube na požádání),
@@ -831,7 +889,7 @@ class CatalogService:
                 out.append(self._to_release_out(release).model_copy(update={"rarity": rarity}))
         self._session.commit()
         out.sort(key=lambda r: (self._RARITY_ORDER[r.rarity or "bootleg"], r.release_date or "9999"))
-        return out[:150]
+        return out[:limit]
 
     async def get_artist_bio(self, artist_id: str) -> ArtistBioOut | None:
         """Životopis + "Podobní interpreti" pro `ArtistScreen` -- MusicBrainz
