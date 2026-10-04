@@ -391,6 +391,7 @@ def remove_playlist_cover(
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
     _require_user_kind(playlist)
     playlist.cover_urls = []
+    playlist.updated_at = utcnow()
     session.add(playlist)
     session.commit()
     session.refresh(playlist)

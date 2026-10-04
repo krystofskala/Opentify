@@ -1003,6 +1003,8 @@ async def like_song(
         ).one()
         position = (top - 1) if top is not None else 0
         session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
+        playlist.updated_at = utcnow()  # "Upraveno" v Knihovně
+        session.add(playlist)
         session.commit()
     # Oblíbená skladba nemůže mít zároveň zlomené srdce (klepnutí na
     # zlomené srdce ho spraví a dá do Oblíbených).
