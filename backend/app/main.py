@@ -19,7 +19,7 @@ from app.catalog.artwork import artwork_backfill_loop, artwork_progress
 from app.catalog.deezer import close_deezer_client
 from app.catalog.musicbrainz import close_musicbrainz_client
 from app.catalog.wikimedia import close_wikimedia_client
-from app.db import init_db
+from app.db import init_db, use_env_busy_timeout
 from app.home.service import home_refresh_loop
 from app.listens import lb_submit_loop
 from app.loudness import backfill_loop
@@ -62,6 +62,8 @@ def _api_file_log() -> None:
 
 
 _api_file_log()
+# Kratší čekání na zámek SQLite jen pro API (viz app/db.py).
+use_env_busy_timeout()
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):  # noqa: ANN202

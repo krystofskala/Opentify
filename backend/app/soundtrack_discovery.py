@@ -194,9 +194,39 @@ async def apple_artwork(title: str, year: int, kind: str) -> str | None:
         return {}
 
     try:
-        return (await cached_json(f"apple:art:v1:{kind}:{fold(title)}:{year}", MONTH, fetch, is_empty=lambda v: not v.get("url"))).get("url")
+        apple_url = (await cached_json(f"apple:art:v1:{kind}:{fold(title)}:{year}", MONTH, fetch, is_empty=lambda v: not v.get("url"))).get("url")
     except Exception:  # noqa: BLE001
         return None
+    if not apple_url:
+        return None
+    return await _local_poster(client, apple_url, f"{kind}:{fold(title)}:{year}")
+
+
+async def _local_poster(client: httpx.AsyncClient, apple_url: str, key: str) -> str | None:
+    """Plakát se stáhne jednou (přes proxy) a servíruje z vlastního serveru --
+    telefon se k Apple CDN nepřipojí se svou IP. Nepovede-li se, raději žádný
+    plakát než únik."""
+    import uuid
+
+    from app.catalog.embedded_art import URL_TEMPLATE, _save_resized, artwork_path
+
+    # Pevné UUID z klíče: route artwork bere jen UUID a stejné dílo = stejný soubor.
+    poster_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"opentify:apple-poster:{key}"))
+    dest = artwork_path(poster_id)
+    if dest.exists():
+        return URL_TEMPLATE.format(release_id=poster_id)
+    try:
+        r = await client.get(apple_url, follow_redirects=True)
+        r.raise_for_status()
+        data = r.content
+    except httpx.HTTPError:
+        return None
+    if not data or len(data) > 10 * 1024 * 1024:
+        return None
+    # Hero přes celou šířku -- víc než 600 px běžných obalů.
+    if not await asyncio.to_thread(_save_resized, data, dest, 1200):
+        return None
+    return URL_TEMPLATE.format(release_id=poster_id)
 
 
 # ----------------------------------------------------------------------
@@ -312,7 +342,16 @@ def _dyn(ns: str) -> dict[str, Any]:
 
     with Session(engine) as session:
         row = session.get(HomeSnapshot, f"soundtracks:dyn:{ns}")
-        return (row.payload or {}) if row else {}
+        data = (row.payload or {}) if row else {}
+    # Starší snímky ještě nesou přímé odkazy na Apple CDN -- do přestavby
+    # takové karty raději vynechat, ať telefon k Applu nejde se svou IP.
+    pools = data.get("pools") or {}
+    if any("mzstatic.com" in str(c.get("cover") or "") + str(c.get("hero") or "") for p in pools.values() for c in p):
+        data = {**data, "pools": {
+            k: [c for c in p if "mzstatic.com" not in str(c.get("cover") or "") + str(c.get("hero") or "")]
+            for k, p in pools.items()
+        }}
+    return data
 
 
 # ----------------------------------------------------------------------

@@ -19,6 +19,7 @@ vyvolaný explicitním otevřením obrazovky, ne psaním do vyhledávacího pole
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import unicodedata
@@ -26,10 +27,12 @@ from collections import Counter
 from typing import Any
 from urllib.parse import quote_plus
 
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select
 from app.catalog.identity import is_own_id
 
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
+from app.catalog.cache import CACHE_PREFIX
 from app.catalog.availability import compute_availability, resolve_artist_name
 from app.catalog.deezer import DeezerClient
 from app.catalog.deezer_ingest import deezer_image, ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
@@ -41,6 +44,7 @@ from app.catalog.non_music import is_non_music, mark_non_music
 from app.catalog.upsert import upsert_artist, upsert_recording, upsert_release
 from app.catalog.wikimedia import get_wikimedia_client
 from app.models import Artist, Recording, Release
+from app.redis_bus import get_redis
 from app.utils import utcnow
 
 _TRACKLIST_OVERLAP_THRESHOLD = 0.4
@@ -293,9 +297,19 @@ class CatalogService:
 
         # Upsert až po všech `await`ech a bez dalších -- viz deezer_ingest
         # (souběžná hledání se tu nemůžou proložit a zdvojit řádky).
+        # Do DB se zapisuje jen napoprvé: id našich řádků k výsledku Deezeru
+        # se pamatují (stejné TTL jako Deezer cache) a další stejné hledání
+        # (klient posílá dotaz na každé písmeno) už jen čte.
+        remembered = await asyncio.gather(*(self._search_ids_get(t, query, limit, offset) for t in types_to_query))
         results: list[dict[str, Any]] = []
         seen_artists: set[str] = {r["id"] for r in own if r.get("entityType") == "artist"}
-        for t, data in zip(types_to_query, fetched):
+        to_remember: dict[str, list[str]] = {}
+        for t, data, ids in zip(types_to_query, fetched, remembered):
+            from_ids = self._search_results_from_ids(t, ids, seen_artists) if ids is not None else None
+            if from_ids is not None:
+                results.extend(from_ids)
+                continue
+            type_ids: list[str] = []
             if t == "artist" and data:
                 # Deezer řadí interprety zvláštně (živě: "nirvana" -> nejdřív
                 # "Nirvana (UK)" s 237 fanoušky, pak Nirvana s 10 miliony).
@@ -311,11 +325,13 @@ class CatalogService:
                     # Víc Deezer profilů téhož interpreta -> jeden výsledek.
                     if artist is not None and artist.id not in seen_artists:
                         seen_artists.add(artist.id)
+                        type_ids.append(artist.id)
                         results.append({"entityType": "artist", **self._to_artist_out(artist).model_dump(by_alias=True)})
                 elif t == "release":
                     artist = ingest_artist(self._session, item.get("artist") or {})
                     release = ingest_album(self._session, item, artist) if artist else None
                     if release is not None:
+                        type_ids.append(release.id)
                         results.append({"entityType": "release", **self._to_release_out(release).model_dump(by_alias=True)})
                 else:
                     if _ANTI_AI.is_blocked_text((item.get("artist") or {}).get("name"), item.get("title")):
@@ -325,13 +341,57 @@ class CatalogService:
                         continue
                     recording = ingest_track_with_context(self._session, item)
                     if recording is not None:
+                        type_ids.append(recording.id)
                         results.append(
                             {"entityType": "recording", **self._to_recording_out(recording).model_dump(by_alias=True)}
                         )
+            if data is not None:
+                to_remember[t] = type_ids
         self._session.commit()
+        for t, type_ids in to_remember.items():
+            await self._search_ids_set(t, query, limit, offset, type_ids)
         results = await self._merge_verified_duplicates(results)
         results = own + results
         return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
+
+    @staticmethod
+    def _search_ids_key(t: str, query: str, limit: int, offset: int) -> str:
+        return f"{CACHE_PREFIX}search:ids:v1:{t}:{query}:{limit}:{offset}"
+
+    async def _search_ids_get(self, t: str, query: str, limit: int, offset: int) -> list[str] | None:
+        try:
+            raw = await get_redis().get(self._search_ids_key(t, query, limit, offset))
+        except Exception:  # noqa: BLE001 - bez Redisu prostě zapsat jako dřív
+            return None
+        return json.loads(raw) if raw is not None else None
+
+    async def _search_ids_set(self, t: str, query: str, limit: int, offset: int, ids: list[str]) -> None:
+        from app.catalog.deezer import SEARCH_TTL_SECONDS
+
+        try:
+            await get_redis().set(self._search_ids_key(t, query, limit, offset), json.dumps(ids), ex=SEARCH_TTL_SECONDS)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _search_results_from_ids(self, t: str, ids: list[str], seen_artists: set[str]) -> list[dict[str, Any]] | None:
+        """Výsledky z už zapsaných řádků (jen čtení). Chybí-li některý řádek
+        (mezitím sloučený/smazaný), `None` -> zapsat znovu z Deezeru."""
+        model = {"artist": Artist, "release": Release}.get(t, Recording)
+        rows = [self._session.get(model, i) for i in ids]
+        if any(r is None or (r.external_refs or {}).get("mergedInto") for r in rows):
+            return None
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if t == "artist":
+                if row.id in seen_artists:
+                    continue
+                seen_artists.add(row.id)
+                out.append({"entityType": "artist", **self._to_artist_out(row).model_dump(by_alias=True)})
+            elif t == "release":
+                out.append({"entityType": "release", **self._to_release_out(row).model_dump(by_alias=True)})
+            else:
+                out.append({"entityType": "recording", **self._to_recording_out(row).model_dump(by_alias=True)})
+        return out
 
     async def _merge_verified_duplicates(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Deezer má jednoho interpreta občas víckrát (živě: Lana Del Rey 3×,
@@ -996,7 +1056,18 @@ class CatalogService:
         return self._to_release_out(release)
 
     async def get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
-        tracks = await self._get_release_tracks(release_id)
+        # GET nesmí spadnout na 500 jen proto, že zápis drží worker/nástroj
+        # (load test: "database is locked") -- zápisy jsou jen doplňky
+        # katalogu, příště se zkusí znovu. Pak tracklist z toho, co už je v DB.
+        try:
+            tracks = await self._get_release_tracks(release_id)
+        except OperationalError as exc:
+            if not _is_locked(exc):
+                raise
+            self._session.rollback()
+            logger.warning("album %s: DB zamčená, tracklist jen z DB", release_id)
+            release = self._session.get(Release, release_id)
+            return self._stored_release_tracks(release) if release is not None else None
         if tracks:
             # Kolik skladeb album má (různé názvy) -- Knihovna podle toho pozná
             # celá alba ("Jen celá alba").
@@ -1007,8 +1078,28 @@ class CatalogService:
             if release is not None and (refs.get("tracklistCount") != count or refs.get("tracklistTitles") != titles):
                 release.external_refs = {**refs, "tracklistCount": count, "tracklistTitles": titles}
                 self._session.add(release)
-                self._session.commit()
+                try:
+                    self._session.commit()
+                except OperationalError as exc:
+                    if not _is_locked(exc):
+                        raise
+                    self._session.rollback()
         return tracks
+
+    def _stored_release_tracks(self, release: Release) -> list[RecordingOut]:
+        """Tracklist bez zápisu: uložené pořadí (`tracklistIds`), jinak
+        skladby alba bez těch z jiných edic."""
+        ids = (release.external_refs or {}).get("tracklistIds") or []
+        if ids:
+            rows = {r.id: r for r in self._session.exec(select(Recording).where(Recording.id.in_(ids))).all()}  # type: ignore[attr-defined]
+            if rows:
+                return [self._to_recording_out(rows[i]) for i in ids if i in rows]
+        recordings = [
+            r for r in self._session.exec(select(Recording).where(Recording.release_id == release.id)).all()
+            if not (r.external_refs or {}).get("otherEdition")
+        ]
+        recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0, r.title))
+        return [self._to_recording_out(r) for r in recordings]
 
     async def _get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
         release = self._session.get(Release, release_id)
@@ -1375,6 +1466,11 @@ class CatalogService:
 
         await asyncio.gather(*(enrich_one(r) for r in recordings))
         self._session.commit()
+
+
+def _is_locked(exc: OperationalError) -> bool:
+    text = str(exc).lower()
+    return "locked" in text or "busy" in text
 
 
 def _real_id(value: str | None) -> str | None:

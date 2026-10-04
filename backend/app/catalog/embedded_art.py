@@ -80,7 +80,7 @@ def _picture_bytes(path: str) -> bytes | None:
     return None
 
 
-def _save_resized(data: bytes, dest: Path) -> bool:
+def _save_resized(data: bytes, dest: Path, max_side: int = MAX_SIDE) -> bool:
     from PIL import Image
 
     try:
@@ -88,7 +88,7 @@ def _save_resized(data: bytes, dest: Path) -> bool:
             img = img.convert("RGB")
             if min(img.size) < 64:
                 return False  # ikonka/placeholder, ne obal
-            img.thumbnail((MAX_SIDE, MAX_SIDE))
+            img.thumbnail((max_side, max_side))
             dest.parent.mkdir(parents=True, exist_ok=True)
             tmp = dest.with_suffix(".tmp")
             img.save(tmp, "JPEG", quality=88, optimize=True)

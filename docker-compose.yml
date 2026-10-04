@@ -26,6 +26,12 @@ services:
       # stejná hodnota jako MusicBrainz výš stačí, samostatná `.env` proměnná
       # navíc by byla jen duplicitní nastavení stejné věci.
       WIKIMEDIA_USER_AGENT: ${MUSICBRAINZ_USER_AGENT}
+      # AcoustID (ověření stažených souborů otiskem, app/library/verify_file.py)
+      # -- bez klíče se ověření tiše vypne.
+      ACOUSTID_API_KEY: ${ACOUSTID_API_KEY:-}
+      # SQLite busy_timeout pro požadavky API: radši rychle selhat (GET to
+      # ustojí) než držet požadavek 15 s, když zápis drží worker/nástroj.
+      DB_BUSY_TIMEOUT_MS: ${DB_BUSY_TIMEOUT_MS:-5000}
       # fanart.tv (volitelné, zdarma) -- široké fotky interpretů do hlavičky.
       FANART_API_KEY: ${FANART_API_KEY:-}
       DEEZER_API_BASE: https://api.deezer.com
@@ -82,6 +88,11 @@ services:
       # Šifrovací klíč pro tokeny služeb v DB (ListenBrainz, Last.fm) -- jen v .env.
       OPENTIFY_DATA_KEY: ${OPENTIFY_DATA_KEY:-}
       MUSICBRAINZ_BASE_URL: https://musicbrainz.org/ws/2
+      # Worker taky volá MusicBrainz (párování stažených souborů) -- bez
+      # kontaktu v User-Agent porušuje MB etiketu.
+      MUSICBRAINZ_USER_AGENT: ${MUSICBRAINZ_USER_AGENT:?nastav v .env}
+      WIKIMEDIA_USER_AGENT: ${MUSICBRAINZ_USER_AGENT}
+      ACOUSTID_API_KEY: ${ACOUSTID_API_KEY:-}
       DEEZER_API_BASE: https://api.deezer.com
       # composite = zkusí slskd, při prázdném hledání/chybě padá na yt-dlp
       # (viz app/providers.py). "placeholder" pro dev bez slskd/yt-dlp.

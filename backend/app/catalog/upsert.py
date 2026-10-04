@@ -14,6 +14,20 @@ from app.models import Artist, Recording, Release
 from app.utils import utcnow
 
 
+def _assign(row, **values) -> bool:
+    """Nastaví jen hodnoty, které se opravdu liší (a pak `updated_at`).
+    Dřív každé načtení tracklistu / hledání přepsalo všechny řádky jen kvůli
+    `updated_at` -- zbytečný zápis a zámek SQLite při každém GET."""
+    changed = False
+    for key, value in values.items():
+        if getattr(row, key) != value:
+            setattr(row, key, value)
+            changed = True
+    if changed:
+        row.updated_at = utcnow()
+    return changed
+
+
 def upsert_artist(
     session: Session, *, mbid: str | None, name: str, sort_name: str | None, country: str | None = None
 ) -> Artist:
@@ -46,14 +60,11 @@ def upsert_artist(
         artist = Artist(mbid=mbid, name=name, sort_name=sort_name or name, country=country)
         session.add(artist)
     else:
-        artist.name = name
-        artist.sort_name = sort_name or artist.sort_name
         # Nepřepisovat `None`-em -- embedded artist-credit stub ze search
         # výsledků `country` typicky vůbec nenese (viz `_ingest_artist_credit`),
         # takže by jinak smazal hodnotu, co už doplnil `_enrich_artist_country`.
-        artist.country = country or artist.country
-        artist.updated_at = utcnow()
-        session.add(artist)
+        if _assign(artist, name=name, sort_name=sort_name or artist.sort_name, country=country or artist.country):
+            session.add(artist)
     session.commit()
     session.refresh(artist)
     return artist
@@ -83,15 +94,17 @@ def upsert_release(
         )
         session.add(release)
     else:
-        release.title = title
-        release.release_date = release_date or release.release_date
-        release.release_type = release_type
         # Nepřepisovat prázdným seznamem -- volání bez `inc=genres` (většina
         # cest sem) posílá `None`/`[]`, což by jinak smazalo, co už dřív
         # doplnil `_enrich_release_genres`.
-        release.genres = genres or release.genres or []
-        release.updated_at = utcnow()
-        session.add(release)
+        if _assign(
+            release,
+            title=title,
+            release_date=release_date or release.release_date,
+            release_type=release_type,
+            genres=genres or release.genres or [],
+        ):
+            session.add(release)
     session.commit()
     session.refresh(release)
     return release
@@ -124,14 +137,16 @@ def upsert_recording(
         )
         session.add(recording)
     else:
-        recording.title = title
-        recording.release_id = release_id or recording.release_id
-        recording.artist_id = artist_id or recording.artist_id
-        recording.duration_ms = duration_ms or recording.duration_ms
-        recording.isrc = isrc or recording.isrc
-        recording.track_number = track_number or recording.track_number
-        recording.updated_at = utcnow()
-        session.add(recording)
+        if _assign(
+            recording,
+            title=title,
+            release_id=release_id or recording.release_id,
+            artist_id=artist_id or recording.artist_id,
+            duration_ms=duration_ms or recording.duration_ms,
+            isrc=isrc or recording.isrc,
+            track_number=track_number or recording.track_number,
+        ):
+            session.add(recording)
     # Poznámka MusicBrainz k nahrávce ("live, 1994-05-02: ...", "demo",
     # "acoustic") -- verzi, kterou název neříká, pak hlídá stahování
     # (`worker._version_hint`).

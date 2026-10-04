@@ -88,6 +88,7 @@ def merge_recording(session: Session, src: Recording, dst: Recording) -> None:
     stats["listens"] += moved.rowcount or 0
     _move_later(session, "track", src.id, dst.id)
     _move_per_user(session, src.id, dst.id)
+    remap_snapshot_ids(session, {src.id: dst.id})
     # Doplnit, co cílové chybí (MBID je unikátní -- nejdřív uvolnit).
     refs = dict(dst.external_refs or {})
     for key, value in (src.external_refs or {}).items():
@@ -159,6 +160,57 @@ def _move_later(session: Session, kind: str, src_id: str, dst_id: str) -> None:
             session.add(item)
 
 
+def remap_release_refs(session: Session, mapping: dict[str, str]) -> None:
+    """Textové odkazy na sloučené album ("/releases/<id>" v rozposlouchaných
+    kolekcích a v kontextu poslechů, id ve snímcích Domů) -- jinak po
+    sloučení vedou "Pokračovat" a sekce Domů na neexistující album."""
+    from app.models import CollectionProgress
+
+    for old, new in mapping.items():
+        if not old or not new or old == new:
+            continue
+        old_route, new_route = f"/releases/{old}", f"/releases/{new}"
+        for row in session.exec(select(CollectionProgress).where(CollectionProgress.route == old_route)).all():
+            # Profil už má postup u cílového alba -> nechat novější z obou.
+            dup = session.exec(
+                select(CollectionProgress).where(CollectionProgress.user_id == row.user_id, CollectionProgress.route == new_route)
+            ).first()
+            if dup is not None:
+                if dup.updated_at >= row.updated_at:
+                    session.delete(row)
+                    stats["progress_dropped"] += 1
+                    continue
+                session.delete(dup)
+                session.flush()
+            row.route = new_route
+            session.add(row)
+            stats["progress_remapped"] += 1
+        moved = session.execute(
+            update(Listen).where(Listen.context.like(f"%{old}%")).values(context=func.replace(Listen.context, old, new))  # type: ignore[union-attr]
+        )
+        stats["listen_context_remapped"] += moved.rowcount or 0
+    remap_snapshot_ids(session, mapping)
+    session.flush()
+
+
+def remap_snapshot_ids(session: Session, mapping: dict[str, str]) -> None:
+    """Id ve snímcích Domů (JSON) -- jen textová náhrada, UUID jsou unikátní,
+    takže nic jiného se nepřepíše. Tabulka je malá (stovky řádků)."""
+    import json
+
+    from sqlalchemy import String, cast
+
+    from app.models import HomeSnapshot
+
+    for old, new in mapping.items():
+        if not old or not new or old == new:
+            continue
+        for row in session.exec(select(HomeSnapshot).where(cast(HomeSnapshot.payload, String).like(f"%{old}%"))).all():
+            row.payload = json.loads(json.dumps(row.payload).replace(old, new))
+            session.add(row)
+            stats["snapshots_remapped"] += 1
+
+
 def track_key(title: str) -> str:
     """Název skladby pro párování mezi kopiemi alba: bez diakritiky,
     interpunkce a "(feat. X)", ale verze v závorce zůstává ("doin' time" ==
@@ -203,6 +255,7 @@ def merge_release(session: Session, src: Release, dst: Release) -> None:
             rec.artist_id = dst.artist_id if rec.artist_id == src.artist_id else rec.artist_id
             session.add(rec)
     _move_later(session, "album", src.id, dst.id)
+    remap_release_refs(session, {src.id: dst.id})
     dst.images = dst.images or src.images
     dst.genres = dst.genres or src.genres
     dst.release_date = dst.release_date or src.release_date

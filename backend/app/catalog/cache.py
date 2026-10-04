@@ -21,6 +21,16 @@ CACHE_PREFIX = "vault:catalog:cache:"
 EMPTY_TTL_SECONDS = 10 * 60
 
 
+# Single-flight: drahé studené sestavení (stránka kategorie 20-30 s) běží
+# jednou -- souběžní volající v tomhle procesu čekají na stejný výsledek.
+# Mezi procesy (api x worker) hlídá Redis zámek `lock:<klíč>`.
+# Klíč i se smyčkou: future z jiné event loop (nástroj s vlastní
+# `asyncio.run`) nejde čekat.
+_inflight: dict[tuple[int, str], asyncio.Future] = {}
+LOCK_SECONDS = 120
+LOCK_WAIT_SECONDS = 60.0
+
+
 async def cached_json(
     key: str,
     ttl_seconds: int,
@@ -31,14 +41,73 @@ async def cached_json(
     uloží jen na `EMPTY_TTL_SECONDS`, ne na celé TTL."""
     r = get_redis()
     cache_key = CACHE_PREFIX + key
-    cached = await r.get(cache_key)
-    if cached is not None:
-        return json.loads(cached)
+    flight = (id(asyncio.get_running_loop()), cache_key)
+    while True:
+        cached = await r.get(cache_key)
+        if cached is not None:
+            return json.loads(cached)
+        pending = _inflight.get(flight)
+        if pending is None:
+            break
+        try:
+            # shield: zrušení čekajícího (klient zavřel stránku) nesmí zrušit
+            # sestavení ostatním.
+            return await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            if pending.cancelled():
+                continue  # zrušil se ten, kdo sestavoval -> zkusit znovu
+            raise
 
-    value = await fetch()
-    ttl = EMPTY_TTL_SECONDS if is_empty is not None and is_empty(value) else ttl_seconds
-    await r.set(cache_key, json.dumps(value), ex=ttl)
-    return value
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _inflight[flight] = future
+    try:
+        value = await _build(r, cache_key, ttl_seconds, fetch, is_empty)
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
+    except BaseException as exc:
+        future.set_exception(exc)
+        future.exception()  # nikdo nečeká -> žádné "exception never retrieved"
+        raise
+    else:
+        future.set_result(value)
+        return value
+    finally:
+        if _inflight.get(flight) is future:
+            del _inflight[flight]
+
+
+async def _build(r, cache_key: str, ttl_seconds: int, fetch, is_empty) -> Any:
+    lock_key = "lock:" + cache_key
+    try:
+        got_lock = bool(await r.set(lock_key, "1", nx=True, ex=LOCK_SECONDS))
+    except Exception:  # noqa: BLE001 - bez zámku prostě sestavit
+        got_lock = True
+    if not got_lock:
+        # Sestavuje jiný proces -- počkat na jeho výsledek, po limitu
+        # (spadl/trvá moc) sestavit sami.
+        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.25)
+            cached = await r.get(cache_key)
+            if cached is not None:
+                return json.loads(cached)
+            if not await r.exists(lock_key):
+                break
+        cached = await r.get(cache_key)
+        if cached is not None:
+            return json.loads(cached)
+    try:
+        value = await fetch()
+        ttl = EMPTY_TTL_SECONDS if is_empty is not None and is_empty(value) else ttl_seconds
+        await r.set(cache_key, json.dumps(value), ex=ttl)
+        return value
+    finally:
+        if got_lock:
+            try:
+                await r.delete(lock_key)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 _refreshing: set[str] = set()

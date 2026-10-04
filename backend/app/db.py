@@ -12,6 +12,20 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 # a zasekla se celá appka (živě). Kratší timeout = rychlé selhání místo 30 s.
 engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_size=20, max_overflow=20, pool_timeout=10)
 
+# Worker a nástroje čekají na zámek 15 s. API (uvicorn) si to při importu
+# app.main sníží podle DB_BUSY_TIMEOUT_MS (docker-compose: 5 s) -- požadavek
+# nemá viset za zápisem workeru. Nástroje spuštěné v kontejneru api app.main
+# neimportují, takže jim 15 s zůstane.
+BUSY_TIMEOUT_MS = 15000
+
+
+def use_env_busy_timeout() -> None:
+    global BUSY_TIMEOUT_MS
+    try:
+        BUSY_TIMEOUT_MS = max(1000, int(os.environ.get("DB_BUSY_TIMEOUT_MS") or BUSY_TIMEOUT_MS))
+    except ValueError:
+        pass
+
 if DATABASE_URL.startswith("sqlite"):
     from sqlalchemy import event
 
@@ -22,7 +36,7 @@ if DATABASE_URL.startswith("sqlite"):
         # místo okamžité chyby. Svazek je ext4 (Docker), WAL je tam bezpečný.
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=15000")
+        cur.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         cur.execute("PRAGMA synchronous=NORMAL")
         cur.close()
 
