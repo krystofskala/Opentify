@@ -91,10 +91,13 @@ class Taste:
     artist_deezer: dict[str, str] = field(default_factory=dict)
     artist_photo: dict[str, str] = field(default_factory=dict)
     release_genres: dict[str, list[str]] = field(default_factory=dict)  # recording -> genres
+    # Skladby z vlastních playlistů profilu (i společných, kde je členem) --
+    # poskládaný playlist říká, co má rád (živě: tátův "Koza Band").
+    playlisted: set[str] = field(default_factory=set)
 
     @property
     def known(self) -> set[str]:
-        return set(self.liked) | self.library | set(self.listen_counts)
+        return set(self.liked) | self.library | set(self.listen_counts) | self.playlisted
 
 
 def load_taste(user_id: str) -> Taste:
@@ -115,13 +118,27 @@ def load_taste(user_id: str) -> Taste:
                 )
             ).all()
         )
+        from app.models import Playlist, PlaylistKind, PlaylistMember
+
+        member_of = set(
+            session.exec(select(PlaylistMember.playlist_id).where(PlaylistMember.user_id == user_id)).all()
+        )
+        own_playlists = [
+            p.id
+            for p in session.exec(select(Playlist).where(Playlist.kind == PlaylistKind.USER)).all()
+            if (p.owner_user_id == user_id or p.id in member_of) and p.id != liked_pl.id
+        ]
+        if own_playlists:
+            taste.playlisted = set(
+                session.exec(select(PlaylistItem.recording_id).where(PlaylistItem.playlist_id.in_(own_playlists))).all()  # type: ignore[attr-defined]
+            )
         since = now - timedelta(days=365)
         listens = session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
         if user_id != g.HOME_USER_ID:
             # Sdílená knihovna je stažená podle vkusu admina -- u jiného
             # profilu se počítá jen to, co sám poslouchal nebo lajkl (jinak
             # by prázdný profil dostal mixy podle cizího vkusu).
-            own = set(taste.liked) | {listen.recording_id for listen in listens}
+            own = set(taste.liked) | {listen.recording_id for listen in listens} | taste.playlisted
             taste.library &= own
         for listen in listens:
             played = _aware(listen.played_at)
@@ -155,6 +172,8 @@ def load_taste(user_id: str) -> Taste:
             if recording_id in taste.last_played:
                 days = (now - taste.last_played[recording_id]).days
                 weight += 2.0 * math.exp(-days / 30)
+            if recording_id in taste.playlisted:
+                weight += 1.5
             if recording_id in taste.library:
                 weight += 0.2
             taste.artist_weight[artist_id] += weight
@@ -643,6 +662,8 @@ async def build_styles() -> int:
         w += 0.05 * taste.listen_counts.get(rid, 0)
         if rid in liked:
             w += 0.3
+        if rid in taste.playlisted:
+            w += 0.2
         if w:
             weight[artist_id] += w
     # Vlastní interpreti jen s ručně zadanými styly -- štítky Last.fm podle
