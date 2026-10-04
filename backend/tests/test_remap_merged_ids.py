@@ -65,6 +65,18 @@ def test_merge_release_rewrites_text_refs(session):
     assert snap.payload == {"albumIds": [dst.id, "jine"], "nested": {"id": dst.id}}
 
 
+def test_merge_release_keeps_different_length_versions_apart(session):
+    src, src_recs = _album(session, "Can't Wake Up", ["Kids These Days", "Mansion Door"])
+    dst, dst_recs = _album(session, "Can't Wake Up", ["Kids These Days", "Mansion Door"])
+    src_recs[0].duration_ms, dst_recs[0].duration_ms = 200_000, 201_500  # tatáž
+    src_recs[1].duration_ms, dst_recs[1].duration_ms = 180_000, 244_000  # jiná verze
+    session.commit()
+    dedupe.merge_release(session, src, dst)
+    session.commit()
+    left = session.exec(select(Recording).where(Recording.release_id == dst.id)).all()
+    assert sorted(r.title for r in left) == ["Kids These Days", "Mansion Door", "Mansion Door"]
+
+
 def test_progress_conflict_keeps_newer(session):
     old_rel, old_recs = _album(session, "A", ["x"])
     new_rel, new_recs = _album(session, "B", ["y"])

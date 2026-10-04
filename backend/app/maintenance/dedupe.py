@@ -241,6 +241,13 @@ def find_twin(title: str, candidates: dict[str, Recording]) -> Recording | None:
     return None
 
 
+def same_length(a_ms: int | None, b_ms: int | None) -> bool:
+    """Délky se shodují (±3 s nebo 2 %); neznámá délka nic nevylučuje."""
+    if not a_ms or not b_ms:
+        return True
+    return abs(a_ms - b_ms) <= max(3000, 0.02 * max(a_ms, b_ms))
+
+
 def merge_release(session: Session, src: Release, dst: Release) -> None:
     # Skladby: stejný název na cílovém albu -> sloučit, jinak přesunout.
     dst_titles = {
@@ -248,6 +255,10 @@ def merge_release(session: Session, src: Release, dst: Release) -> None:
     }
     for rec in session.exec(select(Recording).where(Recording.release_id == src.id)).all():
         twin = find_twin(rec.title, dst_titles)
+        if twin is not None and not same_length(rec.duration_ms, twin.duration_ms):
+            # Stejný název, jiná délka = jiná verze (živě: Can't Wake Up, 64 s
+            # rozdíl) -- přesunout vedle, ne slít.
+            twin = None
         if twin is not None and twin.id != rec.id:
             merge_recording(session, rec, twin)
         else:
