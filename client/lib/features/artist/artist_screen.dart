@@ -14,7 +14,6 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../theme/glass_tokens.dart';
 import '../../theme/shapes.dart';
-import '../../widgets/toast.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/detail_scaffold_states.dart';
 import '../../widgets/media_card.dart';
@@ -185,10 +184,11 @@ class _ArtistBody extends ConsumerWidget {
                   HeroAction(
                     icon: Symbols.heart_broken_rounded,
                     filled: true,
-                    tooltip: 'Nelíbí se mi (podržením zrušíš)',
-                    // Klepnutí nic neruší (popisek říká "podržením") -- jen
-                    // ukáže nápovědu; tooltipy jsou v appce skryté.
-                    onPressed: () => toast(context, 'Nelíbí se mi – podržením srdce to zrušíš'),
+                    tooltip: 'Nelíbí se mi (klepnutím zrušíš)',
+                    // Zlomené srdce je vidět a klepnutí ho zruší -- "nelíbí se"
+                    // se musí dát vrátit stejně snadno, jako vzniklo.
+                    onPressed: () =>
+                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
                     onLongPress: () =>
                         ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
                   )

@@ -27,19 +27,43 @@ class DislikedArtistsController extends AsyncNotifier<Set<String>> {
     }
     final before = state.valueOrNull ?? const <String>{};
     final was = before.contains(id);
+    // Server při "nelíbí se" interpreta odebere z oblíbených -- Zpět ho vrátí.
+    final wasFavorite = ref.read(favoriteArtistsProvider.notifier).isFavorite(id);
+    await _set(messenger, id: id, name: name, disliked: !was, restoreFavorite: false);
+    if (!was) {
+      showToast(
+        messenger,
+        '$name se už nebude objevovat v mixech',
+        action: SnackBarAction(
+          label: 'Zpět',
+          onPressed: () => _set(messenger, id: id, name: name, disliked: false, restoreFavorite: wasFavorite),
+        ),
+      );
+    }
+  }
+
+  Future<void> _set(
+    ScaffoldMessengerState? messenger, {
+    required String id,
+    required String name,
+    required bool disliked,
+    required bool restoreFavorite,
+  }) async {
+    final before = state.valueOrNull ?? const <String>{};
     HapticFeedback.selectionClick();
-    state = AsyncData(was ? ({...before}..remove(id)) : {...before, id});
+    state = AsyncData(disliked ? {...before, id} : ({...before}..remove(id)));
     try {
       final api = ref.read(apiClientProvider);
-      if (was) {
-        await api.deleteJson('/library/disliked-artists/$id');
-      } else {
+      if (disliked) {
         await api.postJson('/library/disliked-artists/$id');
+      } else {
+        await api.deleteJson('/library/disliked-artists/$id');
+        if (restoreFavorite) await api.postJson('/library/favorite-artists/$id');
+        showToast(messenger, '$name se zase může objevovat v mixech');
       }
       // Server ho zároveň odebral z oblíbených a z hotových mixů.
       ref.invalidate(favoriteArtistsProvider);
       ref.invalidate(homeProvider);
-      showToast(messenger, was ? '$name se zase může objevovat v mixech' : '$name se už nebude objevovat v mixech');
     } catch (_) {
       state = AsyncData(before);
       showToast(messenger, 'Nepodařilo se uložit, zkus to znovu');
