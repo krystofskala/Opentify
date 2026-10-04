@@ -15,25 +15,51 @@ AudioRecorder? _recorder;
 StreamSubscription<Uint8List>? _sub;
 final BytesBuilder _pcm = BytesBuilder(copy: false);
 
+/// Roste s každým start/stop -- zrušení/zavření během rozjíždějícího se
+/// startu (jako u ladičky) jinak nechalo mikrofon zapnutý.
+int _generation = 0;
+
 Future<String> startRecording() async {
   await stopRecording();
+  final gen = ++_generation;
   final recorder = AudioRecorder();
   if (!await recorder.hasPermission()) {
     await recorder.dispose();
     throw const RecorderException('denied');
   }
+  if (gen != _generation) {
+    await recorder.dispose();
+    return 'audio/wav';
+  }
   _pcm.clear();
+  final StreamSubscription<Uint8List> sub;
   try {
     final stream = await recorder.startStream(const RecordConfig(
       encoder: AudioEncoder.pcm16bits,
       sampleRate: _rate,
       numChannels: 1,
     ));
-    _sub = stream.listen(_pcm.add);
+    sub = stream.listen(_pcm.add);
   } catch (e) {
     await recorder.dispose();
     throw RecorderException('unavailable', '$e');
   }
+  if (gen != _generation) {
+    // Mezitím zrušeno -- hned uvolnit (globální _sub/_recorder už může mít
+    // novější start, proto jen vlastní).
+    await sub.cancel();
+    try {
+      await recorder.stop();
+    } catch (_) {}
+    await recorder.dispose();
+    if (_recorder == null) {
+      try {
+        await (await AudioSession.instance).configure(const AudioSessionConfiguration.music());
+      } catch (_) {}
+    }
+    return 'audio/wav';
+  }
+  _sub = sub;
   _recorder = recorder;
   return 'audio/wav';
 }
@@ -41,6 +67,7 @@ Future<String> startRecording() async {
 Future<Uint8List> recordingSnapshot() async => _wav(_pcm.toBytes());
 
 Future<void> stopRecording() async {
+  _generation++;
   await _sub?.cancel();
   _sub = null;
   final recorder = _recorder;

@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 from sqlmodel import Session, select
 
 from app.catalog.artwork import _normalize
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.models import (
     AppUser,
@@ -130,11 +131,13 @@ def _band(hour: int) -> str:
 
 
 def _artist_names(recording_ids: list[str]) -> dict[str, str]:
+    """Jména interpretů pro štítky Last.fm -- bez vlastních (Kontrast), u nich
+    by Last.fm vrátil styly cizí stejnojmenné kapely."""
     with Session(engine) as s:
         rows = s.exec(
-            select(Recording.id, Artist.name).join(Artist, Artist.id == Recording.artist_id).where(Recording.id.in_(recording_ids))  # type: ignore[attr-defined]
+            select(Recording.id, Artist).join(Artist, Artist.id == Recording.artist_id).where(Recording.id.in_(recording_ids))  # type: ignore[attr-defined]
         ).all()
-    return dict(rows)
+    return {rid: a.name for rid, a in rows if not is_own_artist(a)}
 
 
 async def _artist_styles(name: str) -> list[str]:
@@ -451,7 +454,8 @@ async def build_deep_cuts(user_id: str) -> int:
     from app.tags import _resolve_tracks
 
     weights, names = await asyncio.to_thread(_artist_weights, user_id, 180, 45.0)
-    top = [a for a, _w in weights.most_common(20) if a in names]
+    # Vlastní interpret podle jména na Last.fm = cizí kapela.
+    top = [a for a, _w in weights.most_common(20) if a in names and not is_own_artist(a)]
     with Session(engine) as s:
         heard = defaultdict(set)
         for artist_id, title in s.exec(
@@ -505,7 +509,8 @@ async def _similar_unknown(user_id: str, top_n: int = 15) -> tuple[list[str], se
                 select(Artist.name).join(Recording, Recording.artist_id == Artist.id).join(Listen, Listen.recording_id == Recording.id).where(Listen.user_id == user_id)
             ).all()
         }
-    top = [names[a] for a, _w in weights.most_common(top_n) if a in names]
+    # Bez vlastních interpretů -- Last.fm zná jen stejnojmennou cizí kapelu.
+    top = [names[a] for a, _w in weights.most_common(top_n) if a in names and not is_own_artist(a)]
     score: Counter = Counter()
     display: dict[str, str] = {}
     seeds: dict[str, Counter] = defaultdict(Counter)  # návrh -> od kterých tvých interpretů

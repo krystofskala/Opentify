@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 from app.catalog import lastfm
 from app.catalog.artwork import _normalize
 from app.catalog.cache import cached_json
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.utils import utcnow
 
@@ -246,7 +247,8 @@ async def tag_for_you(tag: str, user_id: str) -> str | None:
 
     async def plays_tag(artist_id: str) -> bool:
         name = names.get(artist_id)
-        if not name:
+        # Vlastní interpret: štítky (i podobní níž) by byly cizí kapely.
+        if not name or is_own_artist(artist_id):
             return False
         async with sem:
             tags = await artist_top_tags(name)

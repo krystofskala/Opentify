@@ -273,9 +273,9 @@ def apply(items: list[dict]) -> Counter:
             if old_rec is not None and (old_rec.external_refs or {}).get("manual"):
                 stats["manual"] += 1  # ručně opravené (třeba Once) -- nepřepisovat
                 continue
-            release_artist = find_or_create_artist(session, f["release_artist"])
+            release_artist = find_or_create_artist(session, f["release_artist"], allow_own=True)
             release = find_or_create_release(session, release_artist, f["release"])
-            artist = find_or_create_artist(session, f["artist"])
+            artist = find_or_create_artist(session, f["artist"], allow_own=True)
             rec = _recording_for(session, artist, release, f)
             rec.release_id = release.id
             if f["track"]:

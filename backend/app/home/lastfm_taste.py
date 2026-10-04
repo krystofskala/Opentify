@@ -17,6 +17,7 @@ from sqlmodel import Session
 
 from app.catalog import lastfm
 from app.catalog.artwork import _normalize, primary_artist_name
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.models import Artist, Recording
 
@@ -59,7 +60,8 @@ def _track_info(recording_ids: list[str]) -> list[tuple[str, str]]:
         for rid in recording_ids:
             rec = session.get(Recording, rid)
             artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
-            if rec is not None and artist is not None and rec.title:
+            # Vlastní interpret (Kontrast) -- Last.fm by vrátil cizí kapelu.
+            if rec is not None and artist is not None and rec.title and not is_own_artist(artist):
                 out.append((lastfm_name(artist.name), rec.title))
     return out
 

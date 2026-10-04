@@ -33,6 +33,7 @@ from sqlmodel import Session, select
 from app import listen_later
 from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.home import generators as g
 from app.home import lastfm_taste as lt
@@ -219,8 +220,10 @@ async def build_clusters(taste: Taste) -> list[Cluster]:
         signature = {dz} | {str(r["id"]) for r in rel if r.get("id")}
         # + podobní podle posluchačů Last.fm (jako "lf:<jméno>") -- Deezer
         # "related" je u menších žánrů slabý.
+        # Vlastní interpret jen podle jména -- Last.fm zná jen cizí kapelu.
         name = taste.artist_name.get(artist_id, "")
-        signature |= {f"lf:{lt.norm(name)}"} | {f"lf:{lt.norm(n)}" for n, _m in await lt.similar_artist_names(name)}
+        if not is_own_artist(artist_id):
+            signature |= {f"lf:{lt.norm(name)}"} | {f"lf:{lt.norm(n)}" for n, _m in await lt.similar_artist_names(name)}
         related[artist_id] = signature
         await asyncio.sleep(0.05)
 
@@ -509,6 +512,8 @@ async def build_discover_weekly() -> int:
     # výš), převedení na Deezer přes přesné jméno.
     lf_scores: Counter = Counter()
     for artist_id, _ in taste.artist_weight.most_common(15):
+        if is_own_artist(artist_id):  # Last.fm by našel stejnojmennou cizí kapelu
+            continue
         for name, match in await lt.similar_artist_names(taste.artist_name.get(artist_id, ""), 25):
             if primary_artist_name(name).casefold() not in known_names:
                 lf_scores[name] += match
@@ -640,7 +645,8 @@ async def build_styles() -> int:
             w += 0.3
         if w:
             weight[artist_id] += w
-    top = [(taste.artist_name[a], w) for a, w in weight.most_common(60) if a in taste.artist_name]
+    # Bez vlastních interpretů -- štítky Last.fm by byly cizí kapely.
+    top = [(taste.artist_name[a], w) for a, w in weight.most_common(60) if a in taste.artist_name and not is_own_artist(a)]
     styles = await lt.user_styles_weighted(top, 60)
     with Session(engine) as session:
         row = session.get(HomeSnapshot, styles_key(user_id)) or HomeSnapshot(key=styles_key(user_id))

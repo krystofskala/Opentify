@@ -32,6 +32,7 @@ from app import listen_later
 from app.browse import CATEGORIES, Category, _category_playlists, get_category
 from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.home import generators as g
 from app.home import personal_mixes as pm
@@ -176,6 +177,8 @@ async def artist_shares(taste: pm.Taste, budget: int) -> dict[str, dict[str, flo
 
     lf: dict[str, dict[str, float]] = {}
     for artist_id in ranked[: max(budget * 4, 150)]:
+        if is_own_artist(artist_id):  # štítky by patřily cizí kapele
+            continue
         lf[artist_id] = await lt.tag_category_shares(taste.artist_name.get(artist_id, ""))
     out: dict[str, dict[str, float]] = {}
     for artist_id in ranked:

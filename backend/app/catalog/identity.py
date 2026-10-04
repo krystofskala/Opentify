@@ -7,6 +7,7 @@ album se jmenuje stejně jako některé naše album toho interpreta.
 
 from __future__ import annotations
 
+import time
 import unicodedata
 
 from sqlmodel import Session, select
@@ -26,6 +27,38 @@ OWN_PREFIX = "own:"
 
 def is_own_id(value: str | None) -> bool:
     return isinstance(value, str) and value.startswith(OWN_PREFIX)
+
+
+def is_own_artist(artist: Artist | str | None) -> bool:
+    """Vlastní interpret (`own:` id / `ownArtist`; řádek nebo jeho id) --
+    podle jména ho nikde nehledat (Last.fm, Discogs...), našla by se
+    stejnojmenná cizí kapela."""
+    if artist is None:
+        return False
+    if isinstance(artist, str):
+        return artist in own_artist_ids()
+    refs = artist.external_refs or {}
+    return is_own_id(artist.mbid) or is_own_id(artist.deezer_id) or bool(refs.get("ownArtist"))
+
+
+_OWN_IDS: set[str] = set()
+_OWN_IDS_AT = -1e9
+
+
+def own_artist_ids() -> set[str]:
+    """Id vlastních interpretů (krátká cache -- volá se pro každé jméno)."""
+    global _OWN_IDS, _OWN_IDS_AT
+    if time.monotonic() - _OWN_IDS_AT > 300:
+        with Session(engine) as session:
+            rows = session.exec(
+                select(Artist).where(
+                    ((Artist.mbid >= OWN_PREFIX) & (Artist.mbid < "own;"))  # type: ignore[operator]
+                    | ((Artist.deezer_id >= OWN_PREFIX) & (Artist.deezer_id < "own;"))  # type: ignore[operator]
+                )
+            ).all()
+            _OWN_IDS = {a.id for a in rows if is_own_artist(a)}
+        _OWN_IDS_AT = time.monotonic()
+    return _OWN_IDS
 
 
 def _norm(text: str | None) -> str:

@@ -16,6 +16,7 @@ import unicodedata
 from sqlalchemy import func
 from sqlmodel import Session, select
 
+from app.catalog.identity import is_own_artist
 from app.models import Artist, Recording, Release
 
 
@@ -30,8 +31,16 @@ def _nfc(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
-def find_or_create_artist(session: Session, name: str) -> Artist:
+def find_or_create_artist(session: Session, name: str, *, allow_own: bool = False) -> Artist:
+    """`allow_own` jen pro sken vlastních souborů -- Shazam, Spotify nebo
+    YouTube s cizím "Kontrastem" se nesmí přilepit k tátově kapele."""
     name = _nfc(primary_of(name))
+
+    def usable(a: Artist) -> bool:
+        if {"mergedInto", "homonymOf"} & set((a.external_refs or {}).keys()):
+            return False
+        return allow_own or not is_own_artist(a)
+
     # Nejdřív přesná shoda: SQLite `lower()` mění jen ASCII -- "Mňága a Žďorp"
     # se přes něj nikdy nenašel a každá skladba dostala nového interpreta
     # (a s ním vlastní album).
@@ -39,7 +48,7 @@ def find_or_create_artist(session: Session, name: str) -> Artist:
         # Sloučené duplicity (`mergedInto`) a stejnojmenné cizí kapely
         # (`homonymOf`, "Nepatří k tomuto interpretovi") nebrat; přednost má
         # interpret s MBID / Deezer id.
-        live = [a for a in rows if not {"mergedInto", "homonymOf"} & set((a.external_refs or {}).keys())]
+        live = [a for a in rows if usable(a)]
         return max(live, key=lambda a: (a.mbid is not None, a.deezer_id is not None), default=None)
 
     artist = best(session.exec(select(Artist).where(Artist.name == name)).all())
@@ -53,7 +62,7 @@ def find_or_create_artist(session: Session, name: str) -> Artist:
         live = [
             a
             for a in (session.get(Artist, i) for i in ids)
-            if a is not None and not {"mergedInto", "homonymOf"} & set((a.external_refs or {}).keys())
+            if a is not None and usable(a)
         ]
         if len(live) == 1:
             artist = live[0]

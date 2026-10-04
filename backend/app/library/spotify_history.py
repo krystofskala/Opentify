@@ -142,16 +142,20 @@ def build_year_playlists(user_id: str) -> dict[int, int]:
     historie ze Spotify i poslechy v appce (počet přehrání, při shodě
     celkový čas). Běží denně jako generátor Domů, takže 1. ledna přibude
     playlist za právě skončený rok."""
+    # Rok podle českého času -- poslech 31.12. ve 23:30 patří do toho roku
+    # a playlist za rok přibude o půlnoci, ne v 1:00.
+    from app.home.personal_mixes import _TZ, _aware
+
     counts: dict[int, Counter] = defaultdict(Counter)
     time_ms: dict[int, Counter] = defaultdict(Counter)
     total: Counter = Counter()
-    last_year = utcnow().year - 1  # rozběhnutý rok ještě ne
+    last_year = _aware(utcnow()).astimezone(_TZ).year - 1  # rozběhnutý rok ještě ne
     with Session(engine) as session:
         rows = session.exec(
             select(Listen.recording_id, Listen.played_at, Listen.duration_played_ms).where(Listen.user_id == user_id)
         ).all()
     for recording_id, played_at, ms in rows:
-        year = played_at.year
+        year = _aware(played_at).astimezone(_TZ).year
         if not FIRST_YEAR <= year <= last_year:
             continue
         counts[year][recording_id] += 1

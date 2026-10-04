@@ -78,6 +78,28 @@ async def franchise(franchise_id: str):
     return out
 
 
+@browse_router.post("/deezer-playlists/{deezer_id}")
+async def open_playlist(deezer_id: str, title: str | None = None):
+    """Otevřít Deezer playlist z kategorie -- převezme ho do katalogu a vrátí
+    id našeho playlistu (klient pak otevře `/playlists/{id}`)."""
+    if not _DEEZER_ID.match(deezer_id):
+        raise HTTPException(status_code=400, detail="neplatné id")
+    playlist_id = await browse.open_deezer_playlist(deezer_id, title)
+    if playlist_id is None:
+        raise HTTPException(status_code=502, detail="playlist se nepodařilo načíst")
+    return {"playlistId": playlist_id}
+
+
+@browse_router.get("/search-tags")
+async def search_tags(q: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Žánry a styly pro Hledat › Vše ("blues" -> Blues, Chicago Blues...)."""
+    from app import genre_search
+
+    return {"items": await genre_search.search(q, user_id=current[0])}
+
+
+# Pevné cesty musí být nad `/{category_id}`, jinak by je pohltila
+# (/browse/search-tags končilo 404 "kategorie neexistuje").
 @browse_router.get("/{category_id}")
 async def category(category_id: str):
     c = browse.get_category(category_id)
@@ -128,23 +150,3 @@ async def category_for_you(category_id: str, current: tuple[str, str] = Depends(
         mine = set(payload.get("all") or payload.get("tags") or [])
     out["yourSubgenres"] = [t for t in SUBGENRES.get(c.id, ()) if t in mine]
     return out
-
-
-@browse_router.post("/deezer-playlists/{deezer_id}")
-async def open_playlist(deezer_id: str, title: str | None = None):
-    """Otevřít Deezer playlist z kategorie -- převezme ho do katalogu a vrátí
-    id našeho playlistu (klient pak otevře `/playlists/{id}`)."""
-    if not _DEEZER_ID.match(deezer_id):
-        raise HTTPException(status_code=400, detail="neplatné id")
-    playlist_id = await browse.open_deezer_playlist(deezer_id, title)
-    if playlist_id is None:
-        raise HTTPException(status_code=502, detail="playlist se nepodařilo načíst")
-    return {"playlistId": playlist_id}
-
-
-@browse_router.get("/search-tags")
-async def search_tags(q: str, current: tuple[str, str] = Depends(get_current_user)):
-    """Žánry a styly pro Hledat › Vše ("blues" -> Blues, Chicago Blues...)."""
-    from app import genre_search
-
-    return {"items": await genre_search.search(q, user_id=current[0])}

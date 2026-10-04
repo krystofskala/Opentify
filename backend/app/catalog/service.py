@@ -29,7 +29,7 @@ from urllib.parse import quote_plus
 
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select
-from app.catalog.identity import is_own_id
+from app.catalog.identity import is_own_artist, is_own_id
 
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.cache import CACHE_PREFIX
@@ -1072,7 +1072,9 @@ class CatalogService:
         if artist is None:
             return None
         relations: list[dict[str, Any]] = []
-        if artist.mbid:
+        # Vlastní interpret: hledání podle jména by vedlo na cizí kapelu.
+        own = is_own_artist(artist)
+        if artist.mbid and not own:
             try:
                 relations = (await self._mb.get_artist(artist.mbid)).get("relations") or []
             except MusicBrainzError:
@@ -1106,10 +1108,10 @@ class CatalogService:
         return {
             "web": first("official homepage"),
             "bandcamp": first("bandcamp") or None,
-            "bandcampSearch": f"https://bandcamp.com/search?q={name}&item_type=b",
+            "bandcampSearch": None if own else f"https://bandcamp.com/search?q={name}&item_type=b",
             "shop": shop,
-            "records": first("discogs") or f"https://www.discogs.com/search/?q={name}&type=artist",
-            "concerts": concerts or f"https://www.songkick.com/search?query={name}",
+            "records": first("discogs") or (None if own else f"https://www.discogs.com/search/?q={name}&type=artist"),
+            "concerts": concerts or (None if own else f"https://www.songkick.com/search?query={name}"),
             "concertsSource": (
                 "Bandsintown" if concerts and "bandsintown" in concerts else "Songkick"
             ),

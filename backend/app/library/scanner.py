@@ -212,7 +212,8 @@ def _reassign_media_asset(
 async def _match_locally(session: Session, tags: _TrackTags) -> Recording | None:
     if not tags.title or not tags.artist:
         return None
-    artist = find_or_create_artist(session, tags.artist)
+    # Vlastní soubory smí přistát na vlastním interpretovi (tátův Kontrast).
+    artist = find_or_create_artist(session, tags.artist, allow_own=True)
     release = find_or_create_release(session, artist, tags.album) if tags.album else None
     recording = find_or_create_recording(
         session, artist, tags.title, track_number=tags.track_number, duration_ms=tags.duration_ms

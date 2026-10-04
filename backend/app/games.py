@@ -307,6 +307,7 @@ _NOT_OST = ("piano", "lofi", "lo-fi", "cover", "covers", "tribute", "remix", "re
 # Jiný díl / jiné dílo: číslo, římská číslice, pokračování, film.
 _SEQUEL = {
     "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv", "xv", "xvi", "2", "3", "4", "5", "6",
+    "7", "8", "9", "10",  # II-X převádí `_words` na číslice
     "part", "chapter", "movie", "film", "nightreign", "remake", "rebirth", "reborn", "origins", "dlc", "expansion", "dungeons",
     "odst", "reach", "season", "hbo", "tv", "series", "anime",
 }
@@ -314,7 +315,7 @@ _SEQUEL = {
 _LABELS = (
     "square enix music", "nintendo", "atlus game music", "fromsoftware sound team", "re-logic", "sega", "capcom",
     "konami", "bethesda", "xbox music", "halo", "aperture science", "bandai namco", "supergiant games",
-    "cd projekt red", "rockstar games", "warhorse studios", "2k", "mojang", "sony interactive",
+    "cd projekt red", "rockstar games", "warhorse studios", "2k", "mojang", "sony interactive", "valve",
 )
 
 
@@ -326,8 +327,26 @@ _CORE_OK = {
 }
 
 
+_ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9", "x": "10"}
+_GLUED = re.compile(r"^([^\W\d_]{3,})(\d{1,2})$")
+
+
 def _words(text: str) -> list[str]:
-    return [w for w in tokens(text.replace(":", " ").replace("-", " "))]
+    """Slova názvu; římské II-X jako číslice ("Dark Souls III" = "Dark Souls 3")
+    a slepené číslo dílu zvlášť ("SILENT HILL2" -> "hill", "2")."""
+    out: list[str] = []
+    for w in tokens(text.replace(":", " ").replace("-", " ")):
+        glued = _GLUED.match(w)
+        out.extend(glued.groups() if glued else (_ROMAN.get(w, w),))
+    return out
+
+
+def _same_work(want: list[str], title_words: set[str], words: list[str], sequel: frozenset[str]) -> bool:
+    """Album patří k dílu: má všechna jeho slova a žádné slovo jiného dílu
+    (Dark Souls 3 není Dark Souls 2)."""
+    if not all(_covered(w, set(words)) for w in want):
+        return False
+    return not ({w for w in words if w in sequel} - title_words)
 
 
 @dataclass(frozen=True)
@@ -359,7 +378,7 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
     from app.catalog.deezer_ingest import ingest_album, ingest_artist
 
     cat = cat or GAMES_CATALOG
-    version = "v8" if cat.ns == "games" else cat.ost_version
+    version = "v9" if cat.ns == "games" else cat.ost_version
 
     async def fetch() -> dict[str, Any]:
         dz = get_deezer_client()
@@ -376,9 +395,7 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
                     title = h.get("title") or ""
                     artist = fold((h.get("artist") or {}).get("name") or "")
                     words = _words(title)
-                    if not all(_covered(w, set(words)) for w in want):
-                        continue
-                    if {w for w in words if w in cat.sequel} - title_words:
+                    if not _same_work(want, title_words, words, cat.sequel):
                         continue
                     if cat.strict_core:
                         core = re.split(r"[\(\[]| - | – ", title)[0]
@@ -428,7 +445,10 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
         return {"albums": [{"kind": k, "album": picks[k][1]} for k in ("score", "songs") if k in picks]}
 
     try:
-        found = (await cached_json(f"{cat.ns}:ost:{version}:{game.slug}", MONTH, fetch)).get("albums") or []
+        # Prázdný výsledek (výpadek Deezeru) necachovat na měsíc.
+        found = (
+            await cached_json(f"{cat.ns}:ost:{version}:{game.slug}", MONTH, fetch, is_empty=lambda v: not (v or {}).get("albums"))
+        ).get("albums") or []
     except Exception:  # noqa: BLE001
         logger.exception("soundtrack %s", game.slug)
         return []

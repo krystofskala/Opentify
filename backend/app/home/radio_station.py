@@ -24,6 +24,7 @@ from sqlmodel import Session, select
 from app.library.dislikes import without_disliked
 from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.home import generators as g
 from app.home.personal_mixes import _artists_of, _cap_per_artist, _is_junk, _spread
@@ -127,7 +128,8 @@ async def _lastfm_similar(recording_id: str, rng: random.Random, limit: int = 25
     with Session(engine) as session:
         rec = session.get(Recording, recording_id)
         artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
-        if rec is None or artist is None:
+        # Vlastní interpret -- Last.fm by vrátil podobné cizí kapele.
+        if rec is None or artist is None or is_own_artist(artist):
             return []
         title, name = rec.title, primary_artist_name(artist.name)
     similar = await lastfm.similar_tracks(name, title, limit=limit * 2)

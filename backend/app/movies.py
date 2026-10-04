@@ -171,5 +171,5 @@ MOVIES_CATALOG = Catalog(
     series_unit="filmů",
     page_version="v9",
     strict_core=True,
-    ost_version="v8",
+    ost_version="v9",  # v9: římské číslice / slepená čísla v `_words`
 )

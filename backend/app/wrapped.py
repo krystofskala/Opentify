@@ -278,7 +278,7 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
                 out["playlists"] = _decade_playlists(ranked_tracks, evergreens, year_track)
             else:
                 playlist = session.exec(
-                    select(Playlist).where(Playlist.owner_user_id == g.home_user(), Playlist.source == f"personal:year:{period}")
+                    select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == f"personal:year:{period}")
                 ).first()
                 out["playlists"] = [{"id": playlist.id, "title": playlist.title}] if playlist else []
             return out
