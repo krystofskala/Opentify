@@ -262,6 +262,35 @@ class GlassOffController extends StateNotifier<bool> {
 
 final glassOffProvider = StateNotifierProvider<GlassOffController, bool>((ref) => GlassOffController());
 
+/// "Omezit animace" na tomhle zařízení (pro lidi, kterým pohyb vadí) --
+/// navíc k systémovému nastavení; zapnuté = celá appka jako se systémovým
+/// omezením pohybu (`MediaQuery.disableAnimations`, viz app.dart).
+class ReducedMotionController extends StateNotifier<bool> {
+  ReducedMotionController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.reduced_motion_device';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final reducedMotionProvider = StateNotifierProvider<ReducedMotionController, bool>((ref) => ReducedMotionController());
+
 // Výchozí hodnoty = nastavení majitele z telefonu (2026-10-03, profil "Já").
 
 /// Nastavení skla pro celý strom (`GlassContainer` je bez Riverpodu).

@@ -408,7 +408,7 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
     if (!mounted || index != _currentIndex || _userScrolling) return;
     final ctx = _keys[index].currentContext;
     if (ctx != null) {
-      if (animate) {
+      if (animate && !MediaQuery.disableAnimationsOf(ctx)) {
         Scrollable.ensureVisible(ctx,
             alignment: _alignment, duration: const Duration(milliseconds: 450), curve: Curves.easeOutCubic);
       } else {

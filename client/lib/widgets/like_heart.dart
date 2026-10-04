@@ -64,7 +64,7 @@ class LikeHeart extends ConsumerWidget {
           dimension: 48,
           child: Center(
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
+              duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 260),
               switchInCurve: Curves.easeOutBack,
               transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
               child: Icon(icon, key: ValueKey(icon), size: size, fill: fill, color: tint),

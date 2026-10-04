@@ -426,6 +426,14 @@ class _AppearanceSettings extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         _SwitchRow(
+          title: 'Omezit animace',
+          subtitle: 'Méně pohybu: bez pružin, plynutí a samostatného posouvání. Platí jen pro toto zařízení '
+              '(zapne se i samo, když máš omezení pohybu v systému).',
+          value: ref.watch(reducedMotionProvider),
+          onChanged: ref.read(reducedMotionProvider.notifier).set,
+        ),
+        const SizedBox(height: 12),
+        _SwitchRow(
           title: 'Zrno na pozadí',
           subtitle: 'Jemná filmová zrnitost. Vypnuté = úplně hladké plochy.',
           value: !ref.watch(noGrainProvider),

@@ -115,7 +115,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   void _setLyrics(bool on, {bool animate = true, bool save = true}) {
     if (on == _lyricsMode) return;
     setState(() => _lyricsMode = on);
-    if (animate) {
+    if (animate && !MediaQuery.disableAnimationsOf(context)) {
       on ? _lyricsAnim.forward() : _lyricsAnim.reverse();
     } else {
       _lyricsAnim.value = on ? 1 : 0;
@@ -1350,7 +1350,12 @@ class _LivingCoverState extends State<_LivingCover> with TickerProviderStateMixi
   @override
   void initState() {
     super.initState();
-    if (widget.playing) _clock.repeat();
+    // Omezení pohybu čte MediaQuery -- v initState ještě nejde, až po snímku.
+    if (widget.playing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.playing && !_reduce) _clock.repeat();
+      });
+    }
   }
 
   @override

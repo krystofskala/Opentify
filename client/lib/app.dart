@@ -80,6 +80,7 @@ class OpentifyApp extends ConsumerWidget {
       builder: (context, child) => _DismissKeyboard(
           child: _maybeSimulatedInsets(
           context,
+          ref.watch(reducedMotionProvider),
           UserActivityListener(
               child: AppBackground(
             selectedAccent: accent,
@@ -131,12 +132,12 @@ class OpentifyApp extends ConsumerWidget {
 /// tab bar, mini přehrávač, hlavičky a přehrávač insety respektují.
 const _simulateInsets = bool.fromEnvironment('SIMULATE_INSETS');
 
-Widget _maybeSimulatedInsets(BuildContext context, Widget child) {
+Widget _maybeSimulatedInsets(BuildContext context, bool reduceMotion, Widget child) {
   final mq = MediaQuery.of(context);
   // Omezení pohybu: na webu Flutter `prefers-reduced-motion` do
   // `disableAnimations` nepropisuje -- doplníme ho, ať celá appka čte jen
-  // `MediaQuery.disableAnimationsOf`.
-  final reduce = !mq.disableAnimations && systemPrefersReducedMotion();
+  // `MediaQuery.disableAnimationsOf`. Navíc ruční přepínač v Profil › Vzhled.
+  final reduce = !mq.disableAnimations && (reduceMotion || systemPrefersReducedMotion());
   if (!_simulateInsets && !reduce) return child;
   const insets = EdgeInsets.only(top: 47, bottom: 34);
   return MediaQuery(

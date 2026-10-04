@@ -88,7 +88,11 @@ class NowPlayingSheetController {
 
   bool get isOpen => _routeOpen;
 
+  /// Omezení pohybu (poslední známé z widgetu, controller kontext nemá).
+  bool _reduceMotion = false;
+
   void _ensureRoute(BuildContext context) {
+    _reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     if (_routeOpen || _pushing) return;
     _pushing = true;
     context.push('/now-playing');
@@ -146,7 +150,10 @@ class NowPlayingSheetController {
 
   Future<bool> _settle(double target, double velocity, {bool popRoute = true}) {
     final done = Completer<bool>();
-    final sim = SpringSimulation(_spring, _anim.value, target, velocity)
+    // Omezení pohybu: bez pružiny, rychlé lineární dojetí.
+    final sim = _reduceMotion
+        ? SpringSimulation(const SpringDescription(mass: 1, stiffness: 2000, damping: 120), _anim.value, target, 0)
+        : SpringSimulation(_spring, _anim.value, target, velocity)
       ..tolerance = const Tolerance(distance: 0.001, velocity: 0.01);
     _anim.animateWith(sim).whenCompleteOrCancel(() {
       if (dragging || _anim.isAnimating) return done.complete(false);

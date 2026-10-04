@@ -66,7 +66,8 @@ class MediaCard extends ConsumerWidget {
         ? _buildRow(context, image, isCircle)
         : _buildCard(context, image, cardShape, isCircle);
 
-    if (animationIndex != null) {
+    // Omezení pohybu: karty se jen objeví, bez nájezdu.
+    if (animationIndex != null && !MediaQuery.disableAnimationsOf(context)) {
       card = card
           .animate(delay: (animationIndex! * 60).ms)
           .fadeIn(duration: 300.ms, curve: Curves.easeOut)

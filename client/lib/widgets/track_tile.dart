@@ -621,7 +621,7 @@ class _CardTile extends StatelessWidget {
       ),
     );
 
-    if (animationIndex != null) {
+    if (animationIndex != null && !MediaQuery.disableAnimationsOf(context)) {
       card = card
           .animate(delay: (animationIndex! * 60).ms)
           .fadeIn(duration: Motion.state.duration, curve: Motion.state)
