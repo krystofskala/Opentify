@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/diagnostics.dart';
@@ -19,6 +21,11 @@ typedef ArtworkKey = ({String? releaseId, String? artistId});
 /// stav, ne chyba, kterou by volající musel řešit).
 final recordingArtworkProvider = FutureProvider.autoDispose.family<String?, ArtworkKey>((ref, key) async {
   final repo = ref.watch(catalogRepositoryProvider);
+  // Výsledek podržet 20 min i po odscrollování -- dřív se při návratu
+  // v dlouhém seznamu (knihovna, fronta) posílal stejný dotaz znovu.
+  final link = ref.keepAlive();
+  final timer = Timer(const Duration(minutes: 20), link.close);
+  ref.onDispose(timer.cancel);
 
   if (key.releaseId != null) {
     // Skladba/album S albem: jen obal alba. Fotka interpreta jako "obal"

@@ -358,11 +358,16 @@ class GlassSettings extends InheritedWidget {
   }
 
 
+  static int? _coarse(Color? c) =>
+      c == null ? null : ((c.r * 31).round() << 10) | ((c.g * 31).round() << 5) | (c.b * 31).round();
+
   @override
   bool updateShouldNotify(GlassSettings old) =>
       old.frost != frost ||
       old.tint != tint ||
-      old.tintColor != tintColor ||
+      // Přechod barvy skladby (2,8 s) mění tón každý snímek -- přestavět
+      // všechna skla jen při znatelném posunu (~3 % na kanál), ne 170x.
+      _coarse(old.tintColor) != _coarse(tintColor) ||
       old.darkness != darkness ||
       old.colorfulness != colorfulness ||
       old.tone != tone ||

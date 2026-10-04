@@ -160,8 +160,9 @@ class LiquidCapture {
   // tak jako tak. Dřív 32 ms a "moc brzy" si vynucovalo každý snímek
   // (scheduleFrame) -- appka pak kreslila 60 fps i v klidu.
   static const Duration _interval = Duration(milliseconds: 42);
-  // Jen pozadí appky se změnilo (pomalý přeliv) -- stačí ~8 fps.
-  static const Duration _slowInterval = Duration(milliseconds: 125);
+  // Jen pozadí appky se změnilo (pomalý přeliv) -- stačí ~3 fps (pozadí se
+  // hýbe pomalu; dřív 8 fps = 3 toImageSync + blur 8x za vteřinu napořád).
+  static const Duration _slowInterval = Duration(milliseconds: 300);
   static const Duration _safetyInterval = Duration(milliseconds: 500);
 
   // Ostrý výřez stačí do 2x (Retina 3x je pod rozmazaným sklem k ničemu),
@@ -177,9 +178,19 @@ class LiquidCapture {
     _schedule();
   }
 
+  /// Sklo, které se nedávno opravdu vykreslilo. Skrytá skla (Offstage pod
+  /// rozbaleným přehrávačem, neaktivní záložky, zakryté trasy) se nekreslí
+  /// -- jinak by držela zachytávání v chodu a roztahovala výřez.
+  bool _live(RenderLiquidGlass g) {
+    final at = g.paintedAt;
+    if (at == null) return false;
+    return !at.isBefore(_lastCapture) || DateTime.now().difference(at) < const Duration(seconds: 2);
+  }
+
   Rect? _glassUnion() {
     Rect? union;
     for (final g in _glasses) {
+      if (!_live(g)) continue;
       final r = g.globalRect;
       if (r == null) continue;
       union = union == null ? r : union.expandToInclude(r);
@@ -234,6 +245,7 @@ class LiquidCapture {
   void _capture() {
     Rect? union;
     for (final g in _glasses) {
+      if (!_live(g)) continue;
       final r = g.globalRect;
       if (r == null) continue;
       union = union == null ? r : union.expandToInclude(r);
@@ -546,6 +558,7 @@ class RenderLiquidGlass extends RenderBox {
 
   /// Poloha na obrazovce (logické px) z posledního kreslení.
   Rect? globalRect;
+  DateTime? paintedAt;
 
   @override
   void attach(PipelineOwner owner) {
@@ -675,6 +688,7 @@ class RenderLiquidGlass extends RenderBox {
   }
 
   void _paintGlass(PaintingContext context, Offset offset) {
+    paintedAt = DateTime.now();
     globalRect = localToGlobal(Offset.zero) & size;
     _updateMotion(globalRect!);
     _capture._schedule();

@@ -120,7 +120,9 @@ ImageProvider netImageProvider(String url, {int? decodeSize}) {
 /// Velikost dekódování zaokrouhlená nahoru na pár stupňů -- při animaci
 /// (roztahování hlavičky) se tak obrázek nenačítá znovu každý snímek.
 int decodeBucket(double pixels) {
-  for (final size in const [128, 256, 512, 1024]) {
+  // 384/768 navíc: dlaždice ~180 pt na 3x (540 px) se dřív dekódovala na
+  // 1024 = 4 MB místo ~2,3 MB a cache obrázků se rychle přepisovala.
+  for (final size in const [128, 256, 384, 512, 768, 1024]) {
     if (pixels <= size) return size;
   }
   return 2048;
@@ -143,6 +145,11 @@ class RasterizedImage extends ImageProvider<RasterizedImage> {
 
   Future<ImageInfo> _load() async {
     final source = await _resolveFirstFrame(inner);
+    // Původní (GPU) obrázek z cache vyhodit -- jinak tam na webu zůstával
+    // vedle naší CPU kopie a paměť na obrázky se zdvojnásobila.
+    try {
+      PaintingBinding.instance.imageCache.evict(await inner.obtainKey(ImageConfiguration.empty));
+    } catch (_) {}
     try {
       final bytes = await source.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (bytes == null) return ImageInfo(image: source.clone());

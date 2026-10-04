@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../core/reduced_motion.dart';
 import '../theme/accent_color.dart' show CoverCharacter, accentTransitionDuration, isAchromatic;
+import '../state/user_idle.dart';
 import 'glass/liquid_glass.dart' show LiquidCapture, LiquidSource;
 
 /// Globální pozadí appky -- tekuté zrnité gradienty (reference: "50 Grainy
@@ -240,6 +241,8 @@ class _AppBackgroundState extends State<AppBackground> {
     return c;
   }
 
+  double _sincePaint = 0;
+
   void _wake() {
     if (widget.hidden) {
       _stopTicker();
@@ -282,6 +285,26 @@ class _AppBackgroundState extends State<AppBackground> {
       _flow = (_flow + step * _speed * (1 + 3 * _boost) * 0.02) % 256;
       _guestClock += step;
     }
+    // Každé překreslení pozadí znamená i nové výpočty všech skel a rozmazání
+    // nad ním (Impeller/CanvasKit si vrstvy nepamatují) -- proto plných
+    // 30 fps jen při přechodu barvy / scrollu, při hraní 20 fps, v klidu
+    // 12 a po delší nečinnosti 8. Pohyb je pomalý (smyčka 20-40 s), rozdíl
+    // oko nepozná, baterie ano (audit výkonu).
+    if (_reducedMotion && !_tweening(now)) {
+      // Omezený pohyb: poslední snímek po přechodu a dost.
+      _frame.value++;
+      _stopTicker();
+      return;
+    }
+    _sincePaint += dt;
+    final busy = _tweening(now) || _boost > 0.05 || _bloom > 0.01;
+    final minInterval = busy
+        ? 0.0
+        : widget.isPlaying
+            ? 1 / 20
+            : (UserIdle.idle.value ? 1 / 8 : 1 / 12);
+    if (_sincePaint + 0.004 < minInterval) return;
+    _sincePaint = 0;
     _frame.value++;
 
     // Animuje se nepřetržitě (30 fps strop výš); zastaví se jen při

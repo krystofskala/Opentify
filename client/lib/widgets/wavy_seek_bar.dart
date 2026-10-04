@@ -83,7 +83,12 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     // na starším iPhonu hlavní zdroj zasekávání (audit výkonu).
     _phaseController = _SteppedPhase(
       // Omezení pohybu: vlna stojí (amplituda zůstává, jen neplyne).
-      () => mounted && TickerMode.valuesOf(context).enabled && !MediaQuery.disableAnimationsOf(context),
+      // + jen s appkou na obrazovce (zamčený telefon s hudbou: nebudit CPU 24x/s).
+      () =>
+          mounted &&
+          TickerMode.valuesOf(context).enabled &&
+          !MediaQuery.disableAnimationsOf(context) &&
+          (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) == AppLifecycleState.resumed,
     )..repeat();
     _ampController = AnimationController(
       vsync: this,

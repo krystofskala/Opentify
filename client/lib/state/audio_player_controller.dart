@@ -360,6 +360,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   // appce nedovolí se po otevření sama rozehrát, play naváže od pozice.
 
   static const _sessionPrefKey = 'player.session.v1';
+  static const _sessionQueuePrefKey = 'player.session.queue.v1';
   bool _restoredIdle = false;
   Duration? _resumeAt;
   String? _resumeFor;
@@ -432,12 +433,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _recordCollectionProgress(s);
     _lastPersistKey = key;
     _lastPersist = now;
-    // Frontu (klidně tisíce skladeb) zakódovat jen když se změnila.
-    if (!identical(s.queue, _encodedQueueFor)) {
+    // Frontu (klidně tisíce skladeb, stovky kB) zakódovat A ZAPSAT jen když
+    // se změnila -- dřív se celá přepisovala každých 5 s po celou dobu hraní
+    // (Android přepisuje celý XML, web localStorage synchronně).
+    final queueChanged = !identical(s.queue, _encodedQueueFor);
+    if (queueChanged) {
       _encodedQueueFor = s.queue;
       _encodedQueue = jsonEncode([for (final q in s.queue) _infoToJson(q)]);
     }
-    final rest = jsonEncode({
+    final queueJson = _encodedQueue;
+    final data = jsonEncode({
       'index': s.queueIndex,
       'positionMs': s.position.inMilliseconds,
       'source': s.queueSourceLabel,
@@ -446,11 +451,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       'shuffleOrder': s.shuffleOrder,
       'repeat': s.repeatMode.name,
     });
-    final data = '{"queue":$_encodedQueue,${rest.substring(1)}';
-    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_sessionPrefKey, data)).then<void>(
-          (_) {},
-          onError: (Object _) {},
-        ));
+    unawaited(SharedPreferences.getInstance().then((p) async {
+      if (queueChanged) await p.setString(_sessionQueuePrefKey, queueJson);
+      await p.setString(_sessionPrefKey, data);
+    }).then<void>(
+      (_) {},
+      onError: (Object _) {},
+    ));
   }
 
   Future<void> _restoreSession() async {
@@ -459,7 +466,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       final raw = prefs.getString(_sessionPrefKey);
       if (raw == null || state.nowPlaying != null) return;
       final j = jsonDecode(raw) as Map<String, dynamic>;
-      final queue = [for (final e in (j['queue'] as List<dynamic>)) _infoFromJson(e as Map<String, dynamic>)];
+      // Fronta zvlášť (nový formát); starý měl frontu přímo uvnitř.
+      final rawQueue = j['queue'] ?? jsonDecode(prefs.getString(_sessionQueuePrefKey) ?? '[]');
+      final queue = [for (final e in (rawQueue as List<dynamic>)) _infoFromJson(e as Map<String, dynamic>)];
       if (queue.isEmpty) return;
       final index = (j['index'] as int).clamp(0, queue.length - 1);
       _queueContext = j['context'] as String?;

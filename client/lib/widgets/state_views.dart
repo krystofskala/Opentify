@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../core/api_client.dart';
@@ -226,13 +225,46 @@ class SkeletonBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.08);
-    return DecoratedBox(
-      decoration: ShapeDecoration(color: color, shape: AppShapes.of(radius)),
-      child: SizedBox(width: width, height: height),
-    )
-        .animate(onPlay: (c) => c.repeat(reverse: true))
-        .fade(begin: 0.5, end: 1, duration: 800.ms, curve: Curves.easeInOut);
+    final base = Theme.of(context).colorScheme.onSurface;
+    Widget box(double k) => DecoratedBox(
+          decoration: ShapeDecoration(color: base.withValues(alpha: 0.08 * k), shape: AppShapes.of(radius)),
+          child: SizedBox(width: width, height: height),
+        );
+    if (MediaQuery.disableAnimationsOf(context)) return box(0.75);
+    // Jeden společný pulz pro všechny obdélníky (dřív vlastní controller +
+    // Opacity = saveLayer na každý z ~18 obdélníků, na každý snímek).
+    return ValueListenableBuilder<double>(valueListenable: _SkeletonPulse.instance, builder: (_, k, __) => box(k));
+  }
+}
+
+/// Společný "dech" skeletonů: ~15 fps, běží jen dokud ho někdo poslouchá.
+class _SkeletonPulse extends ValueNotifier<double> {
+  _SkeletonPulse() : super(0.75);
+
+  static final instance = _SkeletonPulse();
+  Timer? _timer;
+  final _clock = Stopwatch();
+
+  @override
+  void addListener(VoidCallback listener) {
+    super.addListener(listener);
+    _timer ??= Timer.periodic(const Duration(milliseconds: 66), (_) {
+      // 0.5..1 tam a zpět za 1,6 s (jako dřív 800 ms fade s reverse).
+      final t = (_clock.elapsedMilliseconds % 1600) / 1600;
+      final tri = t < 0.5 ? t * 2 : 2 - t * 2;
+      value = 0.5 + 0.5 * Curves.easeInOut.transform(tri);
+    });
+    _clock.start();
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    if (!hasListeners) {
+      _timer?.cancel();
+      _timer = null;
+      _clock.stop();
+    }
   }
 }
 
