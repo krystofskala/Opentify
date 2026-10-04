@@ -9,6 +9,9 @@ Chytré pořadí (bez připnutých):
   "/playlists/<id>", "/library/liked") v podobnou dobu hrálo, a za to, jak
   moc jeho interpreti odpovídají tomu, co v tuhle dobu posloucháš -- ráno
   tak vyjde jiný mix než večer i u mixů, které jsi nikdy nespustil;
+- vybírá ze všeho (i ze sekcí, které má profil na Domů skryté); ze
+  žebříčků a nálad nejvýš jedno místo (`WIDE_SLOTS`) -- ten, který na vkus
+  a denní dobu sedí nejvíc (něco mimo bublinu, ale ne zaplavit);
 - bez historie zůstává původní pořadí (mixy, žebříčky, výběry).
 """
 
@@ -26,6 +29,9 @@ from app.utils import utcnow
 
 MAX_PINS = 6
 QUICK_SIZE = 6
+# Žebříčky a nálady: jedno místo pro něco mimo vlastní vkus ("Top Worldwide
+# jako jedno místo ho neodradí, třeba zaujme").
+WIDE_SLOTS = 1
 _TZ = ZoneInfo("Europe/Prague")
 
 
@@ -93,9 +99,16 @@ def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter, Coun
 
 def rank(session: Session, user_id: str, candidates: list[Playlist], liked_id: str | None) -> list[Playlist]:
     """Kandidáti seřazení podle toho, jak sedí na tuhle denní dobu."""
+    return [p for p, _score in rank_scored(session, user_id, candidates, liked_id)]
+
+
+def rank_scored(
+    session: Session, user_id: str, candidates: list[Playlist], liked_id: str | None
+) -> list[tuple[Playlist, float | None]]:
+    """Jako `rank`, i se skóre shody (0..1,7); bez historie skóre None."""
     ctx, artists, _recs = time_profile(session, user_id)
     if not ctx and not artists:
-        return candidates
+        return [(p, None) for p in candidates]
     max_ctx = max(ctx.values(), default=0) or 1.0
     max_art = max(artists.values(), default=0) or 1.0
     scored = []
@@ -114,4 +127,4 @@ def rank(session: Session, user_id: str, candidates: list[Playlist], liked_id: s
         # Malá přednost původnímu pořadí při shodě (mixy dne napřed).
         scored.append((-score, order, p))
     scored.sort(key=lambda x: (x[0], x[1]))
-    return [p for _s, _o, p in scored]
+    return [(p, -s) for s, _o, p in scored]
