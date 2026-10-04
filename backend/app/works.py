@@ -38,13 +38,36 @@ def is_qid(value: str) -> bool:
     return len(value) > 1 and value[0] == "Q" and value[1:].isdigit()
 
 
-async def _get(params: dict[str, Any], key: str, ttl: int = WEEK) -> dict[str, Any]:
+async def _get(params: dict[str, Any], key: str, ttl: int = WEEK, transform=None) -> dict[str, Any]:
     async def fetch() -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=15.0, headers=_UA) as client:
             r = await client.get(WD_API, params={**params, "format": "json"})
-        return r.json() if r.status_code == 200 else {}
+        data = r.json() if r.status_code == 200 else {}
+        return transform(data) if transform and data else data
 
     return await cached_json(f"wd:{key}", ttl, fetch, is_empty=lambda v: not v)
+
+
+# Vlastnosti, které z entit opravdu čteme (druh, rok, skladatel, série,
+# Steam id). Celá entita má i MB claimů -- cache tak rostla na 375 MB.
+_USED_PROPS = ("P31", "P577", "P580", "P86", "P179", "P1733")
+
+
+def _slim(data: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for qid, ent in (data.get("entities") or {}).items():
+        claims = {}
+        for prop in _USED_PROPS:
+            vals = [
+                {"mainsnak": {"datavalue": {"value": ((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")}}}
+                for c in (ent.get("claims") or {}).get(prop) or []
+            ]
+            if vals:
+                claims[prop] = vals
+        slim = {k: ent[k] for k in ("id", "labels", "sitelinks", "missing") if k in ent}
+        slim["claims"] = claims
+        out[qid] = slim
+    return {"entities": out}
 
 
 async def entities(ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -54,7 +77,8 @@ async def entities(ids: list[str]) -> dict[str, dict[str, Any]]:
         data = await _get(
             {"action": "wbgetentities", "ids": "|".join(chunk), "props": "claims|labels|sitelinks",
              "languages": "cs|en", "sitefilter": "enwiki|cswiki"},
-            "ent:" + "|".join(chunk),
+            "ent2:" + "|".join(chunk),
+            transform=_slim,
         )
         out.update(data.get("entities") or {})
     return out
