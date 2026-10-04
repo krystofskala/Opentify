@@ -12,11 +12,19 @@ import 'native_nav.dart';
 /// `token_from_request` bere obojí).
 String? deviceToken;
 
-/// Admin jedná za jiný profil (web: cookie `opentify_act_as`).
+/// Admin jedná za jiný profil -- JEDINÝ zdroj pravdy na webu i v appce:
+/// posílá se v každém požadavku (`X-Act-As`, u WebSocketu `act_as`). Dřív
+/// web spoléhal na cookie na 10 let, kterou prohlížeč posílal sám -- appka
+/// si myslela jedno, server druhé (živě: "moje nastavení, tátova Domů").
 String? actAsProfile;
 
 const _tokenKey = 'auth.device_token';
 const _actAsKey = 'auth.act_as';
+const _actAsAtKey = 'auth.act_as_at';
+
+/// Přepnutí na jiný profil po téhle době samo vyprší (zapomenuté přepnutí
+/// by jinak po restartu tiše pokračovalo).
+const actAsLifetime = Duration(hours: 3);
 
 /// Klíč zařízení v systémovém trezoru (iOS Keychain, Android Keystore), ne
 /// v běžném úložišti appky -- to Android kopíroval do zálohy na Google Disk.
@@ -75,11 +83,26 @@ void _scheduleRetry() {
   });
 }
 
+Future<void> _loadActAs() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString(_actAsKey);
+    final at = DateTime.tryParse(prefs.getString(_actAsAtKey) ?? '');
+    if (id != null && (at == null || DateTime.now().difference(at) > actAsLifetime)) {
+      await prefs.remove(_actAsKey);
+      await prefs.remove(_actAsAtKey);
+      actAsProfile = null;
+    } else {
+      actAsProfile = id;
+    }
+  } catch (_) {}
+}
+
 Future<void> loadDeviceToken() async {
+  await _loadActAs();
   if (kIsWeb) return;
   try {
     final prefs = await SharedPreferences.getInstance();
-    actAsProfile = prefs.getString(_actAsKey);
     final legacy = prefs.getString(_tokenKey);
     try {
       deviceToken = await _readSecure();
@@ -128,6 +151,11 @@ Future<void> clearDeviceToken() async {
   actAsProfile = null;
   _retryOnResume?.dispose();
   _retryOnResume = null;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_actAsKey);
+    await prefs.remove(_actAsAtKey);
+  } catch (_) {}
   if (kIsWeb) return;
   try {
     await _secure.delete(key: _tokenKey);
@@ -141,13 +169,18 @@ Future<void> clearDeviceToken() async {
 }
 
 Future<void> saveActAs(String? userId) async {
-  if (kIsWeb) return;
   actAsProfile = userId;
   try {
     final prefs = await SharedPreferences.getInstance();
-    userId == null ? await prefs.remove(_actAsKey) : await prefs.setString(_actAsKey, userId);
+    if (userId == null) {
+      await prefs.remove(_actAsKey);
+      await prefs.remove(_actAsAtKey);
+    } else {
+      await prefs.setString(_actAsKey, userId);
+      await prefs.setString(_actAsAtKey, DateTime.now().toIso8601String());
+    }
   } catch (_) {}
-  await NativeNav.syncConfig();
+  if (!kIsWeb) await NativeNav.syncConfig();
 }
 
 /// Hlavičky přihlášení pro nativní appku (web: prázdné).

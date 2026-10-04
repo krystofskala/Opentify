@@ -489,7 +489,10 @@ class ProfilesSection extends ConsumerWidget {
 
 /// Pruh nahoře v Profilu, když admin jedná za jiný profil.
 class ActingAsBanner extends ConsumerWidget {
-  const ActingAsBanner({super.key});
+  const ActingAsBanner({super.key, this.compactTop = false});
+
+  /// Plovoucí nahoře přes obrazovku (HomeShell) -- bez spodního odsazení.
+  final bool compactTop;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -498,9 +501,13 @@ class ActingAsBanner extends ConsumerWidget {
     if (auth?.user == null || acting == null || acting.id == auth!.user!.id) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: EdgeInsets.only(bottom: compactTop ? 0 : AppSpacing.md),
       child: DecoratedBox(
-        decoration: ShapeDecoration(shape: const StadiumBorder(), color: scheme.primaryContainer),
+        decoration: ShapeDecoration(
+          shape: const StadiumBorder(),
+          color: scheme.primaryContainer,
+          shadows: compactTop ? glassShadow : null,
+        ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
           child: Row(

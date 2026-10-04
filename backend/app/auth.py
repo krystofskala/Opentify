@@ -92,6 +92,25 @@ def _user_for_token(session: Session, token: str | None) -> AppUser | None:
     return session.get(AppUser, row.user_id)
 
 
+def purge_stale_tokens() -> int:
+    """Smaže klíče zařízení, které se nepoužívají: nikdy nepoužitý klíč
+    starší než den (přihlášení v prohlížeči, které si klíč nenechalo, testy,
+    starý přechodný režim) a klíč nepoužitý přes `DEVICE_IDLE_EXPIRY`. Dřív
+    se mazal jen při použití, takže nepoužité visely v Profilech navždy
+    (živě: 10 "zařízení" u jednoho PC). Vrací počet smazaných."""
+    now = utcnow()
+    removed = 0
+    with Session(engine) as session:
+        for row in session.exec(select(AuthToken)).all():
+            created = aware(row.created_at)
+            used = aware(row.last_used_at)
+            if (used is None and now - created > timedelta(days=1)) or (used is not None and now - used > DEVICE_IDLE_EXPIRY):
+                session.delete(row)
+                removed += 1
+        session.commit()
+    return removed
+
+
 def _user_for_tailscale(session: Session, login: str) -> AppUser | None:
     """Profil podle Tailscale účtu. Hlavičky `Tailscale-User-*` přidává
     `tailscale serve` (klient je podvrhnout nemůže -- API poslouchá jen na
@@ -147,11 +166,10 @@ def resolve_user(request: Request) -> tuple[AppUser | None, AppUser | None]:
         acting = user
         # `act_as` v dotazu: WebSocket z nativní appky hlavičky poslat neumí
         # (Opentify Connect jinak skončil v jiném profilu než HTTP).
-        act_as = (
-            request.headers.get("x-act-as")
-            or request.query_params.get("act_as")
-            or request.cookies.get(ACT_AS_COOKIE)
-        )
+        # Jen to, co appka výslovně pošle (hlavička, u WebSocketu dotaz) --
+        # dřív i cookie na 10 let: prohlížeč ji posílal sám a část požadavků
+        # šla za jiný profil než zbytek (živě: tvoje nastavení, tátova Domů).
+        act_as = request.headers.get("x-act-as") or request.query_params.get("act_as")
         if user.role == "admin" and act_as and act_as != user.id:
             other = session.get(AppUser, act_as)
             if other is not None:

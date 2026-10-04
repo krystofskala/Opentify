@@ -344,9 +344,8 @@ def act_as(body: ActAsIn, response: Response, _admin=Depends(require_admin)):
         with Session(engine) as session:
             if session.get(AppUser, body.user_id) is None:
                 raise HTTPException(status_code=404, detail="Profil neexistuje.")
-        _set_cookie(response, ACT_AS_COOKIE, body.user_id)
-    else:
-        response.delete_cookie(ACT_AS_COOKIE, path="/")
+    # Profil se určuje jen hlavičkou X-Act-As (appka); stará cookie pryč.
+    response.delete_cookie(ACT_AS_COOKIE, path="/")
     return {"actingAs": body.user_id or ADMIN_ID}
 
 

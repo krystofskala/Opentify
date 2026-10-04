@@ -14,6 +14,7 @@ import '../widgets/glass/glass.dart';
 import '../widgets/glass/liquid_glass.dart';
 import '../widgets/now_playing_sheet.dart' show HiddenUnderPlayer;
 import '../widgets/player_bar.dart';
+import '../features/profile/profiles_section.dart' show ActingAsBanner;
 import 'branches.dart';
 import '../core/app_update.dart';
 import '../widgets/app_update_sheet.dart';
@@ -201,7 +202,19 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
           extendBody: true,
           body: NotificationListener<ScrollNotification>(
             onNotification: _onScroll,
-            child: LiquidSource.page(child: shell),
+            child: Stack(
+              children: [
+                Positioned.fill(child: LiquidSource.page(child: shell)),
+                // Jednáš za jiný profil: vidět na KAŽDÉ obrazovce (dřív jen
+                // v Profilu -- zapomenuté přepnutí míchalo profily).
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top + 4,
+                  left: GlassTokens.floatingMargin,
+                  right: GlassTokens.floatingMargin,
+                  child: const ActingAsBanner(compactTop: true),
+                ),
+              ],
+            ),
           ),
           // Na širokém okně plovoucí skupina (přehrávač + tab bar) uprostřed s
           // omezenou šířkou -- ne pruh přes celých 2000 px.

@@ -1258,6 +1258,10 @@ async def _db_backup(r) -> None:
 
     if db_backup.due() and await r.set("maintenance:db-backup", CONSUMER_NAME, nx=True, ex=3600):
         await asyncio.to_thread(db_backup.backup)
+        # Spolu se zálohou (jednou denně): klíče zařízení, které nikdo nepoužívá.
+        from app.auth import purge_stale_tokens
+
+        await asyncio.to_thread(purge_stale_tokens)
 
 
 async def main() -> None:
