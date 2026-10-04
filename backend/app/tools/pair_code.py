@@ -25,8 +25,9 @@ def main() -> None:
         )
         if user is None:
             raise SystemExit(f"profil s přihlašovacím jménem {username!r} neexistuje")
+        name = user.name
         code, expires = new_pair_code(session, user.id, "server")
-    print(f"{user.name}: kód {code} (platí do {expires:%d.%m. %H:%M} UTC, jen jednou)")
+    print(f"{name}: kód {code} (platí do {expires:%d.%m. %H:%M} UTC, jen jednou)")
 
 
 if __name__ == "__main__":
