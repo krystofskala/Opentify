@@ -49,7 +49,17 @@ def delete_profile(user_id: str) -> dict[str, int]:
     with Session(engine) as session:
         if session.get(AppUser, user_id) is None:
             raise LookupError("Profil neexistuje.")
-        playlist_ids = list(session.exec(select(Playlist.id).where(Playlist.owner_user_id == user_id)).all())
+        # Kromě vlastních i blendy u partnera (`blend:<id>:*`) a řada "Co
+        # poslouchá rodina" s mými skladbami u ostatních -- jinak by po
+        # smazání zůstaly otevíratelné.
+        blend_ids = list(session.exec(
+            select(Blend.id).where(or_(Blend.user_a == user_id, Blend.user_b == user_id, Blend.created_by == user_id))
+        ).all())
+        playlist_ids = list(session.exec(select(Playlist.id).where(or_(
+            Playlist.owner_user_id == user_id,
+            Playlist.source == f"home:rail:family_{user_id[:8]}",
+            *(Playlist.source.like(f"blend:{bid}:%") for bid in blend_ids),  # type: ignore[union-attr]
+        ))).all())
         if playlist_ids:
             for model in (PlaylistItem, PlaylistMember, PinnedPlaylist):
                 session.exec(delete(model).where(model.playlist_id.in_(playlist_ids)))  # type: ignore[attr-defined]

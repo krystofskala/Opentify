@@ -23,6 +23,7 @@ from sqlmodel import Session, select
 
 from app.library.dislikes import without_disliked
 from app.catalog.artwork import _names_match, primary_artist_name
+from app.catalog.canonical import album_recordings
 from app.catalog.deezer import get_deezer_client
 from app.catalog.identity import is_own_artist
 from app.db import engine
@@ -53,7 +54,7 @@ def _seed(user_id: str, kind: str, target_id: str) -> tuple[str, list[str], list
             if rel is None:
                 raise StationError("album nenalezeno")
             artists = [rel.artist_id] if rel.artist_id else []
-            for rec in session.exec(select(Recording).where(Recording.release_id == rel.id)).all():
+            for rec in album_recordings(session, rel):
                 if rec.artist_id and rec.artist_id not in artists:
                     artists.append(rec.artist_id)
             return rel.title, artists[:4], []
@@ -109,7 +110,7 @@ def _seed_recordings(kind: str, target_id: str, rng: random.Random, limit: int =
     """Pár skladeb, od kterých se rádio odrazí (Last.fm podobné skladby)."""
     with Session(engine) as session:
         if kind == "album":
-            ids = [r.id for r in session.exec(select(Recording).where(Recording.release_id == target_id)).all()]
+            ids = [r.id for r in album_recordings(session, target_id)]
         elif kind == "artist":
             ids = [r.id for r in session.exec(select(Recording).where(Recording.artist_id == target_id)).all()]
         else:

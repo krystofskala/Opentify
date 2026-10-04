@@ -16,9 +16,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.db import engine
+from app.catalog.canonical import album_recordings
 from app.models import Artist, Recording, Release
 from app.download_match import _covered, artist_in, core_tokens, duration_ok, match_label, tokens
 from app.providers import SlskdProvider, TrackMetadata, _junk_reason, _normalize
@@ -125,7 +126,8 @@ async def plan_album(release_id: str) -> dict[str, Any]:
         if release is None:
             return {"found": False, "reason": "album neexistuje"}
         artist = session.get(Artist, release.artist_id)
-        rows = session.exec(select(Recording).where(Recording.release_id == release_id)).all()
+        # Tracklist alba -- skladby jiných edic by srážely pokrytí složky.
+        rows = album_recordings(session, release)
         recs = [(r.id, r.title, r.duration_ms) for r in rows]
         numbered_recs = [(r.id, r.title, r.duration_ms, r.track_number) for r in rows]
         album, artist_name = release.title, artist.name if artist else ""

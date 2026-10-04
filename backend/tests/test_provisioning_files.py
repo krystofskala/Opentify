@@ -228,6 +228,7 @@ def test_missing_file_self_heals(eng, tmp_path, monkeypatch):
     from app import provisioning_service
 
     monkeypatch.setattr(provisioning_service, "MEDIA_ROOT", tmp_path)
+    (tmp_path / "_zalohy").mkdir()  # disk připojený
     with Session(eng) as s:
         rec = _rec(s)
         s.add(MediaAsset(recording_id=rec.id, status=MediaAssetStatus.AVAILABLE, storage_path=str(tmp_path / "gone.flac")))
@@ -235,6 +236,19 @@ def test_missing_file_self_heals(eng, tmp_path, monkeypatch):
         asset, job, created = provisioning_service.get_or_create_job(s, rec.id, "u", None)
         assert created and job is not None
         assert asset.status == MediaAssetStatus.QUEUED and asset.storage_path is None
+
+
+def test_unplugged_media_disk_does_not_mark_missing(eng, tmp_path, monkeypatch):
+    from app import provisioning_service
+
+    # Prázdný bind mount: složka existuje, disk ne.
+    monkeypatch.setattr(provisioning_service, "MEDIA_ROOT", tmp_path)
+    with Session(eng) as s:
+        rec = _rec(s)
+        s.add(MediaAsset(recording_id=rec.id, status=MediaAssetStatus.AVAILABLE, storage_path=str(tmp_path / "gone.flac")))
+        s.commit()
+        asset, job, _created = provisioning_service.get_or_create_job(s, rec.id, "u", None)
+        assert job is None and asset.status == MediaAssetStatus.AVAILABLE
 
 
 def test_own_music_outside_media_root_is_not_redownloaded(eng, tmp_path, monkeypatch):

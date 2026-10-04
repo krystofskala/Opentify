@@ -27,7 +27,8 @@ from collections import Counter
 from typing import Any
 from urllib.parse import quote_plus
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, func, select
 from app.catalog.identity import is_own_artist, is_own_id
 
@@ -43,7 +44,7 @@ from app.catalog.schemas import ArtistBioOut, ArtistOut, DiscographyOut, Release
 from app.catalog.non_music import is_non_music, mark_non_music
 from app.catalog.upsert import upsert_artist, upsert_recording, upsert_release
 from app.catalog.wikimedia import get_wikimedia_client
-from app.models import Artist, Recording, Release
+from app.models import Artist, MediaAsset, MediaAssetStatus, Recording, Release
 from app.redis_bus import get_redis
 from app.utils import utcnow
 
@@ -141,13 +142,26 @@ def parse_concert_title(title: str | None, artist_name: str | None = None) -> tu
     return date, venue
 
 
+_BRACKETS_RE = re.compile(r"[(\[]([^)\]]*)[)\]]")
+
+
+def _version_part(title: str) -> str:
+    """Jen text v závorkách a za " - " ("Song (Live)", "Song - Demo") --
+    slovo verze ve vlastním názvu ("Live Forever", "Live Through This")
+    verzi neznamená."""
+    parts = _BRACKETS_RE.findall(title)
+    if " - " in title:
+        parts.append(_BRACKETS_RE.sub(" ", title.split(" - ", 1)[1]))
+    return " ".join(parts)
+
+
 def _official_first(results: list[dict], query: str) -> list[dict]:
     """Skladby a alba: oficiální napřed, živé/demo/remix verze za nimi --
     stabilně (jinak pořadí Deezeru). Ostatní typy zůstávají, kde jsou."""
     q = query.lower()
 
     def demoted(r: dict) -> bool:
-        words = {m.group(1).lower() for m in _VERSION_RE.finditer(r.get("title") or "")}
+        words = {m.group(1).lower() for m in _VERSION_RE.finditer(_version_part(r.get("title") or ""))}
         return any(w not in q for w in words)
 
     for kind in ("recording", "release"):
@@ -159,15 +173,20 @@ def _official_first(results: list[dict], query: str) -> list[dict]:
 
 
 def _canonical_edition(releases: list[dict]) -> dict:
-    """Edice pro tracklist: nejméně disků (deluxe s bonusovým / živým diskem
-    nevyhraje nad standardní -- živě: Angus & Julia Stone ukazovali studiové
-    skladby proložené živými z bonusového disku), pak nejdřívější vydání.
-    Pořadí od MB samo o sobě nic neznamená."""
+    """Edice pro tracklist: oficiální napřed (promo/bootleg jen když jiná
+    není), pak nejméně disků (deluxe s bonusovým / živým diskem nevyhraje
+    nad standardní -- živě: Angus & Julia Stone ukazovali studiové skladby
+    proložené živými z bonusového disku), obvyklý počet skladeb, nejdřívější
+    vydání. Pořadí od MB samo o sobě nic neznamená."""
 
     def shape(r: dict) -> tuple[int, int]:
         media = [m for m in r.get("media") or [] if m.get("tracks")]
         return len(media), sum(len(m["tracks"]) for m in media)
 
+    # Edice bez skladeb by vyhrály "nejméně disků" (0) -- pryč, jsou-li jiné.
+    releases = [r for r in releases if shape(r)[0]] or releases
+    official = [r for r in releases if (r.get("status") or "").lower() == "official"]
+    releases = official or releases
     fewest = min(shape(r)[0] for r in releases)
     candidates = [r for r in releases if shape(r)[0] == fewest]
     # Nejběžnější počet skladeb mezi nimi (promo/zkrácené edice nevyhrají),
@@ -1170,11 +1189,12 @@ class CatalogService:
         # katalogu, příště se zkusí znovu. Pak tracklist z toho, co už je v DB.
         try:
             tracks = await self._get_release_tracks(release_id)
-        except OperationalError as exc:
-            if not _is_locked(exc):
+        except (OperationalError, IntegrityError) as exc:
+            # IntegrityError: souběžné načtení téhož alba už řádek vložilo.
+            if isinstance(exc, OperationalError) and not _is_locked(exc):
                 raise
             self._session.rollback()
-            logger.warning("album %s: DB zamčená, tracklist jen z DB", release_id)
+            logger.warning("album %s: zápis selhal (%s), tracklist jen z DB", release_id, type(exc).__name__)
             release = self._session.get(Release, release_id)
             return self._stored_release_tracks(release) if release is not None else None
         if tracks:
@@ -1198,17 +1218,9 @@ class CatalogService:
     def _stored_release_tracks(self, release: Release) -> list[RecordingOut]:
         """Tracklist bez zápisu: uložené pořadí (`tracklistIds`), jinak
         skladby alba bez těch z jiných edic."""
-        ids = (release.external_refs or {}).get("tracklistIds") or []
-        if ids:
-            rows = {r.id: r for r in self._session.exec(select(Recording).where(Recording.id.in_(ids))).all()}  # type: ignore[attr-defined]
-            if rows:
-                return [self._to_recording_out(rows[i]) for i in ids if i in rows]
-        recordings = [
-            r for r in self._session.exec(select(Recording).where(Recording.release_id == release.id)).all()
-            if not (r.external_refs or {}).get("otherEdition")
-        ]
-        recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0, r.title))
-        return [self._to_recording_out(r) for r in recordings]
+        from app.catalog.canonical import album_recordings
+
+        return [self._to_recording_out(r) for r in album_recordings(self._session, release)]
 
     async def _get_release_tracks(self, release_id: str) -> list[RecordingOut] | None:
         release = self._session.get(Release, release_id)
@@ -1244,6 +1256,13 @@ class CatalogService:
 
         recordings: list[Recording] = []
         media = [m for m in chosen.get("media", []) if m.get("tracks")]
+        chosen_mbids = {
+            (t.get("recording") or {}).get("id") or t.get("id") for m in media for t in m.get("tracks") or []
+        }
+        # Starší řádky alba (soubor/poslechy z dřívější kanonické edice) --
+        # viz `_reuse_referenced_row`.
+        album_rows = list(self._session.exec(select(Recording).where(Recording.release_id == release.id)).all())
+        claimed: set[str] = set()
         # Víc disků: čísla průběžně přes všechny disky (2CD Marsyas: 1..31),
         # jinak se disky prolínaly (1, 1, 2, 2...). Tak i vinylové strany "A1".
         position = 0
@@ -1259,17 +1278,25 @@ class CatalogService:
                 # připíše celé jednomu jménu (živě: Pelíšky -> všech 31 skladeb
                 # "Boleslav Polívka", pak se stahovalo "Polívka – Lékořice").
                 track_artist = self._ingest_artist_credit(track.get("artist-credit") or rec_json.get("artist-credit"))
+                mbid = rec_json.get("id") or track.get("id")
+                duration_ms = rec_json.get("length") or track.get("length")
+                track_number = position if len(media) > 1 else _parse_track_number(track.get("number"))
+                if mbid:
+                    self._reuse_referenced_row(
+                        release, album_rows, mbid, title, duration_ms, track_number, chosen_mbids, claimed
+                    )
                 recording = upsert_recording(
                     self._session,
-                    mbid=rec_json.get("id") or track.get("id"),
+                    mbid=mbid,
                     release_id=release.id,
                     artist_id=track_artist.id if track_artist else release.artist_id,
                     title=title,
-                    duration_ms=rec_json.get("length") or track.get("length"),
+                    duration_ms=duration_ms,
                     isrc=isrcs[0] if isrcs else None,
-                    track_number=position if len(media) > 1 else _parse_track_number(track.get("number")),
+                    track_number=track_number,
                     disambiguation=rec_json.get("disambiguation") if rec_json else None,
                 )
+                claimed.add(recording.id)
                 if (recording.external_refs or {}).get("otherEdition"):
                     # Dřív z jiné edice, teď v tracklistu tohohle alba.
                     recording.external_refs = {k: v for k, v in recording.external_refs.items() if k != "otherEdition"}
@@ -1289,6 +1316,41 @@ class CatalogService:
         self._session.commit()
         self._ingest_other_editions(release, mb_releases, chosen)
         return [self._to_recording_out(r) for r in recordings]
+
+    def _reuse_referenced_row(
+        self,
+        release: Release,
+        album_rows: list[Recording],
+        mbid: str,
+        title: str,
+        duration_ms: int | None,
+        track_number: int | None,
+        chosen_mbids: set[str | None],
+        claimed: set[str],
+    ) -> None:
+        """Po změně kanonické edice: nová MB nahrávka by založila nový řádek
+        a starý (se souborem, poslechy, lajky) by z alba vypadl. Starý řádek
+        téže skladby (název, ±3 s) proto převezme nové MBID; řádek, který ho
+        už má bez souboru, se do něj sloučí."""
+        from app.catalog.canonical import adopt_mbid, find_referenced_twin
+
+        holder = self._session.exec(select(Recording).where(Recording.mbid == mbid)).first()
+        if holder is not None:
+            if holder.release_id != release.id:
+                return  # nahrávka jiného alba (singl) -- přes alba neslučovat
+            asset = self._session.get(MediaAsset, holder.id)
+            if asset is not None and asset.status == MediaAssetStatus.AVAILABLE:
+                return  # už má soubor, není co zachraňovat
+        # Řádky jiných skladeb tohohle tracklistu nebo už použité se neberou.
+        exclude = set(claimed) | {r.id for r in album_rows if r.mbid in chosen_mbids}
+        twin = find_referenced_twin(self._session, album_rows, title, duration_ms, track_number, exclude)
+        if twin is None:
+            return
+        logger.info("album %s: '%s' -- starý řádek %s převzal MBID %s", release.id, title, twin.id, mbid)
+        adopt_mbid(self._session, twin, mbid)
+        if holder is not None and holder.id != twin.id:
+            album_rows[:] = [r for r in album_rows if r.id != holder.id]
+        self._session.commit()
 
     def _ingest_other_editions(self, release: Release, editions: list[dict], chosen: dict) -> None:
         """Skladby z ostatních edic téhož alba (jiné pásky koncertu, bonusy
@@ -1330,7 +1392,7 @@ class CatalogService:
             refs = {"otherEdition": label or "jiná edice"}
             if (rec_json.get("disambiguation") or "").strip():
                 refs["mbDisambiguation"] = rec_json["disambiguation"].strip()
-            self._session.add(Recording(
+            row = Recording(
                 mbid=rec_json["id"],
                 release_id=release.id,
                 artist_id=track_artist.id if track_artist else release.artist_id,
@@ -1339,8 +1401,13 @@ class CatalogService:
                 isrc=isrcs[0] if isrcs else None,
                 track_number=None,
                 external_refs=refs,
-            ))
-            added += 1
+            )
+            # Souběžné otevření téhož alba vkládá stejná MBID -- unikátní
+            # klíč by shodil celý tracklist (500); duplicitu jen přeskočit.
+            done = self._session.execute(
+                sqlite_insert(Recording).values(**row.model_dump()).on_conflict_do_nothing()
+            )
+            added += done.rowcount or 0
         if added:
             self._session.commit()
             logger.info("album %s: %d skladeb z jiných edic", release.id, added)

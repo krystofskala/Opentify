@@ -123,6 +123,10 @@ def _find_local(
         for rec in session.exec(select(Recording).where(Recording.artist_id == artist_id)).all()
         if _exact(rec.title) == exact_title
     ]
+    # Skladby z jiných edic (pásky koncertů) jen, když jiná není -- jinak
+    # by "jediná shoda" kvůli nim nikdy nevyšla.
+    canonical = [rec for rec in same_title if not (rec.external_refs or {}).get("otherEdition")]
+    same_title = canonical or same_title
     if exact_release is None:
         return same_title[0] if len(same_title) == 1 else None
     for rec in same_title:

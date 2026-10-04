@@ -6,6 +6,7 @@ je jen `enqueue`, protože ten mluví s Redisem.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import os
@@ -70,9 +71,26 @@ def _file_missing(asset: MediaAsset) -> bool:
     if not asset.storage_path:
         return True
     path = Path(asset.storage_path)
-    if not path.is_relative_to(MEDIA_ROOT) or not MEDIA_ROOT.is_dir():
+    if not path.is_relative_to(MEDIA_ROOT) or not _media_mounted():
         return False
     return not path.exists()
+
+
+# Odpojený disk = prázdná složka bind mountu (adresář existuje dál), takže
+# `is_dir()` nestačí -- jinak by se všechno označilo MISSING a stahovalo znovu.
+_MOUNT_MARKER = "_zalohy"
+_MIN_MEDIA_FILES = 20
+
+
+def _media_mounted() -> bool:
+    if not MEDIA_ROOT.is_dir():
+        return False
+    if (MEDIA_ROOT / _MOUNT_MARKER).is_dir():
+        return True
+    try:
+        return sum(1 for _ in itertools.islice(MEDIA_ROOT.iterdir(), _MIN_MEDIA_FILES)) >= _MIN_MEDIA_FILES
+    except OSError:
+        return False
 
 
 def heal_missing_file(session: Session, asset: MediaAsset) -> bool:

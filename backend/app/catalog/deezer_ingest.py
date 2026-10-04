@@ -275,8 +275,12 @@ def ingest_track(
             for r in session.exec(select(Recording).where(Recording.artist_id == artist.id)).all()
             if r.deezer_id in (None, dzid) and version_key(r.title) == wanted
         ]
-        # Stejné album má přednost (jinak "Creep" ze singlu i z alba splyne).
-        same_title.sort(key=lambda r: not (release is not None and r.release_id == release.id))
+        # Skladby z jiných edic (živé pásky) až nakonec, pak stejné album
+        # (jinak "Creep" ze singlu i z alba splyne).
+        same_title.sort(key=lambda r: (
+            bool((r.external_refs or {}).get("otherEdition")),
+            not (release is not None and r.release_id == release.id),
+        ))
         recording = same_title[0] if same_title else None
 
     duration_ms = int(dz["duration"]) * 1000 if dz.get("duration") else None

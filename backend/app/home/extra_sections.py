@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 from sqlmodel import Session, select
 
 from app.catalog.artwork import _normalize
+from app.catalog.canonical import album_recordings
 from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.models import (
@@ -326,8 +327,10 @@ async def build_unfinished(user_id: str) -> int:
                 continue
             if len(st["ctx_tracks"]) < 2:
                 continue
-            total = len(s.exec(select(Recording.id).where(Recording.release_id == release_id)).all())
-            heard = len(st["tracks"])
+            # Jen tracklist alba (skladby jiných edic by "dokončení" nedovolily).
+            canonical = {r.id for r in album_recordings(s, release_id)}
+            total = len(canonical)
+            heard = len(st["tracks"] & canonical)
             if total < 5 or heard >= total * 0.7:
                 continue
             picks.append((st["ctx_last"], release_id, total - heard))

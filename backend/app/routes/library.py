@@ -298,6 +298,8 @@ def local_albums(
         select(Recording.release_id, Recording.title)
         .join(MediaAsset, MediaAsset.recording_id == Recording.id)
         .where(_in_library(current[0]))  # (zbytečný join na LibraryEntry pryč -- půlka z 2 s)
+        # Stejnojmenná skladba z jiné edice (živá páska) album nedoplní.
+        .where(func.json_extract(Recording.external_refs, "$.otherEdition").is_(None))
     ).all():
         owned_titles.setdefault(release_id, set()).add((rec_title or "").strip().lower())
 
@@ -756,7 +758,10 @@ async def add_album(
     current: tuple[str, str] = Depends(get_current_user),
 ):
     """"Přidat do knihovny" -- celé album (skladby, které katalog zná)."""
-    ids = list(session.exec(select(Recording.id).where(Recording.release_id == release_id)).all())
+    from app.catalog.canonical import album_recordings
+
+    # Jen tracklist alba -- ne stovky skladeb z jiných edic a pásek.
+    ids = [r.id for r in album_recordings(session, release_id)]
     if not ids:
         raise HTTPException(status_code=404, detail="album nemá skladby v katalogu")
     added = await _add_and_fetch(current[0], current[1], ids)
@@ -1307,6 +1312,7 @@ def remove_favorite_artist(
 async def download_album(release_id: str, current: tuple[str, str] = Depends(get_current_user)):
     """"Stáhnout celé album": nejdřív složka alba ze Soulseeku (jedna verze
     od jednoho člověka), pak stažení všech skladeb, co ještě nejsou."""
+    from app.catalog.canonical import album_recordings
     from app.library.album_download import plan_album
     from app.provisioning_service import enqueue, get_or_create_job
 
@@ -1314,7 +1320,8 @@ async def download_album(release_id: str, current: tuple[str, str] = Depends(get
     user_id, device_id = current
     queued = 0
     with Session(engine) as session:
-        for rec in session.exec(select(Recording).where(Recording.release_id == release_id)).all():
+        # Jen tracklist alba (skladby jiných edic se stahují jednotlivě).
+        for rec in album_recordings(session, release_id):
             _asset, job, created = get_or_create_job(session, rec.id, user_id, device_id)
             if job is not None and created:
                 await enqueue(job)

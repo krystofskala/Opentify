@@ -124,11 +124,15 @@ def find_or_create_recording(
     duration_ms: int | None = None,
 ) -> Recording:
     title = _nfc(title.strip())
-    recording = session.exec(select(Recording).where(Recording.artist_id == artist.id, Recording.title == title)).first()
+    recording = _prefer_canonical(
+        session.exec(select(Recording).where(Recording.artist_id == artist.id, Recording.title == title)).all()
+    )
     if recording is None:
-        recording = session.exec(
-            select(Recording).where(Recording.artist_id == artist.id, func.lower(Recording.title) == title.lower())
-        ).first()
+        recording = _prefer_canonical(
+            session.exec(
+                select(Recording).where(Recording.artist_id == artist.id, func.lower(Recording.title) == title.lower())
+            ).all()
+        )
     if recording is None:
         recording = Recording(
             artist_id=artist.id,
@@ -140,6 +144,12 @@ def find_or_create_recording(
         session.commit()
         session.refresh(recording)
     return recording
+
+
+def _prefer_canonical(rows: list[Recording]) -> Recording | None:
+    """Skladba z jiné edice (živá páska u alba) jen, když jiná není --
+    jinak by se soubor/import přilepil k nahodilé verzi."""
+    return next((r for r in rows if not (r.external_refs or {}).get("otherEdition")), rows[0] if rows else None)
 
 
 def attach_release_if_missing(session: Session, recording: Recording, release: Release | None) -> None:

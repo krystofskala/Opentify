@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +32,16 @@ _MAX_ATTEMPTS = 10
 _BATCH = 100
 _http = httpx.AsyncClient(timeout=15.0)
 _wakeup = asyncio.Event()
+# Neplatný token (401): profil se 30 min nezkouší -- jinak každou minutu
+# (a po každém poslechu) zbytečný dotaz s odmítnutým tokenem. Podle tokenu:
+# nově připojený účet se zkusí hned.
+_AUTH_BACKOFF_S = 30 * 60
+_auth_failed: dict[str, tuple[str, float]] = {}
+
+
+def _auth_blocked(user_id: str, token: str) -> bool:
+    failed = _auth_failed.get(user_id)
+    return failed is not None and failed[0] == token and failed[1] > time.monotonic()
 
 
 def token_for(user_id: str) -> str | None:
@@ -131,7 +142,7 @@ async def _post(payload: dict[str, Any], token: str) -> httpx.Response:
 async def submit_playing_now(recording_id: str, user_id: str) -> None:
     """"Právě hraje" -- best-effort, jen s tokenem TOHO profilu."""
     token = token_for(user_id)
-    if not token:
+    if not token or _auth_blocked(user_id, token):
         return
     with Session(engine) as session:
         recording = session.get(Recording, recording_id)
@@ -157,7 +168,7 @@ async def submit_pending() -> int:
     sent = 0
     for user_id in users:
         token = token_for(user_id)
-        if token:
+        if token and not _auth_blocked(user_id, token):
             sent += await _submit_for(user_id, token)
     return sent
 
@@ -193,7 +204,15 @@ async def _submit_for(user_id: str, token: str) -> int:
             one_status, one_error = await _send([entry], token)
             _mark([entry[0]], one_status, one_error)
             sent += one_status == 200
+            if one_status == 401:
+                _auth_failed[user_id] = (token, time.monotonic() + _AUTH_BACKOFF_S)
+            if one_status in (401, 429):
+                break  # zbytek počká na další kolo (429 = zpomalit)
         return sent
+    if status == 401:
+        _auth_failed[user_id] = (token, time.monotonic() + _AUTH_BACKOFF_S)
+    else:
+        _auth_failed.pop(user_id, None)
     _mark([listen_id for listen_id, _ in entries], status, error)
     if status != 200:
         logger.warning("ListenBrainz: odeslání %d poslechů selhalo (%s), zkusím znovu", len(entries), error)
