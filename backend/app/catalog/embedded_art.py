@@ -30,6 +30,42 @@ def artwork_path(release_id: str) -> Path:
     return ARTWORK_DIR / f"{release_id}.jpg"
 
 
+def artwork_png_path(release_id: str) -> Path:
+    """Vlastní obal playlistu s průhledností (PNG) -- má přednost před .jpg."""
+    return ARTWORK_DIR / f"{release_id}.png"
+
+
+def save_custom_cover(data: bytes, release_id: str, max_side: int = MAX_SIDE) -> bool:
+    """Nahraný obal playlistu: s průhlednými pixely jako PNG (průhlednost
+    zůstane), jinak JPEG jako ostatní obaly. Druhý formát se smaže."""
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.load()
+            if min(img.size) < 64:
+                return False
+            has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+            if has_alpha:
+                rgba = img.convert("RGBA")
+                lo, _hi = rgba.getchannel("A").getextrema()
+                if lo < 255:
+                    rgba.thumbnail((max_side, max_side))
+                    dest = artwork_png_path(release_id)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = dest.with_suffix(".tmp")
+                    rgba.save(tmp, "PNG", optimize=True)
+                    tmp.replace(dest)
+                    artwork_path(release_id).unlink(missing_ok=True)
+                    return True
+    except Exception:  # noqa: BLE001 - neplatná/nepodporovaná data
+        return False
+    if not _save_resized(data, artwork_path(release_id), max_side):
+        return False
+    artwork_png_path(release_id).unlink(missing_ok=True)
+    return True
+
+
 def _picture_bytes(path: str) -> bytes | None:
     try:
         audio = MutagenFile(path)

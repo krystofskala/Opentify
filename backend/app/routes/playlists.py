@@ -74,8 +74,11 @@ def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) ->
     různých obalů + nejčastější interpreti. Vlastní playlisty se mění, tak
     mozaika z aktuálních položek; uložená (kopie z Domů) jen jako záloha."""
     ids = [item.recording_id for item in items]
-    # Sdílené ze Spotify: jejich vlastní obal (uložený u nás), ne mozaika.
-    if (playlist.source or "").startswith(("spotify-link:", "apple-link:")) and playlist.cover_urls:
+    # Vlastní nahraný obal (i z importu odkazem) a sdílené ze Spotify/Apple:
+    # ten obal, ne mozaika -- dřív se vlastní obal ukázal jen v detailu.
+    if playlist.cover_urls and (
+        _has_custom_cover(playlist) or (playlist.source or "").startswith(("spotify-link:", "apple-link:"))
+    ):
         covers = list(playlist.cover_urls)
     else:
         covers = _fast_covers(session, ids[:40]) or list(playlist.cover_urls or [])
@@ -91,6 +94,13 @@ def _preview(session: Session, playlist: Playlist, items: list[PlaylistItem]) ->
     ).all()
     names = [name for artist_id, _n in counts if (name := resolve_artist_name(session, artist_id))]
     return covers, names[:3]
+
+
+def _has_custom_cover(playlist: Playlist) -> bool:
+    from app.catalog.embedded_art import URL_TEMPLATE
+
+    own = URL_TEMPLATE.format(release_id=playlist.id)
+    return any((url or "").startswith(own) for url in playlist.cover_urls or [])
 
 
 def _fast_covers(session: Session, recording_ids: list[str]) -> list[str]:
@@ -361,14 +371,14 @@ async def upload_playlist_cover(
     """Vlastní obal playlistu (místo mozaiky z obalů skladeb)."""
     import asyncio
 
-    from app.catalog.embedded_art import URL_TEMPLATE, _save_resized, artwork_path
+    from app.catalog.embedded_art import URL_TEMPLATE, save_custom_cover
     from app.uploads import read_limited
 
     user_id, _device_id = current
     playlist = _owned_playlist_or_404(session, playlist_id, user_id)
     _require_user_kind(playlist)
     raw = await read_limited(file, 15 * 1024 * 1024, "Obrázek")
-    if not await asyncio.to_thread(_save_resized, raw, artwork_path(playlist.id)):
+    if not await asyncio.to_thread(save_custom_cover, raw, playlist.id):
         raise HTTPException(status_code=400, detail="Tohle není obrázek (nebo je moc malý).")
     # Verze v URL -- obrázek se servíruje jako immutable na týden, nový by
     # se jinak neukázal.

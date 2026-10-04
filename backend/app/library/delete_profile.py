@@ -86,11 +86,12 @@ def delete_profile(user_id: str) -> dict[str, int]:
 
 
 def _delete_covers(playlist_ids: list[str]) -> None:
-    from app.catalog.embedded_art import artwork_path
+    from app.catalog.embedded_art import artwork_path, artwork_png_path
 
     for pid in playlist_ids:
         try:
             artwork_path(pid).unlink(missing_ok=True)
+            artwork_png_path(pid).unlink(missing_ok=True)
         except OSError:
             logger.warning("obal playlistu %s nejde smazat", pid)
 
