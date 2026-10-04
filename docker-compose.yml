@@ -233,6 +233,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Strop paměti: cache katalogu (Deezer/MB/Wikidata, všechny s TTL) rostla
+    # bez limitu na 1,4 GB. volatile-lru vyhazuje jen klíče s TTL -- fronty,
+    # joby a streamy (bez TTL) zůstanou vždy.
+    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru"]
     volumes:
       - redis-data:/data
     restart: unless-stopped
