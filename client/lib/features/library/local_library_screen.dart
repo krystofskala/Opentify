@@ -313,8 +313,8 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
     if (_items.isEmpty) {
       return const EmptyState(
         icon: Symbols.library_music_rounded,
-        message: 'Zatím žádné skladby – spusť sken v Profilu, nebo si nějakou přehraj '
-            'z Hledání (stažené skladby se sem přidávají samy).',
+        message: 'Zatím žádné skladby – najdi si něco v Hledání a přidej do knihovny '
+            '(stažené skladby se sem přidávají samy).',
       );
     }
 
@@ -586,7 +586,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
               LibrarySort.count => b.trackCount.compareTo(a.trackCount),
             });
         if (loaded.isEmpty) {
-          return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba – spusť sken v Profilu.');
+          return const EmptyState(icon: Symbols.album_rounded, message: 'Zatím žádná alba – přidej si nějaké z Hledání.');
         }
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localAlbumsProvider),
@@ -733,7 +733,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
             });
         if (loaded.isEmpty && favorites.isEmpty) {
           return const EmptyState(
-              icon: Symbols.person_rounded, message: 'Zatím žádní interpreti – spusť sken v Profilu.');
+              icon: Symbols.person_rounded, message: 'Zatím žádní interpreti – přidej si hudbu z Hledání.');
         }
         return RefreshIndicator(
           onRefresh: () async => ref.invalidate(_localArtistsProvider),

@@ -139,5 +139,7 @@ Future<void> shareInOpentifyWithToast(
   final outcome = await shareInOpentify(path: path, title: title, artistName: artistName);
   if (outcome == ShareOutcome.copied) {
     showToast(messenger, 'Odkaz do Opentify zkopírován');
+  } else if (outcome == ShareOutcome.failed) {
+    showToast(messenger, 'Odkaz se nepodařilo sdílet ani zkopírovat');
   }
 }

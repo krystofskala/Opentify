@@ -9,6 +9,7 @@ import '../state/providers.dart';
 import '../theme/design_tokens.dart';
 import 'glass/glass.dart';
 import 'toast.dart';
+import 'state_views.dart';
 
 /// Zvyšuje se po každém odebrání z knihovny -- obrazovky Knihovny ho
 /// sledují a přenačtou se (seznam skladeb drží vlastní stránkovaný stav).
@@ -32,7 +33,7 @@ Future<bool> confirmRemoveFromLibrary(BuildContext context, List<RecordingModel>
   try {
     preview = await repo.removeTracks(ids, dryRun: true);
   } catch (e) {
-    showToast(messenger, 'Nepodařilo se připravit odebrání: $e');
+    showToast(messenger, 'Nepodařilo se připravit odebrání: ${humanError(e)}');
     return false;
   }
   if (preview.removed == 0) {
@@ -55,7 +56,7 @@ Future<bool> confirmRemoveFromLibrary(BuildContext context, List<RecordingModel>
     ];
     showToast(messenger, parts.join(' · '));
   } catch (e) {
-    showToast(messenger, 'Odebrání selhalo: $e');
+    showToast(messenger, 'Odebrání selhalo: ${humanError(e)}');
     return false;
   }
 

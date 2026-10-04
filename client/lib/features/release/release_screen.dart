@@ -184,7 +184,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
       showToast(messenger, '„${release.title}“ smazáno');
       if (context.mounted) context.pop();
     } catch (e) {
-      showToast(messenger, 'Smazat se nepodařilo: $e');
+      showToast(messenger, 'Smazat se nepodařilo: ${humanError(e)}');
     }
   }
 

@@ -11,6 +11,7 @@ import '../theme/design_tokens.dart';
 import 'collection_actions.dart';
 import 'glass/glass.dart';
 import 'toast.dart';
+import 'state_views.dart';
 
 /// Odebrání playlistu z Knihovny -- jedno místo pro detail i karty v Knihovně:
 /// vlastní se smaže (s potvrzením), připnutý mix odepne, ze společného
@@ -45,7 +46,7 @@ Future<bool> confirmDeletePlaylist(BuildContext context, WidgetRef ref, {require
     showToast(messenger, '„$title“ smazán');
     return true;
   } catch (e) {
-    showToast(messenger, 'Smazat se nepodařilo: $e');
+    showToast(messenger, 'Smazat se nepodařilo: ${humanError(e)}');
     return false;
   }
 }
@@ -65,7 +66,7 @@ Future<bool> unpinPlaylist(BuildContext context, WidgetRef ref, {required String
     showToast(messenger, '„$title“ odebrán z knihovny');
     return true;
   } catch (e) {
-    showToast(messenger, 'Nepodařilo se: $e');
+    showToast(messenger, 'Nepodařilo se: ${humanError(e)}');
     return false;
   }
 }
@@ -78,7 +79,7 @@ Future<bool> leavePlaylist(BuildContext context, WidgetRef ref, {required String
     showToast(messenger, 'Opustil(a) jsi „$title“');
     return true;
   } catch (e) {
-    showToast(messenger, 'Nepodařilo se: $e');
+    showToast(messenger, 'Nepodařilo se: ${humanError(e)}');
     return false;
   }
 }
@@ -93,7 +94,7 @@ Future<void> invitePlaylist(BuildContext context, WidgetRef ref, {required Strin
     await Clipboard.setData(ClipboardData(text: url));
     showToast(messenger, 'Odkaz na společný playlist zkopírován – pošli ho, kdo ho otevře, může ho upravovat s tebou');
   } catch (e) {
-    showToast(messenger, 'Pozvánku se nepodařilo vytvořit: $e');
+    showToast(messenger, 'Pozvánku se nepodařilo vytvořit: ${humanError(e)}');
   }
 }
 
@@ -147,7 +148,7 @@ Future<void> editPlaylist(
                             fieldName: 'file', bytes: file!.bytes!, filename: file.name);
                         showToast(messenger, 'Obal nastaven');
                       } catch (e) {
-                        showToast(messenger, 'Obal se nepodařilo nahrát: $e');
+                        showToast(messenger, 'Obal se nepodařilo nahrát: ${humanError(e)}');
                       }
                     },
                   ),
@@ -185,7 +186,7 @@ Future<void> editPlaylist(
         'description': descriptionField.text.trim(),
       });
     } catch (e) {
-      showToast(messenger, 'Uložení selhalo: $e');
+      showToast(messenger, 'Uložení selhalo: ${humanError(e)}');
     }
   }
   titleField.dispose();

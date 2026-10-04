@@ -279,7 +279,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     try {
       await ref.read(playlistsRepositoryProvider).reorderItems(widget.playlistId, reordered.map((r) => r.id).toList());
     } catch (e) {
-      showToast(messenger, 'Přeskládání selhalo: $e');
+      showToast(messenger, 'Přeskládání selhalo: ${humanError(e)}');
     } finally {
       // Počkat na čerstvá data (jako u odebrání) -- jinak se zrcadlo hned
       // přepsalo starým pořadím z provideru a skladba skočila zpátky.
@@ -307,7 +307,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       }
       showToast(messenger, ids.length == 1 ? 'Skladba odebrána' : 'Odebráno: ${songsCount(ids.length)}');
     } catch (e) {
-      showToast(messenger, 'Odebrání selhalo: $e');
+      showToast(messenger, 'Odebrání selhalo: ${humanError(e)}');
     } finally {
       ref.invalidate(myPlaylistsProvider);
       // Počkat na čerstvá data, než se zrcadlo znovu synchronizuje -- jinak
@@ -428,7 +428,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       ref.invalidate(myPlaylistsProvider);
       showToast(messenger, '„${detail.title}“ je v knihovně a dál se aktualizuje');
     } catch (e) {
-      showToast(messenger, 'Uložení selhalo: $e');
+      showToast(messenger, 'Uložení selhalo: ${humanError(e)}');
     }
   }
 
@@ -439,7 +439,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       ref.invalidate(myPlaylistsProvider);
       showToast(messenger, '„${detail.title}“ odebrán z knihovny');
     } catch (e) {
-      showToast(messenger, 'Nepodařilo se: $e');
+      showToast(messenger, 'Nepodařilo se: ${humanError(e)}');
     }
   }
 
@@ -451,7 +451,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       showToast(messenger, '„${detail.title}“ přidán do knihovny',
           action: SnackBarAction(label: 'Otevřít', onPressed: () => context.push('/playlists/${copy.id}')));
     } catch (e) {
-      showToast(messenger, 'Přidání selhalo: $e');
+      showToast(messenger, 'Přidání selhalo: ${humanError(e)}');
     }
   }
 }

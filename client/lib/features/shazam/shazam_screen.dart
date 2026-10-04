@@ -104,7 +104,9 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
       return _fail(
           session,
           switch (e.kind) {
-            'denied' => 'Přístup k mikrofonu je zakázaný. Povol ho v Nastavení › Safari › Mikrofon a zkus to znovu.',
+            'denied' => kIsWeb
+                ? 'Přístup k mikrofonu je zakázaný. Povol ho v nastavení prohlížeče (Safari: Nastavení › Safari › Mikrofon) a zkus to znovu.'
+                : 'Přístup k mikrofonu je zakázaný. Povol ho v Nastavení › Opentify › Mikrofon a zkus to znovu.',
             'unavailable' => 'Mikrofon se nepodařilo otevřít. Nepoužívá ho jiná aplikace?',
             'unsupported' => 'Tenhle prohlížeč nahrávání neumí.',
             _ => 'Nahrávání se nepodařilo spustit.',

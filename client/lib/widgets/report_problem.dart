@@ -7,6 +7,7 @@ import '../state/library_scope.dart' show libraryIdsProvider;
 import '../state/providers.dart';
 import 'remove_from_library.dart' show libraryRevisionProvider;
 import 'toast.dart';
+import 'state_views.dart';
 
 /// "Špatné audio": stažený soubor je jiná verze/píseň -- zdroj se zapamatuje
 /// jako odmítnutý a skladba se stáhne znovu (přísně podle názvu a verze;
@@ -27,7 +28,7 @@ Future<void> reportWrongAudio(
       await player.retryCurrent();
     }
   } catch (e) {
-    showToast(messenger, 'Nahlášení se nepovedlo: $e');
+    showToast(messenger, 'Nahlášení se nepovedlo: ${humanError(e)}');
   }
 }
 
@@ -43,6 +44,6 @@ Future<void> reportWrongCover(
     container.invalidate(releaseProvider(releaseId));
     showToast(messenger, res['found'] == true ? 'Obal vyměněn' : 'Jiný obal jsem nenašel – album má zatím neutrální');
   } catch (e) {
-    showToast(messenger, 'Nahlášení se nepovedlo: $e');
+    showToast(messenger, 'Nahlášení se nepovedlo: ${humanError(e)}');
   }
 }

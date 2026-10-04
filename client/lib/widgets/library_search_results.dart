@@ -60,9 +60,9 @@ class LibrarySearchResults extends ConsumerWidget {
           LibrarySearchScope.all => _grouped(context, data),
           LibrarySearchScope.tracks => _trackList(context, data),
           LibrarySearchScope.artists => _grid(context, [for (final a in data.artists) _artistCard(context, a)],
-              aspect: 0.8, emptyLabel: 'interpreti'),
+              aspect: 0.8, emptyLabel: 'Žádní interpreti'),
           LibrarySearchScope.albums => _grid(context, [for (final a in data.albums) _albumCard(context, a)],
-              aspect: 0.72, emptyLabel: 'alba'),
+              aspect: 0.72, emptyLabel: 'Žádná alba'),
         };
       },
     );
@@ -130,7 +130,7 @@ class LibrarySearchResults extends ConsumerWidget {
 
   Widget _grid(BuildContext context, List<Widget> cards, {required double aspect, required String emptyLabel}) {
     if (cards.isEmpty) {
-      return EmptyState(icon: Symbols.search_off_rounded, message: 'Žádná $emptyLabel pro „$query“ v knihovně.');
+      return EmptyState(icon: Symbols.search_off_rounded, message: '$emptyLabel pro „$query“ v knihovně.');
     }
     final columns = (MediaQuery.sizeOf(context).width / 170).floor().clamp(2, 8);
     return GridView.builder(

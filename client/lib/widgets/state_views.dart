@@ -14,6 +14,30 @@ import 'glass/glass.dart';
 /// `_EmptyState`/holý `CircularProgressIndicator`/`Text('Nepodařilo se...')`
 /// s mírně odlišnými paddingy, styly i texty.
 
+/// Chyba lidsky (do toastu / chybového stavu) -- nikdy surové
+/// "ApiException(500): {...}". Neznámá chyba = obecná věta.
+String humanError(Object? error) {
+  final text = _readableError(error);
+  return text.isNotEmpty ? text : 'Zkus to prosím znovu.';
+}
+
+String _readableError(Object? e) {
+  if (e == null) return '';
+  if (e is TimeoutException) return 'Server neodpověděl včas.';
+  if (e is ApiException) {
+    final d = e.detail;
+    if (d != null) return d;
+    if (e.statusCode >= 500) return 'Server má potíže (${e.statusCode}).';
+    if (e.statusCode == 404) return 'Tohle už neexistuje.';
+    return 'Chyba ${e.statusCode}.';
+  }
+  final raw = e.toString();
+  if (raw.contains('ClientException') || raw.contains('XMLHttpRequest') || raw.contains('SocketException')) {
+    return 'Nejde se spojit se serverem – je zapnutý Tailscale?';
+  }
+  return '';
+}
+
 /// Nadpis sekce -- volitelný štítek vedle názvu a "Zobrazit vše" vpravo.
 class SectionHeader extends StatelessWidget {
   const SectionHeader(this.title, {super.key, this.badge, this.onSeeAll, this.trailing, this.padding});
@@ -147,23 +171,7 @@ class ErrorState extends StatelessWidget {
   final bool compact;
 
   /// Lidská věta místo syrové výjimky ("ApiException(502): {...}").
-  String get _detail {
-    final e = error;
-    if (e == null) return '';
-    if (e is TimeoutException) return 'Server neodpověděl včas.';
-    if (e is ApiException) {
-      final d = e.detail;
-      if (d != null) return d;
-      if (e.statusCode >= 500) return 'Server má potíže (${e.statusCode}).';
-      if (e.statusCode == 404) return 'Tohle už neexistuje.';
-      return 'Chyba ${e.statusCode}.';
-    }
-    final raw = e.toString();
-    if (raw.contains('ClientException') || raw.contains('XMLHttpRequest') || raw.contains('SocketException')) {
-      return 'Nejde se spojit se serverem – je zapnutý Tailscale?';
-    }
-    return '';
-  }
+  String get _detail => _readableError(error);
 
   @override
   Widget build(BuildContext context) {

@@ -206,7 +206,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                 Text(
                   creating
                       ? 'Ahoj $_createFor! Vytvoř si heslo – budeš ho zadávat jen na novém zařízení.'
-                      : 'Přihlas se jménem, které ti dal správce. Poprvé si vytvoříš heslo.',
+                      : 'Přihlas se jménem a heslem. Poprvé si heslo vytvoříš přes pozvánku od správce.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
@@ -227,7 +227,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                     obscureText: true,
                     autofillHints: const [AutofillHints.password],
                     textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(labelText: 'Heslo', hintText: 'poprvé nech prázdné'),
+                    decoration: const InputDecoration(labelText: 'Heslo'),
                   )
                 else ...[
                   TextField(

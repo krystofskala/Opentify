@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -404,7 +405,9 @@ class _Readout extends StatelessWidget {
     final IconData? hintIcon;
     if (phase == _Phase.error) {
       headline = switch (error?.kind) {
-        'denied' => 'Přístup k mikrofonu je zakázaný',
+        'denied' => kIsWeb
+            ? 'Přístup k mikrofonu je zakázaný – povol ho v nastavení prohlížeče'
+            : 'Přístup k mikrofonu je zakázaný – povol ho v Nastavení › Opentify › Mikrofon',
         'unavailable' => 'Mikrofon se nepodařilo otevřít',
         'unsupported' => 'Tenhle prohlížeč ladičku neumí',
         _ => 'Ladičku se nepodařilo spustit',

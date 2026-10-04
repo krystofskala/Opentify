@@ -67,10 +67,13 @@ class HomeScreen extends ConsumerWidget {
           data: (sections) => ListView(
             padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
             children: [
-              if (sections.isEmpty)
+              // "Pokračovat v poslechu" posílá server vždy (jako zástupce) --
+              // prázdný Domů = nic jiného než ten, a ještě bez historie.
+              if (sections.every((s) => s.type == HomeSectionType.continueListening) && recent.isEmpty)
                 const EmptyState(
                   icon: Symbols.home_rounded,
-                  message: 'Domů se zatím připravuje – mixy se skládají na pozadí, zkus to za pár minut.',
+                  message: 'Tady zatím nic není. Najdi si hudbu v Hledat – z toho, co posloucháš, se Domů poskládá '
+                      'samo. Sekce si zapneš v Profil › Domů.',
                 ),
               // Pozvánka do společného mixu (Blend), čeká na mě.
               const BlendInviteBanner(),
