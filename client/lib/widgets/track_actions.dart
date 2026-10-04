@@ -83,13 +83,13 @@ Future<void> shareWithToast(
       showToast(messenger, text);
   try {
     final link = ready ?? await load();
-    if (link.url == null && link.youtubeUrl == null) {
+    if (link.primaryUrl == null) {
       toast('Tahle skladba je jen v Opentify – pošli ji přes „Poslat v Opentify“');
       return;
     }
     final outcome = await shareLink(link);
     if (outcome == ShareOutcome.copied) toast('Odkaz zkopírován – otevře se v jakékoliv hudební appce');
-    if (outcome == ShareOutcome.failed) toast('Odkaz se nepodařilo zkopírovat: ${link.url}');
+    if (outcome == ShareOutcome.failed) toast('Odkaz se nepodařilo zkopírovat: ${link.primaryUrl}');
   } catch (_) {
     toast('Skladbu se nepodařilo najít pro sdílení');
   }
@@ -272,6 +272,12 @@ class _TrackActionsSheet extends ConsumerWidget {
                   icon: Symbols.smart_display_rounded,
                   label: 'Zdrojové video na YouTube',
                   onTap: () => run(() => openExternal(yt)),
+                ),
+              if (shareLinkAsync.valueOrNull?.soundcloudUrl case final sc?)
+                _Item(
+                  icon: Symbols.cloud_rounded,
+                  label: 'Otevřít na SoundCloudu',
+                  onTap: () => run(() => openExternal(sc)),
                 ),
               const _Divider(),
               _Item(

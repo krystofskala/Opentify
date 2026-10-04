@@ -13,7 +13,11 @@ class ReleaseModel {
     this.notes,
     this.imported = false,
     this.youtubeOnly = false,
+    this.credits = const [],
   });
+
+  /// Spolupráce (víc interpretů alba): všichni, `artistId` je jen první.
+  final List<({String id, String name})> credits;
 
   final String id;
   final String? mbid;
@@ -51,5 +55,9 @@ class ReleaseModel {
         notes: json['notes'] as String?,
         imported: json['imported'] as bool? ?? false,
         youtubeOnly: json['youtubeOnly'] as bool? ?? false,
+        credits: [
+          for (final c in (json['credits'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+            (id: c['id'] as String, name: c['name'] as String),
+        ],
       );
 }

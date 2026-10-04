@@ -59,7 +59,7 @@ class _ShareSheet extends ConsumerWidget {
     // Načíst hned -- Safari sdílí jen přímo z klepnutí, ne po síťovém čekání.
     final link = external == null ? null : ref.watch(shareLinkProvider(external!));
     final hasExternal = external != null &&
-        !(link?.hasValue == true && link!.value!.url == null && link.value!.youtubeUrl == null);
+        !(link?.hasValue == true && link!.value!.primaryUrl == null);
 
     Widget row(IconData icon, String label, String hint, VoidCallback onTap) => ListTile(
           dense: true,

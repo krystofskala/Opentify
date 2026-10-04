@@ -21,7 +21,18 @@ class ShareLink {
     this.spotifyUrl,
     this.appleUrl,
     this.youtubeUrl,
+    this.soundcloudUrl,
+    this.youtubeSearchUrl,
   });
+
+  /// Hledání na YouTube podle jména, když zdrojové video neznáme.
+  final String? youtubeSearchUrl;
+
+  /// Skladba/set na SoundCloudu (import, Nevydané a vzácné) -- tam jinde není.
+  final String? soundcloudUrl;
+
+  /// Co se pošle jako hlavní odkaz: univerzální, jinak zdroj (YouTube / SoundCloud).
+  String? get primaryUrl => url ?? youtubeUrl ?? soundcloudUrl;
 
   /// Zdrojové YouTube video (stažená z YouTube / album jen na YouTube).
   final String? youtubeUrl;
@@ -47,7 +58,11 @@ class ShareLink {
         if (appleUrl != null) 'Apple Music: $appleUrl',
         // Bez univerzálního odkazu jde YouTube jako hlavní odkaz -- ne ještě
         // jednou v řádku (živě: odkaz dvakrát za sebou).
-        if (youtubeUrl != null && url != null) 'YouTube: $youtubeUrl',
+        if (youtubeUrl != null && url != null)
+          'YouTube: $youtubeUrl'
+        else if (youtubeUrl == null && youtubeSearchUrl != null)
+          'YouTube: $youtubeSearchUrl',
+        if (soundcloudUrl != null && primaryUrl != soundcloudUrl) 'SoundCloud: $soundcloudUrl',
       ].join('\n');
 
   /// Text ke sdílení (univerzální odkaz jde zvlášť jako url).
@@ -55,7 +70,7 @@ class ShareLink {
 
   /// Do schránky (na PC): univerzální odkaz + Spotify + Apple Music.
   String get clipboardText =>
-      [if ((url ?? youtubeUrl) != null) (url ?? youtubeUrl)!, if (_services.isNotEmpty) _services].join('\n');
+      [if (primaryUrl != null) primaryUrl!, if (_services.isNotEmpty) _services].join('\n');
 }
 
 typedef ShareTarget = ({String kind, String id}); // kind: recordings | releases
@@ -77,6 +92,8 @@ final shareLinkProvider = FutureProvider.autoDispose.family<ShareLink, ShareTarg
     spotifyUrl: json['spotifyUrl'] as String?,
     appleUrl: json['appleUrl'] as String?,
     youtubeUrl: json['youtubeUrl'] as String?,
+    soundcloudUrl: json['soundcloudUrl'] as String?,
+    youtubeSearchUrl: json['youtubeSearchUrl'] as String?,
   );
 });
 
@@ -85,7 +102,7 @@ enum ShareOutcome { shared, copied, failed }
 /// Telefon: systémová nabídka sdílení (Zprávy, WhatsApp...). Počítač (nebo
 /// když sdílení není k dispozici): zkopírovat odkaz do schránky.
 Future<ShareOutcome> shareLink(ShareLink link) async {
-  final url = link.url ?? link.youtubeUrl;
+  final url = link.primaryUrl;
   if (url == null) return ShareOutcome.failed;
   if (await impl.nativeShare(link.text, url)) return ShareOutcome.shared;
   try {

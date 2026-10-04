@@ -237,7 +237,14 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
               eyebrow: releaseTypeLabels[release.releaseType] ?? release.releaseType,
               eyebrowIcon: release.releaseType == 'single' ? Symbols.music_note_rounded : Symbols.album_rounded,
               subtitle: [
-                if (artistName != null)
+                // Spolupráce: každý interpret vlastní odkaz (Thile & Daves).
+                if (release.credits.length > 1)
+                  Wrap(
+                    spacing: AppSpacing.md,
+                    runSpacing: AppSpacing.xs,
+                    children: [for (final c in release.credits) _CreditLink(id: c.id, name: c.name)],
+                  )
+                else if (artistName != null)
                   HeroLink(
                     text: artistName,
                     avatarUrl: artist?.coverImageUrl,
@@ -430,6 +437,26 @@ class _OtherEditionsState extends ConsumerState<_OtherEditions> {
             ],
         ],
       ),
+    );
+  }
+}
+
+
+/// Jeden z interpretů spolupráce -- avatar a odkaz na jeho stránku.
+class _CreditLink extends ConsumerWidget {
+  const _CreditLink({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final artist = ref.watch(releaseArtistProvider(id)).valueOrNull;
+    return HeroLink(
+      text: name,
+      avatarUrl: artist?.coverImageUrl,
+      icon: Symbols.person_rounded,
+      onTap: () => context.push('/artists/$id'),
     );
   }
 }

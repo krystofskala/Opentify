@@ -51,12 +51,28 @@ def _apple_search(title: str, artist: str) -> str:
     return f"https://music.apple.com/cz/search?term={quote(f'{title} {artist}'.strip(), safe='')}"
 
 
+def _youtube_search(title: str, artist: str) -> str:
+    """YouTube všude -- hledání podle jména, když zdrojové video neznáme."""
+    return f"https://www.youtube.com/results?search_query={quote(f'{artist} {title}'.strip(), safe='')}"
+
+
 def _youtube_url(refs: dict | None) -> str | None:
     """Zdrojové YouTube video skladby (stažená z YouTube / import odkazu)."""
     refs = refs or {}
     if refs.get("youtubeUrl"):
         return refs["youtubeUrl"]
     return f"https://www.youtube.com/watch?v={refs['youtubeId']}" if refs.get("youtubeId") else None
+
+
+def _soundcloud_url(refs: dict | None, downloaded_from: bool = False) -> str | None:
+    """Skladba ze SoundCloudu (import odkazem, Nevydané a vzácné). Se
+    `downloaded_from` i soubor stažený ze SoundCloudu jako záloha -- jen když
+    ji jinde nenajdeme (cizí upload oficiální skladby jinak neposílat)."""
+    refs = refs or {}
+    if refs.get("soundcloudUrl"):
+        return refs["soundcloudUrl"]
+    key = str(refs.get("sourceKey") or "")
+    return key.removeprefix("soundcloud:") if downloaded_from and key.startswith("soundcloud:") else None
 
 
 def _same(a: str | None, b: str | None) -> bool:
@@ -109,14 +125,18 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         # podle jména (našlo by cizí kapelu).
         return {"url": None, "title": recording.title, "artistName": artist_name or None, "spotifySearchUrl": None}
     release_row = session.get(Release, recording.release_id) if recording.release_id else None
-    if release_row is not None and (release_row.external_refs or {}).get("source") in ("youtube", "manual"):
-        # Album jen na YouTube -- Spotify/Apple ho nemají, jen zdrojové video.
+    soundcloud_url = _soundcloud_url(recording.external_refs)
+    if soundcloud_url or (
+        release_row is not None and (release_row.external_refs or {}).get("source") in ("youtube", "soundcloud", "manual")
+    ):
+        # Jen na YouTube / SoundCloudu -- Spotify/Apple ji nemají, jen zdroj.
         return {
             "url": None,
             "title": recording.title,
             "artistName": artist_name or None,
             "spotifySearchUrl": None,
             "youtubeUrl": _youtube_url(recording.external_refs),
+            "soundcloudUrl": soundcloud_url,
         }
     artist = primary_artist_name(artist_name)
     release = session.get(Release, recording.release_id) if recording.release_id else None
@@ -156,6 +176,17 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
                 deezer_id = str(track["id"])
                 refs["shareDeezerId"] = deezer_id
         if not deezer_id:
+            # Aspoň zdroj, odkud se stáhla (SoundCloud / YouTube).
+            fallback_sc = _soundcloud_url(refs, downloaded_from=True)
+            if fallback_sc or _youtube_url(refs):
+                return {
+                    "url": None,
+                    "title": recording.title,
+                    "artistName": artist_name or None,
+                    "spotifySearchUrl": None,
+                    "youtubeUrl": _youtube_url(refs),
+                    "soundcloudUrl": fallback_sc,
+                }
             raise HTTPException(status_code=404, detail="skladbu se nepodařilo najít pro sdílení")
         url = f"https://song.link/d/{deezer_id}"
 
@@ -174,6 +205,7 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
         else _spotify_search("tracks", recording.title, artist),
         "appleUrl": f"https://music.apple.com/cz/song/{apple_id}" if apple_id else _apple_search(recording.title, artist),
         "youtubeUrl": _youtube_url(recording.external_refs),
+        "youtubeSearchUrl": _youtube_search(recording.title, artist),
     }
 
 
@@ -189,9 +221,18 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
     if (
         is_own_id(release.deezer_id)
         or (artist_row is not None and is_own_id(artist_row.deezer_id))
-        or (release.external_refs or {}).get("source") in ("youtube", "manual")
+        or (release.external_refs or {}).get("source") in ("youtube", "soundcloud", "manual")
     ):
-        return {"url": None, "title": release.title, "artistName": artist_name or None, "spotifySearchUrl": None}
+        rrefs = release.external_refs or {}
+        # Album/playlist ze SoundCloudu: odkaz na ten set.
+        sc = rrefs.get("youtubeSource") if rrefs.get("source") == "soundcloud" else None
+        return {
+            "url": None,
+            "title": release.title,
+            "artistName": artist_name or None,
+            "spotifySearchUrl": None,
+            "soundcloudUrl": sc if sc and "soundcloud.com" in sc else None,
+        }
     artist = primary_artist_name(artist_name)
     refs = dict(release.external_refs or {})
     url: str | None = None
@@ -242,4 +283,5 @@ async def share_release(release_id: str, session: Session = Depends(get_session)
         "appleUrl": f"https://music.apple.com/cz/album/{apple_id}"
         if apple_id
         else _apple_search(clean_album_title(release.title), artist),
+        "youtubeSearchUrl": _youtube_search(clean_album_title(release.title), artist),
     }

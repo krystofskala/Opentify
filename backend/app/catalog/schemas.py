@@ -53,6 +53,8 @@ class ReleaseOut(CamelModel):
     imported: bool = False
     # Jen z YouTube (neoficiální / ztracené album) -- štítek v diskografii.
     youtube_only: bool = False
+    # Spolupráce: všichni interpreti [{id, name, join}] (join = " & ", " feat. "...).
+    credits: list[dict] | None = None
 
 
 class RecordingOut(CamelModel):

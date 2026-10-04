@@ -340,6 +340,7 @@ class CatalogService:
             notes=(release.external_refs or {}).get("notes"),
             imported=(release.external_refs or {}).get("source") in ("youtube", "soundcloud", "manual"),
             youtube_only=(release.external_refs or {}).get("source") in ("youtube", "soundcloud"),
+            credits=(release.external_refs or {}).get("credits"),
         )
 
     def _to_recording_out(self, recording: Recording) -> RecordingOut:
@@ -808,6 +809,8 @@ class CatalogService:
             }
             release = self._ingest_release_group_json(rg_with_artist)
             if release is not None:
+                if rg.get("artist-credit"):  # search ho nese -- spolupráce (Thile & Daves)
+                    self._store_credits(release, rg["artist-credit"])
                 releases.append(release)
 
         # MusicBrainz má u menších interpretů mezery (živě: Hector Gachan --
@@ -1180,6 +1183,7 @@ class CatalogService:
             return None
         await self._enrich_release_images(release)
         await self._enrich_release_genres(release)
+        await self._enrich_release_credits(release)
         await self._enrich_release_date(release)
         return self._to_release_out(release)
 
@@ -1606,6 +1610,37 @@ class CatalogService:
             release.genres = genres
             self._session.add(release)
             self._session.commit()
+
+    def _store_credits(self, release: Release, artist_credit: list[dict[str, Any]]) -> None:
+        """Všichni interpreti alba (spolupráce "Chris Thile & Michael Daves")
+        do `external_refs.credits` -- `artist_id` nese jen prvního. Jen když
+        jich je víc; jinak klíč pryč. `creditsChecked`, ať se MB neptá znovu."""
+        credits: list[dict[str, Any]] = []
+        if len(artist_credit) > 1:
+            for c in artist_credit:
+                a = c.get("artist") or {}
+                if not a.get("name"):
+                    continue
+                row = upsert_artist(self._session, mbid=a.get("id"), name=a["name"], sort_name=a.get("sort-name"))
+                credits.append({"id": row.id, "name": c.get("name") or a["name"], "join": c.get("joinphrase") or ""})
+        refs = {k: v for k, v in (release.external_refs or {}).items() if k != "credits"}
+        if len(credits) > 1:
+            refs["credits"] = credits
+        refs["creditsChecked"] = True
+        if refs != (release.external_refs or {}):
+            release.external_refs = refs
+            self._session.add(release)
+            self._session.commit()
+
+    async def _enrich_release_credits(self, release: Release) -> None:
+        if (release.external_refs or {}).get("creditsChecked") or not release.mbid or is_own_id(release.mbid):
+            return
+        try:
+            data = await self._mb.get_release_group(release.mbid)
+        except MusicBrainzError:
+            return
+        if data.get("artist-credit"):
+            self._store_credits(release, data["artist-credit"])
 
     # ------------------------------------------------------------------
     # Deezer enrichment — best-effort, nikdy nesmí shodit request na MB datech.
