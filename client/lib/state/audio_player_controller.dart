@@ -790,7 +790,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _radioLastRawAt = DateTime.now();
     _radioTick?.cancel();
     _radioTick = Timer.periodic(const Duration(milliseconds: 200), (_) {
-      if (!_radioActive || !_player.playing) return;
+      if (!_radioActive || !_player.playing || _loadingTrack) return;
       final since = DateTime.now().difference(_radioLastRawAt);
       if (since > const Duration(seconds: 3)) return; // hlášení nechodí -> nehádat
       _onRadioPosition(_radioLastRaw + since * state.speed);
@@ -814,11 +814,23 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (info == null) return;
     _radioPausedAt = null;
     _radioStallRaw = null;
+    // Nový zdroj: přerušený `setUrl` z `_startStream` (restart dřív, než
+    // první stream doběhl) jinak hlásil falešné "Nepodařilo se přehrát".
+    final gen = ++_sourceGen;
+    // Čekání na automatický druhý pokus (`_handleStreamFailure`) tím končí.
+    _awaitingProvisioning = false;
     final url = _startRadio(info, position);
     state = state.copyWith(position: position);
-    unawaited(_player
-        .setUrl(url)
-        .then<void>((_) => _installMediaHandlers(), onError: (Object e) => debugPrint('rádio setUrl: $e')));
+    unawaited(_player.setUrl(url).then<void>((_) {
+      _installMediaHandlers();
+      if (gen != _sourceGen) return;
+      _readyGen = gen;
+      // Přerušený `_startStream` start neoznámil (historie, poslech).
+      final pending = _unannounced;
+      if (pending != null && pending.recordingId == state.nowPlaying?.recordingId) {
+        _announceStart(pending, paused: false);
+      }
+    }, onError: (Object e) => debugPrint('rádio setUrl: $e')));
     unawaited(_player.play().catchError((Object e) => debugPrint('rádio play: $e')));
   }
 
@@ -898,6 +910,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   /// Pozice ve streamu -> co hraje a kde ve skladbě.
   void _onRadioPosition(Duration streamPosition, {bool measured = false}) {
+    // Načítá se jiná skladba (tiché odemknutí / obstarávání): časová osa
+    // starého streamu by `nowPlaying` přepnula zpátky na předchozí skladbu.
+    if (_loadingTrack) return;
     final ms = streamPosition.inMilliseconds.toDouble();
     _RadioSegment? seg;
     for (final s in _radioTimeline) {
@@ -998,7 +1013,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     try {
       await _configureSession();
     } catch (_) {}
-    if (state.nowPlaying == null || _player.playing) return;
+    // Web: při načítání hraje tiché odemknutí (`playing` true), skladba ale
+    // ještě nehraje -- i tehdy obnovit.
+    if (state.nowPlaying == null || (_player.playing && !_loadingTrack)) return;
     _maybePersistSession(state, force: true);
     _restoredIdle = true;
   }
@@ -1150,10 +1167,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   /// Pauza (povel z jiného zařízení / předání přehrávání jinam).
-  Future<void> pauseIfPlaying() async {
-    if (state.nowPlaying == null) return;
-    if (_deferWhileLoading(play: false)) return; // `isPlaying` je při načítání false
-    if (state.isPlaying) await togglePlayPause();
+  /// Vrací, jestli hrálo / mělo po načtení hrát -- Wrapped podle toho po
+  /// zavření přehrávání vrátí (`isPlaying` je při načítání false).
+  Future<bool> pauseIfPlaying() async {
+    if (state.nowPlaying == null) return false;
+    if (_loadingTrack) {
+      final wanted = !_startPausedWhenReady;
+      _deferWhileLoading(play: false);
+      return wanted;
+    }
+    if (!state.isPlaying) return false;
+    await togglePlayPause();
+    return true;
   }
 
   Future<void> resumeIfPaused() async {
@@ -1783,6 +1808,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // ztlumit hned -- dřív dál hrála stará skladba, zatímco UI ukazovalo
     // novou "Ve frontě..." (živě: SoundCloud remix, který se nikdy nestáhl).
     _awaitingProvisioning = true; // zastavení níž nesmí schovat načítání
+    // Rádio starého streamu ukončit -- jeho časová osa by jinak během čekání
+    // přepnula `nowPlaying` zpátky na předchozí skladbu a kolečko by se
+    // točilo navždy (iPhone, nestažená skladba).
+    _stopRadio();
     // Zastavit, ne jen pauznout: s pauzou zůstal starý zdroj načtený a Play
     // (sluchátka, zamčená obrazovka) ho rozehrálo pod názvem nové skladby.
     // Web ne: tam už starou skladbu nahradilo tiché "odemknutí" přehrávače
@@ -1910,6 +1939,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final gen = ++_sourceGen;
     final startPaused = _startPausedWhenReady;
     _startPausedWhenReady = false;
+    _unannounced = info;
+    _scrobbleOnPlay = null;
     // iOS: místo souboru skladby jeden nepřetržitý stream celé fronty (viz
     // `_startRadio`). Ještě se stahující soubor (progresivní přehrávání) jde
     // postaru -- rádio řadí jen hotové skladby.
@@ -1961,13 +1992,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       await _player.setSpeed(state.speed);
       _applyVolume();
       if (_radioActive) _installMediaHandlers();
-      if (startPaused) {
-        state = state.copyWith(isPlaying: false, isBuffering: false);
-      } else {
-        _realtime.playbackPlay(info.recordingId);
-      }
-      _recordRecentlyPlayed(info);
-      _beginScrobble(info.recordingId);
+      // Play mezitím (klepnutí během `setUrl`) -> skutečný stav, ne natvrdo
+      // "pozastaveno".
+      if (startPaused) state = state.copyWith(isPlaying: _player.playing, isBuffering: false);
+      _announceStart(info, paused: startPaused && !_player.playing);
       if (!_radioActive &&
           _ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId) == null) {
         unawaited(_loadGainFor(info.recordingId));
@@ -1976,9 +2004,36 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // Přerušené novějším `_startStream` (návaznost, přeskočení) -- žádná chyba.
       if (gen != _sourceGen) return;
       debugPrint('AudioPlayerController: setUrl() selhalo pro ${info.recordingId}: $e');
+      // Záměr "pozastaveno" platí i pro další pokus -- jinak se skladba po
+      // navázání sama rozehrála (po předání obě zařízení, do nahrávání Shazamu).
+      _startPausedWhenReady = startPaused;
       _handleStreamFailure(info, e, isProgressive: isProgressive);
     }
   }
+
+  /// Zdroj z `_startStream`, jehož start se ještě neoznámil (historie,
+  /// poslech, Connect) -- když `setUrl` přeruší restart rádia (posun hned po
+  /// spuštění), oznámí ho `_restartRadio`.
+  NowPlayingInfo? _unannounced;
+
+  /// Pozastaveně načtená skladba: poslech a "právě hraje" až s prvním
+  /// skutečným přehráváním (`_onPlayerStateChanged`), ne při načtení.
+  String? _scrobbleOnPlay;
+
+  void _announceStart(NowPlayingInfo info, {required bool paused}) {
+    _unannounced = null;
+    if (paused) {
+      _scrobbleOnPlay = info.recordingId;
+    } else {
+      _realtime.playbackPlay(info.recordingId);
+      _beginScrobble(info.recordingId);
+    }
+    _recordRecentlyPlayed(info);
+  }
+
+  /// Generace zdroje, který je automatickým druhým pokusem po chybě sítě
+  /// (`_handleStreamFailure`) -- jeho selhání už se ukáže jako chyba.
+  int _autoRetryGen = -1;
 
   /// Generace zdroje: zvyšuje ji každý `_startStream`; `_readyGen` je ta,
   /// jejíž `setUrl` doběhl. Chyba z `playbackEventStream` se počítá jen pro
@@ -2011,8 +2066,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         if (result == null) return;
         if (result.isAvailable && result.streamUrl != null) {
           done();
-          // Soubor je hotový -- další chyba už není "ještě se stahuje".
-          _currentProgressive = false;
+          // `_currentProgressive` záměrně zůstává: chyba ještě běžícího
+          // progresivního spojení pak naváže hotovým souborem od stejného
+          // místa (`_waitForAvailability` -> neprogresivní `_startStream`,
+          // takže se to nezacyklí) a nespotřebuje automatický druhý pokus.
           if (!_player.playing || state.isBuffering) {
             _resumeAt = state.position;
             _resumeFor = info.recordingId;
@@ -2054,6 +2111,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// opravdu konec -- tam už není na co čekat.
   void _handleStreamFailure(NowPlayingInfo info, Object error, {required bool isProgressive}) {
     if (state.nowPlaying?.recordingId != info.recordingId) return;
+    // Navázání nesmí pozastavenou skladbu rozehrát (záměr z `_startStream`
+    // zůstává, jinak podle přehrávače).
+    _startPausedWhenReady = _startPausedWhenReady || !_player.playing;
     // Offline soubor nejde přečíst -> zkusit server (bez toho by nebylo na
     // co čekat: obstarávání o skladbě nemusí nic vědět).
     final fromLocal = _currentLocal && !isProgressive;
@@ -2073,7 +2133,29 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _waitForAvailability(info);
       return;
     }
+    // Hotový soubor ze serveru: výpadek sítě uprostřed hraní -> jednou sám
+    // navázat od místa výpadku (dřív chyba a "Zkusit znovu" od 0:00).
+    _resumeAt = state.position;
+    _resumeFor = info.recordingId;
+    if (_sourceGen != _autoRetryGen) {
+      debugPrint('AudioPlayerController: přehrání selhalo ($error), zkouším znovu');
+      _awaitingProvisioning = true; // play/pause mezitím jen jako záměr
+      state = state.copyWith(isBuffering: true);
+      final gen = _sourceGen;
+      // Chvilka na obnovení spojení -- hned by druhý pokus spadl taky.
+      Timer(const Duration(seconds: 2), () {
+        if (gen != _sourceGen || state.nowPlaying?.recordingId != info.recordingId) return;
+        _autoRetryGen = _sourceGen + 1; // `_startStream` ji hned zvýší
+        unawaited(_startStream(
+          info,
+          _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+          isProgressive: false,
+        ));
+      });
+      return;
+    }
     _priming = false;
+    _awaitingProvisioning = false;
     debugPrint('AudioPlayerController: přehrání selhalo: $error');
     state = state.copyWith(isBuffering: false, error: 'Nepodařilo se přehrát');
   }
@@ -2313,6 +2395,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // načítání a jeho konec nesmí spustit `next()`.
       state = state.copyWith(isPlaying: false, isBuffering: true);
       return;
+    }
+    // Pozastaveně načtená skladba se teď opravdu rozehrála -> nový poslech.
+    if (_scrobbleOnPlay case final id? when playerState.playing) {
+      _scrobbleOnPlay = null;
+      if (state.nowPlaying?.recordingId == id) _beginScrobble(id);
     }
     // Živý stream (rádio) přehrávač často hlásí trvale jako "loading/
     // buffering" (nekonečná délka) -- tlačítko pauzy pak bylo zablokované

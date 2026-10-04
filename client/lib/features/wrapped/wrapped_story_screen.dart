@@ -211,10 +211,11 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
       if (id != null) _snippets[id] ??= _repo.snippet(id);
     }
     _scheduleRender();
-    if (ref.read(audioPlayerControllerProvider).isPlaying) {
-      _mainWasPlaying = true;
-      unawaited(_mainPlayer.togglePlayPause());
-    }
+    // I skladba, co se teprve načítá (`isPlaying` false) -- jinak se po
+    // načtení rozehrála přes úryvky příběhu.
+    unawaited(_mainPlayer.pauseIfPlaying().then((was) {
+      if (was) _mainWasPlaying = true;
+    }));
     // Na PC projde autoplay (stránka otevřená klepnutím); iOS ho odmítne a
     // zvuk se odemkne prvním klepnutím do příběhu.
     _audioUnlocked = true;

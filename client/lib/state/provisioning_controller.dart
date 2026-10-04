@@ -172,6 +172,9 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
           if (current != null && current.isInFlight) {
             _update(id, (s) => s.copyWith(status: status, jobId: job?.id, streamUrl: result.streamUrl));
           }
+          // Další kontrola až za lhůtu -- se stejným stavem `_update` čas
+          // neposune a POST by šel každých pár vteřin donekonečna.
+          _lastChange[id] = now;
         }
       } catch (_) {
         // Síť -- zkusí se příště (nepočítá se do limitu).
@@ -216,7 +219,10 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
   }
 
   Future<void> provision(String recordingId, {bool interactive = false}) async {
-    _update(recordingId, (s) => s.copyWith(status: 'REQUESTING'));
+    // Bez starého `streamUrl` (a chyby): přehrávač čekající v
+    // `_waitForAvailability` by na něm jinak hned spustil stream starého
+    // (mrtvého) pokusu dřív, než server odpoví.
+    _update(recordingId, (s) => TrackProvisioningState(status: 'REQUESTING', jobId: s.jobId, pct: s.pct));
     try {
       final result = await _repo.provision(recordingId, interactive: interactive);
       if (result.job != null) {
