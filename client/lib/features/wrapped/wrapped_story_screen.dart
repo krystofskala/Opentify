@@ -250,7 +250,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     }
     _progress.dispose();
     _page.dispose();
-    if (_mainWasPlaying) unawaited(_mainPlayer.togglePlayPause());
+    if (_mainWasPlaying) unawaited(_mainPlayer.resumeIfPaused());
     super.dispose();
   }
 
@@ -261,7 +261,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     }
     if (_mainWasPlaying) {
       _mainWasPlaying = false;
-      unawaited(_mainPlayer.togglePlayPause());
+      unawaited(_mainPlayer.resumeIfPaused());
     }
     context.pop();
   }
