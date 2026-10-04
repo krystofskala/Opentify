@@ -74,15 +74,16 @@ def record_listen(
         if session.get(Recording, recording_id) is None:
             return None
         if played_at is not None:
-            # Appka posílá neodeslané poslechy znovu (výpadek signálu) --
-            # stejný poslech (profil, skladba, začátek +-1 s) jen jednou.
+            # Appka posílá neodeslané poslechy znovu (výpadek signálu) a server
+            # ho může zapsat i sám ze stavu Connect (app/connect_listens.py) --
+            # stejný poslech (profil, skladba, začátek +-90 s) jen jednou.
             at = played_at.replace(tzinfo=None) if played_at.tzinfo is None else played_at.astimezone(timezone.utc).replace(tzinfo=None)
             existing = session.exec(
                 select(Listen).where(
                     Listen.user_id == user_id,
                     Listen.recording_id == recording_id,
-                    Listen.played_at >= at - timedelta(seconds=1),
-                    Listen.played_at <= at + timedelta(seconds=1),
+                    Listen.played_at >= at - timedelta(seconds=90),
+                    Listen.played_at <= at + timedelta(seconds=90),
                 )
             ).first()
             if existing is not None:

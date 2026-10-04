@@ -139,6 +139,10 @@ class ConnectionManager:
             }
             me.state = new_state
             me.updated = time.time()
+            # Záložní poslechy (app/connect_listens.py) -- i když je appka nenahlásí.
+            from app.connect_listens import tracker
+
+            tracker.update(user_id, me.device_id or f"ws:{id(ws)}", new_state)
             await self._store_playing(user_id)
             # Jen pozice -> nerozesílat při každém tiku (zařízení posílá
             # stav při změně skladby/přehrávání + občas kvůli pozici).
