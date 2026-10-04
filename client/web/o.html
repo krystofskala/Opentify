@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opentify</title>
+<!-- Lehká přesměrovací stránka pro sdílené odkazy "Poslat v Opentify":
+     o.html#/releases/<id>. Na telefonu zkusí nejdřív aplikaci
+     (opentify:///<cesta>, iOS má FlutterDeepLinkingEnabled), když se do
+     ~1,5 s neotevře, pokračuje do webové appky. Počítač rovnou na web.
+     Žádné skripty ani styly zvenku. -->
+<style>
+  :root { color-scheme: light dark; --bg: #f6f4f1; --fg: #1b1a19; --muted: #6b6762; --accent: #1db954; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #f2f0ed; --muted: #a29d97; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 24px 16px; box-sizing: border-box; text-align: center; }
+  h1 { font-size: 20px; margin: 0; }
+  p { margin: 0; color: var(--muted); }
+  a.btn { display: block; width: min(320px, 100%); padding: 14px 18px; border-radius: 999px; text-decoration: none;
+    font-weight: 600; box-sizing: border-box; }
+  a.primary { background: var(--accent); color: #fff; }
+  a.secondary { color: var(--fg); border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Otevírám Opentify…</h1>
+  <p id="hint">Když se nic nestane, vyber:</p>
+  <a class="btn primary" id="app" href="#">Otevřít v aplikaci</a>
+  <a class="btn secondary" id="web" href="./">Otevřít na webu</a>
+</main>
+<script>
+  (function () {
+    var raw = decodeURIComponent((location.hash || "").replace(/^#/, ""));
+    // Jen cesty appky -- nic, co by šlo podstrčit jako jiný odkaz.
+    var path = /^\/[A-Za-z0-9\/_\-.~%]*$/.test(raw) ? raw : "/";
+    var appUrl = "opentify://" + path;
+    var webUrl = "./#" + path;
+    document.getElementById("app").href = appUrl;
+    document.getElementById("web").href = webUrl;
+    var mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (!mobile) { location.replace(webUrl); return; }
+    var left = false;
+    document.addEventListener("visibilitychange", function () { if (document.hidden) left = true; });
+    location.href = appUrl;
+    setTimeout(function () { if (!left && !document.hidden) location.replace(webUrl); }, 1500);
+  })();
+</script>
+</body>
+</html>

@@ -115,9 +115,11 @@ Future<ShareOutcome> shareLink(ShareLink link) async {
 
 /// „Poslat v Opentify": odkaz, který otevře skladbu/album přímo v Opentify
 /// (pro lidi se sdíleným Opentify). Skládá se bez sítě -- iPhone ho sdílí
-/// hned v rámci klepnutí.
+/// hned v rámci klepnutí. Vede přes lehkou stránku `o.html` (client/web):
+/// na telefonu otevře nejdřív aplikaci, web jen jako zálohu (dřív vždy
+/// celý pomalý web).
 Future<ShareOutcome> shareInOpentify({required String path, required String title, String? artistName}) async {
-  final url = '${AppConfig.sharedOrigin}/#$path';
+  final url = '${AppConfig.sharedOrigin}/o.html#$path';
   final text = artistName == null ? '$title (Opentify)' : '$title – $artistName (Opentify)';
   if (await impl.nativeShare(text, url)) return ShareOutcome.shared;
   try {
