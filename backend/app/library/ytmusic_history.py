@@ -71,7 +71,7 @@ def parse(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         artist = _clean_artist(channel or "")
         if not title or not artist or not e.get("time") or title.startswith("http"):
             continue  # smazané video / reklama
-        plays.append({"ts": e["time"], "ms": ASSUMED_MS, "track": title, "artist": artist, "album": None, "spotify_id": None})
+        plays.append({"ts": e["time"], "ms": ASSUMED_MS, "assumed": True, "track": title, "artist": artist, "album": None, "spotify_id": None})
     return plays
 
 
@@ -127,7 +127,7 @@ def parse_html(text: str) -> list[dict[str, Any]]:
         title, artist = _text(links[0]), _clean_artist(_text(links[1]))
         ts = _parse_date(_text(body.split("<br>")[-2] if "<br>" in body else body))
         if title and artist and ts and not title.startswith("http"):
-            plays.append({"ts": ts, "ms": ASSUMED_MS, "track": title, "artist": artist, "album": None, "spotify_id": None})
+            plays.append({"ts": ts, "ms": ASSUMED_MS, "assumed": True, "track": title, "artist": artist, "album": None, "spotify_id": None})
     return plays
 
 

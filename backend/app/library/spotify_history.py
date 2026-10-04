@@ -114,13 +114,25 @@ def import_history(user_id: str, plays: list[dict[str, Any]], source: str = SOUR
         session.exec(delete(Listen).where(Listen.user_id == user_id, Listen.source == source))
         now = utcnow()
         batch = 0
+        from app.models import Recording
+
+        lengths: dict[str, int | None] = {}
         for play in counted:
+            rid = ids[(play["artist"].strip().lower(), play["track"].strip().lower())]
+            ms = play["ms"]
+            if play.get("assumed"):
+                # YouTube Music délku poslechu nezná: délka skladby (je-li
+                # známá) místo paušálních 3 minut -- Wrapped jinak nafukoval.
+                if rid not in lengths:
+                    rec = session.get(Recording, rid)
+                    lengths[rid] = rec.duration_ms if rec else None
+                ms = lengths[rid] or ms
             session.add(
                 Listen(
                     user_id=user_id,
-                    recording_id=ids[(play["artist"].strip().lower(), play["track"].strip().lower())],
+                    recording_id=rid,
                     played_at=_parse_ts(play["ts"]).replace(tzinfo=None),
-                    duration_played_ms=play["ms"],
+                    duration_played_ms=ms,
                     source=source,
                     lb_submitted_at=now,
                 )

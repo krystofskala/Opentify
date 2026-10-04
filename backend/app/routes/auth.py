@@ -102,6 +102,10 @@ def join(body: JoinIn, request: Request, response: Response):
     with Session(engine) as session:
         invite = session.exec(select(InviteCode).where(InviteCode.code_hash == hash_secret(body.code.strip()))).first()
         if invite is not None and invite.user_id == SIGNUP:
+            # Opakovaně použitelný, ale jen do vypršení (nový se dá kdykoli
+            # vytvořit v Profilech) -- dřív platil navždy.
+            if aware(invite.expires_at) < utcnow():
+                raise HTTPException(status_code=400, detail="Odkaz pro nové profily vypršel. Požádej o nový.")
             return _signup(session, request, response)
         if invite is None or invite.used_at is not None or aware(invite.expires_at) < utcnow():
             raise HTTPException(status_code=400, detail="Pozvánka neplatí (už použitá nebo prošlá).")

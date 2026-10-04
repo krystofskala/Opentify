@@ -40,10 +40,16 @@ def list_blends(current: tuple[str, str] = Depends(get_current_user)):
     with Session(engine) as session:
         mine = [b for b in session.exec(select(Blend)).all() if me in (b.user_a, b.user_b)]
         taken = {b.user_a for b in mine} | {b.user_b for b in mine}
+        # Nabídnout jen profily, které souhlasí se sdílením poslechů ("Sdílet,
+        # co poslouchám") -- kamarádi nemají vidět všechny profily na serveru.
+        from app.home.extra_sections import shares_listening
+
+        me_user = session.get(AppUser, me)
+        is_admin = me_user is not None and me_user.role == "admin"
         profiles = [
             {"id": u.id, "name": u.name}
             for u in session.exec(select(AppUser).order_by(AppUser.name)).all()
-            if u.id != me and u.id not in taken
+            if u.id != me and u.id not in taken and (is_admin or shares_listening(session, u.id))
         ]
         return {"items": [_out(session, b, me) for b in mine], "profiles": profiles}
 
