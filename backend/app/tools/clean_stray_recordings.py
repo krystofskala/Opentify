@@ -3,10 +3,12 @@ disk deluxe edice, regionální bonusy), které v DB visí u alba, ale v jeho
 kanonickém tracklistu nejsou (viz `_canonical_edition` v catalog/service.py).
 Tracklist alba je už neukazuje, ale strašily jinde (knihovna, hledání).
 
-Smaže se JEN nahrávka, na kterou nic neodkazuje (soubor, poslech, playlist,
-knihovna, Poslechni později, lajky/dislajky, rozpracovaný job). Použité
-zůstanou -- živá verze není studiová, slučovat je nejde. Jen alba
-z MusicBrainz (jiná nemají kanonickou edici).
+Cíl je najít co nejvíc hudby, ne míň (přání vlastníka). Proto se NEMAŽE
+nic unikátního -- jiné pásky koncertů, bonusy jiných edic, živé verze
+zůstávají (najdou se dál). Sloučí se jen DVOJNÍCI: kopie bez MBID (Deezer,
+sken) se stejným názvem jako skladba kanonického tracklistu = táž skladba.
+Sloučení převede všechno, co na dvojníka odkazuje (dedupe.merge_recording).
+Jen alba z MusicBrainz (jiná nemají kanonickou edici).
 
     python -m app.tools.clean_stray_recordings [--dry-run]"""
 from __future__ import annotations
@@ -15,13 +17,14 @@ import asyncio
 import sys
 from collections import Counter
 
-from sqlalchemy import delete, func
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.catalog.deezer import get_deezer_client
 from app.catalog.musicbrainz import get_musicbrainz_client
 from app.catalog.service import CatalogService
 from app.db import engine
+from app.maintenance import dedupe
 from app.models import (
     HeardFully,
     LibraryEntry,
@@ -95,16 +98,20 @@ async def main(dry: bool) -> None:
                 stats["bez tracklistu"] += 1
                 continue
             keep = {t.id for t in tracks}
+            canonical = {dedupe.track_key(r.title): r for r in session.exec(select(Recording).where(Recording.id.in_(keep))).all()}  # type: ignore[attr-defined]
             for rec in session.exec(select(Recording).where(Recording.release_id == rid)).all():
                 if rec.id in keep:
                     continue
-                if _referenced(session, rec.id):
-                    stats["použité (zůstávají)"] += 1
+                twin = canonical.get(dedupe.track_key(rec.title))
+                if rec.mbid or twin is None:
+                    stats["unikátní (zůstávají)"] += 1
                     continue
-                stats["smazáno"] += 1
+                if rec.isrc and twin.isrc and rec.isrc != twin.isrc:
+                    stats["jiné ISRC (zůstávají)"] += 1
+                    continue
+                stats["sloučeno s originálem"] += 1
                 if not dry:
-                    session.exec(delete(ProvisioningJob).where(ProvisioningJob.recording_id == rec.id))
-                    session.delete(rec)
+                    dedupe.merge_recording(session, rec, twin)
             if not dry:
                 session.commit()
         if n % 100 == 0:

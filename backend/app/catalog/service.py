@@ -19,6 +19,7 @@ vyvolaný explicitním otevřením obrazovky, ne psaním do vyhledávacího pole
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import unicodedata
 from collections import Counter
@@ -46,6 +47,8 @@ _TRACKLIST_OVERLAP_THRESHOLD = 0.4
 _TRACKLIST_CANDIDATE_LIMIT = 3
 _PARENS_RE = re.compile(r"\(.*?\)|\[.*?\]")
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_title(title: str) -> str:
@@ -1067,12 +1070,76 @@ class CatalogService:
                     track_number=position if len(media) > 1 else _parse_track_number(track.get("number")),
                     disambiguation=rec_json.get("disambiguation") if rec_json else None,
                 )
+                if (recording.external_refs or {}).get("otherEdition"):
+                    # Dřív z jiné edice, teď v tracklistu tohohle alba.
+                    recording.external_refs = {k: v for k, v in recording.external_refs.items() if k != "otherEdition"}
                 recordings.append(recording)
 
         await self._enrich_recording_previews(recordings)
         recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
         self._fix_release_type(release, recordings)
+        refs = release.external_refs or {}
+        ids = [r.id for r in recordings]
+        if refs.get("tracklistIds") != ids:
+            release.external_refs = {**refs, "tracklistIds": ids}
+            self._session.add(release)
+        self._ingest_other_editions(release, mb_releases, chosen)
         return [self._to_recording_out(r) for r in recordings]
+
+    def _ingest_other_editions(self, release: Release, editions: list[dict], chosen: dict) -> None:
+        """Skladby z ostatních edic téhož alba (jiné pásky koncertu, bonusy
+        reedic, Atmos mixy) -- ať se dají najít ("vždy co nejvíc hudby").
+        Ze stejné odpovědi MB, žádné dotazy navíc. Jen nahrávky, které v DB
+        ještě nejsou (cizí album jim nebereme), označené `otherEdition`;
+        tracklist alba je neukazuje, mají vlastní sekci a ve vyhledávání jdou
+        až za oficiálními."""
+        seen: set[str] = set()
+        candidates: list[tuple[dict, dict, dict]] = []
+        for edition in editions:
+            if edition is chosen:
+                continue
+            for medium in edition.get("media") or []:
+                for track in medium.get("tracks") or []:
+                    rec_json = track.get("recording") or {}
+                    mbid = rec_json.get("id")
+                    if mbid and mbid not in seen and (rec_json.get("title") or track.get("title")):
+                        seen.add(mbid)
+                        candidates.append((edition, medium, track))
+        if not candidates:
+            return
+        known = set(self._session.exec(select(Recording.mbid).where(Recording.mbid.in_(list(seen)))).all())  # type: ignore[union-attr]
+        added = 0
+        for edition, medium, track in candidates:
+            rec_json = track.get("recording") or {}
+            if rec_json["id"] in known:
+                continue
+            isrcs = rec_json.get("isrcs") or []
+            track_artist = self._ingest_artist_credit(track.get("artist-credit") or rec_json.get("artist-credit"))
+            label = " · ".join(
+                x for x in (
+                    (edition.get("disambiguation") or "").strip(),
+                    (medium.get("title") or "").strip(),
+                    (edition.get("date") or "")[:4],
+                    edition.get("country") or "",
+                ) if x
+            )
+            refs = {"otherEdition": label or "jiná edice"}
+            if (rec_json.get("disambiguation") or "").strip():
+                refs["mbDisambiguation"] = rec_json["disambiguation"].strip()
+            self._session.add(Recording(
+                mbid=rec_json["id"],
+                release_id=release.id,
+                artist_id=track_artist.id if track_artist else release.artist_id,
+                title=rec_json.get("title") or track.get("title"),
+                duration_ms=rec_json.get("length") or track.get("length"),
+                isrc=isrcs[0] if isrcs else None,
+                track_number=None,
+                external_refs=refs,
+            ))
+            added += 1
+        if added:
+            self._session.commit()
+            logger.info("album %s: %d skladeb z jiných edic", release.id, added)
 
     def _fix_release_type(self, release: Release, recordings: list[Recording]) -> None:
         """"Album" o 1-2 skladbách patří mezi singly/EP (živě nahlášeno:

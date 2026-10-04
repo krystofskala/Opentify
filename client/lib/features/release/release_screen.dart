@@ -10,6 +10,7 @@ import '../../models/recording_model.dart';
 import '../../models/release_model.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
+import '../../theme/shapes.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/detail_scaffold_states.dart';
@@ -30,6 +31,19 @@ final releaseTracksProvider = FutureProvider.autoDispose.family<List<RecordingMo
 });
 
 /// Jméno interpreta pro hlavičku (Release má jen `artistId`).
+/// Skladby z jiných edic / pásek alba (`/other-editions`), po skupinách.
+final releaseOtherEditionsProvider =
+    FutureProvider.autoDispose.family<List<({String label, List<RecordingModel> tracks})>, String>((ref, releaseId) async {
+  final json = await ref.watch(apiClientProvider).getJsonList('/catalog/releases/$releaseId/other-editions');
+  return [
+    for (final g in json.cast<Map<String, dynamic>>())
+      (
+        label: g['label'] as String? ?? 'Další verze',
+        tracks: [for (final t in (g['tracks'] as List<dynamic>)) RecordingModel.fromJson(t as Map<String, dynamic>)],
+      ),
+  ];
+});
+
 final releaseArtistProvider = FutureProvider.autoDispose.family<ArtistModel, String>((ref, artistId) {
   return ref.watch(catalogRepositoryProvider).getArtist(artistId);
 });
@@ -349,6 +363,73 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
           );
         },
       ),
+      SliverToBoxAdapter(
+        child: _OtherEditions(
+          releaseId: release.id,
+          albumArtUrl: release.coverImageUrl,
+          artistName: artistName,
+          sourceLabel: release.title,
+        ),
+      ),
     ];
+  }
+}
+
+/// "Z jiných edic a pásek": skladby, které kanonický tracklist neukazuje
+/// (jiné pásky koncertu, bonusy reedic, Atmos mixy) -- schované pod
+/// rozbalením, ať album zůstane přehledné, ale nic se neztratí.
+class _OtherEditions extends ConsumerStatefulWidget {
+  const _OtherEditions({required this.releaseId, this.albumArtUrl, this.artistName, required this.sourceLabel});
+
+  final String releaseId;
+  final String? albumArtUrl;
+  final String? artistName;
+  final String sourceLabel;
+
+  @override
+  ConsumerState<_OtherEditions> createState() => _OtherEditionsState();
+}
+
+class _OtherEditionsState extends ConsumerState<_OtherEditions> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = ref.watch(releaseOtherEditionsProvider(widget.releaseId)).valueOrNull ?? const [];
+    final count = groups.fold<int>(0, (n, g) => n + g.tracks.length);
+    if (count == 0) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.md, AppSpacing.xs, AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            shape: AppShapes.md,
+            leading: const Icon(Symbols.library_music_rounded),
+            title: Text('Z jiných edic a pásek · $count'),
+            subtitle: const Text('Bonusy reedic, jiné nahrávky koncertu, další mixy'),
+            trailing: Icon(_open ? Symbols.expand_less_rounded : Symbols.expand_more_rounded),
+            onTap: () => setState(() => _open = !_open),
+          ),
+          if (_open)
+            for (final g in groups) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xs),
+                child: Text(g.label, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              ),
+              for (final (i, r) in g.tracks.indexed)
+                TrackTile(
+                  recording: r,
+                  leadingIndex: i + 1,
+                  albumArtUrl: widget.albumArtUrl,
+                  artistName: widget.artistName,
+                  queueRecordings: g.tracks,
+                  sourceLabel: widget.sourceLabel,
+                ),
+            ],
+        ],
+      ),
+    );
   }
 }

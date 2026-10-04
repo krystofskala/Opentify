@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.auth import get_current_user, require_admin
 from app.catalog.availability import compute_availability, resolve_artist_name
@@ -390,6 +390,37 @@ async def get_release_tracks(
     if tracks is None:
         raise HTTPException(status_code=404, detail="album nenalezen")
     return [t.model_dump(by_alias=True) for t in tracks]
+
+
+@catalog_router.get("/releases/{release_id}/other-editions")
+async def get_release_other_editions(
+    release_id: str,
+    service: CatalogService = Depends(get_catalog_service),
+    _current=Depends(get_current_user),
+):
+    """Skladby alba, které nejsou v jeho kanonickém tracklistu: jiné pásky
+    koncertu, bonusy reedic, Atmos/live video mixy. Skupiny podle edice /
+    poznámky MusicBrainz; najdou se tak, i když je tracklist neukazuje."""
+    release = service._session.get(Release, release_id)
+    if release is None:
+        raise HTTPException(status_code=404, detail="album nenalezen")
+    canonical = set((release.external_refs or {}).get("tracklistIds") or [])
+    if not canonical:
+        await service.get_release_tracks(release_id)  # doplní tracklistIds
+        service._session.refresh(release)
+        canonical = set((release.external_refs or {}).get("tracklistIds") or [])
+    rows = service._session.exec(select(Recording).where(Recording.release_id == release_id)).all()
+    groups: dict[str, list] = {}
+    for rec in rows:
+        if rec.id in canonical or not canonical:
+            continue
+        refs = rec.external_refs or {}
+        label = refs.get("mbDisambiguation") or refs.get("otherEdition") or "Další verze"
+        groups.setdefault(label, []).append(service._to_recording_out(rec).model_dump(by_alias=True))
+    return [
+        {"label": label, "tracks": sorted(tracks, key=lambda t: (t.get("title") or "").lower())}
+        for label, tracks in sorted(groups.items(), key=lambda kv: -len(kv[1]))
+    ]
 
 
 @catalog_router.get("/recordings/{recording_id}")
