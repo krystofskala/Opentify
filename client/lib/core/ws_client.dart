@@ -75,6 +75,9 @@ class RealtimeClient {
         // Představit se ostatním zařízením profilu (i po každém reconnectu).
         send('device.hello', {'deviceId': deviceId, 'name': deviceName});
         _onConnected?.call();
+        for (final listener in List.of(_connectListeners)) {
+          listener();
+        }
         _pingTimer?.cancel();
         _pingTimer = Timer.periodic(const Duration(seconds: 25), (_) => _ping());
       }).catchError((Object _) {});
@@ -157,6 +160,10 @@ class RealtimeClient {
   }
 
   void Function()? _onConnected;
+  final List<void Function()> _connectListeners = [];
+
+  /// Další posluchač (znovu)připojení -- vedle `onConnected` (Connect).
+  void addConnectListener(void Function() listener) => _connectListeners.add(listener);
 
   /// Po (znovu)připojení -- Connect pošle aktuální stav přehrávání.
   set onConnected(void Function()? callback) => _onConnected = callback;

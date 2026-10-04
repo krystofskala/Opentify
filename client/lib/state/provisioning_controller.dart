@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/realtime_event.dart';
+import '../core/ws_client.dart';
 import '../data/provisioning_repository.dart';
 import '../models/availability.dart';
 import 'providers.dart';
@@ -73,6 +74,29 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
       (previous, next) => next.whenData(_handleEvent),
     );
     _watchdog = Timer.periodic(const Duration(seconds: 5), (_) => _checkStalled());
+    // Po znovupřipojení WS (restart serveru, iOS na pozadí) mohly utéct
+    // zprávy -- všechno rozestahované hned ověřit, nečekat na lhůtu.
+    // (Provider se po přepnutí profilu vytváří znovu -> poslouchat i nový.)
+    _clientSub = ref.listen<RealtimeClient>(
+      realtimeClientProvider,
+      (_, client) => client.addConnectListener(_resyncAll),
+      fireImmediately: true,
+    );
+  }
+
+  late final ProviderSubscription<RealtimeClient> _clientSub;
+
+  /// Skladba, na kterou teď čeká přehrávač -- tu watchdog nikdy jen tak
+  /// nezahodí (jinak by přehrávač točil kolečko navždy), ale ohlásí chybu.
+  String? awaitedRecordingId;
+
+  void _resyncAll() {
+    for (final id in state.keys) {
+      if (state[id]?.isInFlight == true) {
+        _lastChange[id] = DateTime.fromMillisecondsSinceEpoch(0);
+        _rechecks.remove(id);
+      }
+    }
   }
 
   // Pojistka proti propásnuté WS zprávě (iOS spojení na pozadí přeruší):
@@ -101,6 +125,11 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
       if (last == null || now.difference(last) < stallAfter) continue;
       final count = _rechecks[id] ?? 0;
       if (count >= _maxRechecks) {
+        if (id == awaitedRecordingId) {
+          // Přehrávač na ni čeká -- místo věčného kolečka chyba s "Zkusit znovu".
+          _update(id, (s) => TrackProvisioningState(status: 'FAILED', jobId: s.jobId, error: 'Stahování se zaseklo'));
+          continue;
+        }
         // Ani server neví nic nového -- zaseknutý stav zahodit (řádek je
         // zase normální, další klepnutí spustí stahování znovu).
         state = Map.of(state)..remove(id);
@@ -108,20 +137,38 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
         _rechecks.remove(id);
         continue;
       }
-      _rechecks[id] = count + 1;
       _checking.add(id);
       try {
-        final result = await _repo.provision(id);
-        if (result.job != null) _jobIdToRecordingId[result.job!.id] = id;
-        final job = result.job;
-        final status = result.streamUrl != null ? 'AVAILABLE' : (job?.status ?? result.status);
-        final current = state[id];
-        // Změnilo se něco mezitím přes WS? Pak nepřepisovat.
-        if (current != null && current.isInFlight) {
-          _update(id, (s) => s.copyWith(status: status, streamUrl: result.streamUrl));
+        final jobId = entry.value.jobId;
+        if (jobId != null) {
+          // Jen PŘEČÍST stav jobu -- POST /provision by po ztracené FAILED
+          // zprávě tiše založil nový job a kolečko se točilo znovu.
+          final job = await _repo.getJob(jobId);
+          _rechecks[id] = count + 1; // síťová chyba (výjimka) se nepočítá
+          final current = state[id];
+          if (current == null || !current.isInFlight) continue; // mezitím přes WS
+          switch (job.status) {
+            case 'SUCCEEDED':
+              _update(id, (_) => TrackProvisioningState(status: 'AVAILABLE', streamUrl: '/api/v1/tracks/$id/stream'));
+            case 'FAILED' || 'CANCELLED':
+              _update(id, (s) => TrackProvisioningState(status: 'FAILED', jobId: jobId, error: job.errorMessage ?? 'Stažení se nepodařilo'));
+            default:
+              _lastChange[id] = now; // pořád běží -- další kontrola za lhůtu
+          }
+        } else {
+          final result = await _repo.provision(id);
+          _rechecks[id] = count + 1;
+          if (result.job != null) _jobIdToRecordingId[result.job!.id] = id;
+          final job = result.job;
+          final status = result.streamUrl != null ? 'AVAILABLE' : (job?.status ?? result.status);
+          final current = state[id];
+          // Změnilo se něco mezitím přes WS? Pak nepřepisovat.
+          if (current != null && current.isInFlight) {
+            _update(id, (s) => s.copyWith(status: status, jobId: job?.id, streamUrl: result.streamUrl));
+          }
         }
       } catch (_) {
-        // Síť -- zkusí se příště.
+        // Síť -- zkusí se příště (nepočítá se do limitu).
       } finally {
         _checking.remove(id);
       }
@@ -173,8 +220,14 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
         _loudnessGains[recordingId] = result.loudnessGainDb!;
       }
       // `track.available` přes WS mohl přijít dřív než odpověď -- nepřepsat
-      // hotovou skladbu zpátky na PENDING.
-      if (state[recordingId]?.isAvailable == true && result.streamUrl == null) return;
+      // hotovou skladbu zpátky na PENDING; stejně tak běžící progresivní
+      // stream (STREAMING) -- jen doplnit jobId.
+      final now = state[recordingId];
+      if (now?.isAvailable == true && result.streamUrl == null) return;
+      if (now?.status == 'STREAMING' && result.streamUrl == null) {
+        _update(recordingId, (s) => s.copyWith(jobId: result.job?.id));
+        return;
+      }
       _update(
         recordingId,
         (_) => TrackProvisioningState(
@@ -184,8 +237,19 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
         ),
       );
     } catch (e) {
-      _update(recordingId, (s) => s.copyWith(status: 'FAILED', error: '$e'));
+      // Mezitím (WS/watchdog) se stav posunul dál -> pozdní chyba ho nepřepíše.
+      if (state[recordingId]?.status != 'REQUESTING') return;
+      _update(recordingId, (s) => s.copyWith(status: 'FAILED', error: _humanError(e)));
     }
+  }
+
+  static String _humanError(Object e) {
+    final text = '$e';
+    if (e is TimeoutException || text.contains('Timeout')) return 'Server neodpovídá, zkus to znovu';
+    if (text.contains('SocketException') || text.contains('ClientException') || text.contains('XMLHttpRequest')) {
+      return 'Bez spojení se serverem';
+    }
+    return 'Stahování se nepodařilo spustit';
   }
 
   void _handleEvent(RealtimeEvent event) {
@@ -220,6 +284,11 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
             // (worker retry): starý progresivní stream je mrtvý, zahodit ho.
             if (s.status == 'STREAMING' && event.status == 'PENDING') {
               return TrackProvisioningState(status: 'PENDING', jobId: s.jobId);
+            }
+            // Konečné selhání: starý progresivní `streamUrl` pryč, jinak by
+            // přehrávač zkoušel mrtvý stream dokola a chyba by se neukázala.
+            if (event.status == 'FAILED' || event.status == 'CANCELLED') {
+              return TrackProvisioningState(status: 'FAILED', jobId: s.jobId, error: event.error ?? 'Stažení se nepodařilo');
             }
             final keepStreaming = s.status == 'STREAMING' && event.status == 'RUNNING';
             return s.copyWith(status: keepStreaming ? null : event.status, pct: event.pct, error: event.error);
@@ -256,6 +325,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
   void dispose() {
     _watchdog.cancel();
     _subscription.close();
+    _clientSub.close();
     super.dispose();
   }
 }

@@ -98,6 +98,10 @@ async def provision_track(
     elif interactive:
         # Job už existuje (prefetch) -- ať ho uživatelův klik předběhne/zrychlí.
         await escalate(job)
+    if not created and job.requested_by_user_id != user_id:
+        from app.events import watch
+
+        await watch(job.id, recording_id, user_id)
 
     response.status_code = 202
     return {
