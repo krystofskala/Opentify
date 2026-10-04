@@ -94,6 +94,9 @@ class Taste:
     # Skladby z vlastních playlistů profilu (i společných, kde je členem) --
     # poskládaný playlist říká, co má rád (živě: tátův "Koza Band").
     playlisted: set[str] = field(default_factory=set)
+    # Váha skladby z playlistů: malý ručně poskládaný playlist víc než velký
+    # import (2 590 skladeb ze Spotify by jinak přebilo i poslechy).
+    playlist_weight: dict[str, float] = field(default_factory=dict)
 
     @property
     def known(self) -> set[str]:
@@ -129,9 +132,15 @@ def load_taste(user_id: str) -> Taste:
             if (p.owner_user_id == user_id or p.id in member_of) and p.id != liked_pl.id
         ]
         if own_playlists:
-            taste.playlisted = set(
-                session.exec(select(PlaylistItem.recording_id).where(PlaylistItem.playlist_id.in_(own_playlists))).all()  # type: ignore[attr-defined]
-            )
+            rows = session.exec(
+                select(PlaylistItem.playlist_id, PlaylistItem.recording_id).where(PlaylistItem.playlist_id.in_(own_playlists))  # type: ignore[attr-defined]
+            ).all()
+            sizes = Counter(pid for pid, _ in rows)
+            for pid, rid in rows:
+                # Do ~30 skladeb plná váha, větší playlist úměrně méně na skladbu.
+                share = min(1.0, 30 / sizes[pid])
+                taste.playlist_weight[rid] = max(taste.playlist_weight.get(rid, 0.0), share)
+            taste.playlisted = set(taste.playlist_weight)
         since = now - timedelta(days=365)
         listens = session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
         if user_id != g.HOME_USER_ID:
@@ -172,8 +181,7 @@ def load_taste(user_id: str) -> Taste:
             if recording_id in taste.last_played:
                 days = (now - taste.last_played[recording_id]).days
                 weight += 2.0 * math.exp(-days / 30)
-            if recording_id in taste.playlisted:
-                weight += 1.5
+            weight += 1.5 * taste.playlist_weight.get(recording_id, 0.0)
             if recording_id in taste.library:
                 weight += 0.2
             taste.artist_weight[artist_id] += weight
@@ -662,8 +670,7 @@ async def build_styles() -> int:
         w += 0.05 * taste.listen_counts.get(rid, 0)
         if rid in liked:
             w += 0.3
-        if rid in taste.playlisted:
-            w += 0.2
+        w += 0.2 * taste.playlist_weight.get(rid, 0.0)
         if w:
             weight[artist_id] += w
     # Vlastní interpreti jen s ručně zadanými styly -- štítky Last.fm podle
