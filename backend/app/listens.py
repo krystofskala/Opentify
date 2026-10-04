@@ -14,7 +14,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -73,6 +73,20 @@ def record_listen(
     with Session(engine) as session:
         if session.get(Recording, recording_id) is None:
             return None
+        if played_at is not None:
+            # Appka posílá neodeslané poslechy znovu (výpadek signálu) --
+            # stejný poslech (profil, skladba, začátek +-1 s) jen jednou.
+            at = played_at.replace(tzinfo=None) if played_at.tzinfo is None else played_at.astimezone(timezone.utc).replace(tzinfo=None)
+            existing = session.exec(
+                select(Listen).where(
+                    Listen.user_id == user_id,
+                    Listen.recording_id == recording_id,
+                    Listen.played_at >= at - timedelta(seconds=1),
+                    Listen.played_at <= at + timedelta(seconds=1),
+                )
+            ).first()
+            if existing is not None:
+                return existing.id
         listen = Listen(
             user_id=user_id,
             recording_id=recording_id,

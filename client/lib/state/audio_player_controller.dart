@@ -2542,14 +2542,37 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   /// Nové přehrávání skladby (i opakované přehrání téže) = nový poslech.
   void _beginScrobble(String recordingId) {
+    _finishScrobble();
     _scrobbleId = recordingId;
     _scrobbleStartedAt = DateTime.now();
     _scrobbleAccum = Duration.zero;
     _scrobbleLastPos = null;
+    _scrobbleLastAt = null;
+    _scrobbleDuration = null;
     _scrobbled = false;
     _heardMarked = false;
     unawaited(_ref.read(listensRepositoryProvider).playingNow(recordingId).catchError((Object _) {}));
+    // Poslechy, které dřív neprošly (bez signálu), zkusit znovu.
+    unawaited(_ref.read(listensRepositoryProvider).flushPending());
   }
+
+  /// Předchozí skladba skončila / přeskočila se: když poslední zprávy
+  /// o pozici nedorazily (iOS na pozadí je posílá řidčeji), dopočítat
+  /// odehraný čas z poslední známé pozice a skutečně uplynulého času.
+  void _finishScrobble() {
+    final id = _scrobbleId;
+    final started = _scrobbleStartedAt;
+    final lastPos = _scrobbleLastPos;
+    if (id == null || started == null || _scrobbled || lastPos == null) return;
+    final wall = DateTime.now().difference(started);
+    // Nikdy víc, než kolik reálně uběhlo, ani víc než kam skladba došla.
+    final played = lastPos < wall ? lastPos : wall;
+    if (played > _scrobbleAccum) _scrobbleAccum = played;
+    _submitIfHeard(id, _scrobbleDuration);
+  }
+
+  DateTime? _scrobbleLastAt;
+  Duration? _scrobbleDuration;
 
   /// Počítá jen skutečně odehraný čas (posun vpřed přes seek se nepočítá).
   /// Poslech se nahlásí po polovině délky nebo 4 minutách -- standardní
@@ -2558,10 +2581,22 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final id = _scrobbleId;
     if (id == null || (_scrobbled && _heardMarked) || state.nowPlaying?.recordingId != id) return;
     final last = _scrobbleLastPos;
+    final lastAt = _scrobbleLastAt;
+    final now = DateTime.now();
     _scrobbleLastPos = position;
+    _scrobbleLastAt = now;
+    _scrobbleDuration = state.duration ?? _scrobbleDuration;
     if (last == null || !_player.playing) return;
     final delta = position - last;
-    if (delta <= Duration.zero || delta > const Duration(seconds: 3)) return;
+    if (delta <= Duration.zero) return;
+    // Na pozadí (zamčený iPhone) chodí pozice řidčeji -- delší skok se
+    // počítá, když odpovídá skutečně uplynulému času; skok dál než uběhlo
+    // je přetočení a nepočítá se. Dřív se cokoli nad 3 s zahodilo a poslech
+    // z kapsy se nezapsal (živě: tátovy skladby na cestě).
+    final wall = lastAt == null ? Duration.zero : now.difference(lastAt);
+    final plausible = delta <= const Duration(seconds: 3) ||
+        (delta <= wall + const Duration(seconds: 2) && delta <= const Duration(minutes: 2));
+    if (!plausible) return;
     _scrobbleAccum += delta;
     final duration = state.duration;
     // Poslechnuto celé (>= 90 % délky skutečně odehráno) -> trvalá značka.
@@ -2569,6 +2604,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _heardMarked = true;
       unawaited(_ref.read(heardProvider.notifier).mark(id));
     }
+    _submitIfHeard(id, duration);
+  }
+
+  /// Nahlásí poslech, je-li odehráno aspoň půl skladby nebo 4 minuty.
+  void _submitIfHeard(String id, Duration? duration) {
     if (_scrobbled) return;
     if (duration != null && duration < const Duration(seconds: 30)) return;
     final half = duration == null ? const Duration(minutes: 4) : duration ~/ 2;
