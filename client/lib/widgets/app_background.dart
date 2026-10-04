@@ -34,6 +34,7 @@ class AppBackground extends StatefulWidget {
     required this.hidden,
     this.fineGrain = false,
     this.noGrain = false,
+    this.halfGrain = false,
     this.v2 = false,
     this.levels,
     this.position,
@@ -56,6 +57,9 @@ class AppBackground extends StatefulWidget {
 
   /// Profil › Vzhled › Zrno vypnuté -- hladké pozadí.
   final bool noGrain;
+
+  /// Profil › Vzhled › Zrno "Poloviční" -- vrstva zrna s poloviční silou.
+  final bool halfGrain;
 
   /// Doplňkové tóny z obalu (`effectiveSupportTonesProvider`) -- odstíny
   /// vedlejších slotů monochromatické palety; prázdné = syntetický posun.
@@ -581,7 +585,9 @@ class _ShaderPainter extends CustomPainter {
       grain,
       Rect.fromLTWH(0, 0, grain.width.toDouble(), grain.height.toDouble()),
       Offset.zero & size,
-      Paint()..filterQuality = FilterQuality.none,
+      Paint()
+        ..filterQuality = FilterQuality.none
+        ..color = Color.fromRGBO(0, 0, 0, state.widget.halfGrain ? 0.5 : 1),
     );
   }
 
@@ -713,7 +719,9 @@ class _FallbackPainter extends CustomPainter {
       grain,
       Rect.fromLTWH(0, 0, grain.width.toDouble(), grain.height.toDouble()),
       Offset.zero & size,
-      Paint()..filterQuality = FilterQuality.none,
+      Paint()
+        ..filterQuality = FilterQuality.none
+        ..color = Color.fromRGBO(0, 0, 0, state.widget.halfGrain ? 0.5 : 1),
     );
   }
 

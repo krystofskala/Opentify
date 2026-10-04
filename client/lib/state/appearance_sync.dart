@@ -48,6 +48,7 @@ class _AppearanceSync {
         'appearance.glass_grain': _ref.read(glassGrainProvider),
         'appearance.liquid_glass_test': _ref.read(liquidGlassProvider),
         'appearance.no_grain': _ref.read(noGrainProvider),
+        'appearance.half_grain': _ref.read(halfGrainProvider),
         'appearance.theme_mode': _ref.read(themeModeProvider).name,
       };
 
@@ -71,6 +72,7 @@ class _AppearanceSync {
     await flag('appearance.glass_grain', _ref.read(glassGrainProvider.notifier).set);
     await flag('appearance.liquid_glass_test', _ref.read(liquidGlassProvider.notifier).set);
     await flag('appearance.no_grain', _ref.read(noGrainProvider.notifier).set);
+    await flag('appearance.half_grain', _ref.read(halfGrainProvider.notifier).set);
     final tone = GlassToneMode.values.where((m) => m.name == values['appearance.glass_tone']).firstOrNull;
     if (tone != null) await _ref.read(glassToneProvider.notifier).set(tone);
     final theme = ThemeMode.values.where((m) => m.name == values['appearance.theme_mode']).firstOrNull;
@@ -105,6 +107,7 @@ class _AppearanceSync {
     watch(glassGrainProvider);
     watch(liquidGlassProvider);
     watch(noGrainProvider);
+    watch(halfGrainProvider);
     watch(themeModeProvider);
   }
 

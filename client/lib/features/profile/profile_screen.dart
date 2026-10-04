@@ -470,11 +470,30 @@ class _AppearanceSettings extends ConsumerWidget {
           onChanged: ref.read(reducedMotionProvider.notifier).set,
         ),
         const SizedBox(height: 12),
-        _SwitchRow(
-          title: 'Zrno na pozadí',
-          subtitle: 'Jemná filmová zrnitost. Vypnuté = úplně hladké plochy.',
-          value: !ref.watch(noGrainProvider),
-          onChanged: (on) => ref.read(noGrainProvider.notifier).set(!on),
+        Text('Zrno na pozadí', style: theme.textTheme.titleSmall),
+        Text(
+          'Jemná filmová zrnitost. Poloviční = stejné zrno, ale slabší; vypnuté = úplně hladké plochy.',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints.tightFor(width: 520),
+            child: GlassSegmentedControl<int>(
+              // 2 = plné, 1 = poloviční, 0 = vypnuté
+              selected: ref.watch(noGrainProvider) ? 0 : (ref.watch(halfGrainProvider) ? 1 : 2),
+              onChanged: (level) {
+                ref.read(noGrainProvider.notifier).set(level == 0);
+                ref.read(halfGrainProvider.notifier).set(level == 1);
+              },
+              segments: const [
+                GlassSegment(value: 2, label: 'Plné', icon: Symbols.grain_rounded),
+                GlassSegment(value: 1, label: 'Poloviční', icon: Symbols.blur_on_rounded),
+                GlassSegment(value: 0, label: 'Vypnuté', icon: Symbols.crop_square_rounded),
+              ],
+            ),
+          ),
         ),
         // Jen iOS appka: karta s obalem ve "fun shape" na zámku a v Dynamic
         // Islandu. Výchozí vypnuto -- systémový přehrávač na zámku stačí.

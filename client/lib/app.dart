@@ -92,6 +92,7 @@ class OpentifyApp extends ConsumerWidget {
             hidden: false,
             fineGrain: ref.watch(fineGrainProvider),
             noGrain: ref.watch(noGrainProvider),
+            halfGrain: ref.watch(halfGrainProvider),
             v2: ref.watch(backgroundV2Provider),
             levels: ref.watch(currentTrackLevelsProvider),
             position: () => ref.read(audioPlayerControllerProvider).position,

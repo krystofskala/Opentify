@@ -31,3 +31,31 @@ class NoGrainController extends StateNotifier<bool> {
 }
 
 final noGrainProvider = StateNotifierProvider<NoGrainController, bool>((ref) => NoGrainController());
+
+/// "Poloviční zrno": stejné zrno, poloviční síla (živě: tátovi plné zrno
+/// vadilo, úplně hladké nechtěl).
+class HalfGrainController extends StateNotifier<bool> {
+  HalfGrainController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.half_grain';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final halfGrainProvider = StateNotifierProvider<HalfGrainController, bool>((ref) => HalfGrainController());
