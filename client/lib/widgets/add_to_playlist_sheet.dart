@@ -95,6 +95,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
       }
     } catch (_) {
       ref.invalidate(myPlaylistsProvider);
+      if (added > 0) ref.invalidate(playlistDetailProvider(playlistId));
       final prefix = created ? 'Playlist „$playlistTitle“ vytvořen, ale ' : '';
       showToast(
         messenger,
@@ -105,6 +106,8 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
       return;
     }
     ref.invalidate(myPlaylistsProvider);
+    // Otevřený detail toho playlistu (pod sheetem) ukáže nové skladby hned.
+    ref.invalidate(playlistDetailProvider(playlistId));
     if (mounted) Navigator.of(context).pop();
     _confirm(messenger, playlistTitle);
   }

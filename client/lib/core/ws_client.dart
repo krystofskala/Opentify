@@ -107,12 +107,13 @@ class RealtimeClient {
 
   /// Hned znovu připojit (appka se vrátila do popředí -- iOS spojení na
   /// pozadí zavírá a čekat na další pokus by mohlo trvat až 30 s).
-  void reconnectNow() {
+  /// `force`: i živé spojení (po přihlášení -- to staré vzniklo bez klíče).
+  void reconnectNow({bool force = false}) {
     if (_disposed) return;
     if (_channel != null) {
       // Po pozadí: dlouho nic nepřišlo (server pinguje odpovědí na ping) =
       // socket je mrtvý, i když se tváří otevřeně.
-      if (_ready && DateTime.now().difference(_lastMessage) < const Duration(seconds: 30)) return;
+      if (!force && _ready && DateTime.now().difference(_lastMessage) < const Duration(seconds: 30)) return;
       _drop();
     }
     _reconnectTimer?.cancel();

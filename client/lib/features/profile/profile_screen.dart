@@ -10,6 +10,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../core/api_client.dart' show ApiException;
 import '../../data/library_repository.dart';
 import '../../state/providers.dart';
+import '../../state/liked_songs_controller.dart' show likedSongsControllerProvider;
 import '../../state/glass_settings.dart';
 import '../../state/auth_controller.dart';
 import 'home_genres_sheet.dart';
@@ -27,6 +28,7 @@ import '../../widgets/spotify_import_report.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import 'profiles_section.dart';
 import '../../core/device_token.dart' show clearDeviceToken;
+import '../../core/profile_prefs.dart' show clearProfilePrefs;
 import '../../core/page_location.dart' show reloadPage;
 import '../../core/share_image.dart' show shareFile;
 import '../../core/now_playing_activity.dart';
@@ -268,6 +270,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     try {
       final imported = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
       ref.invalidate(likedSongsProvider);
+      // Importované lajky do srdíček hned, ne až po restartu appky.
+      unawaited(ref.read(likedSongsControllerProvider.notifier).refresh());
       ref.invalidate(homeProvider);
       ref.invalidate(myPlaylistsProvider);
       messenger.hideCurrentSnackBar();
@@ -1090,6 +1094,8 @@ class _LogoutButton extends ConsumerWidget {
             await ref.read(apiClientProvider).postJson('/auth/logout');
           } catch (_) {}
           await clearDeviceToken();
+          // Další přihlášený nemá vidět frontu ani historii hledání.
+          await clearProfilePrefs();
           ref.invalidate(authProvider);
           reloadPage();
         },

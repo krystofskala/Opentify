@@ -7,6 +7,7 @@ import '../../core/device_token.dart';
 import '../../core/api_client.dart';
 import '../../core/config.dart';
 import '../../core/page_location.dart';
+import '../../core/profile_prefs.dart' show clearProfilePrefs;
 import '../../state/auth_controller.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
@@ -323,6 +324,8 @@ class ProfilesSection extends ConsumerWidget {
   Future<void> _switch(WidgetRef ref, String? userId) async {
     await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': userId});
     await saveActAs(userId);
+    // Fronta, historie hledání... patří profilu, ne zařízení.
+    await clearProfilePrefs();
     ref.invalidate(realtimeClientProvider); // nativně se stránka nenačte znovu
     reloadPage();
   }
@@ -449,6 +452,7 @@ class ActingAsBanner extends ConsumerWidget {
                 onPressed: () async {
                   await ref.read(apiClientProvider).postJson('/auth/act-as', body: {'user_id': null});
                   await saveActAs(null);
+                  await clearProfilePrefs();
                   ref.invalidate(realtimeClientProvider);
                   reloadPage();
                 },

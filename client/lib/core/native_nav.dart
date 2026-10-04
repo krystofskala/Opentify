@@ -9,6 +9,7 @@ import 'config.dart';
 import 'diagnostics.dart';
 import 'device_token.dart';
 import '../features/share/share_card_screen.dart' show openShareCard;
+import '../widgets/now_playing_sheet.dart' show NowPlayingSheetController;
 import '../widgets/toast.dart';
 
 /// Most k nativní části iOS (kanál `opentify/nav`):
@@ -25,14 +26,29 @@ class NativeNav {
   static bool get _supported => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
   static AppLifecycleListener? _lifecycle;
 
+  /// Aktuální router -- po restartu appky (přepnutí profilu) je jiný, a
+  /// posluchač vzniká jen jednou (dřív navigoval do prvního, mrtvého).
+  static GoRouter? _router;
+
   static void attach(GoRouter router) {
     if (!_supported) return;
+    _router = router;
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'open' && call.arguments is String) _open(router, call.arguments as String);
-      if (call.method == 'screenshot') _offerShareCard(router);
+      final current = _router;
+      if (current == null) return;
+      if (call.method == 'open' && call.arguments is String) _open(current, call.arguments as String);
+      if (call.method == 'screenshot') _offerShareCard(current);
     });
-    _lifecycle ??= AppLifecycleListener(onResume: () => unawaited(_pull(router)));
+    _lifecycle ??= AppLifecycleListener(onResume: () {
+      final current = _router;
+      if (current != null) unawaited(_pull(current));
+    });
     unawaited(_pull(router));
+  }
+
+  /// Router se ruší (restart appky) -- už ho nepoužívat.
+  static void detach(GoRouter router) {
+    if (identical(_router, router)) _router = null;
   }
 
   static Future<void> _pull(GoRouter router) async {
@@ -49,16 +65,20 @@ class NativeNav {
 
   /// Screenshot v přehrávači: nabídnout kartu ke sdílení (jako Spotify).
   static void _offerShareCard(GoRouter router) {
-    if (router.routerDelegate.currentConfiguration.uri.path != '/now-playing') return;
     final context = router.routerDelegate.navigatorKey.currentContext;
     if (context == null) return;
+    // `push` mění jen poslední shodu, ne `uri` konfigurace (ta hlásí záložku)
+    // -- otevřený přehrávač ví sheet.
+    if (!(NowPlayingSheetController.maybeOf(context)?.isOpen ?? false)) return;
     toast(context, 'Sdílet jako obrázek?',
         action: SnackBarAction(label: 'Sdílet', onPressed: () => openShareCard(context)));
   }
 
   static void _open(GoRouter router, String route) {
     // Po studeném startu ještě nemusí být navigátor -- o snímek později.
-    WidgetsBinding.instance.addPostFrameCallback((_) => router.push(route));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (identical(_router, router)) router.push(route);
+    });
   }
 
   static Future<void> syncConfig() async {

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/profile_prefs.dart';
 import '../widgets/remove_from_library.dart' show libraryRevisionProvider;
+import 'auth_controller.dart' show profilePrefsReady;
 import 'providers.dart';
 
 /// Pohled Knihovny: klasická knihovna, co si stáhl, celý server (admin),
@@ -15,10 +17,12 @@ class LibraryScopeController extends StateNotifier<LibraryScope> {
   }
 
   final Ref _ref;
+  final _prefsGeneration = profilePrefsGeneration;
   static const _prefKey = 'library.scope';
 
   Future<void> _load() async {
     try {
+      await profilePrefsReady(_ref);
       final prefs = await SharedPreferences.getInstance();
       final saved = LibraryScope.values.where((v) => v.name == prefs.getString(_prefKey)).firstOrNull;
       if (saved != null && saved != LibraryScope.mine && mounted) set(saved, save: false);
@@ -31,7 +35,7 @@ class LibraryScopeController extends StateNotifier<LibraryScope> {
     final server = scope == LibraryScope.downloaded || scope == LibraryScope.all;
     server ? headers['X-Library-Scope'] = scope.name : headers.remove('X-Library-Scope');
     _ref.read(libraryRevisionProvider.notifier).state++;
-    if (!save) return;
+    if (!save || _prefsGeneration != profilePrefsGeneration) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKey, scope.name);

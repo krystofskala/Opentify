@@ -20,6 +20,7 @@ import '../data/recommendations_repository.dart';
 import '../data/wrapped_repository.dart';
 import 'audio_player_controller.dart';
 import 'auth_controller.dart' show deviceName;
+import 'liked_songs_controller.dart' show likedSongsControllerProvider;
 
 /// Sdílený `ApiClient` -- jedna instance pro celou appku (connection reuse),
 /// zavřená při dispose containeru (hot-restart v devu, ne v produkci).
@@ -109,8 +110,12 @@ final recentContextsProvider = FutureProvider.autoDispose<List<RecentContext>>((
 });
 
 /// Oblíbené skladby -- sdílené Knihovnou (karta + detail); dřív žily v Profilu.
-final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) {
-  return ref.watch(libraryRepositoryProvider).likedSongs();
+final likedSongsProvider = FutureProvider.autoDispose<PlaylistDetailModel>((ref) async {
+  final playlist = await ref.watch(libraryRepositoryProvider).likedSongs();
+  // Čerstvý seznam = čerstvá sada srdíček -- detail Oblíbených filtruje
+  // podle sady, stará by schovala nově přidané (import, jiné zařízení).
+  ref.read(likedSongsControllerProvider.notifier).replaceAll(playlist.items.map((r) => r.id).toSet());
+  return playlist;
 });
 
 final libraryRepositoryProvider = Provider<LibraryRepository>((ref) {
@@ -136,6 +141,16 @@ final playlistsRepositoryProvider = Provider<PlaylistsRepository>((ref) {
 final myPlaylistsProvider = FutureProvider.autoDispose((ref) {
   return ref.watch(playlistsRepositoryProvider).list();
 });
+
+/// Detail jednoho playlistu -- tady (ne u obrazovky), ať ho po změně
+/// (přidání ze sheetu, přejmenování, smazání) zneplatní i widgety mimo detail.
+final playlistDetailProvider = FutureProvider.autoDispose.family<PlaylistDetailModel, String>((ref, playlistId) {
+  return ref.watch(playlistsRepositoryProvider).get(playlistId);
+});
+
+/// Playlisty smazané / opuštěné v tomhle běhu appky -- otevřený detail pak
+/// ukáže jasný stav místo akcí, které by na serveru selhaly.
+final gonePlaylistsProvider = StateProvider<Set<String>>((ref) => const {});
 
 /// Jedno WS spojení pro celou appku -- playback i provisioning controller
 /// poslouchají stejný `events` stream (viz core/ws_client.dart).

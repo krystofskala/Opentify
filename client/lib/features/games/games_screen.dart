@@ -20,7 +20,6 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/track_tile.dart';
-import '../library/playlist_detail_screen.dart' show playlistDetailProvider;
 
 /// Procházet › Herní soundtracky / Filmy a seriály (app/games.py,
 /// app/movies.py): velké obrázky nahoře, mixy, série (jako interpret --

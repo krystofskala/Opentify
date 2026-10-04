@@ -955,6 +955,8 @@ class _PlaylistsTab extends ConsumerWidget {
             onRefresh: () async {
               ref.invalidate(myPlaylistsProvider);
               ref.invalidate(likedSongsProvider);
+              // Sada srdíček zvlášť -- karta Oblíbené počítá z ní.
+              await ref.read(likedSongsControllerProvider.notifier).refresh();
             },
             child: CustomScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,

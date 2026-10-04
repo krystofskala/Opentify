@@ -25,7 +25,8 @@ class ListenLaterController extends AsyncNotifier<LaterList> {
     // započítá poslech) -- při přechodu na další skladbu seznam obnovit.
     ref.listen(audioPlayerControllerProvider.select((s) => s.nowPlaying?.recordingId), (previous, next) {
       if (previous != null && previous != next && state.valueOrNull?.active.isNotEmpty == true) {
-        Future.delayed(const Duration(seconds: 2), refresh);
+        // Offline / výpadek serveru: nechat starý seznam, ne neošetřenou výjimku.
+        Future.delayed(const Duration(seconds: 2), () => refresh().catchError((Object _) {}));
       }
     });
     return ref.watch(listenLaterRepositoryProvider).list();

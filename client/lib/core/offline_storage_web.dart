@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -8,6 +9,22 @@ String _key(String id) => '${web.window.location.origin}/__offline__/$id';
 
 // Jedna blob URL na skladbu (přehrávač ji může dostat opakovaně).
 final Map<String, String> _blobUrls = {};
+
+// Skladba, kterou přehrávač naposledy chtěl (její URL musí zůstat platná).
+String? _currentId;
+
+/// Přehrávání se posunulo jinam: URL ostatních skladeb uvolnit (každá drží
+/// celý soubor v paměti) -- s odstupem, než přehrávač přepne zdroj.
+void _releaseOthers(String keep) {
+  for (final MapEntry(key: id, value: url) in _blobUrls.entries.toList()) {
+    if (id == keep) continue;
+    Timer(const Duration(seconds: 10), () {
+      if (_currentId == id || _blobUrls[id] != url) return; // mezitím znovu hraje
+      _blobUrls.remove(id);
+      web.URL.revokeObjectURL(url);
+    });
+  }
+}
 
 Future<web.Cache> _open() => web.window.caches.open(_cacheName).toDart;
 
@@ -22,6 +39,8 @@ Future<void> put(String id, Uint8List bytes, String mimeType) async {
 }
 
 Future<String?> localUrl(String id) async {
+  _currentId = id;
+  _releaseOthers(id);
   final existing = _blobUrls[id];
   if (existing != null) return existing;
   try {

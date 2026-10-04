@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/api_client.dart' show ApiException;
 import '../../models/playlist_model.dart';
 import '../../widgets/mix_artwork.dart';
 import '../wrapped/wrapped_launch_button.dart';
@@ -22,10 +23,7 @@ import '../../core/cz_plural.dart';
 import '../../widgets/toast.dart';
 import '../../theme/shapes.dart';
 import '../../widgets/playlist_removal.dart';
-
-final playlistDetailProvider = FutureProvider.autoDispose.family((ref, String playlistId) {
-  return ref.watch(playlistsRepositoryProvider).get(playlistId);
-});
+import '../../widgets/section_app_bar.dart';
 
 /// Detail vlastního playlistu -- stejná hlavička jako Album/Interpret
 /// (obal = obal první skladby), filtr/řazení/hromadný výběr a ruční
@@ -59,6 +57,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final playlist = ref.watch(playlistDetailProvider(widget.playlistId));
+    // Smazaný / opuštěný (i z jiného tabu nebo zařízení): jasný stav, ne
+    // obecná chyba a akce, které by selhaly.
+    final gone = ref.watch(gonePlaylistsProvider.select((s) => s.contains(widget.playlistId))) ||
+        switch (playlist.error) { ApiException(statusCode: 403 || 404) => true, _ => false };
+    if (gone) {
+      return const Scaffold(
+        appBar: SectionAppBar(''),
+        bottomNavigationBar: ShellBarSpace(),
+        body: EmptyState(
+          icon: Symbols.playlist_remove_rounded,
+          message: 'Tenhle playlist už neexistuje, nebo k němu nemáš přístup.',
+        ),
+      );
+    }
 
     return playlist.when(
       data: (detail) {
@@ -255,11 +267,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       _items = reordered;
       _reordering = true;
     });
+    final messenger = ScaffoldMessenger.maybeOf(context);
     try {
       await ref.read(playlistsRepositoryProvider).reorderItems(widget.playlistId, reordered.map((r) => r.id).toList());
-    } catch (_) {
-      ref.invalidate(playlistDetailProvider(widget.playlistId));
+    } catch (e) {
+      showToast(messenger, 'Přeskládání selhalo: $e');
     } finally {
+      // Počkat na čerstvá data (jako u odebrání) -- jinak se zrcadlo hned
+      // přepsalo starým pořadím z provideru a skladba skočila zpátky.
+      if (mounted) {
+        try {
+          ref.invalidate(playlistDetailProvider(widget.playlistId));
+          await ref.read(playlistDetailProvider(widget.playlistId).future);
+        } catch (_) {}
+      }
       if (mounted) setState(() => _reordering = false);
     }
   }

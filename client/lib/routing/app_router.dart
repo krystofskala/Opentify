@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -33,63 +34,65 @@ import '../features/profile/verify_downloads_screen.dart';
 import '../features/library/playlist_join_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final router = GoRouter(
+  final router = _AppRouter(
     initialLocation: '/',
-    // `/artists/x` z kterékoli záložky -> detail v té záložce.
-    redirect: (context, state) => branchRedirect(state.uri),
-    routes: [
-      StatefulShellRoute.indexedStack(
-        builder: (context, state, navigationShell) => HomeShell(navigationShell: navigationShell),
-        branches: [
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/', builder: (context, state) => const HomeScreen(), routes: _detailRoutes()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/search', builder: (context, state) => const SearchScreen(), routes: _detailRoutes()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/library', builder: (context, state) => const LocalLibraryScreen(), routes: _detailRoutes()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen(), routes: _detailRoutes()),
-          ]),
-        ],
-      ),
-      GoRoute(
-        path: '/playlist-join/:code',
-        builder: (context, state) => PlaylistJoinScreen(code: state.pathParameters['code']!),
-      ),
-      GoRoute(
-        path: '/wrapped',
-        builder: (context, state) => const WrappedHubScreen(),
-      ),
-      GoRoute(
-        path: '/wrapped/:period',
-        builder: (context, state) => WrappedStoryScreen(period: state.pathParameters['period']!),
-      ),
-      GoRoute(
-        path: '/shazam',
-        builder: (context, state) => ShazamScreen(autoStart: state.uri.queryParameters['start'] == '1'),
-      ),
-      GoRoute(
-        path: '/tuner',
-        builder: (context, state) => const TunerScreen(),
-      ),
-      GoRoute(
-        path: '/now-playing',
-        // Bez vlastní animace a průhledná -- polohu přehrávače řídí
-        // `NowPlayingSheetController` (interaktivní tažení z mini
-        // přehrávače), stránka pod ním zůstává vidět během vysouvání.
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          opaque: false,
-          transitionDuration: Duration.zero,
-          reverseTransitionDuration: Duration.zero,
-          child: const NowPlayingScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) => child,
+    routingConfig: ValueNotifier(RoutingConfig(
+      // `/artists/x` z kterékoli záložky -> detail v té záložce.
+      redirect: (context, state) => branchRedirect(state.uri),
+      routes: [
+        StatefulShellRoute.indexedStack(
+          builder: (context, state, navigationShell) => HomeShell(navigationShell: navigationShell),
+          branches: [
+            StatefulShellBranch(routes: [
+              GoRoute(path: '/', builder: (context, state) => const HomeScreen(), routes: _detailRoutes()),
+            ]),
+            StatefulShellBranch(routes: [
+              GoRoute(path: '/search', builder: (context, state) => const SearchScreen(), routes: _detailRoutes()),
+            ]),
+            StatefulShellBranch(routes: [
+              GoRoute(path: '/library', builder: (context, state) => const LocalLibraryScreen(), routes: _detailRoutes()),
+            ]),
+            StatefulShellBranch(routes: [
+              GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen(), routes: _detailRoutes()),
+            ]),
+          ],
         ),
-      ),
-    ],
+        GoRoute(
+          path: '/playlist-join/:code',
+          builder: (context, state) => PlaylistJoinScreen(code: state.pathParameters['code']!),
+        ),
+        GoRoute(
+          path: '/wrapped',
+          builder: (context, state) => const WrappedHubScreen(),
+        ),
+        GoRoute(
+          path: '/wrapped/:period',
+          builder: (context, state) => WrappedStoryScreen(period: state.pathParameters['period']!),
+        ),
+        GoRoute(
+          path: '/shazam',
+          builder: (context, state) => ShazamScreen(autoStart: state.uri.queryParameters['start'] == '1'),
+        ),
+        GoRoute(
+          path: '/tuner',
+          builder: (context, state) => const TunerScreen(),
+        ),
+        GoRoute(
+          path: '/now-playing',
+          // Bez vlastní animace a průhledná -- polohu přehrávače řídí
+          // `NowPlayingSheetController` (interaktivní tažení z mini
+          // přehrávače), stránka pod ním zůstává vidět během vysouvání.
+          pageBuilder: (context, state) => CustomTransitionPage(
+            key: state.pageKey,
+            opaque: false,
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            child: const NowPlayingScreen(),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) => child,
+          ),
+        ),
+      ],
+    )),
   );
   // Kroky navigace do "černé skříňky" (diagnostika zamrzání).
   router.routerDelegate.addListener(() {
@@ -97,8 +100,67 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   });
   // iOS: Ovládací centrum / upozornění Shazamu otevírají obrazovky přes nativní most.
   NativeNav.attach(router);
+  // Restart appky (přepnutí profilu) staví nový router -- starý uvolnit.
+  ref.onDispose(() {
+    NativeNav.detach(router);
+    router.dispose();
+  });
   return router;
 });
+
+/// go_router 14.8.1 při `push` detailu záložky nad stránkou MIMO záložky
+/// (`/shazam`, `/tuner`, `/wrapped/…`, `/playlist-join/…`, přehrávač nad
+/// nimi) přidá druhou kopii celého `StatefulShellRoute` (viz
+/// `RouteMatchList._createNewMatchUntilIncompatible`: porovnává jen poslední
+/// trasu) -- dvakrát tentýž GlobalKey navigátoru a pád. Takové stránky se
+/// proto nejdřív sundají a detail se otevře v záložce pod nimi (zpět pak
+/// vede v záložce, jako u každého detailu).
+class _AppRouter extends GoRouter {
+  _AppRouter({required super.routingConfig, super.initialLocation}) : super.routingConfig();
+
+  @override
+  Future<T?> push<T extends Object?>(String location, {Object? extra}) {
+    final trimmed = _withoutOverlays(location);
+    if (trimmed == null) return super.push<T>(location, extra: extra);
+    return _pushOver<T>(trimmed, location, extra);
+  }
+
+  @override
+  Future<T?> pushReplacement<T extends Object?>(String location, {Object? extra}) {
+    final trimmed = _withoutOverlays(location);
+    if (trimmed == null) return super.pushReplacement<T>(location, extra: extra);
+    // Nahrazovaná stránka je mezi sundanými -- stačí obyčejný push.
+    return _pushOver<T>(trimmed, location, extra);
+  }
+
+  Future<T?> _pushOver<T>((RouteMatchList, List<RouteMatchBase>) trimmed, String location, Object? extra) {
+    final (base, removed) = trimmed;
+    final result = routeInformationProvider.push<T>(location, base: base, extra: extra);
+    // Kdo čekal na výsledek sundané stránky, nesmí viset navždy.
+    for (final m in removed) {
+      if (m is ImperativeRouteMatch && !m.completer.isCompleted) m.complete();
+    }
+    return result;
+  }
+
+  /// Současná konfigurace bez stránek nad záložkami -- jen když jsou nějaké
+  /// a cíl patří do záložek (jinak `null` = běžný push).
+  (RouteMatchList, List<RouteMatchBase>)? _withoutOverlays(String location) {
+    final current = routerDelegate.currentConfiguration;
+    final matches = current.matches;
+    final shell = matches.indexWhere((m) => m is ShellRouteMatch);
+    if (shell < 0 || shell == matches.length - 1) return null;
+    final uri = Uri.parse(location);
+    final target = configuration.findMatch(Uri.parse(branchRedirect(uri) ?? location));
+    if (target.isError || target.matches.firstOrNull is! ShellRouteMatch) return null;
+    final removed = matches.sublist(shell + 1);
+    var base = current;
+    for (final m in removed.reversed) {
+      base = base.remove(m);
+    }
+    return (base, removed);
+  }
+}
 
 /// Detaily, které se otevírají uvnitř záložky (viz `branches.dart`) -- každá
 /// záložka je má jako podstránky, takže tab bar zůstává a historie se drží

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/device_token.dart';
 import '../core/page_location.dart';
+import '../core/profile_prefs.dart';
 import 'providers.dart';
 
 typedef Profile = ({String id, String name, String role});
@@ -50,6 +51,8 @@ final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) asy
   // Nativní appka: klíč vydaný serverem si uložit (web má cookie).
   if (json['token'] case final String token) await saveDeviceToken(token);
   final user = _profile(json['user']);
+  // Profilový stav v zařízení (fronta, historie hledání...) jen pro tenhle profil.
+  if ((_profile(json['acting'])?.id ?? user?.id) case final String id) await claimProfilePrefs(id);
   return (
     user: user,
     acting: _profile(json['acting']),
@@ -59,6 +62,14 @@ final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) asy
     inviteCode: user == null && mode == 'login' ? code : null,
   );
 });
+
+/// Profilový stav zařízení (`core/profile_prefs.dart`) číst až po `/auth/me`
+/// -- ten ho případně smaže jako cizí. Offline (bez odpovědi) se čte, co je.
+Future<void> profilePrefsReady(Ref ref) async {
+  try {
+    await ref.read(authProvider.future).timeout(const Duration(seconds: 8));
+  } catch (_) {}
+}
 
 /// Název tohohle zařízení pro přehled admina (posílá se při přihlášení).
 String deviceName() {

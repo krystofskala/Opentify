@@ -29,8 +29,9 @@ class HeardController extends StateNotifier<Set<String>> {
   }
 }
 
-/// Při přepnutí profilu (admin) se načte znovu.
+/// Při přepnutí profilu (admin) se načte znovu -- jen při změně profilu, ne
+/// při každém obnovení `/auth/me` (zahodilo by značky a znovu je stahovalo).
 final heardProvider = StateNotifierProvider<HeardController, Set<String>>((ref) {
-  ref.watch(authProvider);
+  ref.watch(authProvider.select((a) => a.valueOrNull?.acting?.id ?? a.valueOrNull?.user?.id));
   return HeardController(ref);
 });

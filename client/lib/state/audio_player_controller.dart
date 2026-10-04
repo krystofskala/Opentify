@@ -16,12 +16,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
 import '../core/media_session.dart';
+import '../core/profile_prefs.dart';
 import '../core/radio_mode.dart';
 import '../core/ws_client.dart';
 import '../models/playback_model.dart' show RepeatMode;
 import '../routing/app_router.dart';
 import '../theme/accent_color.dart';
 import 'artwork_provider.dart';
+import 'auth_controller.dart' show profilePrefsReady;
 import '../core/now_playing_activity.dart';
 import 'provisioning_controller.dart';
 import 'collection_progress.dart';
@@ -359,6 +361,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   // (fronta, skladba, pozice, shuffle/opakování) -- pozastavený; iOS webové
   // appce nedovolí se po otevření sama rozehrát, play naváže od pozice.
 
+  final _prefsGeneration = profilePrefsGeneration;
   static const _sessionPrefKey = 'player.session.v1';
   static const _sessionQueuePrefKey = 'player.session.queue.v1';
   bool _restoredIdle = false;
@@ -425,7 +428,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   void _maybePersistSession(AudioPlayerState s, {bool force = false}) {
     final np = s.nowPlaying;
-    if (np == null || _restoredIdle) return;
+    // Po přepnutí profilu / odhlášení (do restartu appky) nepsat starou
+    // frontu zpátky -- obnovil by ji další profil.
+    if (np == null || _restoredIdle || _prefsGeneration != profilePrefsGeneration) return;
     final key = '${np.recordingId}|${s.queueIndex}|${s.queue.length}|${s.shuffleEnabled}|${s.repeatMode.name}';
     final now = DateTime.now();
     if (!force && key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
@@ -462,9 +467,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   Future<void> _restoreSession() async {
     try {
+      // Až po `/auth/me` -- cizí uloženou relaci (jiný profil) mezitím smaže.
+      await profilePrefsReady(_ref);
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_sessionPrefKey);
-      if (raw == null || state.nowPlaying != null) return;
+      if (raw == null || !mounted || state.nowPlaying != null) return;
       final j = jsonDecode(raw) as Map<String, dynamic>;
       // Fronta zvlášť (nový formát); starý měl frontu přímo uvnitř.
       final rawQueue = j['queue'] ?? jsonDecode(prefs.getString(_sessionQueuePrefKey) ?? '[]');
@@ -987,6 +994,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     bool prefetchWholeQueue = false,
     Duration? startPosition,
     bool rememberProgress = true,
+    ({String? route})? context,
+    bool? shuffle,
+    List<int>? shuffleOrder,
+    RepeatMode? repeatMode,
   }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
@@ -995,7 +1006,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // "Pokračovat" v albu/playlistu: skladba začne tam, kde uživatel skončil.
     _resumeAt = startPosition;
     _resumeFor = startPosition == null ? null : items[index].recordingId;
-    _queueContext = _currentRoute();
+    // Převzetí z jiného zařízení nese stránku odesílatele -- ta, na které
+    // je příjemce zrovna otevřený, s frontou nesouvisí.
+    _queueContext = context != null ? context.route : _currentRoute();
+    final shuffleOn = shuffle ?? state.shuffleEnabled;
+    // Převzaté pořadí jen když sedí na frontu (jinak nové).
+    final order = shuffleOn
+        ? (shuffleOrder != null && shuffleOrder.length == items.length && shuffleOrder.contains(index)
+            ? shuffleOrder
+            : _buildShuffleOrder(items.length, index))
+        : null;
     _primeAudioElement(items[index].recordingId);
     state = AudioPlayerState(
       nowPlaying: items[index],
@@ -1010,9 +1030,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       queue: items,
       queueIndex: index,
       queueSourceLabel: sourceLabel,
-      shuffleEnabled: state.shuffleEnabled,
-      shuffleOrder: state.shuffleEnabled ? _buildShuffleOrder(items.length, index) : null,
-      repeatMode: state.repeatMode,
+      shuffleEnabled: shuffleOn,
+      shuffleOrder: order,
+      repeatMode: repeatMode ?? state.repeatMode,
       speed: state.speed,
       volume: state.volume,
       recentlyPlayed: state.recentlyPlayed,
@@ -1067,6 +1087,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       'positionMs': s.position.inMilliseconds,
       'isPlaying': s.isPlaying,
       if (s.queueSourceLabel != null) 'sourceLabel': s.queueSourceLabel,
+      // Vždy (i null) -- příjemce pozná nový formát od starého bez klíče.
+      'context': _queueContext,
+      'shuffle': s.shuffleEnabled,
+      if (s.shuffleOrder != null) 'shuffleOrder': s.shuffleOrder,
+      'repeat': s.repeatMode.name,
     };
   }
 
@@ -1082,6 +1107,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       index,
       sourceLabel: snapshot['sourceLabel'] as String?,
       startPosition: Duration(milliseconds: (snapshot['positionMs'] as num?)?.toInt() ?? 0),
+      // Starší snímky tyhle klíče nemají -- pak jako dřív (místní nastavení).
+      context: snapshot.containsKey('context') ? (route: snapshot['context'] as String?) : null,
+      shuffle: snapshot['shuffle'] as bool?,
+      shuffleOrder: (snapshot['shuffleOrder'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList(),
+      repeatMode: RepeatMode.values.where((m) => m.name == snapshot['repeat']).firstOrNull,
     );
   }
 

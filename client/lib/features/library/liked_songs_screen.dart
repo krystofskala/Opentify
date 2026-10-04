@@ -22,10 +22,13 @@ const _title = 'Oblíbené skladby';
 
 /// Srdíčko kdekoliv v appce -> seznam se hned přizpůsobí: odebrané zmizí
 /// okamžitě (filtr podle živé sady), nově přidané po krátkém přenačtení.
-void _listenForLikes(WidgetRef ref) {
+void _listenForLikes(BuildContext context, WidgetRef ref) {
   ref.listen(likedSongsControllerProvider, (previous, next) {
     if (previous?.valueOrNull?.length != next.valueOrNull?.length) {
-      Future.delayed(const Duration(milliseconds: 600), () => ref.invalidate(likedSongsProvider));
+      // Widget mezitím mohl zmizet -- `ref` po dispose hází.
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (context.mounted) ref.invalidate(likedSongsProvider);
+      });
     }
   });
 }
@@ -42,7 +45,7 @@ class LikedSongsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    _listenForLikes(ref);
+    _listenForLikes(context, ref);
     final scheme = Theme.of(context).colorScheme;
     final count = ref.watch(likedSongsControllerProvider).valueOrNull?.length;
     return PinnedTile(
@@ -88,7 +91,7 @@ class _LikedSongsScreenState extends ConsumerState<LikedSongsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _listenForLikes(ref);
+    _listenForLikes(context, ref);
     final liked = ref.watch(likedSongsProvider);
     return liked.when(
       loading: () => const DetailLoadingScaffold(),

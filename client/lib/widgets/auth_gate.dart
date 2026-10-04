@@ -90,6 +90,9 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
       }
       if (json['token'] case final String token) await saveDeviceToken(token);
       ref.invalidate(authProvider);
+      // WS se připojoval ještě nepřihlášený a čeká v backoffu (až 30 s) --
+      // Connect a živé události hned.
+      ref.read(realtimeClientProvider).reconnectNow(force: true);
       // Server přihlášení přijal, ale prohlížeč si cookie nenechal (blokování
       // cookies, anonymní okno) -- dřív se jen tiše vrátil přihlašovací formulář.
       final after = await ref.read(authProvider.future);
@@ -354,6 +357,7 @@ class _ClaimFormState extends ConsumerState<_ClaimForm> {
       if (json['token'] case final String token) await saveDeviceToken(token);
       clearJoinFromUrl();
       ref.invalidate(authProvider);
+      ref.read(realtimeClientProvider).reconnectNow(force: true);
     } catch (e) {
       if (mounted) {
         setState(() => _error = e is ApiException ? (e.detail ?? 'Nepovedlo se.') : 'Server není dostupný.');

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart';
+import '../core/profile_prefs.dart';
+import 'auth_controller.dart' show profilePrefsReady;
 import 'providers.dart';
 
 /// Kde uživatel v albu/playlistu skončil -- u dlouhých playlistů (100
@@ -28,6 +30,8 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
   }
 
   final Ref _ref;
+  // Po přepnutí profilu už tenhle (starý) kontroler nezapisuje.
+  final _prefsGeneration = profilePrefsGeneration;
 
   static const _prefKey = 'player.collection_progress';
   static const _maxEntries = 60;
@@ -65,6 +69,7 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
 
   Future<void> _load() async {
     try {
+      await profilePrefsReady(_ref);
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_prefKey);
       if (raw != null && mounted) {
@@ -77,6 +82,7 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
   }
 
   Future<void> _save() async {
+    if (_prefsGeneration != profilePrefsGeneration) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKey, jsonEncode({for (final e in state.entries) e.key: _toJson(e.value)}));

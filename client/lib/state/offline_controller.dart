@@ -125,8 +125,14 @@ class OfflineController extends StateNotifier<OfflineState> {
     try {
       await _ensureOnServer(id);
       final bytes = await _ref.read(apiClientProvider).getBytes('/tracks/$id/stream', timeout: const Duration(minutes: 5));
-      await OfflineStorage.put(id, bytes, _mimeOf(bytes));
       if (!mounted || !state.pending.containsKey(id)) return; // mezitím zrušeno
+      await OfflineStorage.put(id, bytes, _mimeOf(bytes));
+      if (!mounted || !state.pending.containsKey(id)) {
+        // Zrušeno během zápisu (remove/clear soubor smazaly dřív, než
+        // vznikl) -- jinak by zůstal v zařízení bez záznamu a zabíral místo.
+        if (!mounted || !has(id)) await OfflineStorage.remove(id);
+        return;
+      }
       final track = (
         id: id,
         title: info.title,

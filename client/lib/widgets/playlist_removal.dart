@@ -41,13 +41,20 @@ Future<bool> confirmDeletePlaylist(BuildContext context, WidgetRef ref, {require
   if (confirmed != true) return false;
   try {
     await ref.read(playlistsRepositoryProvider).delete(id);
-    ref.invalidate(myPlaylistsProvider);
+    _markGone(ref, id);
     showToast(messenger, '„$title“ smazán');
     return true;
   } catch (e) {
     showToast(messenger, 'Smazat se nepodařilo: $e');
     return false;
   }
+}
+
+/// Smazaný / opuštěný playlist: detail otevřený jinde (jiný tab) to musí
+/// poznat, ne až chybou při další akci.
+void _markGone(WidgetRef ref, String id) {
+  ref.read(gonePlaylistsProvider.notifier).update((gone) => {...gone, id});
+  ref.invalidate(myPlaylistsProvider);
 }
 
 Future<bool> unpinPlaylist(BuildContext context, WidgetRef ref, {required String id, required String title}) async {
@@ -67,7 +74,7 @@ Future<bool> leavePlaylist(BuildContext context, WidgetRef ref, {required String
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
     await ref.read(apiClientProvider).deleteJson('/playlists/$id/members/me');
-    ref.invalidate(myPlaylistsProvider);
+    _markGone(ref, id);
     showToast(messenger, 'Opustil(a) jsi „$title“');
     return true;
   } catch (e) {
@@ -184,6 +191,8 @@ Future<void> editPlaylist(
   titleField.dispose();
   descriptionField.dispose();
   ref.invalidate(myPlaylistsProvider);
+  // Nový název/obal i v detailu otevřeném jinde.
+  ref.invalidate(playlistDetailProvider(id));
   onSaved?.call();
 }
 
