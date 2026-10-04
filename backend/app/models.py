@@ -240,6 +240,18 @@ class PlayEvent(SQLModel, table=True):
     origin: str = "connect"
 
 
+class HomeImpression(SQLModel, table=True):
+    """Co Domů profilu ukázalo (mix / playlist v sekci, pozice) -- jednou
+    za den a položku. S PlayEvent.playlist_id jde změřit, jestli se mixy
+    pouštějí (ukázáno -> přehráno -> dohráno), app/home/impressions.py."""
+
+    user_id: str = Field(primary_key=True)
+    day: str = Field(primary_key=True)  # YYYY-MM-DD (Praha)
+    item_id: str = Field(primary_key=True)
+    section: str | None = None
+    position: int = 0
+
+
 class RecordingDislike(SQLModel, table=True):
     """Zlomené srdce -- skladba, kterou uživatel nechce slyšet (viz
     app/library/dislikes.py)."""

@@ -22,7 +22,11 @@ home_router = APIRouter(prefix="/home", tags=["home"])
 @home_router.get("")
 async def home(current: tuple[str, str] = Depends(get_current_user)):
     user_id, _device_id = current
-    return await get_home(user_id)
+    data = await get_home(user_id)
+    from app.home import impressions
+
+    asyncio.get_running_loop().run_in_executor(None, impressions.record, user_id, data)
+    return data
 
 
 class PlayNowIn(BaseModel):
