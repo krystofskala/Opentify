@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 KEYDIR = ROOT / ".android-signing"
 KS = KEYDIR / "opentify-release.jks"
 ENV = ROOT / ".env"
-REPO = "krystofskala/Opentify"
+REPO = os.environ.get("GITHUB_REPOSITORY", "krystofskala/Opentify")
 
 gi = (ROOT / ".gitignore").read_text(encoding="utf-8")
 if ".android-signing/" not in gi:

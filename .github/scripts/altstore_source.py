@@ -5,13 +5,14 @@ nic se nestahuje ručně. Volá iOS workflow po vydání buildu.
   python altstore_source.py <verze> <url ipa> <velikost> <cesta k source.json>
 """
 
+import os
 import datetime
 import json
 import sys
 
 version, url, size, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 commit = sys.argv[5] if len(sys.argv) > 5 else ""
-repo = "krystofskala/Opentify"
+repo = os.environ.get("GITHUB_REPOSITORY", "krystofskala/Opentify")
 raw = f"https://raw.githubusercontent.com/{repo}"
 
 source = {

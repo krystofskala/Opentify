@@ -22,7 +22,7 @@ import '../../theme/shapes.dart';
 /// Ostatní tuhle sekci nevidí vůbec.
 /// Adresa pro ostatní: samostatný Tailscale stroj jen s Opentify
 /// (docker-compose `tailscale`), ne celé PC.
-const _sharedOrigin = AppConfig.sharedOrigin;
+String get _sharedOrigin => AppConfig.sharedOrigin;
 
 /// Kód zařízení (k jménu a heslu při přihlášení nového zařízení) --
 /// ukázat a nabídnout ke zkopírování. Platí krátce a jen jednou.

@@ -7,12 +7,15 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_update.dart';
+import 'config.dart';
 
 // Veřejné repo, žádné přihlášení ani údaje o uživateli -- jen statický soubor.
-const _latest = 'https://github.com/krystofskala/Opentify/releases/download/android-latest';
+// Repo z buildu (`UPDATE_REPO`, v GitHub Actions to vlastní); bez něj žádné
+// aktualizace (vlastní kopie projektu nehledá verze u někoho jiného).
+const _latest = 'https://github.com/${AppConfig.updateRepo}/releases/download/android-latest';
 const _channel = MethodChannel('app.opentify/update');
 
-final bool supported = Platform.isAndroid;
+final bool supported = Platform.isAndroid && AppConfig.updateRepo.isNotEmpty;
 
 Future<AppUpdate?> check() async {
   if (!supported) return null;

@@ -26,10 +26,18 @@ class AppConfig {
   /// samostatném `opentify.…ts.net` (sdílený jen tenhle stroj, ne celé PC).
   /// Adresa Opentify pro ostatní (samostatný Tailscale stroj jen s Opentify,
   /// sdílený tátovi/kamarádům) -- pozvánky a odkazy „Poslat v Opentify".
-  static const sharedOrigin = String.fromEnvironment(
-    'SHARED_ORIGIN',
-    defaultValue: 'https://opentify.tail343940.ts.net',
-  );
+  /// Bez `--dart-define=SHARED_ORIGIN` adresa serveru z `API_BASE_URL`.
+  static const _sharedOriginDefine = String.fromEnvironment('SHARED_ORIGIN');
+
+  static String get sharedOrigin {
+    if (_sharedOriginDefine.isNotEmpty) return _sharedOriginDefine;
+    final api = Uri.parse(apiBaseUrl);
+    return api.replace(path: '', query: null).toString().replaceAll(RegExp(r'/$'), '');
+  }
+
+  /// GitHub repozitář s vydáními appky (aktualizace v Android appce),
+  /// `--dart-define=UPDATE_REPO=uzivatel/repo`; prázdné = bez aktualizací.
+  static const updateRepo = String.fromEnvironment('UPDATE_REPO');
 
   static String get apiBaseUrl => _sameOrigin(_apiBaseDefine, 'https');
   static String get wsBaseUrl => _sameOrigin(_wsBaseDefine, 'wss');

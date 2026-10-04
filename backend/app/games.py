@@ -15,6 +15,8 @@ Vše se ukládá do cache (obrázky měsíc, stránka den).
 
 from __future__ import annotations
 
+import os
+
 import asyncio
 import logging
 import random
@@ -34,7 +36,9 @@ logger = logging.getLogger("vault.games")
 
 MONTH = 30 * 24 * 3600
 DAY = 24 * 3600
-_UA = {"User-Agent": "Opentify/1.0 (claudstopher@gmail.com)"}
+# Identifikace pro Wikipedii/Steam -- z .env (MUSICBRAINZ_USER_AGENT), ať se
+# cizí instalace nehlásí cizím kontaktem.
+_UA = {"User-Agent": os.environ.get("MUSICBRAINZ_USER_AGENT") or "Opentify/1.0"}
 
 
 @dataclass(frozen=True)

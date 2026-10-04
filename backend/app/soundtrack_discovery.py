@@ -15,6 +15,8 @@ Sestavuje se denně na pozadí (registr Domů); stránka jen čte.
 
 from __future__ import annotations
 
+import os
+
 import asyncio
 import logging
 import random
@@ -33,7 +35,9 @@ logger = logging.getLogger("vault.soundtrack_discovery")
 
 DAY = 24 * 3600
 MONTH = 30 * DAY
-_UA = {"User-Agent": "Opentify/1.0 (claudstopher@gmail.com)"}
+# Identifikace pro Wikipedii/Steam -- z .env (MUSICBRAINZ_USER_AGENT), ať se
+# cizí instalace nehlásí cizím kontaktem.
+_UA = {"User-Agent": os.environ.get("MUSICBRAINZ_USER_AGENT") or "Opentify/1.0"}
 WD_SPARQL = "https://query.wikidata.org/sparql"
 DYN_VERSION = "v3"
 

@@ -35,7 +35,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable, Protocol, Sequence
+from typing import Any, Awaitable, Callable, Protocol, Sequence
 
 import httpx
 
@@ -298,6 +298,17 @@ class MediaProvider(Protocol):
         jeho docstring výš -- volitelné zavolat, ne všechny providery to
         umí/dává smysl."""
         ...
+
+
+class NoDownloadProvider:
+    """`MEDIA_PROVIDER=none`: nic se nestahuje -- přehrává se jen vlastní
+    knihovna (MUSIC_DIR). Chybějící skladba skončí jako nedostupná."""
+
+    async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
+        raise RuntimeError("Stahování je vypnuté (MEDIA_PROVIDER=none) -- skladba není ve vlastní knihovně.")
+
+    async def fetch(self, track: TrackMetadata, candidate: ProviderCandidate, on_progress: Any = None) -> Any:
+        raise RuntimeError("Stahování je vypnuté (MEDIA_PROVIDER=none).")
 
 
 class PlaceholderProvider:
@@ -1626,6 +1637,8 @@ def build_provider() -> MediaProvider:
     """`MEDIA_PROVIDER` env: `composite` (výchozí, slskd -> youtube fallback),
     `slskd`, `youtube`, nebo `placeholder` pro dev bez závislosti na obojím."""
     kind = os.environ.get("MEDIA_PROVIDER", "composite").lower()
+    if kind == "none":
+        return NoDownloadProvider()
     if kind == "placeholder":
         return PlaceholderProvider()
     if kind == "slskd":

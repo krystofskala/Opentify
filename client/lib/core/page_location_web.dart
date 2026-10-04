@@ -1,3 +1,4 @@
+import 'config.dart';
 import 'package:web/web.dart' as web;
 
 String? joinCodeFromUrl() {
@@ -28,6 +29,6 @@ String appOrigin() {
   try {
     return web.window.location.origin;
   } catch (_) {
-    return 'https://desktop-2lissjt.tail343940.ts.net';
+    return AppConfig.sharedOrigin;
   }
 }
