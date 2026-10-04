@@ -207,6 +207,7 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
                       shadow: true,
                       rim: true,
                       liquid: true,
+                      systemGlass: true,
                       child: SizedBox(
                         height: h,
                         width: width,

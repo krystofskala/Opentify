@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -225,6 +225,38 @@ class BackgroundV2Controller extends StateNotifier<bool> {
 
 final backgroundV2Provider = StateNotifierProvider<BackgroundV2Controller, bool>((ref) => BackgroundV2Controller());
 
+/// Profil › Vzhled › "Systémové sklo" (jen iOS appka): plovoucí lišty
+/// (tab bar, kapsle, mini přehrávač) dostanou skutečné Liquid Glass z iOS 26
+/// (`NativeGlassView` v AppDelegate.swift) místo našeho. Test, výchozí vypnuto.
+class SystemGlassController extends StateNotifier<bool> {
+  SystemGlassController() : super(false) {
+    _load();
+  }
+
+  static const _prefKey = 'appearance.system_glass';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefKey);
+      if (saved != null && mounted) state = saved;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefKey, value);
+    } catch (_) {}
+  }
+}
+
+final systemGlassProvider = StateNotifierProvider<SystemGlassController, bool>((ref) => SystemGlassController());
+
+/// Systémové sklo jde jen v nativní iOS appce (ne web, ne Android).
+bool get systemGlassSupported => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
 final glassButtonsProvider = StateNotifierProvider<GlassButtonsController, bool>((ref) => GlassButtonsController());
 
 /// Profil › Vzhled › "Lom skla (test)": sklo mini přehrávače láme obsah pod
@@ -337,8 +369,12 @@ class GlassSettings extends InheritedWidget {
     required this.glassButtons,
     this.liquid = false,
     this.solid = false,
+    this.system = false,
     required super.child,
   });
+
+  /// Systémové Liquid Glass (iOS) pro prvky s `GlassContainer.systemGlass`.
+  final bool system;
 
   /// Jezdce 0..1, výchozí 0.5 (násobitel 2× hodnota).
   final double frost;
@@ -382,6 +418,7 @@ class GlassSettings extends InheritedWidget {
       glassButtons: s.glassButtons,
       liquid: s.liquid,
       solid: s.solid,
+      system: s.system,
       child: child,
     );
   }
@@ -403,6 +440,7 @@ class GlassSettings extends InheritedWidget {
       old.grain != grain ||
       old.fineGrain != fineGrain ||
       old.glassButtons != glassButtons ||
+      old.system != system ||
       old.liquid != liquid ||
       old.solid != solid;
 }

@@ -428,6 +428,16 @@ class _AppearanceSettings extends ConsumerWidget {
             ),
           ),
         ),
+        if (systemGlassSupported && !glassOff) ...[
+          const SizedBox(height: 12),
+          _SwitchRow(
+            title: 'Systémové sklo (iOS 26)',
+            subtitle: 'Tab bar a mini přehrávač ze skutečného Liquid Glass jako v Apple Music – '
+                'lom, lesk a barevný okraj kreslí iOS. Test, porovnej s naším sklem.',
+            value: ref.watch(systemGlassProvider),
+            onChanged: ref.read(systemGlassProvider.notifier).set,
+          ),
+        ],
         const SizedBox(height: 16),
         Text('Pozadí', style: theme.textTheme.titleSmall),
         Text(

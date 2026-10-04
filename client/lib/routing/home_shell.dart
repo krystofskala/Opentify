@@ -335,6 +335,7 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
                     shadow: true,
                     rim: true,
                     liquid: true,
+                    systemGlass: true,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -463,6 +464,7 @@ class _TabPill extends StatelessWidget {
           shadow: true,
           rim: true,
           liquid: true,
+          systemGlass: true,
           child: SizedBox(
             width: size,
             height: size,

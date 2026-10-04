@@ -67,6 +67,15 @@ jobs:
           sudo gem install xcodeproj --no-document
           ruby ios/tool/add_widget_extension.rb
 
+      # Systémové sklo (UIGlassEffect) potřebuje SDK iOS 26 -- nejnovější
+      # Xcode 26 na runneru, je-li; jinak se přeloží záložní rozmazání.
+      - name: Xcode 26
+        if: steps.changes.outputs.build == 'true'
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$X" ]; then sudo xcode-select -s "$X"; fi
+          xcodebuild -version
+
       - name: Build (bez podpisu)
         if: steps.changes.outputs.build == 'true'
         working-directory: client

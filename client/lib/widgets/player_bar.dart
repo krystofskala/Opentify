@@ -223,6 +223,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
               shadow: widget.shadow,
               rim: true,
               liquid: true,
+              systemGlass: true,
               child: MediaQuery.removePadding(
                 context: context,
                 removeBottom: true,

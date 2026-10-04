@@ -3,6 +3,8 @@ import 'dart:ui';
 
 import 'package:figma_squircle/figma_squircle.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
+import 'package:flutter/services.dart';
 
 import '../state/glass_settings.dart';
 import '../theme/app_theme.dart' show buildAppTheme;
@@ -40,6 +42,7 @@ class GlassContainer extends StatelessWidget {
     this.fit = StackFit.loose,
     this.rim = false,
     this.liquid = false,
+    this.systemGlass = false,
   });
 
   /// Dřív vlastní "přehrávačové" sklo (barva skladby navíc, silnější
@@ -59,6 +62,7 @@ class GlassContainer extends StatelessWidget {
     this.rim = true,
     this.liquid = false,
   })  : tint = null,
+        systemGlass = false,
         blurSigma = GlassTokens.blur,
         saturation = GlassTokens.vibrancy,
         tintOpacity = GlassTokens.playerTint,
@@ -101,6 +105,10 @@ class GlassContainer extends StatelessWidget {
   /// Sklo se skutečným lomem obsahu pod sebou (`LiquidGlass`, test) --
   /// jen uvnitř `LiquidScope` a se zapnutým "Lom skla (test)".
   final bool liquid;
+
+  /// Plovoucí lišta (tab bar, kapsle, mini přehrávač): se zapnutým
+  /// "Systémové sklo" na iPhonu skutečné Liquid Glass z iOS místo našeho.
+  final bool systemGlass;
 
   @override
   Widget build(BuildContext context) {
@@ -146,6 +154,7 @@ class GlassContainer extends StatelessWidget {
         ),
       );
     }
+    if (systemGlass && (settings?.system ?? false)) return _system(content, isDark);
     final liquidCapture = liquid && (GlassSettings.maybeOf(context)?.liquid ?? false) ? LiquidScope.maybeOf(context) : null;
     // Profil › Vzhled › "Zrno na skle": jemná textura nad výplní, pod obsahem.
     if (settings?.grain ?? false) {
@@ -246,6 +255,31 @@ class GlassContainer extends StatelessWidget {
         shadows: shadow ? glassShadow : null,
       ),
       child: ClipPath(clipper: ShapeBorderClipper(shape: shape), child: NoLiquidScope(child: child)),
+    );
+  }
+
+  /// Systémové sklo: nativní `UIGlassEffect` (platform view, viz
+  /// AppDelegate.swift `NativeGlassView`) pod obsahem kresleným Flutterem.
+  /// Lom, rozmazání, lesk i barevný okraj kreslí iOS; dotyky jdou dál do
+  /// Flutteru (platform view je jen podklad).
+  Widget _system(Widget content, bool isDark) {
+    final radius = borderRadius.topLeft.x;
+    return Stack(
+      fit: fit,
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: UiKitView(
+              key: ValueKey(('glass', isDark, radius)),
+              viewType: 'opentify/glass',
+              creationParams: {'radius': radius, 'dark': isDark},
+              creationParamsCodec: const StandardMessageCodec(),
+              hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+            ),
+          ),
+        ),
+        content,
+      ],
     );
   }
 
