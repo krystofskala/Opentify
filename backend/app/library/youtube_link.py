@@ -37,6 +37,8 @@ from app.models import MediaAsset, MediaAssetStatus, PlaylistItem, Recording, Re
 logger = logging.getLogger("uvicorn.error")
 _VIDEO = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})")
 _LIST = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
+_MIX_URL = re.compile(r"[?&]list=RD(?!CLAK)")
+_MIX_LIMIT = 50
 _BROWSE = re.compile(r"music\.youtube\.com/browse/(MPRE[A-Za-z0-9_-]+)")
 
 
@@ -89,8 +91,12 @@ def _normalized_url(text: str) -> str:
     video = _VIDEO.search(text or "")
     if video:
         return f"https://www.youtube.com/watch?v={video.group(1)}"
-    # Mix bez videa (jen list=RD...) -- yt-dlp ho umí načíst jako seznam.
+    # Mix bez videa (sdílený "playlist" list=RD<id videa>): stránka playlistu
+    # mixu je pro YouTube "unviewable" -- načíst přes video, ke kterému patří.
     if lst:
+        mix = re.fullmatch(r"RD([A-Za-z0-9_-]{11})", lst.group(1))
+        if mix:
+            return f"https://www.youtube.com/watch?v={mix.group(1)}&list={lst.group(1)}"
         return f"https://www.youtube.com/playlist?list={lst.group(1)}"
     # Album / stránka YouTube Music (music.youtube.com/browse/MPREb_...) --
     # yt-dlp si ji převede na playlist alba sám.
@@ -123,6 +129,8 @@ async def inspect_youtube_link(text: str) -> dict[str, Any]:
     is_playlist = info.get("_type") == "playlist" or bool(info.get("entries"))
     channel = _clean_channel(info.get("channel") or info.get("uploader"))
     entries = [e for e in (info.get("entries") or []) if e and e.get("id")] if is_playlist else [info]
+    if _MIX_URL.search(url):
+        entries = entries[:_MIX_LIMIT]  # automatický mix je skoro nekonečný (živě 399)
     videos = []
     for e in entries:
         e_channel = _clean_channel(e.get("channel") or e.get("uploader")) or channel

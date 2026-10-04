@@ -15,6 +15,8 @@ from app.library.youtube_link import YoutubeLinkError, _normalized_url
         # Automatický mix k videu -> to video, ne mix.
         ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
         ("https://www.youtube.com/playlist?list=RDMMabc", "https://www.youtube.com/playlist?list=RDMMabc"),
+        ("https://youtube.com/playlist?list=RDIn1Ck6OX7z8&playnext=1&si=5AKea6V8bs_ExxOX",
+         "https://www.youtube.com/watch?v=In1Ck6OX7z8&list=RDIn1Ck6OX7z8"),
         ("https://music.youtube.com/browse/MPREb_AbCdEf123", "https://music.youtube.com/browse/MPREb_AbCdEf123"),
         ("Koukni https://youtu.be/dQw4w9WgXcQ?si=a", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
     ],
