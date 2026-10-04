@@ -97,6 +97,12 @@ def record_listen(
             context=context,
         )
         session.add(listen)
+        # Dohráno / poslechnuto -> přeskakování té skladby se nuluje.
+        from app.models import SkipStreak
+
+        streak = session.get(SkipStreak, (user_id, recording_id))
+        if streak is not None:
+            session.delete(streak)
         session.commit()
         listen_id = listen.id
     _wakeup.set()

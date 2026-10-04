@@ -222,6 +222,18 @@ class RecordingDislike(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class SkipStreak(SQLModel, table=True):
+    """Kolikrát po sobě profil skladbu přeskočil (přehrání s odehranými
+    pár vteřinami a přechodem na jinou skladbu). Dohrání / poslech řádek smaže.
+    Od 2 se skladba nebere do mixů a interpret trochu ztratí -- jedno přeskočení
+    je jen nálada (viz app/home/personal_mixes.py)."""
+
+    user_id: str = Field(primary_key=True)
+    recording_id: str = Field(primary_key=True, foreign_key="recording.id")
+    streak: int = 0
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class HeardFully(SQLModel, table=True):
     """Skladba, kterou profil aspoň jednou poslechl celou (>= 90 % délky
     skutečně odehráno) -- v appce nenápadná trvalá značka u skladby."""

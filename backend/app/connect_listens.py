@@ -66,7 +66,9 @@ class ConnectListens:
             if cur.playing:
                 # Kousek od posledního stavu do konce (stav chodí po ~15 s).
                 cur.played_s += min(max(0.0, now - cur.last_wall), 16.0)
-            self._finish(key)
+            # Přechod na JINOU skladbu po pár vteřinách = přeskočení (ne
+            # opakování téže, ne zastavení / zmizení zařízení).
+            self._finish(key, switched=bool(rid) and cur.recording_id != rid)
             cur = None
         if not rid:
             return
@@ -92,7 +94,7 @@ class ConnectListens:
             cur.duration_ms = state["durationMs"]
         self._ensure_sweeper()
 
-    def _finish(self, key: tuple[str, str]) -> None:
+    def _finish(self, key: tuple[str, str], switched: bool = False) -> None:
         s = self._sessions.pop(key, None)
         if s is None:
             return
@@ -101,14 +103,19 @@ class ConnectListens:
             return
         threshold = min(duration / 2, 240) if duration else 240
         if s.played_s < threshold:
+            # Přeskočeno: do 30 s (a do čtvrtiny skladby) a hned jiná skladba.
+            if switched and s.played_s < min(30.0, (duration or 120) / 4):
+                self._run(_skip, s.user_id, s.recording_id)
             return
         played_at = datetime.fromtimestamp(s.started_wall, tz=timezone.utc)
+        self._run(_record, s.user_id, s.recording_id, played_at, int(s.played_s * 1000), s.source)
+
+    @staticmethod
+    def _run(fn, *args) -> None:
         try:
-            asyncio.get_running_loop().create_task(
-                asyncio.to_thread(_record, s.user_id, s.recording_id, played_at, int(s.played_s * 1000), s.source)
-            )
+            asyncio.get_running_loop().create_task(asyncio.to_thread(fn, *args))
         except RuntimeError:
-            _record(s.user_id, s.recording_id, played_at, int(s.played_s * 1000), s.source)
+            fn(*args)
 
     def _ensure_sweeper(self) -> None:
         if self._sweeper is not None and not self._sweeper.done():
@@ -137,6 +144,24 @@ def _record(user_id: str, recording_id: str, played_at: datetime, played_ms: int
             logger.info("connect %s: poslech zapsán serverem %s (%d s)", user_id[:8], recording_id[:8], played_ms // 1000)
     except Exception:  # noqa: BLE001 -- záloha nesmí shodit Connect
         logger.exception("záložní poslech se nepodařilo zapsat")
+
+
+def _skip(user_id: str, recording_id: str) -> None:
+    from sqlmodel import Session
+
+    from app.db import engine
+    from app.models import SkipStreak
+    from app.utils import utcnow
+
+    try:
+        with Session(engine) as session:
+            row = session.get(SkipStreak, (user_id, recording_id)) or SkipStreak(user_id=user_id, recording_id=recording_id)
+            row.streak += 1
+            row.updated_at = utcnow()
+            session.add(row)
+            session.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("přeskočení se nepodařilo zapsat")
 
 
 tracker = ConnectListens()

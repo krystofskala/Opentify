@@ -97,10 +97,16 @@ class Taste:
     # Váha skladby z playlistů: malý ručně poskládaný playlist víc než velký
     # import (2 590 skladeb ze Spotify by jinak přebilo i poslechy).
     playlist_weight: dict[str, float] = field(default_factory=dict)
+    # Přeskočené dvakrát po sobě (SkipStreak >= 2).
+    skipped: set[str] = field(default_factory=set)
 
     @property
     def known(self) -> set[str]:
-        return set(self.liked) | self.library | set(self.listen_counts) | self.playlisted
+        return (set(self.liked) | self.library | set(self.listen_counts) | self.playlisted) - self.skipped
+
+
+LIBRARY_ARTIST_CAP = 8.0
+PLAYLIST_ARTIST_CAP = 12.0
 
 
 def load_taste(user_id: str) -> Taste:
@@ -113,12 +119,35 @@ def load_taste(user_id: str) -> Taste:
                 select(PlaylistItem.recording_id).where(PlaylistItem.playlist_id == liked_pl.id).order_by(PlaylistItem.position)
             ).all()
         )
-        taste.library = set(
+        # Knihovna = co si profil SÁM přidal (LibraryEntry: "Přidat do
+        # knihovny", lajk, stažení) + u admina jeho vlastní hudební složka.
+        # Jen stažené na serveru (jiným profilem, dopředu do fronty) ne --
+        # dřív se počítaly všechny soubory a admina to tlačilo k cizímu vkusu.
+        from app.auth import ADMIN_ID
+        from app.models import LibraryEntry, SkipStreak
+
+        available = set(
             session.exec(
                 select(MediaAsset.recording_id).where(
                     MediaAsset.status == MediaAssetStatus.AVAILABLE,
                     (MediaAsset.hidden_from_library.is_(None)) | (MediaAsset.hidden_from_library.is_(False)),  # type: ignore[union-attr]
                 )
+            ).all()
+        )
+        added = set(session.exec(select(LibraryEntry.recording_id).where(LibraryEntry.user_id == user_id)).all())
+        if user_id == ADMIN_ID:
+            added |= set(
+                session.exec(
+                    select(MediaAsset.recording_id).where(
+                        MediaAsset.source_provider.in_(("local", "musicbrainz-local"))  # type: ignore[union-attr]
+                    )
+                ).all()
+            )
+        taste.library = added & available
+        # Dvakrát po sobě přeskočené -- do mixů ne (jednou = jen nálada).
+        taste.skipped = set(
+            session.exec(
+                select(SkipStreak.recording_id).where(SkipStreak.user_id == user_id, SkipStreak.streak >= 2)
             ).all()
         )
         from app.models import Playlist, PlaylistKind, PlaylistMember
@@ -143,12 +172,6 @@ def load_taste(user_id: str) -> Taste:
             taste.playlisted = set(taste.playlist_weight)
         since = now - timedelta(days=365)
         listens = session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
-        if user_id != g.HOME_USER_ID:
-            # Sdílená knihovna je stažená podle vkusu admina -- u jiného
-            # profilu se počítá jen to, co sám poslouchal nebo lajkl (jinak
-            # by prázdný profil dostal mixy podle cizího vkusu).
-            own = set(taste.liked) | {listen.recording_id for listen in listens} | taste.playlisted
-            taste.library &= own
         for listen in listens:
             played = _aware(listen.played_at)
             taste.listen_counts[listen.recording_id] += 1
@@ -172,6 +195,8 @@ def load_taste(user_id: str) -> Taste:
                     taste.release_genres[recording_id] = release.genres
 
         liked_set = set(taste.liked)
+        library_count: Counter = Counter()
+        playlist_sum: Counter = Counter()
         for recording_id, artist_id in taste.artist_of.items():
             weight = 0.0
             if recording_id in liked_set:
@@ -181,10 +206,24 @@ def load_taste(user_id: str) -> Taste:
             if recording_id in taste.last_played:
                 days = (now - taste.last_played[recording_id]).days
                 weight += 2.0 * math.exp(-days / 30)
-            weight += 1.5 * taste.playlist_weight.get(recording_id, 0.0)
+            playlist_sum[artist_id] += 1.5 * taste.playlist_weight.get(recording_id, 0.0)
             if recording_id in taste.library:
-                weight += 0.2
+                library_count[artist_id] += 1
             taste.artist_weight[artist_id] += weight
+        # Knihovna: výslovně přidané (a vlastní složka) -- za interpreta nejvýš
+        # strop, ať celá diskografie ve složce (Dylan, Beatles) nepřebije
+        # poslouchání.
+        for artist_id, n in library_count.items():
+            taste.artist_weight[artist_id] += min(float(n), LIBRARY_ARTIST_CAP)
+        # Playlisty taky se stropem -- uložený "This Is Bob Dylan" (50 skladeb)
+        # je jeden signál "mám ho rád", ne padesát poslechů.
+        for artist_id, w in playlist_sum.items():
+            taste.artist_weight[artist_id] += min(w, PLAYLIST_ARTIST_CAP)
+        # Dvakrát po sobě přeskočené: interpret trochu ztratí.
+        for recording_id in taste.skipped:
+            recording = session.get(Recording, recording_id)
+            if recording is not None and recording.artist_id in taste.artist_weight:
+                taste.artist_weight[recording.artist_id] = max(0.0, taste.artist_weight[recording.artist_id] - 1.0)
 
         for artist_id in taste.artist_weight:
             artist = session.get(Artist, artist_id)
