@@ -633,6 +633,10 @@ def layout_key(user_id: str) -> str:
 # Výchozí stav: základní sada zapnutá, ostatní (a všechny nové sekce) si
 # profil zapne sám v Profil › Domů -- ať si každý dá přesně, co mu přináší.
 DEFAULT_OFF = {
+    # Žebříčky, novinky a česká hudba nováčka postrkují k cizímu vkusu --
+    # zapne si je sám (uživatel 4. 10. 2026; stávající profily mají
+    # rozložení uložené, nezmění se).
+    "charts", "new_releases", "czech",
     "years", "trending_tracks", "top_albums", "genres", "editorial", "popular_playlists",
     "now_mix", "year_ago", "forgotten", "unfinished", "anniversaries", "release_radar", "deep_cuts",
     "artist_discovery", "album_picks", "shazam", "soundcloud", "family",

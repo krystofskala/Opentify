@@ -70,7 +70,7 @@ class HomeScreen extends ConsumerWidget {
               if (sections.isEmpty)
                 const EmptyState(
                   icon: Symbols.home_rounded,
-                  message: 'Domů se zatím připravuje – žebříčky a mixy se generují na pozadí, zkus to za pár minut.',
+                  message: 'Domů se zatím připravuje – mixy se skládají na pozadí, zkus to za pár minut.',
                 ),
               // Pozvánka do společného mixu (Blend), čeká na mě.
               const BlendInviteBanner(),
