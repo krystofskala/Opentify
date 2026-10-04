@@ -40,10 +40,10 @@ class GlassTabBar extends StatefulWidget {
   final ValueChanged<int> onSelected;
 
   @override
-  State<GlassTabBar> createState() => _GlassTabBarState();
+  State<GlassTabBar> createState() => GlassTabBarState();
 }
 
-class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin {
+class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin {
   // Poloha kapky v jednotkách tabů (0 = první), pružinou.
   late final AnimationController _pos =
       AnimationController.unbounded(vsync: this, value: widget.selectedIndex.toDouble());
@@ -137,6 +137,32 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
     _dragVelocity = 0;
   }
 
+  // --- Tažení zvenku (smrštěná kapsle v `HomeShell`): podržení/tah kapsle
+  // lištu rozbalí a prst rovnou táhne kapku výběru, jako v Apple Music. ---
+  final GlobalKey _area = GlobalKey();
+
+  Offset _toLocal(Offset global) {
+    final box = _area.currentContext?.findRenderObject() as RenderBox?;
+    return box == null || !box.hasSize ? Offset.zero : box.globalToLocal(global);
+  }
+
+  void beginExternalDrag(Offset global) {
+    _lastDragAt = DateTime.now().microsecondsSinceEpoch;
+    _onDragStart(DragStartDetails(globalPosition: global, localPosition: _toLocal(global)));
+  }
+
+  void updateExternalDrag(Offset global) {
+    if (!_dragging) return;
+    _onDragUpdate(DragUpdateDetails(globalPosition: global, localPosition: _toLocal(global)));
+  }
+
+  void endExternalDrag(double velocityX) {
+    if (!_dragging) return;
+    _onDragEnd(DragEndDetails(velocity: Velocity(pixelsPerSecond: Offset(velocityX, 0)), primaryVelocity: velocityX));
+  }
+
+  void cancelExternalDrag() => _onDragCancel();
+
   // Zrušené tažení (gesto vyhrál někdo jiný, systémové přerušení) nesmí
   // přepnout tab -- kapka se jen vrátí na aktuální.
   void _onDragCancel() {
@@ -160,6 +186,7 @@ class _GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: GlassTokens.floatingMargin),
         child: SizedBox(
+          key: _area,
           height: h,
           child: LayoutBuilder(
             builder: (context, constraints) {

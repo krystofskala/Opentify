@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -24,9 +25,11 @@ import '../widgets/app_update_sheet.dart';
 /// prosvítá rozmazaný. Scaffold posílá jejich výšku jako
 /// `MediaQuery.padding.bottom`, kterou si seznamy přičítají (`navBottomInset`).
 ///
-/// Jako iOS 26: posouvání obsahu dolů tab bar smrští do kapsle s ikonou
-/// záložky vlevo od mini přehrávače (víc místa na obsah); posun nahoru,
-/// začátek stránky, nová stránka nebo klepnutí na kapsli ho zase rozbalí.
+/// Jako Apple Music (iOS 26): posouvání obsahu dolů tab bar smrští do kapsle
+/// s ikonou záložky vlevo od mini přehrávače. Zpátky se rozbalí až na
+/// úplném začátku stránky s malým přetažením nahoru (ne hned při posunu
+/// nahoru), na nové stránce, klepnutím na kapsli -- nebo podržením/tahem
+/// kapsle, který lištu rozbalí a prst rovnou táhne kapku výběru.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.navigationShell});
 
@@ -55,10 +58,15 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
   double _travel = 0; // kolik px se posunulo jedním směrem
   GoRouterDelegate? _delegate;
 
-  // Kolik posunu stačí: dolů schválně víc (ne při každém dotyku), nahoru
-  // méně (návrat k navigaci má být po ruce).
+  // Kolik posunu dolů stačí na smrštění (ne při každém dotyku).
   static const _collapseAfter = 56.0;
-  static const _expandAfter = 24.0;
+  // Přetažení za začátek stránky, které lištu rozbalí (iOS pružné přetažení
+  // i Android/web overscroll).
+  static const _expandOverscroll = 10.0;
+  double _overscroll = 0;
+
+  final GlobalKey<GlassTabBarState> _tabBar = GlobalKey();
+  bool _pillDragging = false;
 
   @override
   void initState() {
@@ -106,14 +114,26 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
   }
 
   bool _onScroll(ScrollNotification n) {
-    if (n is! ScrollUpdateNotification || n.metrics.axis != Axis.vertical) return false;
+    if (n.metrics.axis != Axis.vertical) return false;
     // Široké okno (desktop): místa dost, lišta zůstává.
     if (MediaQuery.sizeOf(context).width >= 600) return false;
     final m = n.metrics;
-    if (m.pixels <= m.minScrollExtent + 24) {
-      _setCollapsed(false);
+    // Rozbalení: až na úplném začátku a kousek dál (Apple Music) -- posun
+    // nahoru uprostřed stránky lištu nechá smrštěnou.
+    if (n is OverscrollNotification) {
+      if (_collapsed && n.overscroll < 0 && m.pixels <= m.minScrollExtent) {
+        _overscroll -= n.overscroll;
+        if (_overscroll >= _expandOverscroll) _setCollapsed(false);
+      }
       return false;
     }
+    if (n is ScrollEndNotification) _overscroll = 0;
+    if (n is! ScrollUpdateNotification) return false;
+    if (m.pixels < m.minScrollExtent - _expandOverscroll) {
+      if (_collapsed) _setCollapsed(false);
+      return false;
+    }
+    if (m.pixels <= m.minScrollExtent) return false;
     // Krátká stránka: není co odkrývat.
     if (m.maxScrollExtent - m.minScrollExtent < 240) return false;
     // Dojel na konec (pružný přetah) -- nic nepřepínat.
@@ -122,12 +142,31 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
     if (delta == 0) return false;
     if (delta.sign != _travel.sign) _travel = 0;
     _travel += delta;
-    if (!_collapsed && _travel > _collapseAfter) {
-      _setCollapsed(true);
-    } else if (_collapsed && _travel < -_expandAfter) {
-      _setCollapsed(false);
-    }
+    if (!_collapsed && _travel > _collapseAfter) _setCollapsed(true);
     return false;
+  }
+
+  // Kapsle: podržení / tah -> rozbalit a táhnout kapku výběru v liště.
+  void _pillDragStart(Offset global) {
+    if (_pillDragging) return;
+    HapticFeedback.selectionClick();
+    setState(() => _pillDragging = true);
+    _setCollapsed(false);
+    _tabBar.currentState?.beginExternalDrag(global);
+  }
+
+  void _pillDragUpdate(Offset global) => _tabBar.currentState?.updateExternalDrag(global);
+
+  void _pillDragEnd(double velocityX) {
+    if (!_pillDragging) return;
+    _tabBar.currentState?.endExternalDrag(velocityX);
+    setState(() => _pillDragging = false);
+  }
+
+  void _pillDragCancel() {
+    if (!_pillDragging) return;
+    _tabBar.currentState?.cancelExternalDrag();
+    setState(() => _pillDragging = false);
   }
 
   void _select(int index) {
@@ -203,7 +242,9 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
                 ),
               ),
             ),
-            if (t > 0)
+            // Při tahu z kapsle zůstává ve stromu (neviditelná), jinak by
+            // gesto skončilo s jejím zmizením.
+            if (t > 0 || _pillDragging)
               Positioned(
                 left: GlassTokens.floatingMargin,
                 top: 0,
@@ -217,6 +258,10 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
                       child: _TabPill(
                         item: HomeShell.tabs[shell.currentIndex],
                         onTap: t > 0.5 ? () => _setCollapsed(false) : null,
+                        onDragStart: _pillDragStart,
+                        onDragUpdate: _pillDragUpdate,
+                        onDragEnd: _pillDragEnd,
+                        onDragCancel: _pillDragCancel,
                       ),
                     ),
                   ),
@@ -236,6 +281,7 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
               child: Opacity(
                 opacity: (1 - t * 1.4).clamp(0.0, 1.0),
                 child: GlassTabBar(
+                  key: _tabBar,
                   items: HomeShell.tabs,
                   selectedIndex: shell.currentIndex,
                   onSelected: _select,
@@ -251,28 +297,65 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
   }
 }
 
-/// Smrštěný tab bar: skleněná kapsle s ikonou aktuální záložky.
+/// Smrštěný tab bar: skleněná kapsle s ikonou aktuální záložky. Klepnutí
+/// lištu rozbalí; podržení nebo vodorovný tah ji rozbalí a předá prst kapce
+/// výběru v liště (`GlassTabBarState.beginExternalDrag`).
 class _TabPill extends StatelessWidget {
-  const _TabPill({required this.item, required this.onTap});
+  const _TabPill({
+    required this.item,
+    required this.onTap,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.onDragCancel,
+  });
 
   final GlassTabItem item;
   final VoidCallback? onTap;
+  final ValueChanged<Offset> onDragStart;
+  final ValueChanged<Offset> onDragUpdate;
+  final ValueChanged<double> onDragEnd;
+  final VoidCallback onDragCancel;
 
   @override
   Widget build(BuildContext context) {
     const size = GlassTokens.tabBarHeight;
+    final tap = onTap;
     return Semantics(
       button: true,
       label: 'Zobrazit navigaci (${item.label})',
       excludeSemantics: true,
-      child: GestureDetector(
+      child: RawGestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onTap == null
-            ? null
-            : () {
-                HapticFeedback.selectionClick();
-                onTap!();
-              },
+        gestures: {
+          TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+            TapGestureRecognizer.new,
+            (r) => r.onTap = tap == null
+                ? null
+                : () {
+                    HapticFeedback.selectionClick();
+                    tap();
+                  },
+          ),
+          // Podržení (kratší než systémových 500 ms) a pak tah.
+          LongPressGestureRecognizer: GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+            () => LongPressGestureRecognizer(duration: const Duration(milliseconds: 220)),
+            (r) => r
+              ..onLongPressStart = ((d) => onDragStart(d.globalPosition))
+              ..onLongPressMoveUpdate = ((d) => onDragUpdate(d.globalPosition))
+              ..onLongPressEnd = ((d) => onDragEnd(d.velocity.pixelsPerSecond.dx))
+              ..onLongPressCancel = onDragCancel,
+          ),
+          // Rovnou tah doprava po liště.
+          HorizontalDragGestureRecognizer: GestureRecognizerFactoryWithHandlers<HorizontalDragGestureRecognizer>(
+            HorizontalDragGestureRecognizer.new,
+            (r) => r
+              ..onStart = ((d) => onDragStart(d.globalPosition))
+              ..onUpdate = ((d) => onDragUpdate(d.globalPosition))
+              ..onEnd = ((d) => onDragEnd(d.primaryVelocity ?? 0))
+              ..onCancel = onDragCancel,
+          ),
+        },
         child: GlassContainer(
           borderRadius: const BorderRadius.all(Radius.circular(size / 2)),
           shadow: true,
