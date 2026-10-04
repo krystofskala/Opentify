@@ -377,7 +377,13 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
     pinned: list = []
     room = qp.QUICK_SIZE
     taken = {c.id for c in pinned}
-    fallback = (other_mixes + daily)[:3] + cards_by_section["charts"][:2] + cards_by_section["editorial"][:1]
+    # Záloha jen ze sekcí, které profil nemá skryté (tátovi žádné žebříčky).
+    layout = get_layout(session, user_id)
+    fallback = (other_mixes + daily)[:3]
+    if is_visible(layout, "charts"):
+        fallback += cards_by_section["charts"][:2]
+    if is_visible(layout, "editorial"):
+        fallback += cards_by_section["editorial"][:1]
     # Kandidáti chytrého výběru: tvoje mixy, žánrové mixy, společné mixy,
     # tvoje playlisty a Oblíbené.
     candidates: list[Playlist] = []

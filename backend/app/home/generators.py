@@ -495,7 +495,9 @@ async def build_personal_mixes() -> int:
                 title=title,
                 description=description,
                 kind=PlaylistKind.GENERATED_RECOMMENDATION,
-                section="mixes",
+                # Trendy jsou žebříček celého ListenBrainz, ne "Vytvořeno pro
+                # tebe" -- se Žebříčky se i skrývají (tátovi 17x BTS mezi mixy).
+                section="charts" if source == "home:mix:trending" else "mixes",
                 recording_ids=ids,
                 cover_urls=_covers_for(ids),
                 ttl=DAILY_TTL,

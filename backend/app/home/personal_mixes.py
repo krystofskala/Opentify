@@ -755,15 +755,27 @@ async def build_popular_playlists() -> int:
     with Session(engine) as session:
         snap = session.get(HomeSnapshot, styles_key(user_id))
         tags = list((snap.payload or {}).get("tags") or [])[:10] if snap else []
+    import re
+    import unicodedata
+
+    def words(text: str) -> set[str]:
+        text = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
+        return set(re.findall(r"[a-z0-9]+", text))
+
     items: list[dict] = []
     seen: set[str] = set()
     for tag in tags:
         try:
-            found = await browse.search_playlists(tag, 4, popular=True)
+            found = await browse.search_playlists(tag, 8, popular=True)
         except Exception:  # noqa: BLE001 - jeden styl nesmí shodit celou sekci
             continue
+        tag_words = words(tag)
         for p in found:
             if p["deezerId"] in seen:
+                continue
+            # Deezer hledá přibližně ("banjo" -> "Banho Relaxante") -- název
+            # musí obsahovat slovo stylu, jinak radši další výsledek.
+            if not tag_words & words(p.get("title") or ""):
                 continue
             seen.add(p["deezerId"])
             items.append({**p, "style": title_of(tag)})
