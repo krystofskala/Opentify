@@ -23,6 +23,8 @@ import json
 import logging
 import re
 import unicodedata
+
+import httpx
 from collections import Counter
 from typing import Any
 from urllib.parse import quote_plus
@@ -399,6 +401,13 @@ class CatalogService:
             # Deezer chce shodu VŠECH slov: "Peter Rowan Old Home Place" ani
             # "Tame Impala Currents deluxe" nenašly nic (simulace uživatele).
             # Zkusit interpret + skladba a pak dotaz bez posledních slov.
+            # Napřed alba z MusicBrainz přesně na celý dotaz (Deezer je nemá:
+            # "100% Handmade Music") -- jinak by uvolněný dotaz našel jen
+            # něco podobného.
+            if "release" in types_to_query:
+                exact = await self._with_musicbrainz_albums(query, [])
+                if exact:
+                    return {"query": query, "total": len(exact), "results": exact[: limit or len(exact)]}
             for alt in _relaxed_queries(query):
                 found = await self.search(alt, entity_type, limit, offset, _relaxed=True)
                 if found.get("results"):
@@ -463,10 +472,52 @@ class CatalogService:
         self._session.commit()
         for t, type_ids in to_remember.items():
             await self._search_ids_set(t, query, limit, offset, type_ids)
+        if "release" in types_to_query and offset == 0 and not _relaxed:
+            results = await self._with_musicbrainz_albums(query, results)
         results = await self._merge_verified_duplicates(results)
         results = _official_first(results, query)
         results = own + results
         return {"query": query, "total": len(results), "results": results[: limit or len(results)]}
+
+    async def _with_musicbrainz_albums(self, query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Alba, která Deezer nemá (malá vydavatelství, kompilace -- živě:
+        Acoustic Disc "100% Handmade Music" Davida Grismana): když méně než 3
+        alba z Deezeru obsahují všechna hledaná slova, doplnit shodná alba
+        z MusicBrainz. Krátký časový limit -- MB má frontu 1 dotaz/s a hledání
+        se nesmí zdržet; výsledky MB dotazu jsou v mezipaměti."""
+        words = [w for w in (norm(part) for part in query.split()) if w]
+        if len(norm(query)) < 4 or not words:
+            return results
+
+        def fits(title: str) -> bool:
+            have = norm(title)  # bez mezer -- "Disc:100%" i "Disc: 100%"
+            return all(w in have for w in words)
+
+        releases = [r for r in results if r.get("entityType") == "release"]
+        # Deezer má dost shodných alb -> MB netřeba (běžná hledání).
+        if sum(fits(r.get("title") or "") for r in releases) >= 3:
+            return results
+        try:
+            data = await asyncio.wait_for(self._mb.search("release-group", query, 10, 0), timeout=4.0)
+        except (MusicBrainzError, asyncio.TimeoutError, httpx.HTTPError):
+            return results
+        seen = {r.get("id") for r in releases}
+        extra: list[dict[str, Any]] = []
+        for rg in data.get("release-groups") or []:
+            if (rg.get("score") or 0) < 80 or not fits(rg.get("title") or ""):
+                continue
+            release = self._ingest_release_group_json(rg)
+            if release is None or release.id in seen:
+                continue
+            seen.add(release.id)
+            extra.append({"entityType": "release", **self._to_release_out(release).model_dump(by_alias=True)})
+        if not extra:
+            return results
+        self._session.commit()
+        # Shodná alba z MB před ostatní (neshodná) alba z Deezeru.
+        first_release = next((i for i, r in enumerate(results) if r.get("entityType") == "release"), None)
+        at = first_release if first_release is not None else len(results)
+        return results[:at] + extra + results[at:]
 
     @staticmethod
     def _search_ids_key(t: str, query: str, limit: int, offset: int) -> str:
