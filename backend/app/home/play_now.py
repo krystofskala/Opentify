@@ -148,7 +148,10 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
             unique.append(r)
     ordered = unique
     known_target = max(1, round(size * (1 - NEW_SHARE)))
+    from app.home import energy_flow
+
     familiar = _spread(_cap_per_artist(ordered, act.artist_of, 1)[:known_target], act.artist_of)
+    familiar = energy_flow.order(familiar, act.artist_of)  # plynulé navazování (P3)
     # Semínka pro nové: semínka nekonečného hraní, jinak první známé.
     new_seeds = (seeds[-2:] if seeds else []) + familiar[:2]
     return familiar, new_seeds, reason

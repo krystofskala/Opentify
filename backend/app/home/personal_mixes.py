@@ -585,6 +585,10 @@ async def build_daily_mixes() -> int:
         familiar_target = round(DAILY_MIX_SIZE * FAMILIAR_SHARE)
         familiar = _cap_per_artist(preferred + fallback, taste.artist_of, 5)[:familiar_target]
         familiar = _spread(familiar, taste.artist_of)
+        # Plynulé navazování energie (P3) -- konec skladby k začátku další.
+        from app.home import energy_flow
+
+        familiar = await asyncio.to_thread(energy_flow.order, familiar, taste.artist_of)
         # Poměr ~70/30 drží i u menších skupin -- málo známých skladeb se
         # nezaplácne novými (dřív tak vznikaly mixy s 85 % neznámé hudby).
         new_target = min(DAILY_MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))

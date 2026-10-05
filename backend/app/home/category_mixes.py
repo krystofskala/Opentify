@@ -225,7 +225,10 @@ def _familiar(taste: pm.Taste, artists: dict[str, float], rng: random.Random) ->
     used = pm.used_today()
     ordered = pm.prefer_unused(preferred, used) + pm.prefer_unused(fallback, used)
     target = round(MIX_SIZE * FAMILIAR_SHARE)
-    return pm._spread(pm._cap_per_artist(ordered, taste.artist_of, 4)[:target], taste.artist_of)
+    from app.home import energy_flow
+
+    spread = pm._spread(pm._cap_per_artist(ordered, taste.artist_of, 4)[:target], taste.artist_of)
+    return energy_flow.order(spread, taste.artist_of)  # plynulé navazování (P3)
 
 
 async def _genre_mix(c: Category, taste: pm.Taste, shares: dict[str, dict[str, float]], rng: random.Random) -> tuple[list[str], list[str], list[str]]:
