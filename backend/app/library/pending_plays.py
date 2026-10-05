@@ -83,14 +83,23 @@ async def lookup_itunes(track: str, album: str | None) -> str | None:
         items = resp.json().get("results", []) if resp.status_code == 200 else []
     except (httpx.HTTPError, ValueError):
         return None
-    same = [i for i in items if norm(i.get("trackName")) == norm(track)]
+    same = [i for i in items if base(i.get("trackName")) == base(track)]
     if album:
-        # Album přesně, nebo vydání, jehož název je začátkem toho z exportu
-        # ("Jazz" ~ "Jazz (Deluxe Edition)").
+        # Album přesně, nebo jedno je začátkem druhého ("Jazz" ~ "Jazz
+        # (Deluxe Edition)"); iTunes i export přidávají k názvům přívěsky.
         same = [i for i in same if norm(i.get("collectionName")) == norm(album)] or [
-            i for i in same if norm(album).startswith(norm(i.get("collectionName")) + " ")
+            i for i in same if base(i.get("collectionName")) == base(album)
         ]
+    elif same:
+        same = [i for i in same if norm(i.get("trackName")) == norm(track)]  # bez alba jen přesná shoda
     return (same[0].get("artistName") or None) if same else None
+
+
+def base(text: str | None) -> str:
+    """Název bez přívěsků v závorkách a za pomlčkou ("Help the Poor (Live At
+    The Regal Theater/1964)", "Raw Power [2023 Remaster]")."""
+    cut = re.sub(r"\s*[\(\[].*?[\)\]]", "", text or "")
+    return norm(re.split(r"\s+-\s+", cut)[0])
 
 
 def _convert(session: Session, rows: list[PendingImportPlay], artist_name: str) -> int:

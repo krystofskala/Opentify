@@ -106,6 +106,34 @@ def test_unresolved_plays_wait_and_resolve_later(monkeypatch):
     assert asyncio.run(pp.resolve_pending(pause=0)) == 0  # ještě není na řadě
 
 
+def test_itunes_match_ignores_suffixes(monkeypatch):
+    import asyncio
+
+    from app.library import pending_plays as pp
+
+    items = [
+        {"artistName": "Johnny Defrancesco", "trackName": "Help the Poor (feat. Duke Jethro) [Live]",
+         "collectionName": "Tribute to B. B. King's \"Live at the Regal\""},
+        {"artistName": "B.B. King", "trackName": "Help the Poor (Live At The Regal Theater/1964)",
+         "collectionName": "Live At the Regal"},
+    ]
+
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"results": items}
+
+    class Client:
+        async def get(self, *a, **k):
+            return Resp()
+
+    import app.apple_http as ah_http
+    monkeypatch.setattr(ah_http, "apple_http", lambda: Client())
+    assert asyncio.run(pp.lookup_itunes("Help the Poor", "Live At the Regal")) == "B.B. King"
+    assert asyncio.run(pp.lookup_itunes("Help the Poor", "Nějaké jiné album")) is None
+
+
 def test_not_apple():
     assert not ah.read_export(b"not a zip").is_apple
     buf = io.BytesIO()
