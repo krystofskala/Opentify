@@ -160,7 +160,8 @@ async def run_generators(*, force: bool = False) -> dict[str, Any]:
                 try:
                     count = await build()
                 except Exception as exc:  # noqa: BLE001 - izolace generátorů
-                    logger.warning("home: generátor %s selhal: %s", label, exc)
+                    # Typ chyby vždy -- timeout má prázdný text a log byl jen "selhal: ".
+                    logger.warning("home: generátor %s selhal: %s: %s", label, type(exc).__name__, exc)
                     report[label] = f"error: {exc}"
                     continue
                 g._save_snapshot(f"gen:{name}", {"count": count})
