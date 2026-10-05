@@ -108,6 +108,33 @@ async def why_this(recording_id: str, current: tuple[str, str] = Depends(get_cur
     return {"recordingId": recording_id, "reason": await asyncio.to_thread(reason, current[0], recording_id)}
 
 
+@home_router.get("/discoveries")
+async def discoveries(current: tuple[str, str] = Depends(get_current_user)):
+    """Profil › Objevy: kolik nových skladeb tě chytlo a odkud (app/home/discoveries.py)."""
+    from app.catalog.cache import cached_json
+    from app.home.discoveries import report
+    from app.home.service import _recording_out
+
+    user_id = current[0]
+    data = await cached_json(f"discoveries:v1:{user_id}", 30 * 60, lambda: asyncio.to_thread(report, user_id))
+
+    def tracks() -> list[dict]:
+        with Session(engine) as session:
+            out = []
+            for item in data["recentCaught"]:
+                rec = session.get(Recording, item["recordingId"])
+                if rec is not None:
+                    out.append(
+                        {
+                            **_recording_out(session, rec).model_dump(mode="json", by_alias=True),
+                            "discoverySource": item["source"],
+                        }
+                    )
+            return out
+
+    return {**{k: v for k, v in data.items() if k != "recentCaught"}, "recentCaught": await asyncio.to_thread(tracks)}
+
+
 @home_router.get("/recent")
 def recent(
     limit: int = 8,

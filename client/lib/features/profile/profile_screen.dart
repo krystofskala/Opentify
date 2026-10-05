@@ -188,14 +188,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _ActionRow(
+                          icon: Symbols.explore_rounded,
+                          title: 'Objevy',
+                          description: 'Kolik nových skladeb tě chytlo a odkud přišly – z mixů, alb, hledání, rádia…',
+                          buttonLabel: 'Otevřít',
+                          onPressed: () => context.push('/discoveries'),
+                        ),
+                        _ActionRow(
                           icon: Symbols.cloud_upload_rounded,
-                          title: 'Import ze Spotify a YouTube Music',
+                          title: 'Import ze Spotify, Apple Music a YouTube Music',
                           description: 'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
                               'YourLibrary.json z oficiálního exportu -- Liked Songs pro denní mix, '
                               'ostatní playlisty pod svým jménem. ZIP s historií poslechů (Extended '
                               'streaming history) nahraje poslechy pro Wrapped a mixy.\n'
                               'YouTube Music: Google Takeout › YouTube a YouTube Music › historie, '
-                              'formát JSON (v Takeoutu přepnout z HTML) – poslechy se přidají k těm ze Spotify.',
+                              'formát JSON (v Takeoutu přepnout z HTML) – poslechy se přidají k těm ze Spotify.\n'
+                              'Apple Music: privacy.apple.com › kopie dat › Média a nákupy Apple – nahraj ZIP '
+                              '„Informace o mediálních službách Apple“ (část 1). Poslechy i knihovna.',
                           buttonLabel: 'Vybrat soubor…',
                           onPressed: () => _importFromSpotify(context),
                         ),
@@ -278,14 +287,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (!context.mounted) return;
       if (imported.historyListens != null) {
         ref.invalidate(importedHistoryProvider);
-        final yt = imported.platform == 'ytmusic';
+        final name = switch (imported.platform) {
+          'ytmusic' => 'YouTube Music',
+          'applemusic' => 'Apple Music',
+          _ => 'Spotify',
+        };
         showToast(
           messenger,
           [
             if (imported.historyListens! > 0)
-              '${yt ? 'YouTube Music' : 'Spotify'}: ${imported.historyListens} poslechů nahráno – Wrapped a mixy se přepočítají',
+              '$name: ${imported.historyListens} poslechů nahráno – Wrapped a mixy se přepočítají',
             if ((imported.libraryTracks ?? 0) > 0)
-              'knihovna YouTube Music (${imported.libraryTracks} skladeb) je v playlistu „YouTube Music · Knihovna“',
+              'knihovna $name (${imported.libraryTracks} skladeb) je v playlistu „$name · Knihovna“',
           ].join('; '),
         );
         return;

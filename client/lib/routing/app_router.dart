@@ -22,6 +22,7 @@ import '../features/release/release_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
+import '../features/profile/discoveries_screen.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
 import '../features/games/games_screen.dart';
@@ -76,6 +77,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: '/tuner',
           builder: (context, state) => const TunerScreen(),
+        ),
+        GoRoute(
+          path: '/discoveries',
+          builder: (context, state) => const DiscoveriesScreen(),
         ),
         GoRoute(
           path: '/now-playing',
