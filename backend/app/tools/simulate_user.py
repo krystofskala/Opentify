@@ -1,0 +1,177 @@
+"""Simulace uživatele přes API: projde běžné cesty v appce a zapíše chyby,
+prázdné výsledky a pomalé odpovědi. Jen na TESTOVACÍM profilu (žádné
+poslechy) -- skutečné profily odmítne. Nic nepřehrává (žádné stahování),
+nic nemaže kromě vlastního zkušebního playlistu.
+
+    python -m app.tools.simulate_user <user_id> [persona]
+
+persona: newcomer (výchozí) | dad | power
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from typing import Any
+
+import httpx
+from sqlmodel import Session, func, select
+
+from app.db import engine
+from app.models import Listen
+
+BASE = "http://localhost:8000/api/v1"
+SLOW_MS = 3000
+
+QUERIES = {
+    "newcomer": ["twenty one pilots", "Beatles Abbey Road", "lo-fi", "Billie Eilish", "xqzvw nesmysl"],
+    "dad": ["Tony Rice", "Kontrast", "bluegrass", "Jiří Stivín", "Žlutý pes", "Peter Rowan Old Home Place", "Druhá tráva"],
+    "power": ["Nirvana 1993 live", "Kingdom Come Deliverance soundtrack", "Tame Impala Currents deluxe",
+              "feat. Willie Nelson", "Sweet Melinda", "Bob Dylan Blood on the Tracks", "Mňága a Žďorp"],
+}
+
+
+class Sim:
+    def __init__(self, token: str) -> None:
+        self.client = httpx.Client(base_url=BASE, headers={"Authorization": f"Bearer {token}"}, timeout=60.0)
+        self.steps: list[dict[str, Any]] = []
+
+    def call(self, method: str, path: str, note: str = "", **kw) -> Any:
+        t = time.monotonic()
+        try:
+            r = self.client.request(method, path, **kw)
+            ms = int((time.monotonic() - t) * 1000)
+            body = r.json() if "json" in r.headers.get("content-type", "") else None
+            step = {"step": note or path, "method": method, "path": path, "status": r.status_code, "ms": ms}
+            if r.status_code >= 400:
+                step["problem"] = f"HTTP {r.status_code}: {str(body)[:200]}"
+            elif ms > SLOW_MS:
+                step["problem"] = f"pomalé ({ms} ms)"
+            self.steps.append(step)
+            return body
+        except Exception as exc:  # noqa: BLE001
+            self.steps.append({"step": note or path, "method": method, "path": path, "problem": f"výjimka {type(exc).__name__}: {exc}"})
+            return None
+
+    def flag(self, note: str, problem: str) -> None:
+        self.steps.append({"step": note, "problem": problem})
+
+
+def _issue_token(user_id: str) -> str:
+    from app.routes.auth import _issue_token as issue
+
+    with Session(engine) as s:
+        return issue(s, user_id, "simulace uživatele")
+
+
+def _first(items: Any, key: str = "id") -> str | None:
+    if isinstance(items, list) and items and isinstance(items[0], dict):
+        return items[0].get(key)
+    return None
+
+
+def run(user_id: str, persona: str) -> dict[str, Any]:
+    with Session(engine) as s:
+        listens = s.exec(select(func.count()).select_from(Listen).where(Listen.user_id == user_id)).one()
+    if listens:
+        raise SystemExit("Profil má poslechy -- simulace jen na testovacím profilu.")
+    sim = Sim(_issue_token(user_id))
+
+    home = sim.call("GET", "/home", "Domů")
+    sections = [sec.get("id") for sec in (home or {}).get("sections") or []]
+    for bad in ("charts", "new_releases", "czech"):
+        if persona == "newcomer" and bad in sections:
+            sim.flag("Domů nováčka", f"sekce {bad} je vidět, má být výchozí vypnutá")
+    real = [sec for sec in (home or {}).get("sections") or [] if sec.get("id") != "continue" and sec.get("items")]
+    if not real:
+        sim.flag("Domů", "prázdný Domů (nováček) – appka má ukázat prázdný stav s radou")
+    sim.call("GET", "/home/layout", "Upravit Domů")
+    sim.call("GET", "/home/recent", "Pokračovat v poslechu")
+    chunk = sim.call("POST", "/home/play-now", "Pusť teď bez historie", json={"size": 8})
+    if chunk is not None and not (chunk.get("tracks")):
+        sim.flag("Pusť teď", "bez historie nevrátí nic – appka by měla nabídnout jinou cestu (Hledat)")
+
+    for q in QUERIES.get(persona, QUERIES["newcomer"]):
+        res = sim.call("GET", "/catalog/search", f"Hledat „{q}“", params={"q": q})
+        if res is None:
+            continue
+        results = res.get("results") or []
+        if not results and "nesmysl" not in q:
+            sim.flag(f"Hledat „{q}“", "žádné výsledky")
+        by_type: dict[str, list[dict]] = {}
+        for item in results:
+            by_type.setdefault(item.get("entityType") or "?", []).append(item)
+        artist_id = _first(by_type.get("artist"))
+        release_id = _first(by_type.get("release"))
+        # Relevance: první výsledek má obsahovat aspoň jedno slovo dotazu.
+        if results:
+            from app.download_match import tokens
+
+            top = results[0]
+            label = " ".join(str(top.get(k) or "") for k in ("name", "title", "artistName"))
+            if not set(tokens(q)) & set(tokens(label)) and "nesmysl" not in q:
+                sim.flag(f"Hledat „{q}“", f"první výsledek nesouvisí: {label[:80]!r}")
+        if artist_id:
+            sim.call("GET", f"/catalog/artists/{artist_id}", f"Interpret z „{q}“")
+            disco = sim.call("GET", f"/catalog/artists/{artist_id}/discography", "Diskografie")
+            top = sim.call("GET", f"/catalog/artists/{artist_id}/top-tracks", "Top skladby")
+            sim.call("GET", f"/catalog/artists/{artist_id}/bio", "Bio")
+            if isinstance(top, list) and not top:
+                sim.flag(f"Interpret z „{q}“", "žádné top skladby")
+            if isinstance(disco, dict) and not disco.get("releases"):
+                sim.flag(f"Interpret z „{q}“", "prázdná diskografie")
+        if release_id:
+            sim.call("GET", f"/catalog/releases/{release_id}", f"Album z „{q}“")
+            tracks = sim.call("GET", f"/catalog/releases/{release_id}/tracks", "Skladby alba")
+            sim.call("GET", f"/catalog/releases/{release_id}/credits", "Obsazení alba")
+            if isinstance(tracks, list):
+                if not tracks:
+                    sim.flag(f"Album z „{q}“", "album bez skladeb")
+                ids = [t.get("id") for t in tracks]
+                if len(ids) != len(set(ids)):
+                    sim.flag(f"Album z „{q}“", "stejná skladba v tracklistu víckrát")
+                rid = _first(tracks)
+                if rid:
+                    sim.call("GET", f"/lyrics/{rid}", "Text skladby")
+                    sim.call("GET", f"/share/recordings/{rid}", "Sdílet skladbu")
+
+    sim.call("GET", "/browse", "Procházet")
+    for cat in ("bluegrass", "folk", "rock"):
+        sim.call("GET", f"/browse/{cat}", f"Žánr {cat}")
+    sim.call("GET", "/games", "Herní soundtracky")
+    sim.call("GET", "/movies", "Filmy a seriály")
+    for path, note in (("/library/local-tracks", "Knihovna skladby"), ("/library/local-albums", "Knihovna alba"),
+                       ("/library/local-artists", "Knihovna interpreti"), ("/library/liked-songs", "Oblíbené"),
+                       ("/playlists", "Playlisty"), ("/listen-later", "Na později"), ("/library/history-imports", "Importy")):
+        sim.call("GET", path, note)
+
+    # Vlastní playlist: založit, přidat skladbu, smazat (jen zkušební).
+    pl = sim.call("POST", "/playlists", "Nový playlist", json={"title": "Simulace – smazat"})
+    pid = (pl or {}).get("id")
+    if pid:
+        sim.call("DELETE", f"/playlists/{pid}", "Smazat zkušební playlist")
+
+    sim.client.close()
+    # Klíč simulace hned zrušit (nezůstávají viset zařízení navíc).
+    from sqlmodel import delete
+
+    from app.models import AuthToken
+
+    with Session(engine) as s:
+        s.exec(delete(AuthToken).where(AuthToken.user_id == user_id, AuthToken.label == "simulace uživatele"))
+        s.commit()
+    problems = [s for s in sim.steps if s.get("problem")]
+    slow = sorted((s for s in sim.steps if s.get("ms")), key=lambda s: -s["ms"])[:5]
+    return {"user": user_id, "persona": persona, "steps": len(sim.steps), "problems": problems,
+            "slowest": [{"step": s["step"], "ms": s["ms"]} for s in slow]}
+
+
+def main() -> None:
+    user_id = sys.argv[1]
+    persona = sys.argv[2] if len(sys.argv) > 2 else "newcomer"
+    print(json.dumps(run(user_id, persona), ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

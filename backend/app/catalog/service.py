@@ -81,6 +81,21 @@ def _normalize_query(text: str) -> str:
     "vypsana fixa" pro porovnání přesné shody jména interpreta."""
     folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
     return re.sub(r"[^a-z0-9]+", "", folded)
+
+
+def _relaxed_queries(query: str, limit: int = 5) -> list[str]:
+    """Náhradní dotazy, když Deezer na celý dotaz nevrátí nic: nejdřív
+    rozdělení na interpreta a skladbu (Deezer advanced search), pak dotaz
+    bez posledních slov ("Tame Impala Currents deluxe" -> "... Currents")."""
+    words = query.replace('"', " ").split()
+    if len(words) < 3:
+        return []
+    out = [
+        f'artist:"{" ".join(words[:i])}" track:"{" ".join(words[i:])}"'
+        for i in range(1, min(len(words), 4))
+    ]
+    out += [" ".join(words[:n]) for n in range(len(words) - 1, 1, -1)]
+    return out[:limit]
 # Karaoke/"ve stylu"/tribute nahrávky zaplevelují hledání skladeb (živě:
 # "nirvana lake of fire" -> 2 karaoke verze v top 4). Pryč, pokud je uživatel
 # výslovně nehledá.
@@ -368,7 +383,7 @@ class CatalogService:
     # ------------------------------------------------------------------
 
     async def search(
-        self, query: str, entity_type: str | None, limit: int, offset: int
+        self, query: str, entity_type: str | None, limit: int, offset: int, *, _relaxed: bool = False
     ) -> dict[str, Any]:
         """Deezer (rychlý, velkorysý limit) -- MusicBrainz jen jako záloha,
         když Deezer úplně selže. Dřív šlo všechno přes MusicBrainz (1 req/s):
@@ -380,6 +395,14 @@ class CatalogService:
         )
         # Vlastní hudba (tátův Kontrast) online není -- z DB, a navrch.
         own = self._own_matches(query, types_to_query) if offset == 0 else []
+        if not _relaxed and offset == 0 and not own and all(d is not None and not d for d in fetched):
+            # Deezer chce shodu VŠECH slov: "Peter Rowan Old Home Place" ani
+            # "Tame Impala Currents deluxe" nenašly nic (simulace uživatele).
+            # Zkusit interpret + skladba a pak dotaz bez posledních slov.
+            for alt in _relaxed_queries(query):
+                found = await self.search(alt, entity_type, limit, offset, _relaxed=True)
+                if found.get("results"):
+                    return {**found, "query": query, "relaxedQuery": alt}
         if all(data is None for data in fetched):
             found = await self._search_musicbrainz(query, entity_type, limit, offset)
             found["results"] = own + found.get("results", [])
