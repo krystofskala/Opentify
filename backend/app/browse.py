@@ -32,6 +32,8 @@ from app.home import generators as g
 from app.models import GLOBAL_PLAYLIST_OWNER, Artist, Playlist, PlaylistKind, Recording, Release
 from app.utils import utcnow
 
+logger = logging.getLogger(__name__)
+
 CATEGORY_TTL_S = 12 * 60 * 60
 PLAYLIST_FRESH = timedelta(hours=24)
 

@@ -1374,9 +1374,11 @@ async def delete_imported_release(release_id: str, current: tuple[str, str] = De
             for row in session.exec(select(ListenLater).where(ListenLater.target_id == rec.id)).all():
                 session.delete(row)
             # Ostatní tabulky odkazující na skladbu (cizí klíče SQLite nehlídá).
-            from app.models import HeardFully, ProvisioningJob, RecordingDislike
+            from app.models import HeardFully, PlayEvent, SkipStreak
+            from app.models import ProvisioningJob as _Job
+            from app.models import RecordingDislike as _Dislike
 
-            for model in (HeardFully, RecordingDislike, ProvisioningJob):
+            for model in (HeardFully, _Dislike, _Job, SkipStreak, PlayEvent):
                 for row in session.exec(select(model).where(model.recording_id == rec.id)).all():
                     session.delete(row)
             if session.exec(select(Listen).where(Listen.recording_id == rec.id)).first() is not None:
