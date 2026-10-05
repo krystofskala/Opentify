@@ -23,8 +23,20 @@ class _Resp:
         return self._payload
 
 
+_CACHE: dict = {}
+
+
+async def _memory_cache(key, ttl, fetch, is_empty=None):
+    """Mezipaměť v paměti místo Redisu (CI Redis nemá); výjimka z `fetch`
+    se neuloží, stejně jako v `cached_json`."""
+    if key not in _CACHE:
+        _CACHE[key] = await fetch()
+    return _CACHE[key]
+
+
 def _fake(monkeypatch, statuses):
     calls = []
+    monkeypatch.setattr(ls, "cached_json", _memory_cache)
 
     async def get(path, params=None):
         calls.append(params)
