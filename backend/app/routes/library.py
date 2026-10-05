@@ -1301,14 +1301,17 @@ def add_favorite_artist(
 ):
     from app.models import FavoriteArtist
 
+    from app.locks import keyed
+
     if session.get(Artist, artist_id) is None:
         raise HTTPException(status_code=404, detail="Interpret neexistuje.")
-    exists = session.exec(
-        select(FavoriteArtist).where(FavoriteArtist.user_id == current[0], FavoriteArtist.artist_id == artist_id)
-    ).first()
-    if exists is None:
-        session.add(FavoriteArtist(user_id=current[0], artist_id=artist_id))
-        session.commit()
+    with keyed(f"fav-artist:{current[0]}:{artist_id}"):
+        exists = session.exec(
+            select(FavoriteArtist).where(FavoriteArtist.user_id == current[0], FavoriteArtist.artist_id == artist_id)
+        ).first()
+        if exists is None:
+            session.add(FavoriteArtist(user_id=current[0], artist_id=artist_id))
+            session.commit()
     return {"artistId": artist_id, "favorite": True}
 
 

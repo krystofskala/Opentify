@@ -97,8 +97,11 @@ def list_items(user_id: str) -> dict[str, Any]:
 def add(
     user_id: str, kind: str, target_id: str, note: str | None, source: str | None = None
 ) -> dict[str, Any] | None:
-    """Přidá (nebo z "Poslechnuto" vrátí zpět) -- stejná věc je v seznamu jednou."""
-    with Session(engine) as session:
+    """Přidá (nebo z "Poslechnuto" vrátí zpět) -- stejná věc je v seznamu jednou
+    (i při souběžných klepnutích, `app.locks`)."""
+    from app.locks import keyed
+
+    with keyed(f"listen-later:{user_id}:{kind}:{target_id}"), Session(engine) as session:
         model = {"track": Recording, "album": Release, "artist": Artist}[kind]
         if session.get(model, target_id) is None:
             return None

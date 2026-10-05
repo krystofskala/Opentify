@@ -9,7 +9,6 @@ Dart straně je pro oba stejný typ)."""
 
 from __future__ import annotations
 
-import threading
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -533,7 +532,9 @@ def add_item(
 
     # Souběžná přidání do téhož (společného) playlistu dřív dostala stejnou
     # pozici -- pořadí pak bylo náhodné. Čtení maxima + zápis pod zámkem.
-    with _item_lock(playlist.id):
+    from app.locks import keyed
+
+    with keyed(f"playlist-items:{playlist.id}"):
         session.expire_all()
         existing = session.exec(
             select(PlaylistItem).where(
@@ -550,15 +551,6 @@ def add_item(
             session.add(playlist)
             session.commit()
     return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
-
-
-_item_locks: dict[str, threading.Lock] = {}
-_item_locks_guard = threading.Lock()
-
-
-def _item_lock(playlist_id: str) -> threading.Lock:
-    with _item_locks_guard:
-        return _item_locks.setdefault(playlist_id, threading.Lock())
 
 
 @playlists_router.patch("/{playlist_id}/items/reorder")
