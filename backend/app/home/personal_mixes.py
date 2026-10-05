@@ -567,8 +567,9 @@ async def build_daily_mixes() -> int:
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
     later = await asyncio.to_thread(_listen_later_candidates, g.home_user())
     later_used: set[str] = set()
-    built = 0
-    for index, cluster in enumerate(clusters, start=1):
+    used_today: set[str] = set()
+    results: list[tuple[int, Cluster, list[str], str]] = []
+    for index, cluster in _stable_numbers(clusters, _previous_groups()):
         rng = random.Random(f"{day}:{index}")
         cluster_artists = set(cluster.artists)
         preferred = [r for r in liked_or_played if taste.artist_of.get(r) in cluster_artists]
@@ -610,10 +611,24 @@ async def build_daily_mixes() -> int:
         ]
         tracks = listen_later.weave(tracks, fitting)
         later_used.update(fitting[:3])
-        built += 1
+        tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
+        used_today.update(tracks)
         names = [taste.artist_name[a] for a in cluster.artists[:2] if a in taste.artist_name]
         genre = _genre_label(taste, cluster, familiar)
         description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
+        results.append((index, cluster, tracks, description))
+        logger.info(
+            "home: Denní mix (skupina %d) -- %d skladeb (%d známých, %d nových), %s",
+            index, len(tracks), len(familiar), len(new), description,
+        )
+    if not results:
+        raise RuntimeError("osobní mixy: žádná skupina nedala dost skladeb")
+    # Čísla bez děr, pořadí podle stálých čísel skupin (Denní mix 1 zůstává
+    # tatáž hudba ze dne na den, i když se skupiny přepočítají).
+    results.sort(key=lambda r: r[0])
+    groups: dict[str, list[str]] = {}
+    for built, (_idx, cluster, tracks, description) in enumerate(results, start=1):
+        groups[str(built)] = cluster.artists[:15]
         g._save_playlist(
             owner=g.home_user(),
             source=f"personal:daily-mix:{built}",
@@ -626,17 +641,74 @@ async def build_daily_mixes() -> int:
             ttl=g.DAILY_TTL,
         )
         await g._preprovision(tracks[:1])
-        logger.info(
-            "home: Denní mix %d -- %d skladeb (%d známých, %d nových), %s",
-            built, len(tracks), len(familiar), len(new), description,
-        )
-    if built == 0:
-        raise RuntimeError("osobní mixy: žádná skupina nedala dost skladeb")
+    built = len(results)
     await asyncio.to_thread(
         _clear_playlists, g.home_user(), [f"personal:daily-mix:{n}" for n in range(built + 1, MAX_DAILY_MIXES + 1)]
     )
     g._save_snapshot("personal:daily-mixes", {"stamp": day, "count": built})
+    g._save_snapshot("personal:daily-mix-groups", {"groups": groups})
+    _mark_used(day, used_today)
     return built
+
+
+def _previous_groups() -> dict[int, list[str]]:
+    """Interpreti včerejších Denních mixů podle čísla (pro stálá čísla)."""
+    with Session(engine) as session:
+        snap = g.load_snapshot(session, "personal:daily-mix-groups")
+    raw = ((snap.payload or {}).get("groups") or {}) if snap else {}
+    return {int(k): list(v) for k, v in raw.items() if str(k).isdigit()}
+
+
+def _stable_numbers(clusters: list[Cluster], previous: dict[int, list[str]]) -> list[tuple[int, Cluster]]:
+    """Každé skupině číslo včerejšího mixu, se kterým sdílí nejvíc hlavních
+    interpretů (Jaccard >= 0,25); ostatní dostanou nejnižší volná čísla.
+    Dřív se skupiny číslovaly podle pořadí a "Denní mix 1" byl každý den jiná
+    hudba (plán P1, stabilní identita mixů)."""
+    pairs = []
+    for ci, cluster in enumerate(clusters):
+        top = set(cluster.artists[:15])
+        for n, artists in previous.items():
+            prev = set(artists)
+            union = top | prev
+            score = len(top & prev) / len(union) if union else 0.0
+            if score >= 0.25:
+                pairs.append((score, ci, n))
+    pairs.sort(reverse=True)
+    assigned: dict[int, int] = {}
+    taken: set[int] = set()
+    for _score, ci, n in pairs:
+        if ci not in assigned and n not in taken:
+            assigned[ci] = n
+            taken.add(n)
+    free = (n for n in range(1, MAX_DAILY_MIXES + len(clusters) + 1) if n not in taken)
+    for ci in range(len(clusters)):
+        if ci not in assigned:
+            assigned[ci] = next(free)
+    return sorted(((assigned[ci], c) for ci, c in enumerate(clusters)), key=lambda x: x[0])
+
+
+def _used_key(day: str) -> str:
+    return f"mix-used:{day}"
+
+
+def _mark_used(day: str, ids: set[str]) -> None:
+    """Skladby, které už dnes jsou v některém mixu (jedna skladba = jeden mix)."""
+    with Session(engine) as session:
+        snap = g.load_snapshot(session, _used_key(day))
+        have = set((snap.payload or {}).get("ids") or []) if snap else set()
+    g._save_snapshot(_used_key(day), {"ids": sorted(have | ids)})
+
+
+def used_today() -> set[str]:
+    with Session(engine) as session:
+        snap = g.load_snapshot(session, _used_key(_day_key()))
+    return set((snap.payload or {}).get("ids") or []) if snap else set()
+
+
+def prefer_unused(recording_ids: list[str], used: set[str]) -> list[str]:
+    """Nejdřív skladby, které dnes ještě v žádném mixu nejsou; použité až
+    jako záloha (malá knihovna -- mix nesmí zmizet)."""
+    return [r for r in recording_ids if r not in used] + [r for r in recording_ids if r in used]
 
 
 async def build_discover_weekly() -> int:
@@ -756,7 +828,9 @@ async def build_throwback() -> int:
         # 150 každý den jiný výběr.
         loves = [r for r in taste.activation.former_loves() if r in taste.artist_of and r not in taste.skipped][:150]
         ordered = _weighted_order(loves, lambda r: taste.activation.peak.get(r, 1), rng)
+        ordered = prefer_unused(ordered, await asyncio.to_thread(used_today))
         ids = _cap_per_artist(ordered, taste.artist_of, 2)[:30]
+        await asyncio.to_thread(_mark_used, day, set(ids))
     else:
         candidates = [
             r

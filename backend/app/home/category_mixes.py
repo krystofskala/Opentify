@@ -214,10 +214,18 @@ def _familiar(taste: pm.Taste, artists: dict[str, float], rng: random.Random) ->
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
     preferred = [r for r in liked_or_played if taste.artist_of.get(r) in artists]
     fallback = [r for r in taste.library if taste.artist_of.get(r) in artists and r not in liked_or_played]
-    rng.shuffle(preferred)
+    if taste.activation is not None:
+        # v2: podle toho, jak moc skladba teď "žije" (jako Denní mixy).
+        liked = set(taste.liked)
+        preferred = pm._weighted_order(preferred, lambda r: taste.track_score(r) + (0.05 if r in liked else 0.0), rng)
+    else:
+        rng.shuffle(preferred)
     rng.shuffle(fallback)
+    # Co už je dnes v jiném mixu, až na konec (jedna skladba = jeden mix).
+    used = pm.used_today()
+    ordered = pm.prefer_unused(preferred, used) + pm.prefer_unused(fallback, used)
     target = round(MIX_SIZE * FAMILIAR_SHARE)
-    return pm._spread(pm._cap_per_artist(preferred + fallback, taste.artist_of, 4)[:target], taste.artist_of)
+    return pm._spread(pm._cap_per_artist(ordered, taste.artist_of, 4)[:target], taste.artist_of)
 
 
 async def _genre_mix(c: Category, taste: pm.Taste, shares: dict[str, dict[str, float]], rng: random.Random) -> tuple[list[str], list[str], list[str]]:
