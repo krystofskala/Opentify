@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from app.db import get_session
-from app.lyrics_service import fetch_lyrics
+from app.lyrics_service import LyricsSourceDown, fetch_lyrics
 from app.models import Artist, MediaAsset, Recording, Release
 
 lyrics_router = APIRouter(prefix="/lyrics", tags=["lyrics"])
@@ -39,22 +39,26 @@ async def get_lyrics(recording_id: str, session: Session = Depends(get_session))
     # podle ní se vybírá správně časovaná verze textu.
     asset = session.get(MediaAsset, recording.id)
     duration_ms = (asset.waveform_duration_ms if asset else None) or recording.duration_ms
-    result = await fetch_lyrics(
-        track_name=recording.title,
-        artist_name=artist_name,
-        album_name=album_name,
-        duration_s=duration_ms / 1000 if duration_ms else None,
-    )
-    for alias in aliases:
-        if result is not None:
-            break
-        # Délka zůstává -- jiná nahrávka dostane text bez časování, ne posunutý.
+    try:
         result = await fetch_lyrics(
             track_name=recording.title,
-            artist_name=alias,
-            album_name=None,
+            artist_name=artist_name,
+            album_name=album_name,
             duration_s=duration_ms / 1000 if duration_ms else None,
         )
+        for alias in aliases:
+            if result is not None:
+                break
+            # Délka zůstává -- jiná nahrávka dostane text bez časování, ne posunutý.
+            result = await fetch_lyrics(
+                track_name=recording.title,
+                artist_name=alias,
+                album_name=None,
+                duration_s=duration_ms / 1000 if duration_ms else None,
+            )
+    except LyricsSourceDown:
+        # Dočasné -- appka to za chvíli zkusí znovu (404 = "text neexistuje").
+        raise HTTPException(status_code=503, detail="zdroj textů je teď nedostupný") from None
     if result is None:
         raise HTTPException(status_code=404, detail="text skladby nenalezen")
     return result

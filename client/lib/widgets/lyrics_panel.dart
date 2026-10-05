@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/api_client.dart' show ApiException;
 import '../data/lyrics_repository.dart';
 import '../state/audio_player_controller.dart';
 import '../state/glass_settings.dart';
@@ -15,8 +16,26 @@ import 'glass/expressive_shapes.dart';
 import 'glass/glass.dart';
 import '../theme/design_tokens.dart';
 
-final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>((ref, recordingId) {
-  return ref.watch(lyricsRepositoryProvider).getLyrics(recordingId);
+/// Dočasná chyba (zdroj textů nedostupný = 503, výpadek sítě) se zkusí
+/// znovu, než se ukáže "nepodařilo se načíst" -- dřív po přepnutí skladby
+/// text napoprvé chyběl (LRCLIB vracelo 503 u skoro každého druhého dotazu).
+/// 404 = text opravdu není, to se neopakuje.
+const _lyricsRetryDelays = [Duration(seconds: 3), Duration(seconds: 8), Duration(seconds: 20)];
+
+final _lyricsProvider = FutureProvider.autoDispose.family<LyricsModel?, String>((ref, recordingId) async {
+  final repository = ref.watch(lyricsRepositoryProvider);
+  var disposed = false;
+  ref.onDispose(() => disposed = true);
+  for (var attempt = 0;; attempt++) {
+    try {
+      return await repository.getLyrics(recordingId);
+    } catch (e) {
+      final temporary = e is! ApiException || e.statusCode >= 500;
+      if (!temporary || attempt >= _lyricsRetryDelays.length || disposed) rethrow;
+      await Future<void>.delayed(_lyricsRetryDelays[attempt]);
+      if (disposed) rethrow;
+    }
+  }
 });
 
 /// Vytáhne text skladby z LRCLIB (přes backend proxy, viz `LyricsRepository`)

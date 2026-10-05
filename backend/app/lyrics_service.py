@@ -52,14 +52,37 @@ class _SourceDown(Exception):
     jako "text neexistuje" na týden; živě: Hot Milk – Wide Awake)."""
 
 
+class LyricsSourceDown(Exception):
+    """Text teď nejde zjistit (LRCLIB nedostupné a záložní zdroje nic) --
+    route vrací 503, klient to za chvíli zkusí znovu. Ne 404: ten appka
+    bere jako "text neexistuje" (živě: po přepnutí skladby text napoprvé
+    chyběl, LRCLIB vracelo 503 u skoro každého druhého dotazu)."""
+
+
+_RETRY_DELAYS_S = (0.7, 2.0)
+
+
 async def _search(params: dict[str, Any]) -> list[dict[str, Any]]:
-    try:
-        resp = await _client.get("/search", params=params)
-        resp.raise_for_status()
-        results = resp.json()
-    except (httpx.TransportError, httpx.HTTPStatusError, ValueError) as exc:
-        raise _SourceDown from exc
-    return results if isinstance(results, list) else []
+    """Krátké výpadky LRCLIB (503, spadlé spojení) se zkusí znovu."""
+    import asyncio
+
+    for attempt in range(len(_RETRY_DELAYS_S) + 1):
+        try:
+            resp = await _client.get("/search", params=params)
+            if resp.status_code >= 500 and attempt < len(_RETRY_DELAYS_S):
+                await asyncio.sleep(_RETRY_DELAYS_S[attempt])
+                continue
+            resp.raise_for_status()
+            results = resp.json()
+        except httpx.TransportError as exc:
+            if attempt < len(_RETRY_DELAYS_S):
+                await asyncio.sleep(_RETRY_DELAYS_S[attempt])
+                continue
+            raise _SourceDown from exc
+        except (httpx.HTTPStatusError, ValueError) as exc:
+            raise _SourceDown from exc
+        return results if isinstance(results, list) else []
+    raise _SourceDown
 
 
 _ovh = httpx.AsyncClient(base_url="https://api.lyrics.ovh/v1", timeout=10.0)
@@ -199,20 +222,30 @@ async def fetch_lyrics(
     cache_key = f"lyrics:v4:{artist_name or ''}:{track_name}:{duration_key}"
 
     async def fetch() -> dict[str, Any]:
+        down = False
+
+        async def search(params: dict[str, Any]) -> list[dict[str, Any]]:
+            nonlocal down
+            try:
+                return await _search(params)
+            except _SourceDown:
+                down = True  # LRCLIB mimo provoz -- zkusit aspoň záložní zdroje
+                return []
+
         params: dict[str, Any] = {"track_name": track_name}
         if artist_name:
             params["artist_name"] = artist_name
         if album_name:
             params["album_name"] = album_name
-        results = await _search(params)
+        results = await search(params)
         picked = _pick(results, duration_s)
-        if picked is None or picked.get("synced") is None:
+        if (picked is None or picked.get("synced") is None) and not down:
             # Druhý pokus: bez alba (kompilace/reedice se v LRCLIB jmenují
             # jinak) a s očištěným názvem ("- 2004 Remaster" apod.).
             params = {"track_name": clean_title(track_name)}
             if artist_name:
                 params["artist_name"] = artist_name
-            more = await _search(params)
+            more = await search(params)
             seen = {r.get("id") for r in results}
             merged = results + [r for r in more if r.get("id") not in seen]
             picked = _pick(merged, duration_s) or picked
@@ -222,15 +255,24 @@ async def fetch_lyrics(
             picked = await _lyrics_netease(artist_name, track_name, duration_s) or picked
         if picked is None:
             picked = await _lyrics_ovh(artist_name, track_name)
+        if down:
+            if picked is None:
+                raise _SourceDown  # nic -- neukládat, za chvíli znovu
+            # Ze záložního zdroje jen na krátko: LRCLIB může mít lepší časování.
+            return {**picked, "partial": True}
         return picked or _NOT_FOUND
 
     try:
-        # "Nenalezeno" jen na krátko (EMPTY_TTL) -- texty do LRCLIB přibývají.
+        # "Nenalezeno" (a náhrada za výpadku) jen na krátko (EMPTY_TTL) --
+        # texty do LRCLIB přibývají.
         result = await cached_json(
-            cache_key, LYRICS_TTL_SECONDS, fetch, is_empty=lambda v: bool(v and v.get("not_found"))
+            cache_key,
+            LYRICS_TTL_SECONDS,
+            fetch,
+            is_empty=lambda v: bool(v and (v.get("not_found") or v.get("partial"))),
         )
-    except _SourceDown:
-        return None
+    except _SourceDown as exc:
+        raise LyricsSourceDown from exc
     if result is None or result.get("not_found"):
         return None
     return result
