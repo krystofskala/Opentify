@@ -90,6 +90,14 @@ def list_taste_feedback(current: tuple[str, str] = Depends(get_current_user)):
     return {"artists": feedback.deltas(current[0])}
 
 
+@home_router.get("/why/{recording_id}")
+async def why_this(recording_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    """"Proč tohle?" -- jen na vyžádání, jemný důvod bez čísel (app/home/why.py)."""
+    from app.home.why import reason
+
+    return {"recordingId": recording_id, "reason": await asyncio.to_thread(reason, current[0], recording_id)}
+
+
 @home_router.get("/recent")
 def recent(
     limit: int = 8,
