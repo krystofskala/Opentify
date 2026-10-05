@@ -80,7 +80,7 @@ class LibrarySearchResults extends ConsumerWidget {
             child: Column(
               children: [
                 for (final r in data.tracks.take(5))
-                  TrackTile(recording: r, queueRecordings: data.tracks, sourceLabel: _librarySourceLabel),
+                  TrackTile(recording: r, sourceLabel: _librarySourceLabel),
               ],
             ),
           ),
@@ -122,7 +122,6 @@ class LibrarySearchResults extends ConsumerWidget {
       itemCount: data.tracks.length,
       itemBuilder: (context, index) => TrackTile(
         recording: data.tracks[index],
-        queueRecordings: data.tracks,
         sourceLabel: _librarySourceLabel,
       ),
     );

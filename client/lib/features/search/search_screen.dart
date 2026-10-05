@@ -429,7 +429,7 @@ class _AllResults extends ConsumerWidget {
               child: Column(
                 children: [
                   for (final r in recordings.take(5))
-                    TrackTile(recording: r, queueRecordings: recordings, sourceLabel: _searchSourceLabel),
+                    TrackTile(recording: r, sourceLabel: _searchSourceLabel),
                 ],
               ),
             );
@@ -633,7 +633,8 @@ class _FilteredResults extends ConsumerWidget {
               itemCount: recordings.length,
               itemBuilder: (context, index) => TrackTile(
                 recording: recordings[index],
-                queueRecordings: recordings,
+                // Z hledání hraje jen klepnutá skladba -- ostatní výsledky
+                // do fronty nepatří (živě nahlášeno).
                 sourceLabel: _searchSourceLabel,
               ),
             );
@@ -747,7 +748,7 @@ class _CollabSection extends ConsumerWidget {
             child: Column(
               children: [
                 for (final r in recordings.take(6))
-                  TrackTile(recording: r, queueRecordings: recordings, sourceLabel: 'Spolupráce · $names'),
+                  TrackTile(recording: r, sourceLabel: 'Spolupráce · $names'),
               ],
             ),
           ),
@@ -787,7 +788,7 @@ class _VersionsSection extends ConsumerWidget {
           child: Column(
             children: [
               for (final r in recordings)
-                TrackTile(recording: r, queueRecordings: recordings, sourceLabel: 'Verze s $artist'),
+                TrackTile(recording: r, sourceLabel: 'Verze s $artist'),
             ],
           ),
         ),
@@ -869,7 +870,7 @@ class _SoundcloudSectionState extends ConsumerState<_SoundcloudSection> {
                   child: Column(
                     children: [
                       for (final r in _all ? items : items.take(5))
-                        TrackTile(recording: r, queueRecordings: items, sourceLabel: 'SoundCloud'),
+                        TrackTile(recording: r, sourceLabel: 'SoundCloud'),
                     ],
                   ),
                 ),
