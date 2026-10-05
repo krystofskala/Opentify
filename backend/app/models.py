@@ -240,6 +240,25 @@ class PlayEvent(SQLModel, table=True):
     origin: str = "connect"
 
 
+class PendingImportPlay(SQLModel, table=True):
+    """Importovaný poslech, ke kterému zatím chybí interpret (Apple Music
+    export ho neuvádí). Nezahazuje se: app/library/pending_plays.py ho na
+    pozadí dohledává a po nalezení převede na `Listen` (+ `PlayEvent`).
+    Opakovaný import téhož zdroje čekající nahradí."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    source: str = Field(index=True)  # applemusic-history...
+    track: str
+    album: str | None = None
+    played_at: datetime  # konec přehrání (UTC)
+    played_ms: int = 0
+    reason_end: str | None = None  # slovník Spotify historie (spotify_history._end_reason)
+    attempts: int = 0
+    next_try_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class ArtistFeedback(SQLModel, table=True):
     """"Víc / míň takových" (plán P2): ruční posun váhy interpreta v mixech a
     Pusť teď. Kladné = víc, záporné = míň; mezi −15 a +15 (jako poslechy)."""

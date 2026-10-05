@@ -103,6 +103,10 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     from app.tools import upgrade_video_audio
 
     registry.append(("maintenance:video-audio", g.DAILY_TTL, lambda: upgrade_video_audio.run(40)))
+    # Importované poslechy bez interpreta (Apple Music) -> dohledat, nezahazovat.
+    from app.library import pending_plays
+
+    registry.append(("maintenance:pending-imports", timedelta(minutes=30), pending_plays.run))
     # Herní / filmové soundtracky: živé řady (Steam, Wikidata, Apple plakáty).
     from app import soundtrack_discovery
 

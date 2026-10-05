@@ -843,6 +843,44 @@ async def import_spotify(
             out["libraryPlaylist"] = LIBRARY_PLAYLIST
             del report
         return out
+    # Export z Apple Music (privacy.apple.com) -- poslechy + knihovna.
+    if not plays:
+        from app.library.apple_history import LIBRARY_PLAYLIST as APPLE_PLAYLIST
+        from app.library.apple_history import import_export, read_export
+
+        apple = await asyncio.to_thread(read_export, raw)
+        if apple.is_apple:
+            if not apple.plays and not apple.library:
+                raise HTTPException(
+                    status_code=400,
+                    detail="V exportu z Apple není historie poslechů ani knihovna Apple Music "
+                    "(nahraj „Informace o mediálních službách Apple“ – část 1).",
+                )
+            # Poslechy bez interpreta se nezahodí -- dohledají se na pozadí.
+            out = {"kind": "history", "platform": "applemusic", "listens": 0}
+            if apple.plays:
+                from app.home import generators as g
+
+                token = g.set_home_user(user_id)
+                try:
+                    result = await asyncio.to_thread(import_export, user_id, apple)
+                finally:
+                    g.reset_home_user(token)
+                out.update({k: v for k, v in result.items() if isinstance(v, (int, str, float, bool))})
+            if apple.library:
+                from app.library.spotify_import import _import_named_playlist
+
+                def run_apple_library():
+                    with Session(engine) as own:
+                        _import_named_playlist(
+                            own, user_id, APPLE_PLAYLIST, apple.library, description="Import z Apple Music"
+                        )
+                        own.commit()
+
+                await asyncio.to_thread(run_apple_library)
+                out["libraryTracks"] = len(apple.library)
+                out["libraryPlaylist"] = APPLE_PLAYLIST
+            return out
     account_history: dict | None = None
     if plays and all(p.get("account") for p in plays):
         # Balíček "Údaje o účtu": playlisty a knihovna jako dřív (níže) +
