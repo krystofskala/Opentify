@@ -354,6 +354,46 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       onHide: () => _maybePersistSession(state, force: true),
       onPause: () => _maybePersistSession(state, force: true),
     );
+    _stallWatch = Timer.periodic(const Duration(seconds: 3), (_) => _checkStall());
+  }
+
+  // --- Tiché zaseknutí -----------------------------------------------------
+  //
+  // Spojení spadne uprostřed stahování dalšího kusu (přepnutí Wi-Fi <-> data)
+  // a iOS přehrávač jen čeká: hlásí "hraje", pozice stojí, chyba nepřijde
+  // (živě: I Hate It Here se zasekla po přepnutí sítě). Stojí-li pozice
+  // hrající skladby ze serveru déle než `_stallLimit`, navázat od stejného
+  // místa jako po chybě (`_handleStreamFailure` -- sám jednou, pak chyba se
+  // "Zkusit znovu", nezacyklí se). Rádio a stahující se soubor mají hlídání
+  // vlastní.
+  static const _stallLimit = Duration(seconds: 12);
+  Timer? _stallWatch;
+  Duration _stallPosition = Duration.zero;
+  DateTime _stallSince = DateTime.now();
+
+  void _checkStall() {
+    final info = state.nowPlaying;
+    final now = DateTime.now();
+    final position = _player.position;
+    final processing = _player.processingState;
+    final watched = info != null &&
+        _player.playing &&
+        !_radioActive &&
+        !_priming &&
+        !_awaitingProvisioning &&
+        !_currentProgressive &&
+        !_currentLocal &&
+        processing != ProcessingState.completed &&
+        processing != ProcessingState.idle;
+    if (!watched || position != _stallPosition) {
+      _stallPosition = position;
+      _stallSince = now;
+      return;
+    }
+    if (now.difference(_stallSince) < _stallLimit) return;
+    _stallSince = now;
+    debugPrint('AudioPlayerController: pozice stojí ${_stallLimit.inSeconds} s ($processing), navazuji');
+    _handleStreamFailure(info, 'zaseknuté přehrávání', isProgressive: false);
   }
 
   final MediaSessionBridge _mediaSession = MediaSessionBridge();
@@ -2638,6 +2678,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   @override
   void dispose() {
     _lifecycle?.dispose();
+    _stallWatch?.cancel();
     _sleepTimer?.cancel();
     _fadeTimer?.cancel();
     _gainRampTimer?.cancel();
