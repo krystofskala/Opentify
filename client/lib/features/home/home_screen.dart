@@ -12,6 +12,9 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/browse_repository.dart' show BrowseArtist;
 import '../../data/home_repository.dart';
+import '../../data/play_now_repository.dart' show PlayNowMood;
+import '../../state/auto_continue.dart';
+import '../../widgets/toast.dart' show showToast;
 import '../../models/availability.dart';
 import '../../models/recording_model.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
@@ -628,11 +631,15 @@ class _QuickPicks extends ConsumerWidget {
           const gap = AppSpacing.xs;
           final columns = constraints.maxWidth >= 720 ? 3 : 2;
           final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+          // Pusť teď je navíc -> mřížka bez díry na konci (ubere se poslední).
+          final total = cards.length + 1;
+          final fit = total < columns ? total : total - total % columns;
           return Wrap(
             spacing: gap,
             runSpacing: gap,
             children: [
-              for (final card in cards)
+              SizedBox(width: width, height: 56, child: const _PlayNowTile()),
+              for (final card in cards.take(fit - 1))
                 SizedBox(
                   width: width,
                   height: 56,
@@ -654,6 +661,73 @@ class _QuickPicks extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// První dlaždice Rychlého výběru: klepnutí = hudba na teď (nekonečná,
+/// doplňuje se sama), dlouhý stisk = nálada.
+class _PlayNowTile extends ConsumerStatefulWidget {
+  const _PlayNowTile();
+
+  @override
+  ConsumerState<_PlayNowTile> createState() => _PlayNowTileState();
+}
+
+class _PlayNowTileState extends ConsumerState<_PlayNowTile> {
+  bool _loading = false;
+
+  Future<void> _start({String? mood}) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() => _loading = true);
+    try {
+      final reason = await ref.read(autoContinueProvider).start(mood: mood);
+      if (reason != null && reason.isNotEmpty) showToast(messenger, reason);
+    } catch (e) {
+      showToast(messenger, 'Pusť teď se nepovedlo: ${humanError(e)}');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pickMood() async {
+    final moods = ref.read(playNowRepositoryProvider).moods();
+    final picked = await showGlassSheet<String>(
+      context,
+      builder: (sheet) => GlassSheet(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Pusť teď – na jakou náladu?', style: Theme.of(sheet).textTheme.titleMedium),
+              const SizedBox(height: AppSpacing.md),
+              FutureBuilder<List<PlayNowMood>>(
+                future: moods,
+                builder: (context, snap) {
+                  if (snap.hasError) return Text(humanError(snap.error!));
+                  if (!snap.hasData) {
+                    return const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.md), child: CircularProgressIndicator()));
+                  }
+                  return Wrap(
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xs,
+                    children: [
+                      for (final m in snap.data!)
+                        ActionChip(label: Text(m.title), onPressed: () => Navigator.of(sheet).pop(m.id)),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked != null && mounted) await _start(mood: picked);
+  }
+
+  @override
+  Widget build(BuildContext context) => PlayNowTile(loading: _loading, onTap: _start, onLongPress: _pickMood);
 }
 
 /// Sekce, která je jen seznam skladeb ("Mix na teď", "Před rokem",

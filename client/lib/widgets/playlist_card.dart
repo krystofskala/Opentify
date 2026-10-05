@@ -263,6 +263,61 @@ class RankBadge extends StatelessWidget {
 
 /// Kompaktní dlaždice "Rychlého výběru" (2 sloupce, jako Spotify) --
 /// tónový kontejner s mozaikou vlevo a názvem.
+/// "Pusť teď" -- první dlaždice Rychlého výběru: jedno klepnutí a hraje
+/// hudba na míru téhle chvíli, fronta se sama doplňuje. Dlouhý stisk =
+/// výběr nálady. Za běhu točí kolečko místo ikony.
+class PlayNowTile extends StatelessWidget {
+  const PlayNowTile({super.key, required this.onTap, this.onLongPress, this.loading = false});
+
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final shape = AppShapes.of(Expressive.cornerMedium);
+    return GlassPressable(
+      onPressed: loading ? null : onTap,
+      onLongPress: loading ? null : onLongPress,
+      shape: shape,
+      minSize: Size.zero,
+      child: DecoratedBox(
+        decoration: ShapeDecoration(shape: shape, color: scheme.primaryContainer.withValues(alpha: 0.85)),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: Center(
+                child: loading
+                    ? SizedBox.square(
+                        dimension: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: scheme.onPrimaryContainer),
+                      )
+                    : Icon(Symbols.play_circle_rounded, fill: 1, size: 32, color: scheme.onPrimaryContainer),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                'Pusť teď',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: scheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class QuickPickTile extends StatelessWidget {
   const QuickPickTile({super.key, required this.card, required this.onTap, this.onLongPress});
 

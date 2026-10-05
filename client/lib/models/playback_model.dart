@@ -13,11 +13,14 @@ class QueueItem {
   Map<String, dynamic> toJson() => {'recordingId': recordingId, 'position': position};
 }
 
-enum RepeatMode { off, one, all }
+/// `endless` = nekonečné hraní: po konci fronty navazuje podobnou hudbou
+/// (state/auto_continue.dart). Výchozí je vždy `off` -- konec fronty = konec.
+enum RepeatMode { off, one, all, endless }
 
 RepeatMode _repeatModeFromJson(String? value) => switch (value) {
       'one' => RepeatMode.one,
       'all' => RepeatMode.all,
+      'endless' => RepeatMode.endless,
       _ => RepeatMode.off,
     };
 

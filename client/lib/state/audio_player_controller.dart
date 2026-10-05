@@ -1428,7 +1428,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final next = switch (state.repeatMode) {
       RepeatMode.off => RepeatMode.all,
       RepeatMode.all => RepeatMode.one,
-      RepeatMode.one => RepeatMode.off,
+      RepeatMode.one => RepeatMode.endless,
+      RepeatMode.endless => RepeatMode.off,
     };
     setRepeatMode(next);
   }

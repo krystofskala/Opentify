@@ -24,6 +24,8 @@ import 'verify_track_sheet.dart';
 import 'share_sheet.dart';
 import 'report_problem.dart';
 import 'toast.dart';
+import 'state_views.dart' show humanError;
+import '../state/auto_continue.dart' show playNowRepositoryProvider;
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -92,6 +94,19 @@ Future<void> shareWithToast(
     if (outcome == ShareOutcome.failed) toast('Odkaz se nepodařilo zkopírovat: ${link.primaryUrl}');
   } catch (_) {
     toast('Skladbu se nepodařilo najít pro sdílení');
+  }
+}
+
+Future<void> _feedback(WidgetRef ref, String recordingId, void Function(String) toast, {required bool more}) async {
+  try {
+    final delta = await ref.read(playNowRepositoryProvider).feedback(recordingId, more: more);
+    toast(switch (delta) {
+      0 => 'Zase jako dřív',
+      > 0 => 'Takových víc – projeví se v mixech a Pusť teď',
+      _ => 'Takových míň – projeví se v mixech a Pusť teď',
+    });
+  } catch (e) {
+    toast('Nepodařilo se uložit: ${humanError(e)}');
   }
 }
 
@@ -254,6 +269,30 @@ class _TrackActionsSheet extends ConsumerWidget {
                 icon: Symbols.radio_rounded,
                 label: 'Přejít na rádio',
                 onTap: () => run(() => goToRadio(hostContext, RadioSeed.track, recording.id)),
+              ),
+              // Ladění mixů a Pusť teď po interpretech (±, vratné).
+              _Item(
+                icon: Symbols.thumb_up_rounded,
+                label: 'Víc takových',
+                onTap: () => run(() => _feedback(ref, recording.id, toast, more: true)),
+              ),
+              _Item(
+                icon: Symbols.thumb_down_rounded,
+                label: 'Míň takových',
+                onTap: () => run(() => _feedback(ref, recording.id, toast, more: false)),
+              ),
+              // Důvod jen na vyžádání, nikdy u každé skladby.
+              _Item(
+                icon: Symbols.help_rounded,
+                label: 'Proč tohle?',
+                onTap: () => run(() async {
+                  try {
+                    final reason = await ref.read(playNowRepositoryProvider).why(recording.id);
+                    toast(reason.isEmpty ? 'Na tohle nemám dobrou odpověď' : reason);
+                  } catch (e) {
+                    toast('Nepodařilo se zjistit: ${humanError(e)}');
+                  }
+                }),
               ),
               if (recording.releaseId != null)
                 _Item(

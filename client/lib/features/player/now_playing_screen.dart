@@ -30,6 +30,7 @@ import '../../widgets/media_card.dart' show ArtworkPlaceholder;
 import '../../widgets/net_image.dart';
 import '../../widgets/now_playing_sheet.dart';
 import '../../widgets/state_views.dart';
+import '../../widgets/toast.dart';
 import '../../widgets/wavy_seek_bar.dart';
 import 'player_more_sheet.dart';
 import 'queue_panel.dart';
@@ -1143,11 +1144,24 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     fixedSize: const Size.square(44),
                   ),
                   icon: Icon(
-                    playback.repeatMode == RepeatMode.one ? Symbols.repeat_one_rounded : Symbols.repeat_rounded,
+                    switch (playback.repeatMode) {
+                      RepeatMode.one => Symbols.repeat_one_rounded,
+                      RepeatMode.endless => Symbols.all_inclusive_rounded,
+                      _ => Symbols.repeat_rounded,
+                    },
                     size: 22,
                     semanticLabel: 'Opakování',
                   ),
-                  onPressed: controller.cycleRepeatMode,
+                  onPressed: () {
+                    controller.cycleRepeatMode();
+                    // Režim je jinak poznat jen podle ikony -- krátce říct, co teď platí.
+                    toast(context, switch (ref.read(audioPlayerControllerProvider).repeatMode) {
+                      RepeatMode.off => 'Bez opakování – po konci fronty konec',
+                      RepeatMode.all => 'Opakovat frontu',
+                      RepeatMode.one => 'Opakovat skladbu',
+                      RepeatMode.endless => 'Nekonečné hraní – po konci naváže podobnou hudbou',
+                    });
+                  },
                 );
   }
 
