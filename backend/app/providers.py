@@ -505,6 +505,19 @@ class SlskdProvider:
     # Hledání
     # ------------------------------------------------------------------
 
+    @staticmethod
+    async def _running_search_id(client: httpx.AsyncClient, query: str) -> str | None:
+        """Id běžícího hledání se stejným textem (slskd vrátil 409)."""
+        try:
+            resp = await client.get("/api/v0/searches")
+            resp.raise_for_status()
+            for s in resp.json() or []:
+                if (s.get("searchText") or "").strip().lower() == query.strip().lower() and s.get("id"):
+                    return str(s["id"])
+        except (httpx.HTTPError, ValueError):
+            return None
+        return None
+
     async def search_raw(self, query: str, cap_s: float = 20.0) -> list[dict]:
         """Surové odpovědi hledání (pro výběr složky celého alba)."""
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
@@ -513,11 +526,18 @@ class SlskdProvider:
                 created = await client.post(
                     "/api/v0/searches", json={"searchText": query, "searchTimeout": int(cap_s * 1000)}
                 )
-                if created.status_code != 429:
+                if created.status_code not in (409, 429):
                     break
                 await asyncio.sleep(2.0 * (attempt + 1))
-            created.raise_for_status()
-            search_id = created.json()["id"]
+            reused = False
+            if created.status_code == 409:
+                search_id = await self._running_search_id(client, query)
+                if search_id is None:
+                    created.raise_for_status()
+                reused = True
+            else:
+                created.raise_for_status()
+                search_id = created.json()["id"]
             loop = asyncio.get_running_loop()
             started = loop.time()
             active_since: float | None = None  # ve frontě slskd se nepočítá (viz resolve)
@@ -536,10 +556,11 @@ class SlskdProvider:
                 responses.raise_for_status()
                 return [r for r in responses.json() if r.get("username") and not self._is_blocked(r["username"])]
             finally:
-                try:
-                    await client.delete(f"/api/v0/searches/{search_id}")
-                except httpx.HTTPError:
-                    pass
+                if not reused:
+                    try:
+                        await client.delete(f"/api/v0/searches/{search_id}")
+                    except httpx.HTTPError:
+                        pass
 
     async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
         pref = track.preferred_source
@@ -629,8 +650,17 @@ class SlskdProvider:
                 if created.status_code not in (409, 429):
                     break
                 await asyncio.sleep(2.0 * (attempt + 1))
-            created.raise_for_status()
-            search_id = created.json()["id"]
+            reused = False
+            if created.status_code == 409:
+                # Stejné hledání pořád běží (jiný worker hledá tutéž skladbu) --
+                # připojit se k němu, ne vzdát (5 selhání za týden).
+                search_id = await self._running_search_id(client, query)
+                if search_id is None:
+                    created.raise_for_status()
+                reused = True
+            else:
+                created.raise_for_status()
+                search_id = created.json()["id"]
 
             loop = asyncio.get_running_loop()
             started = loop.time()
@@ -673,10 +703,12 @@ class SlskdProvider:
                     await asyncio.sleep(self.poll_interval_s)
             finally:
                 # Úklid -- slskd si jinak hromadí stovky starých hledání.
-                try:
-                    await client.delete(f"/api/v0/searches/{search_id}")
-                except httpx.HTTPError:
-                    pass
+                # Převzaté hledání patří jinému workeru, ten ho smaže sám.
+                if not reused:
+                    try:
+                        await client.delete(f"/api/v0/searches/{search_id}")
+                    except httpx.HTTPError:
+                        pass
 
         logger.info(
             "slskd hledání '%s' (%s): %d kandidátů z %d odpovědí za %.1f s (z toho ve frontě %.1f s)",
