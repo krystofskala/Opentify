@@ -54,6 +54,9 @@ async def search_catalog(
     service: CatalogService = Depends(get_catalog_service),
     _current=Depends(get_current_user),
 ):
+    if not q.strip():
+        # Jen mezery (klient při mazání) -- Deezer na to vrací chybu (502).
+        return {"query": q, "total": 0, "results": []}
     try:
         found = await service.search(q, type, limit, offset)
         # Překlep ("bily strngs"): Deezer skoro nic -- Last.fm opraví jméno
