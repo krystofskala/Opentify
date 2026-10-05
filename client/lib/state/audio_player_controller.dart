@@ -1124,7 +1124,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // Seedne z cache, když jsme tuhle skladbu už přehrávali -- bez tohohle
       // by UI na zlomek sekundy bleslo výchozí (fialovou) barvou při KAŽDÉM
       // přepnutí, i na skladbu, jejíž barvu už dávno známe.
-      accentColor: _accentColorCache[items[index].recordingId],
+      // Neznámá barva -> zatím barva předchozí skladby, ne `null`: s `null`
+      // pozadí spadlo na výchozí fialovo-růžovou a když se barva nové
+      // skladby nespočítala (zamčený telefon), zůstalo tak (živě: černobílý
+      // obal v sytě purpurovém přehrávači).
+      accentColor: _accentColorCache[items[index].recordingId] ?? state.accentColor,
       queue: items,
       queueIndex: index,
       queueSourceLabel: sourceLabel,
@@ -1786,7 +1790,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       position: Duration.zero,
       duration: null,
       // Stejný důvod jako `playQueue` výš -- cache místo natvrdo `null`.
-      accentColor: _accentColorCache[info.recordingId],
+      accentColor: _accentColorCache[info.recordingId] ?? state.accentColor,
       queue: state.queue,
       queueIndex: index,
       // Skok v rámci stejné fronty (next/previous/reorder) beze změny zdroje.
@@ -2273,25 +2277,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Kontroluje `recordingId` proti aktuálnímu stavu, aby pozdě doběhnuvší
   /// extrakce ze staré skladby nepřepsala barvu té, na kterou uživatel
   /// mezitím přepnul.
-  Future<void> _extractAccentColor(String recordingId, String artworkUrl, {bool retry = true}) async {
+  /// `false` = nepovedlo se (opakování řídí `_retryAccent`).
+  Future<bool> _extractAccentColor(String recordingId, String artworkUrl) async {
     final color = await extractAccentColor(artworkUrl);
-    if (color == null) {
-      // Nepovedlo se (typicky automatický přechod na zamčeném telefonu --
-      // Safari na pozadí obrázky nedekóduje). Jinak by skladba zůstala
-      // v barvách té předchozí až do reloadu (živě nahlášeno).
-      if (retry) {
-        Timer(const Duration(seconds: 4), () {
-          if (state.nowPlaying?.recordingId == recordingId && !_accentColorCache.containsKey(recordingId)) {
-            unawaited(_extractAccentColor(recordingId, artworkUrl, retry: false));
-          }
-        });
-      }
-      return;
-    }
+    if (color == null) return false;
     _accentColorCache[recordingId] = color;
     if (state.nowPlaying?.recordingId == recordingId) {
       state = state.copyWith(accentColor: color);
     }
+    return true;
   }
 
   AppLifecycleListener? _lifecycle;
@@ -2326,19 +2320,28 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// `TrackTile.build` (`recordingArtworkProvider` z `releaseId`/`artistId`)
   /// a zapíše zpátky do `nowPlaying`/fronty, ať UI nemusí mít vlastní
   /// fallback logiku navíc.
-  Future<void> _resolveArtworkAndAccent(NowPlayingInfo info) async {
+  Future<void> _resolveArtworkAndAccent(NowPlayingInfo info, {int attempt = 0}) async {
     // Skladba s albem: VŽDY obal jejího alba -- obrázek předaný z obrazovky,
     // odkud se hrálo (třeba fotka interpreta na jeho stránce), byl zavádějící
     // a počítaly se z něj i barvy (živě: špatný obal a barvy na iPhonu).
     var artworkUrl = _artworkCache[info.recordingId];
-    if (artworkUrl == null && info.releaseId != null) {
-      artworkUrl = await _ref.read(recordingArtworkProvider((releaseId: info.releaseId, artistId: null)).future);
+    try {
+      if (artworkUrl == null && info.releaseId != null) {
+        artworkUrl = await _ref.read(recordingArtworkProvider((releaseId: info.releaseId, artistId: null)).future);
+      }
+      artworkUrl ??= info.artworkUrl;
+      if (artworkUrl == null && info.artistId != null) {
+        artworkUrl = await _ref.read(recordingArtworkProvider((releaseId: null, artistId: info.artistId)).future);
+      }
+    } catch (e) {
+      debugPrint('AudioPlayerController: obal se nedohledal ($e)');
     }
-    artworkUrl ??= info.artworkUrl;
-    if (artworkUrl == null && info.artistId != null) {
-      artworkUrl = await _ref.read(recordingArtworkProvider((releaseId: null, artistId: info.artistId)).future);
+    if (artworkUrl == null) {
+      // Obal se nedohledal (síť na zamčeném telefonu) -- zkusit znovu, jinak
+      // by skladba zůstala bez obalu i barvy.
+      _retryAccent(info, attempt);
+      return;
     }
-    if (artworkUrl == null) return;
     _artworkCache[info.recordingId] = artworkUrl;
 
     if (info.artworkUrl != artworkUrl && state.nowPlaying?.recordingId == info.recordingId) {
@@ -2365,8 +2368,23 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         state = state.copyWith(accentColor: cachedColor);
       }
     } else {
-      await _extractAccentColor(info.recordingId, artworkUrl);
+      final ok = await _extractAccentColor(info.recordingId, artworkUrl);
+      if (!ok) _retryAccent(info, attempt);
     }
+  }
+
+  /// Barva/obal hrající skladby se nepovedly (typicky automatický přechod na
+  /// zamčeném telefonu -- iOS/Safari na pozadí obrázky nedekóduje): znovu po
+  /// 4 s, 15 s a 60 s, dokud skladba hraje. Dřív jen jednou po 4 s a pak
+  /// zůstala cizí (nebo výchozí fialová) barva až do reloadu.
+  static const _accentRetryDelays = [Duration(seconds: 4), Duration(seconds: 15), Duration(seconds: 60)];
+
+  void _retryAccent(NowPlayingInfo info, int attempt) {
+    if (attempt >= _accentRetryDelays.length) return;
+    Timer(_accentRetryDelays[attempt], () {
+      if (state.nowPlaying?.recordingId != info.recordingId || _accentColorCache.containsKey(info.recordingId)) return;
+      unawaited(_resolveArtworkAndAccent(state.nowPlaying!, attempt: attempt + 1));
+    });
   }
 
   /// Zavřít přehrávač (stažení mini přehrávače dolů): zastavit, vyprázdnit
