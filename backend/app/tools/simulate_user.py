@@ -71,6 +71,53 @@ def _first(items: Any, key: str = "id") -> str | None:
     return None
 
 
+def _write_journeys(sim: Sim) -> None:
+    """Zápisy, které nic nestahují: playlist (pořadí výběru!), Na později,
+    oblíbený interpret, "nelíbí se" a jeho zrušení. Po sobě uklidí."""
+    res = sim.call("GET", "/catalog/search", "Hledat pro playlist", params={"q": "Tony Rice Church Street Blues"}) or {}
+    recs = [r["id"] for r in res.get("results") or [] if r.get("entityType") == "recording"][:3]
+    found_artists = sim.call("GET", "/catalog/search", "Hledat interpreta", params={"q": "Tony Rice"}) or {}
+    artists = [r["id"] for r in found_artists.get("results") or [] if r.get("entityType") == "artist"][:1]
+    pl = sim.call("POST", "/playlists", "Nový playlist", json={"title": "Simulace – smazat"})
+    pid = (pl or {}).get("id")
+    if pid and len(recs) >= 2:
+        # Přidávat v pořadí výběru -- v playlistu má být stejné pořadí.
+        for rid in recs:
+            sim.call("POST", f"/playlists/{pid}/items", "Přidat do playlistu", json={"recording_id": rid})
+        detail = sim.call("GET", f"/playlists/{pid}", "Otevřít playlist") or {}
+        items = detail.get("items") or detail.get("tracks") or []
+        got = [(i.get("recordingId") or i.get("id") or (i.get("recording") or {}).get("id")) for i in items]
+        if got and got != recs:
+            sim.flag("Playlist", f"pořadí po přidání nesedí: {got} vs {recs}")
+        sim.call("PATCH", f"/playlists/{pid}/items/reorder", "Přeskládat", json={"recording_ids": list(reversed(recs))})
+        sim.call("PATCH", f"/playlists/{pid}", "Přejmenovat", json={"title": "Simulace 2"})
+        sim.call("DELETE", f"/playlists/{pid}/items/{recs[0]}", "Odebrat z playlistu")
+        # Ten samý dvakrát -- chybová cesta.
+        again = sim.call("POST", f"/playlists/{pid}/items", "Přidat podruhé tutéž", json={"recording_id": recs[1]})
+        del again
+    if pid:
+        sim.call("DELETE", f"/playlists/{pid}", "Smazat zkušební playlist")
+        if sim.client.get(f"/playlists/{pid}").status_code != 404:
+            sim.flag("Playlist", "smazaný playlist jde pořád otevřít")
+    if recs:
+        later = sim.call("POST", "/listen-later", "Na později", json={"kind": "track", "targetId": recs[0]}) or {}
+        lid = later.get("id")
+        if lid:
+            sim.call("DELETE", f"/listen-later/{lid}", "Odebrat z Na později")
+    if artists:
+        aid = artists[0]
+        sim.call("POST", f"/library/favorite-artists/{aid}", "Oblíbený interpret")
+        sim.call("POST", f"/library/disliked-artists/{aid}", "Nelíbí se mi (interpret)")
+        favs = sim.call("GET", "/library/favorite-artists", "Oblíbení po nelíbí se") or []
+        if any((f.get("id") if isinstance(f, dict) else f) == aid for f in (favs if isinstance(favs, list) else favs.get("artists", []))):
+            sim.flag("Nelíbí se", "interpret zůstal v oblíbených")
+        sim.call("DELETE", f"/library/disliked-artists/{aid}", "Zpět: zrušit nelíbí se")
+        sim.call("DELETE", f"/library/favorite-artists/{aid}", "Úklid oblíbeného")
+        left = sim.call("GET", "/library/disliked-artists", "Kontrola po Zpět") or {}
+        if aid in (left.get("artistIds") or []):
+            sim.flag("Nelíbí se", "Zpět interpreta nevrátil")
+
+
 def run(user_id: str, persona: str) -> dict[str, Any]:
     with Session(engine) as s:
         listens = s.exec(select(func.count()).select_from(Listen).where(Listen.user_id == user_id)).one()
@@ -146,11 +193,7 @@ def run(user_id: str, persona: str) -> dict[str, Any]:
                        ("/playlists", "Playlisty"), ("/listen-later", "Na později"), ("/library/history-imports", "Importy")):
         sim.call("GET", path, note)
 
-    # Vlastní playlist: založit, přidat skladbu, smazat (jen zkušební).
-    pl = sim.call("POST", "/playlists", "Nový playlist", json={"title": "Simulace – smazat"})
-    pid = (pl or {}).get("id")
-    if pid:
-        sim.call("DELETE", f"/playlists/{pid}", "Smazat zkušební playlist")
+    _write_journeys(sim)
 
     sim.client.close()
     # Klíč simulace hned zrušit (nezůstávají viset zařízení navíc).
@@ -164,7 +207,8 @@ def run(user_id: str, persona: str) -> dict[str, Any]:
     problems = [s for s in sim.steps if s.get("problem")]
     slow = sorted((s for s in sim.steps if s.get("ms")), key=lambda s: -s["ms"])[:5]
     return {"user": user_id, "persona": persona, "steps": len(sim.steps), "problems": problems,
-            "slowest": [{"step": s["step"], "ms": s["ms"]} for s in slow]}
+            "slowest": [{"step": s["step"], "ms": s["ms"]} for s in slow],
+            "journey": [f"{s['step']} {s.get('status', '')}".strip() for s in sim.steps]}
 
 
 def main() -> None:
