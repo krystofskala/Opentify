@@ -503,7 +503,10 @@ def _genre_label(taste: Taste, cluster: Cluster, familiar: list[str]) -> str | N
     if not counts:
         return None
     genre, n = counts.most_common(1)[0]
-    return genre if n >= 2 else None
+    # Žánr musí sedět na podstatnou část mixu -- dřív stačily 2 skladby z
+    # jednoho alba ("abstract hip hop" u mixu twenty one pilots / Coldplay).
+    with_genre = sum(1 for r in familiar if taste.release_genres.get(r))
+    return genre if n >= 3 and n >= with_genre / 3 else None
 
 
 def _artist_covers(taste: Taste, artists: list[str]) -> list[str]:
