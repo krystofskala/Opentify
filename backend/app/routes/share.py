@@ -145,11 +145,37 @@ async def share_recording(recording_id: str, session: Session = Depends(get_sess
 
     # Spotify i Apple Music VŽDY (dvě nejpoužívanější) -- přímý odkaz, když
     # id najdeme, jinak hledání v jejich appce/webu.
-    spotify_id = refs.get("spotifyId") or await _spotify_track_id(artist, release.title if release else None, recording.title)
+    # Obě hledání naráz (dřív za sebou, až 8,5 s) a neúspěch si pamatovat
+    # týden -- jinak každé sdílení čekalo na totéž "nic".
+    import asyncio
+    from datetime import timedelta
+
+    from app.utils import utcnow
+
+    recent_miss = False
+    checked = refs.get("shareLookupAt")
+    if checked:
+        try:
+            from datetime import datetime
+
+            recent_miss = utcnow() - datetime.fromisoformat(checked) < timedelta(days=7)
+        except ValueError:
+            recent_miss = False
+
+    async def none() -> None:
+        return None
+
+    spotify_id = refs.get("spotifyId")
     apple_id = refs.get("appleMusicId")
-    if not apple_id:
-        hit = await _itunes("song", artist, recording.title)
-        apple_id = str(hit["trackId"]) if hit and hit.get("trackId") else None
+    sp_res, it_res = await asyncio.gather(
+        none() if spotify_id or recent_miss else _spotify_track_id(artist, release.title if release else None, recording.title),
+        none() if apple_id or recent_miss else _itunes("song", artist, recording.title),
+    )
+    spotify_id = spotify_id or sp_res
+    if not apple_id and it_res and it_res.get("trackId"):
+        apple_id = str(it_res["trackId"])
+    if not spotify_id or not apple_id:
+        refs["shareLookupAt"] = utcnow().isoformat()
     if spotify_id:
         refs["spotifyId"] = spotify_id
         url = f"https://song.link/s/{spotify_id}"
