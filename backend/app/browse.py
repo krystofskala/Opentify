@@ -25,7 +25,23 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from app.catalog.cache import cached_json
+from app.catalog.cache import cached_json, cached_json_swr
+
+
+async def _swr(key: str, fresh_s: int, build, is_empty) -> Any:
+    """Stránka Procházet hned z uložené verze, obnova na pozadí, až je starší
+    než `fresh_s` (dřív po vypršení 12 h čekal první návštěvník 10-60 s --
+    simulace 5. 10.: 29 z 34 kategorií). Prázdný výsledek (výpadek zdroje)
+    se neukládá."""
+    last: dict[str, Any] = {}
+
+    async def fetch() -> Any:
+        value = await build()
+        last["v"] = value
+        return None if is_empty(value) else value
+
+    value = await cached_json_swr(key, fresh_s, fetch)
+    return value if value is not None else last.get("v")
 from app.catalog.deezer import get_deezer_client
 from app.db import engine
 from app.home import generators as g
@@ -993,7 +1009,7 @@ async def genre_extras(c: Category) -> dict[str, Any]:
             "related": [r for r in RELATED_GENRES.get(c.id, ()) if r in _BY_ID],
         }
 
-    return await cached_json(f"browse:extras:v9:{c.id}", EXTRAS_TTL_S, build, is_empty=lambda v: not v.get("artistIds"))
+    return await _swr(f"browse:extras:v9:{c.id}", EXTRAS_TTL_S, build, lambda v: not v.get("artistIds"))
 
 
 def extras_cards(extras: dict[str, Any]) -> dict[str, Any]:
@@ -1054,7 +1070,7 @@ async def category_page(c: Category) -> dict[str, Any]:
             page["playlistId"] = playlist_id
         return page
 
-    page = await cached_json(f"browse:v5:{c.id}", CATEGORY_TTL_S, build, is_empty=lambda p: not p.get("playlists"))
+    page = await _swr(f"browse:v5:{c.id}", CATEGORY_TTL_S, build, lambda p: not p.get("playlists"))
     if c.group == "soundtrack":
         # Soundtracky jako žánr: alba soundtracků, franšízy (jako interpreti),
         # skladatelé, mixy, podkategorie (app/soundtracks.py).
