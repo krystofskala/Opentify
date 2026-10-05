@@ -11,12 +11,15 @@ from app.models import LibraryEntry
 def add_to_library(session: Session, user_id: str, recording_id: str) -> None:
     # I admin -- jeho záznam "přebije" skladbu staženou jen jiným profilem
     # (pak se mu v knihovně ukáže, viz `_in_library`).
-    exists = session.exec(
-        select(LibraryEntry).where(LibraryEntry.user_id == user_id, LibraryEntry.recording_id == recording_id)
-    ).first()
-    if exists is None:
-        session.add(LibraryEntry(user_id=user_id, recording_id=recording_id))
-        session.commit()
+    from app.locks import keyed
+
+    with keyed(f"library:{user_id}:{recording_id}"):
+        exists = session.exec(
+            select(LibraryEntry).where(LibraryEntry.user_id == user_id, LibraryEntry.recording_id == recording_id)
+        ).first()
+        if exists is None:
+            session.add(LibraryEntry(user_id=user_id, recording_id=recording_id))
+            session.commit()
 
 
 def remove_from_library(session: Session, user_id: str, recording_id: str) -> bool:

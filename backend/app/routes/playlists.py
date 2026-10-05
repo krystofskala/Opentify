@@ -417,14 +417,17 @@ def pin_playlist(
     """"Přidat a nechat aktualizovat": mix zůstane živý, jen je v Knihovně."""
     from app.models import PinnedPlaylist
 
+    from app.locks import keyed
+
     user_id, _device_id = current
     _readable_playlist_or_404(session, playlist_id, user_id)
-    exists = session.exec(
-        select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id, PinnedPlaylist.playlist_id == playlist_id)
-    ).first()
-    if exists is None:
-        session.add(PinnedPlaylist(user_id=user_id, playlist_id=playlist_id))
-        session.commit()
+    with keyed(f"pin:{user_id}:{playlist_id}"):
+        exists = session.exec(
+            select(PinnedPlaylist).where(PinnedPlaylist.user_id == user_id, PinnedPlaylist.playlist_id == playlist_id)
+        ).first()
+        if exists is None:
+            session.add(PinnedPlaylist(user_id=user_id, playlist_id=playlist_id))
+            session.commit()
     return {"playlistId": playlist_id, "pinned": True}
 
 
