@@ -30,6 +30,44 @@ from app.utils import utcnow
 
 NEW_SHARE = 0.2
 _CACHE_SECONDS = 600
+
+# Čipy nálad (plán P2): nálada -> (kategorie z app/tags.SUBGENRES, štítky
+# navíc, popisek). Nálada interpreta ze štítků Last.fm (cache týden) -- dokud
+# nemáme rozbor zvuku (P4). "prekvap" = víc nového, bez denní doby.
+MOODS: dict[str, tuple[str | None, tuple[str, ...], str]] = {
+    "klid": ("chill", ("chill", "mellow", "relaxing", "calm", "acoustic", "ambient", "soft rock"), "Klid"),
+    "energie": ("workout", ("energetic", "upbeat", "punk", "pop punk", "metal", "hard rock", "garage rock"), "Energie"),
+    "soustredeni": ("focus", ("instrumental", "ambient", "post-rock", "classical", "piano", "jazz"), "Soustředění"),
+    "melancholie": ("sad", ("sad", "melancholic", "melancholy", "mellow", "singer-songwriter", "slowcore"), "Melancholie"),
+    "party": ("party", ("dance", "party", "upbeat", "funk", "disco", "pop"), "Párty"),
+    "prekvap": (None, (), "Překvap mě"),
+}
+
+
+async def mood_fit(act: av.Activation, mood: str, limit: int = 80) -> dict[str, float]:
+    """Interpret -> jak sedí na náladu (0..1) podle jeho štítků Last.fm."""
+    from app.home import lastfm_taste as lt
+    from app.models import Artist
+    from app.tags import SUBGENRES
+
+    category, extra, _label = MOODS[mood]
+    terms = set(SUBGENRES.get(category or "", ())) | set(extra)
+    top = [a for a, _ in act.blend(av.ARTIST_BLEND).most_common(limit)]
+    with Session(engine) as session:
+        names = {a: (session.get(Artist, a).name if session.get(Artist, a) else "") for a in top}
+    sem = asyncio.Semaphore(8)
+
+    async def one(artist_id: str) -> tuple[str, float]:
+        async with sem:
+            try:
+                tags = [t.lower() for t in (await asyncio.wait_for(lt.artist_tags(names[artist_id]), 8))[:10]]
+            except Exception:  # noqa: BLE001
+                return artist_id, 0.0
+        # Silnější štítky (dřív v seznamu) víc.
+        score = sum(1.0 / (1 + i * 0.3) for i, t in enumerate(tags) if t in terms)
+        return artist_id, min(1.0, score / 1.5)
+
+    return dict(await asyncio.gather(*(one(a) for a in top if names.get(a))))
 _cache: dict[str, tuple[float, av.Activation]] = {}
 
 
@@ -69,7 +107,10 @@ def _session_signals(session: Session, user_id: str) -> tuple[Counter, Counter, 
     return skipped, done, len(last_two) == 2 and all(r == "skipped" for r in last_two)
 
 
-def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: random.Random) -> tuple[list[str], list[str], str]:
+def pick(
+    user_id: str, seeds: list[str], played: list[str], size: int, rng: random.Random,
+    mood: str | None = None, moods: dict[str, float] | None = None, new_share: float = NEW_SHARE,
+) -> tuple[list[str], list[str], str]:
     """Známé skladby + semínka pro nové. Vrací (známé, semínka_pro_nové, důvod)."""
     from app.home.quick_picks import time_profile
     from app.library.dislikes import disliked_artist_ids
@@ -111,6 +152,13 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
         top = max(time_artists.values(), default=0) or 1.0
         fit = {a: 0.15 + w / top for a, w in time_artists.items()}
         reason = "Podle toho, co posloucháš v tuhle dobu"
+    if mood == "prekvap":
+        fit, time_artists = {}, Counter()  # bez denní doby -- celý vkus
+        reason = "Překvap mě – víc nového"
+    elif mood and moods is not None:
+        label = MOODS[mood][2]
+        fit = {a: fit.get(a, 0.3) * (0.08 + m) for a, m in moods.items()}
+        reason = f"{label} – z toho, co posloucháš"
     if turn:
         # Dvakrát po sobě přeskočeno: jiným směrem -- interpreti přeskočených
         # ven a víc prostoru těm, které se dohrály.
@@ -133,7 +181,8 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
         if _title_key(act.title_of.get(rid, "")) in played_titles:
             return 0.0
         base = act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
-        f = fit.get(artist, 0.05 if (seed_artists or time_artists) else 1.0)
+        f = fit.get(artist, 0.01 if moods is not None and mood != "prekvap" else
+                    (0.05 if (seed_artists or time_artists) else 1.0))
         if skipped_artists.get(artist):
             f *= 0.1 if turn else 0.4
         if done_artists.get(artist):
@@ -153,7 +202,7 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
             seen_titles.add(key)
             unique.append(r)
     ordered = unique
-    known_target = max(1, round(size * (1 - NEW_SHARE)))
+    known_target = max(1, round(size * (1 - new_share)))
     from app.home import energy_flow
 
     familiar = _spread(_cap_per_artist(ordered, act.artist_of, 1)[:known_target], act.artist_of)
@@ -163,12 +212,21 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
     return familiar, new_seeds, reason
 
 
-async def next_chunk(user_id: str, seeds: list[str], played: list[str], size: int = 8) -> dict[str, Any]:
+async def next_chunk(
+    user_id: str, seeds: list[str], played: list[str], size: int = 8, mood: str | None = None
+) -> dict[str, Any]:
     from app.home import lastfm_taste as lt
     from app.home.personal_mixes import _drop_heard
 
     rng = random.Random(f"{user_id}:{int(time.time() // 60)}:{len(played)}")
-    familiar, new_seeds, reason = await asyncio.to_thread(pick, user_id, seeds, played, size, rng)
+    mood = mood if mood in MOODS else None
+    moods = None
+    if mood and mood != "prekvap":
+        moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
+    new_share = 0.5 if mood == "prekvap" else NEW_SHARE
+    familiar, new_seeds, reason = await asyncio.to_thread(
+        pick, user_id, seeds, played, size, rng, mood, moods, new_share
+    )
     want_new = size - len(familiar)
     new: list[str] = []
     if want_new > 0 and new_seeds:

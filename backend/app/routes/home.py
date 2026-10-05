@@ -33,6 +33,16 @@ class PlayNowIn(BaseModel):
     seedIds: list[str] = []  # co právě hrálo (nekonečné hraní); prázdné = Pusť teď
     playedIds: list[str] = []  # už ve frontě / zahrané v téhle session
     size: int = 8
+    # Čip nálady (klid / energie / soustredeni / melancholie / party / prekvap).
+    mood: str | None = None
+
+
+@home_router.get("/play-now/moods")
+def play_now_moods(_current=Depends(get_current_user)):
+    """Čipy nálad pro Pusť teď (pořadí = jak se ukážou)."""
+    from app.home.play_now import MOODS
+
+    return {"moods": [{"id": k, "title": v[2]} for k, v in MOODS.items()]}
 
 
 @home_router.post("/play-now")
@@ -42,7 +52,7 @@ async def play_now(body: PlayNowIn, current: tuple[str, str] = Depends(get_curre
     from app.home.service import _recording_out
 
     size = max(1, min(body.size, 20))
-    chunk = await pn.next_chunk(current[0], body.seedIds[-5:], body.playedIds[-300:], size)
+    chunk = await pn.next_chunk(current[0], body.seedIds[-5:], body.playedIds[-300:], size, body.mood)
     with Session(engine) as session:
         tracks = [
             _recording_out(session, rec).model_dump(mode="json", by_alias=True)

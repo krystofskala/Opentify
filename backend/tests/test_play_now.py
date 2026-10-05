@@ -79,6 +79,19 @@ def test_same_song_in_another_version_does_not_repeat():
     assert twin_id not in familiar
 
 
+def test_mood_prefers_fitting_artists():
+    user = "pn-u4-" + _RUN
+    ids = _setup(user)
+    pn._cache.clear()
+    act = pn._activation(user)
+    metal = act.artist_of[ids[("Metal Act", 0)]]
+    others = {a for a in act.artist_of.values() if a != metal}
+    moods = {metal: 1.0, **{a: 0.0 for a in others}}
+    familiar, _s, reason = pn.pick(user, [], [], 2, random.Random(5), "energie", moods)
+    assert reason.startswith("Energie")
+    assert act.artist_of[familiar[0]] == metal  # náladě sedící interpret první
+
+
 def test_next_chunk_without_network(monkeypatch):
     user = "pn-u2-" + _RUN
     _setup(user)
