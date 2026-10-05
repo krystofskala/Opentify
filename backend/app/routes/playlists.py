@@ -9,6 +9,7 @@ Dart straně je pro oba stejný typ)."""
 
 from __future__ import annotations
 
+import threading
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -530,21 +531,34 @@ def add_item(
     if session.get(Recording, body.recording_id) is None:
         raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
 
-    existing = session.exec(
-        select(PlaylistItem).where(
-            PlaylistItem.playlist_id == playlist.id, PlaylistItem.recording_id == body.recording_id
-        )
-    ).first()
-    if existing is None:
-        # Za poslední (po odebrání můžou v pozicích být díry -- len() by dal duplicitu).
-        position = max((i.position for i in _playlist_items(session, playlist.id)), default=-1) + 1
-        session.add(
-            PlaylistItem(playlist_id=playlist.id, recording_id=body.recording_id, position=position, added_by=user_id)
-        )
-        playlist.updated_at = utcnow()
-        session.add(playlist)
-        session.commit()
+    # Souběžná přidání do téhož (společného) playlistu dřív dostala stejnou
+    # pozici -- pořadí pak bylo náhodné. Čtení maxima + zápis pod zámkem.
+    with _item_lock(playlist.id):
+        session.expire_all()
+        existing = session.exec(
+            select(PlaylistItem).where(
+                PlaylistItem.playlist_id == playlist.id, PlaylistItem.recording_id == body.recording_id
+            )
+        ).first()
+        if existing is None:
+            # Za poslední (po odebrání můžou v pozicích být díry -- len() by dal duplicitu).
+            position = max((i.position for i in _playlist_items(session, playlist.id)), default=-1) + 1
+            session.add(
+                PlaylistItem(playlist_id=playlist.id, recording_id=body.recording_id, position=position, added_by=user_id)
+            )
+            playlist.updated_at = utcnow()
+            session.add(playlist)
+            session.commit()
     return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
+
+
+_item_locks: dict[str, threading.Lock] = {}
+_item_locks_guard = threading.Lock()
+
+
+def _item_lock(playlist_id: str) -> threading.Lock:
+    with _item_locks_guard:
+        return _item_locks.setdefault(playlist_id, threading.Lock())
 
 
 @playlists_router.patch("/{playlist_id}/items/reorder")
