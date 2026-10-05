@@ -182,4 +182,7 @@ async def next_chunk(user_id: str, seeds: list[str], played: list[str], size: in
                 out.extend(new)
                 break
             out.append(nxt)
+    if not out:
+        # Nový profil bez historie: nic nevnucovat (žádné žebříčky), jen říct proč.
+        reason = "Zatím nevím, co posloucháš – pusť si něco z Hledat a příště navážu."
     return {"recordingIds": out[:size], "reason": reason}
