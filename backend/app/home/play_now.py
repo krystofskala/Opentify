@@ -42,6 +42,12 @@ def _activation(user_id: str) -> av.Activation:
     return act
 
 
+def _title_key(title: str) -> str:
+    from app.download_match import core_title, tokens
+
+    return " ".join(tokens(core_title(title or "")))
+
+
 def _session_signals(session: Session, user_id: str) -> tuple[Counter, Counter, bool]:
     """(přeskočení interpreti, dohraní interpreti, změnit směr) za 40 minut."""
     since = (utcnow() - timedelta(minutes=40)).replace(tzinfo=None)
@@ -112,10 +118,15 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
     exclude = set(played) | recent | skipped_tracks | set(seeds)
     max_long = max(act.long.values(), default=0) or 1.0
     max_med = max(act.medium.values(), default=0) or 1.0
+    # Tatáž píseň v jiné verzi ("Salt Creek" od Blake & Rice a pak od Rice
+    # sólo) se v jedné session nevrací.
+    played_titles = {_title_key(act.title_of.get(r, "")) for r in exclude} - {""}
 
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
         if not artist or artist in banned or rid in exclude:
+            return 0.0
+        if _title_key(act.title_of.get(rid, "")) in played_titles:
             return 0.0
         base = act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
         f = fit.get(artist, 0.05 if (seed_artists or time_artists) else 1.0)
@@ -128,7 +139,14 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
     from app.home.personal_mixes import _cap_per_artist, _spread, _weighted_order
 
     ordered = _weighted_order(list(act.total), score, rng)
-    ordered = [r for r in ordered if score(r) > 0]
+    seen_titles: set[str] = set()
+    unique: list[str] = []
+    for r in ordered:
+        key = _title_key(act.title_of.get(r, ""))
+        if score(r) > 0 and (not key or key not in seen_titles):
+            seen_titles.add(key)
+            unique.append(r)
+    ordered = unique
     known_target = max(1, round(size * (1 - NEW_SHARE)))
     familiar = _spread(_cap_per_artist(ordered, act.artist_of, 1)[:known_target], act.artist_of)
     # Semínka pro nové: semínka nekonečného hraní, jinak první známé.

@@ -73,6 +73,7 @@ class Activation:
     peak: dict[str, int] = field(default_factory=dict)  # nejvíc poslechů v 60denním okně
     peak_at: dict[str, datetime] = field(default_factory=dict)
     artist_of: dict[str, str] = field(default_factory=dict)
+    title_of: dict[str, str] = field(default_factory=dict)  # recording -> název
     heard_keys: set[str] = field(default_factory=set)
     # (čas, skladba) všech započtených poslechů, chronologicky -- co se
     # poslouchá spolu (Pusť teď / nekonečné hraní).
@@ -171,6 +172,7 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
             ).all():
                 artist_name[aid] = name
     for rid, title in names.items():
+        act.title_of[rid] = title
         act.heard_keys.add(track_key(artist_name.get(act.artist_of.get(rid, ""), ""), title))
 
     per_day: Counter = Counter()

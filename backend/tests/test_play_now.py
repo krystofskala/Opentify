@@ -59,6 +59,26 @@ def test_endless_follows_seed_and_skips_played(monkeypatch):
     assert reason.startswith("Navazuje")
 
 
+def test_same_song_in_another_version_does_not_repeat():
+    user = "pn-u3-" + _RUN
+    ids = _setup(user)
+    with Session(engine) as s:
+        other = Artist(name="Other Version " + _RUN)
+        s.add(other)
+        s.flush()
+        twin = Recording(title="Bluegrass Band song 1 (Live)", artist_id=other.id, duration_ms=200_000)
+        s.add(twin)
+        s.flush()
+        for d in range(1, 20, 2):
+            s.add(Listen(user_id=user, recording_id=twin.id, played_at=(utcnow() - timedelta(days=d)).replace(tzinfo=None),
+                         duration_played_ms=200_000))
+        s.commit()
+        twin_id = twin.id
+    pn._cache.clear()
+    familiar, _s, _r = pn.pick(user, [ids[("Bluegrass Band", 0)]], [ids[("Bluegrass Band", 1)]], 6, random.Random(3))
+    assert twin_id not in familiar
+
+
 def test_next_chunk_without_network(monkeypatch):
     user = "pn-u2-" + _RUN
     _setup(user)
