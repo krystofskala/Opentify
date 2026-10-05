@@ -455,7 +455,8 @@ def create_playlist(
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="název playlistu nesmí být prázdný")
-    playlist = Playlist(owner_user_id=user_id, title=title, kind=PlaylistKind.USER)
+    # Stejný strop jako při přejmenování (simulace: šlo založit 5000 znaků).
+    playlist = Playlist(owner_user_id=user_id, title=title[:200], kind=PlaylistKind.USER)
     session.add(playlist)
     session.commit()
     session.refresh(playlist)
