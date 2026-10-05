@@ -262,6 +262,15 @@ def load_taste(user_id: str) -> Taste:
             for artist_id, share in taste.activation.blend(av.ARTIST_BLEND).items():
                 if artist_id not in banned:
                     taste.artist_weight[artist_id] += share * scale
+        # "Víc / míň takových": jednotka = dvacetina nejsilnějšího interpreta,
+        # takže +15 je zřetelné, ale nepřebije celý vkus.
+        from app.home.feedback import deltas as _feedback
+
+        manual = _feedback(user_id)
+        if manual:
+            unit = max(1.0, (max(taste.artist_weight.values(), default=20.0)) / 20)
+            for artist_id, delta in manual.items():
+                taste.artist_weight[artist_id] = max(0.0, taste.artist_weight[artist_id] + delta * unit)
         # Dvakrát po sobě přeskočené: interpret trochu ztratí.
         for recording_id in taste.skipped:
             recording = session.get(Recording, recording_id)

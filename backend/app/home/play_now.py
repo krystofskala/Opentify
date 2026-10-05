@@ -115,6 +115,10 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
         # Dvakrát po sobě přeskočeno: jiným směrem -- interpreti přeskočených
         # ven a víc prostoru těm, které se dohrály.
         reason = "Zkouším jiný směr"
+    from app.home.feedback import deltas as feedback_deltas
+    from app.home.feedback import fit_multiplier
+
+    manual = feedback_deltas(user_id)
     exclude = set(played) | recent | skipped_tracks | set(seeds)
     max_long = max(act.long.values(), default=0) or 1.0
     max_med = max(act.medium.values(), default=0) or 1.0
@@ -134,6 +138,8 @@ def pick(user_id: str, seeds: list[str], played: list[str], size: int, rng: rand
             f *= 0.1 if turn else 0.4
         if done_artists.get(artist):
             f *= 1.3
+        if artist in manual:
+            f *= fit_multiplier(manual[artist])  # "víc / míň takových"
         return base * f
 
     from app.home.personal_mixes import _cap_per_artist, _spread, _weighted_order

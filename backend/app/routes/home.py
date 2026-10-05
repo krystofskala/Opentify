@@ -52,6 +52,44 @@ async def play_now(body: PlayNowIn, current: tuple[str, str] = Depends(get_curre
     return {"tracks": tracks, "reason": chunk["reason"]}
 
 
+class FeedbackIn(BaseModel):
+    direction: str  # "more" | "less"
+    artistId: str | None = None
+    recordingId: str | None = None  # stačí skladba -- vezme se její interpret
+
+
+@home_router.post("/feedback")
+def taste_feedback(body: FeedbackIn, current: tuple[str, str] = Depends(get_current_user)):
+    """"Víc / míň takových" (app/home/feedback.py)."""
+    from app.home import feedback
+
+    if body.direction not in ("more", "less"):
+        raise HTTPException(status_code=400, detail="směr musí být more nebo less")
+    artist_id = body.artistId or (feedback.artist_for(body.recordingId) if body.recordingId else None)
+    if not artist_id:
+        raise HTTPException(status_code=404, detail="interpret nenalezen")
+    with Session(engine) as session:
+        if session.get(Artist, artist_id) is None:
+            raise HTTPException(status_code=404, detail="interpret nenalezen")
+    delta = feedback.set_feedback(current[0], artist_id, body.direction)
+    return {"artistId": artist_id, "delta": delta}
+
+
+@home_router.delete("/feedback/{artist_id}")
+def clear_taste_feedback(artist_id: str, current: tuple[str, str] = Depends(get_current_user)):
+    from app.home import feedback
+
+    feedback.clear(current[0], artist_id)
+    return {"artistId": artist_id, "delta": 0}
+
+
+@home_router.get("/feedback")
+def list_taste_feedback(current: tuple[str, str] = Depends(get_current_user)):
+    from app.home import feedback
+
+    return {"artists": feedback.deltas(current[0])}
+
+
 @home_router.get("/recent")
 def recent(
     limit: int = 8,

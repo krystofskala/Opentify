@@ -240,6 +240,16 @@ class PlayEvent(SQLModel, table=True):
     origin: str = "connect"
 
 
+class ArtistFeedback(SQLModel, table=True):
+    """"Víc / míň takových" (plán P2): ruční posun váhy interpreta v mixech a
+    Pusť teď. Kladné = víc, záporné = míň; mezi −15 a +15 (jako poslechy)."""
+
+    user_id: str = Field(primary_key=True)
+    artist_id: str = Field(primary_key=True)
+    delta: float = 0.0
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class HomeImpression(SQLModel, table=True):
     """Co Domů profilu ukázalo (mix / playlist v sekci, pozice) -- jednou
     za den a položku. S PlayEvent.playlist_id jde změřit, jestli se mixy
