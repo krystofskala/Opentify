@@ -558,7 +558,10 @@ async def build_daily_mixes() -> int:
         return done
     taste = await asyncio.to_thread(load_taste, g.home_user())
     if len(taste.known) < 20:
-        raise RuntimeError("osobní mixy: málo dat o chuti (oblíbené/poslechy)")
+        # Nový profil bez historie -- očekávaný stav, ne chyba (dřív to každou
+        # hodinu v logu hlásilo "generátor selhal").
+        logger.info("osobní mixy %s: zatím málo dat o chuti, přeskakuji", g.home_user()[:8])
+        return 0
     clusters = await build_clusters(taste)
     known = taste.known
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
