@@ -166,6 +166,8 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
   }
 
   @override
+  // `state` by tu zastínil stav notifieru -- schválně jiný název.
+  // ignore: avoid_renaming_method_parameters
   void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
     if (lifecycle != AppLifecycleState.resumed) return;
     final client = _ref.read(realtimeClientProvider);

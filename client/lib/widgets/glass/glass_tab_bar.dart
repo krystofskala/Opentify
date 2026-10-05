@@ -57,9 +57,11 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
   static final SpringDescription _liftSpring = SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 0.62);
 
   @override
-  void didUpdateWidget(GlassTabBar old) {
-    super.didUpdateWidget(old);
-    if (!_dragging && widget.selectedIndex != old.selectedIndex && (_pos.value - widget.selectedIndex).abs() > 0.01) {
+  void didUpdateWidget(GlassTabBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dragging &&
+        widget.selectedIndex != oldWidget.selectedIndex &&
+        (_pos.value - widget.selectedIndex).abs() > 0.01) {
       _springPos(widget.selectedIndex.toDouble(), _settle);
     }
   }

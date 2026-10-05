@@ -13,10 +13,10 @@ class DetailLoadingScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const SectionAppBar(''),
-      bottomNavigationBar: const ShellBarSpace(),
-      body: const SingleChildScrollView(
+    return const Scaffold(
+      appBar: SectionAppBar(''),
+      bottomNavigationBar: ShellBarSpace(),
+      body: SingleChildScrollView(
         physics: NeverScrollableScrollPhysics(),
         padding: EdgeInsets.all(AppSpacing.md),
         child: Column(
