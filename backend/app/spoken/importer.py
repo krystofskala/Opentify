@@ -82,10 +82,26 @@ def audio_files(root: Path) -> list[Path]:
     return [p for p in chosen if not (p.stem.lower().endswith("_64kb") and p.with_suffix("").as_posix()[:-5] in stems)]
 
 
-def import_book(book_id: str, root: Path) -> int:
+def _common_parts(dirs: list[Path]) -> tuple[str, ...]:
+    parts = dirs[0].parts
+    for d in dirs[1:]:
+        n = 0
+        while n < min(len(parts), len(d.parts)) and parts[n] == d.parts[n]:
+            n += 1
+        parts = parts[:n]
+    return parts or ("/",)
+
+
+def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int:
     """Vrátí počet souborů. Pořadí: složky (CD1, CD2…) přirozeně, uvnitř číslo
-    stopy z tagu, jinak přirozené řazení jmen."""
-    files = audio_files(root)
+    stopy z tagu, jinak přirozené řazení jmen. `only`: jen tyhle soubory
+    (kniha vybraná ze sbírky)."""
+    if only is not None:
+        files = [p for p in only if p.suffix.lower() in AUDIO and p.is_file()]
+        if files:
+            root = Path(*_common_parts([p.parent for p in files]))
+    else:
+        files = audio_files(root)
     if not files:
         raise ValueError("ve stažených souborech není žádný zvuk")
     rows = []

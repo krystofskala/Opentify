@@ -4,6 +4,7 @@ nepronikne do mixů, doporučení, Wrapped ani na ListenBrainz/Last.fm."""
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,7 @@ from app.db import get_session
 from app.models import SpokenBook, SpokenFile, SpokenProgress
 from app.spoken import sktorrent, slsk_books
 from app.spoken.acquire import SPOKEN_ROOT, book_out
+from app.spoken.importer import _natural as importer_natural
 from app.spoken.importer import guess_from_release
 from app.utils import utcnow
 
@@ -71,6 +73,31 @@ async def search_foreign(q: str, session: Session = Depends(get_session)):
     return {"releases": releases}
 
 
+_AUDIO_EXT = (".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus", ".aac", ".wma")
+
+
+@spoken_router.get("/releases/{infohash}/files")
+async def release_files(infohash: str):
+    """Obsah vydání (sbírky) před stažením: zvukové soubory seskupené po
+    knihách (složkách). Stažení .torrent chce účet -- přes VPN."""
+    infohash = infohash.strip().lower()
+    if len(infohash) != 40 or any(c not in "0123456789abcdef" for c in infohash):
+        raise HTTPException(status_code=422, detail="neplatný infohash")
+    try:
+        torrent = await sktorrent.download_torrent(infohash)
+    except sktorrent.NotConfigured as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    files = [f for f in sktorrent.torrent_files(torrent) if f["path"].lower().endswith(_AUDIO_EXT)]
+    groups: dict[str, dict] = {}
+    for f in files:
+        parts = f["path"].split("/")
+        folder = parts[0] if len(parts) > 1 else ""
+        g = groups.setdefault(folder, {"folder": folder, "size": 0, "files": []})
+        g["size"] += f["size"]
+        g["files"].append({"index": f["index"], "name": "/".join(parts[1:]) or parts[0], "size": f["size"]})
+    return {"groups": sorted(groups.values(), key=lambda g: importer_natural(g["folder"]))}
+
+
 class AcquireIn(BaseModel):
     infohash: str | None = None
     title: str
@@ -78,6 +105,10 @@ class AcquireIn(BaseModel):
     coverUrl: str | None = None
     source: str = "sktorrent"  # sktorrent | slskd
     ref: str | None = None  # slskd: výsledek z /search/foreign
+    # Sbírka: jen tyhle soubory (indexy z /releases/{infohash}/files) jako
+    # jedna kniha; `folder` = její název.
+    files: list[int] | None = None
+    folder: str | None = None
 
 
 @spoken_router.post("/books", status_code=202)
@@ -93,14 +124,21 @@ async def acquire(
     infohash = (body.infohash or "").strip().lower()
     if len(infohash) != 40 or any(c not in "0123456789abcdef" for c in infohash):
         raise HTTPException(status_code=422, detail="neplatný infohash")
-    book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == infohash)).first()
+    selection = sorted({int(i) for i in body.files}) if body.files else None
+    # Kniha vybraná ze sbírky: vlastní id podle vybraných souborů.
+    ref = infohash if selection is None else (
+        f"{infohash}:" + hashlib.sha1(",".join(map(str, selection)).encode()).hexdigest()[:12]
+    )
+    book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == ref)).first()
     if book is None:
-        guess = guess_from_release(body.title)
+        guess = guess_from_release(body.folder or body.title)
         book = SpokenBook(
-            source_ref=infohash,
+            source_ref=ref,
+            source_files={"infohash": infohash, "indices": selection} if selection is not None else None,
+            language="cs",
             release_title=body.title[:300],
             title=guess["title"][:300],
-            narrator=guess["narrator"],
+            narrator=guess["narrator"] or guess_from_release(body.title)["narrator"],
             size_bytes=body.sizeBytes,
             # Obal vždy přes náš server (viz `cover`), nic od klienta.
             cover_url=sktorrent.cover_path(infohash),

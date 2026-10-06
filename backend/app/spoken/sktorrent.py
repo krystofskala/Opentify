@@ -116,6 +116,44 @@ async def fetch_cover(infohash: str) -> bytes | None:
     return resp.content
 
 
+def _bdecode(data: bytes, i: int = 0):
+    """Minimální bencode (jen to, co je v .torrent): int, string, list, dict."""
+    c = data[i:i + 1]
+    if c == b"i":
+        end = data.index(b"e", i)
+        return int(data[i + 1:end]), end + 1
+    if c == b"l":
+        out, i = [], i + 1
+        while data[i:i + 1] != b"e":
+            v, i = _bdecode(data, i)
+            out.append(v)
+        return out, i + 1
+    if c == b"d":
+        out, i = {}, i + 1
+        while data[i:i + 1] != b"e":
+            k, i = _bdecode(data, i)
+            v, i = _bdecode(data, i)
+            out[k] = v
+        return out, i + 1
+    colon = data.index(b":", i)
+    n = int(data[i:colon])
+    return data[colon + 1:colon + 1 + n], colon + 1 + n
+
+
+def torrent_files(torrent: bytes) -> list[dict]:
+    """Soubory v .torrent v pořadí qBittorrentu (= index pro výběr):
+    [{index, path, size}], cesta bez kořenové složky torrentu."""
+    meta, _ = _bdecode(torrent)
+    info = meta[b"info"]
+    if b"files" not in info:  # jeden soubor
+        return [{"index": 0, "path": info[b"name"].decode("utf-8", "replace"), "size": int(info[b"length"])}]
+    out = []
+    for i, f in enumerate(info[b"files"]):
+        parts = f.get(b"path.utf-8") or f[b"path"]
+        out.append({"index": i, "path": "/".join(p.decode("utf-8", "replace") for p in parts), "size": int(f[b"length"])})
+    return out
+
+
 def credentials() -> tuple[str, str] | None:
     user = os.environ.get("SKTORRENT_USERNAME", "").strip()
     password = os.environ.get("SKTORRENT_PASSWORD", "")

@@ -221,8 +221,10 @@ final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) async* {
   }
 });
 
-Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r) async {
+Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, String? folder}) async {
   await ref.read(apiClientProvider).postJson('/spoken/books', body: {
+    if (files != null) 'files': files,
+    if (folder != null && folder.isNotEmpty) 'folder': folder,
     'source': r.source,
     if (r.ref != null) 'ref': r.ref,
     if (r.infohash.isNotEmpty) 'infohash': r.infohash,
@@ -241,3 +243,27 @@ final spokenForeignSearchProvider = FutureProvider.autoDispose.family<List<Spoke
   final json = await ref.watch(apiClientProvider).getJson('/spoken/search/foreign', query: {'q': q});
   return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
 });
+
+/// Kniha (složka) ve sbírce a její zvukové soubory (kapitoly).
+typedef ReleaseFile = ({int index, String name, int size});
+typedef ReleaseGroup = ({String folder, int size, List<ReleaseFile> files});
+
+/// Obsah vydání před stažením (sbírka -> knihy). Chce účet SkTorrent.
+Future<List<ReleaseGroup>> fetchReleaseGroups(WidgetRef ref, String infohash) async {
+  final json = await ref.read(apiClientProvider).getJson('/spoken/releases/$infohash/files');
+  return [
+    for (final g in json['groups'] as List<dynamic>? ?? const [])
+      (
+        folder: (g as Map<String, dynamic>)['folder'] as String? ?? '',
+        size: (g['size'] as num?)?.toInt() ?? 0,
+        files: [
+          for (final f in g['files'] as List<dynamic>? ?? const [])
+            (
+              index: ((f as Map<String, dynamic>)['index'] as num).toInt(),
+              name: f['name'] as String? ?? '',
+              size: (f['size'] as num?)?.toInt() ?? 0,
+            ),
+        ],
+      ),
+  ];
+}

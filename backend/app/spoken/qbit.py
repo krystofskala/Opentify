@@ -25,16 +25,38 @@ async def _client() -> httpx.AsyncClient:
     return c
 
 
-async def add(torrent: bytes, infohash: str, save_path: str) -> None:
+async def add(torrent: bytes, infohash: str, save_path: str, stopped: bool = False) -> None:
+    """`stopped`: přidat zastavený (výběr souborů před spuštěním)."""
+    flag = "true" if stopped else "false"
     async with await _client() as c:
         resp = await c.post(
             "/api/v2/torrents/add",
             files={"torrents": (f"{infohash}.torrent", torrent, "application/x-bittorrent")},
-            data={"savepath": save_path, "category": CATEGORY, "paused": "false", "root_folder": "true"},
+            data={"savepath": save_path, "category": CATEGORY, "stopped": flag, "paused": flag, "root_folder": "true"},
         )
         resp.raise_for_status()
         if resp.text.strip().lower().startswith("fails"):
             raise RuntimeError("qBittorrent torrent nepřijal")
+
+
+async def set_priority(infohash: str, indices: list[int], priority: int) -> None:
+    """0 = nestahovat, 1 = stahovat (jen vybrané soubory sbírky)."""
+    if not indices:
+        return
+    async with await _client() as c:
+        resp = await c.post(
+            "/api/v2/torrents/filePrio",
+            data={"hash": infohash, "id": "|".join(str(i) for i in indices), "priority": str(priority)},
+        )
+        resp.raise_for_status()
+
+
+async def start(infohash: str) -> None:
+    async with await _client() as c:
+        resp = await c.post("/api/v2/torrents/start", data={"hashes": infohash})
+        if resp.status_code == 404:  # starší qBittorrent
+            resp = await c.post("/api/v2/torrents/resume", data={"hashes": infohash})
+        resp.raise_for_status()
 
 
 async def info(infohash: str) -> dict | None:

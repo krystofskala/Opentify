@@ -91,4 +91,43 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
   });
+
+  collectionSheetTests();
+}
+
+void collectionSheetTests() {
+  testWidgets('sbírka: výběr knihy přepočítá velikost a celá kniha zaškrtne části', (tester) async {
+    tester.view.physicalSize = const Size(375 * 3, 812 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    const mb = 1024 * 1024;
+    final groups = <ReleaseGroup>[
+      (folder: 'kniha 1.poslední přání', size: 700 * mb, files: [(index: 0, name: '01.mp3', size: 350 * mb), (index: 1, name: '02.mp3', size: 350 * mb)]),
+      (folder: 'kniha 2.meč osudu', size: 800 * mb, files: [(index: 2, name: '01.mp3', size: 800 * mb)]),
+    ];
+    await tester.pumpWidget(_app(
+      const Scaffold(
+        body: CollectionPickSheet(
+          release: SpokenRelease(infohash: 'a', title: 'Zaklínač komplet', seeders: 30),
+          groups: [],
+        ),
+      ),
+      const [],
+    ));
+    await tester.pumpWidget(_app(
+      Scaffold(
+        body: CollectionPickSheet(
+          release: const SpokenRelease(infohash: 'a', title: 'Zaklínač komplet', seeders: 30),
+          groups: groups,
+        ),
+      ),
+      const [],
+    ));
+    await tester.pump();
+    expect(find.text('Vyber, co stáhnout'), findsOneWidget);
+    await tester.tap(find.text('kniha 1.poslední přání'));
+    await tester.pump();
+    expect(find.text('Stáhnout vybrané (700 MB)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -137,3 +137,57 @@ def test_stream_only_from_spoken_folder(eng, tmp_path, monkeypatch):
         assert routes.stream_file("ok", session=s).path == inside
         with pytest.raises(HTTPException):
             routes.stream_file("bad", session=s)
+
+
+def _bencode(v) -> bytes:
+    if isinstance(v, int):
+        return b"i%de" % v
+    if isinstance(v, str):
+        v = v.encode()
+    if isinstance(v, bytes):
+        return b"%d:%s" % (len(v), v)
+    if isinstance(v, list):
+        return b"l" + b"".join(_bencode(x) for x in v) + b"e"
+    return b"d" + b"".join(_bencode(k) + _bencode(v[k]) for k in sorted(v)) + b"e"
+
+
+def test_torrent_files_in_client_order():
+    from app.spoken.sktorrent import torrent_files
+
+    torrent = _bencode({"announce": "x", "info": {"name": "Zaklinac", "files": [
+        {"length": 10, "path": ["01 Posledni prani", "01.mp3"]},
+        {"length": 20, "path": ["02 Mec osudu", "01.mp3"]},
+        {"length": 5, "path": ["obal.jpg"]},
+    ]}})
+    assert torrent_files(torrent) == [
+        {"index": 0, "path": "01 Posledni prani/01.mp3", "size": 10},
+        {"index": 1, "path": "02 Mec osudu/01.mp3", "size": 20},
+        {"index": 2, "path": "obal.jpg", "size": 5},
+    ]
+    single = _bencode({"info": {"name": "kniha.m4b", "length": 99}})
+    assert torrent_files(single) == [{"index": 0, "path": "kniha.m4b", "size": 99}]
+
+
+def test_import_only_selected_files(eng, tmp_path):
+    for rel in ["Kniha1/01.mp3", "Kniha1/02.mp3", "Kniha2/01.mp3"]:
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref="h:1", release_title="x", title="x", requested_by_user_id="me"))
+        s.commit()
+    only = [tmp_path / "Kniha1/02.mp3", tmp_path / "Kniha1/01.mp3"]
+    assert importer.import_book("b1", tmp_path, only) == 2
+    with Session(eng) as s:
+        assert s.get(SpokenBook, "b1").storage_dir == str(tmp_path / "Kniha1")
+
+
+def test_two_books_from_one_collection_are_separate(eng):
+    with Session(eng) as s:
+        a = asyncio.run(routes.acquire(routes.AcquireIn(infohash=HASH_A, title="Zaklinac komplet", files=[3, 1], folder="01 Posledni prani"), session=s, current=("me", "d")))
+        b = asyncio.run(routes.acquire(routes.AcquireIn(infohash=HASH_A, title="Zaklinac komplet", files=[5], folder="02 Mec osudu"), session=s, current=("me", "d")))
+        same = asyncio.run(routes.acquire(routes.AcquireIn(infohash=HASH_A, title="Zaklinac komplet", files=[1, 3]), session=s, current=("dad", "d")))
+        assert a["id"] != b["id"] and same["id"] == a["id"]
+        assert a["title"] == "01 Posledni prani"
+        book = s.get(SpokenBook, a["id"])
+        assert book.source_files == {"infohash": HASH_A, "indices": [1, 3]}

@@ -20,6 +20,7 @@ import '../../widgets/state_views.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/toast.dart';
 import '../../widgets/glass/glass_segmented_control.dart';
+import '../../widgets/glass/glass_sheet.dart';
 import 'podcast_data.dart';
 import 'podcast_screens.dart';
 import 'spoken_data.dart';
@@ -482,15 +483,150 @@ class _ReleaseTile extends ConsumerWidget {
               icon: Symbols.download_rounded,
               compact: true,
               style: GlassButtonStyle.prominent,
-              onPressed: () async {
-                try {
-                  await acquireSpoken(ref, r);
-                  if (context.mounted) toast(context, 'Kniha se stahuje – najdeš ji na Domů');
-                } catch (e) {
-                  if (context.mounted) toast(context, 'Stažení se nepodařilo spustit');
-                }
-              },
+              onPressed: () => _download(context, ref, r),
             ),
+    );
+  }
+}
+
+/// Stáhnout vydání: jedna kniha rovnou, sbírka (víc složek) přes výběr
+/// knih / kapitol -- každá vybraná složka je v knihovně samostatná kniha.
+Future<void> _download(BuildContext context, WidgetRef ref, SpokenRelease r) async {
+  try {
+    if (r.source == 'sktorrent' && r.infohash.isNotEmpty) {
+      final groups = await fetchReleaseGroups(ref, r.infohash);
+      if (!context.mounted) return;
+      if (groups.length > 1) {
+        await showGlassSheet<void>(context, builder: (_) => GlassSheet(child: CollectionPickSheet(release: r, groups: groups)));
+        return;
+      }
+    }
+    await acquireSpoken(ref, r);
+    if (context.mounted) toast(context, 'Kniha se stahuje – najdeš ji na Domů');
+  } catch (e) {
+    if (context.mounted) {
+      toast(context, '$e'.contains('SKTORRENT') ? 'Chybí přihlášení na SkTorrent' : 'Stažení se nepodařilo spustit');
+    }
+  }
+}
+
+class CollectionPickSheet extends ConsumerStatefulWidget {
+  const CollectionPickSheet({super.key, required this.release, required this.groups});
+  final SpokenRelease release;
+  final List<ReleaseGroup> groups;
+
+  @override
+  ConsumerState<CollectionPickSheet> createState() => CollectionPickSheetState();
+}
+
+class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
+  final Set<int> _selected = {};
+  final Set<String> _expanded = {};
+  bool _busy = false;
+
+  int get _bytes => [
+        for (final g in widget.groups)
+          for (final f in g.files)
+            if (_selected.contains(f.index)) f.size,
+      ].fold(0, (a, b) => a + b);
+
+  void _toggleGroup(ReleaseGroup g, bool on) => setState(() {
+        for (final f in g.files) {
+          on ? _selected.add(f.index) : _selected.remove(f.index);
+        }
+      });
+
+  Future<void> _submit() async {
+    setState(() => _busy = true);
+    var books = 0;
+    try {
+      for (final g in widget.groups) {
+        final picked = [for (final f in g.files) if (_selected.contains(f.index)) f.index];
+        if (picked.isEmpty) continue;
+        await acquireSpoken(ref, widget.release, files: picked, folder: g.folder);
+        books++;
+      }
+      if (mounted) {
+        Navigator.of(context).pop();
+        toast(context, books == 1 ? 'Kniha se stahuje – najdeš ji na Domů' : 'Stahuje se $books knih – najdeš je na Domů');
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _busy = false);
+        toast(context, 'Stažení se nepodařilo spustit');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Co stáhnout?', style: theme.textTheme.titleMedium),
+                Text('${widget.release.title} je sbírka. Vyber knihy, nebo jen některé části.', style: muted),
+              ],
+            ),
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final g in widget.groups) ...[
+                  CheckboxListTile(
+                    value: g.files.every((f) => _selected.contains(f.index))
+                        ? true
+                        : (g.files.any((f) => _selected.contains(f.index)) ? null : false),
+                    tristate: true,
+                    onChanged: (v) => _toggleGroup(g, !g.files.every((f) => _selected.contains(f.index))),
+                    title: Text(g.folder.isEmpty ? widget.release.title : g.folder),
+                    subtitle: Text('${formatSize(g.size)} · ${g.files.length} částí', style: muted),
+                    secondary: IconButton(
+                      tooltip: _expanded.contains(g.folder) ? 'Skrýt části' : 'Vybrat jednotlivé části',
+                      icon: Icon(_expanded.contains(g.folder) ? Symbols.expand_less_rounded : Symbols.expand_more_rounded),
+                      onPressed: () => setState(
+                        () => _expanded.contains(g.folder) ? _expanded.remove(g.folder) : _expanded.add(g.folder),
+                      ),
+                    ),
+                  ),
+                  if (_expanded.contains(g.folder))
+                    for (final f in g.files)
+                      Padding(
+                        padding: const EdgeInsets.only(left: AppSpacing.lg),
+                        child: CheckboxListTile(
+                          dense: true,
+                          value: _selected.contains(f.index),
+                          onChanged: (v) => setState(() => v == true ? _selected.add(f.index) : _selected.remove(f.index)),
+                          title: Text(f.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                          subtitle: Text(formatSize(f.size), style: muted),
+                        ),
+                      ),
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: GlassButton(
+              label: _selected.isEmpty ? 'Vyber, co stáhnout' : 'Stáhnout vybrané (${formatSize(_bytes)})',
+              icon: Symbols.download_rounded,
+              style: GlassButtonStyle.prominent,
+              expand: true,
+              onPressed: _selected.isEmpty || _busy ? null : _submit,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
