@@ -117,6 +117,10 @@ def import_book(book_id: str, root: Path) -> int:
                 )
             )
         first = rows[0][1]
+        # Album v tagu = název knihy (čistší než název vydání na trackeru).
+        album = _tag(first, "album")
+        if album and len(album) <= 200:
+            book.title = album
         book.author = book.author or _tag(first, "albumartist", "artist")
         book.narrator = book.narrator or _tag(first, "performer", "composer")
         book.duration_ms = total or None

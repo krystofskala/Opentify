@@ -78,8 +78,8 @@ def acquire(
             title=guess["title"][:300],
             narrator=guess["narrator"],
             size_bytes=body.sizeBytes,
-            # Jen obal ze SkTorrentu (cizí adresy appka nenačítá).
-            cover_url=body.coverUrl if (body.coverUrl or "").startswith("https://cdn.sktorrent.eu/") else None,
+            # Obal vždy přes náš server (viz `cover`), nic od klienta.
+            cover_url=sktorrent.cover_path(infohash),
             requested_by_user_id=current[0],
         )
     elif book.status == "failed":
@@ -143,11 +143,34 @@ def stream_file(file_id: str, session: Session = Depends(get_session)):
     f = session.get(SpokenFile, file_id)
     if f is None:
         raise HTTPException(status_code=404, detail="soubor nenalezen")
-    path = Path(f.path)
-    # Jen soubory ze složky mluveného slova -- nic jiného z disku.
-    if not path.is_relative_to(SPOKEN_ROOT) or not path.is_file():
+    path = Path(f.path).resolve()
+    # Jen soubory ze složky mluveného slova -- nic jiného z disku (i přes
+    # "..", odkazy apod.: porovnává se skutečná cesta).
+    if not path.is_relative_to(SPOKEN_ROOT.resolve()) or not path.is_file():
         raise HTTPException(status_code=404, detail="soubor chybí na disku")
     return FileResponse(path, media_type=_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream"))
+
+
+_COVER_CACHE = Path("/tmp/spoken-covers")
+
+
+@spoken_router.get("/cover/{infohash}")
+async def cover(infohash: str):
+    """Obal vydání ze SkTorrentu přes server (Mullvad) -- telefon se na
+    SkTorrent nikdy nepřipojuje sám. Uloží se do mezipaměti."""
+    infohash = infohash.lower()
+    if len(infohash) != 40 or any(c not in "0123456789abcdef" for c in infohash):
+        raise HTTPException(status_code=404, detail="obal nenalezen")
+    path = _COVER_CACHE / f"{infohash}.jpg"
+    if not path.is_file():
+        data = await sktorrent.fetch_cover(infohash)
+        if data is None:
+            raise HTTPException(status_code=404, detail="obal nenalezen")
+        _COVER_CACHE.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
 
 
 class ProgressIn(BaseModel):

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/config.dart';
 import '../../core/device_token.dart' show withDeviceToken;
 import '../../core/realtime_event.dart' show UnknownEvent;
 import '../../state/audio_player_controller.dart' show NowPlayingInfo;
@@ -23,7 +24,7 @@ class SpokenRelease {
         title: j['title'] as String,
         sizeBytes: (j['sizeBytes'] as num?)?.toInt(),
         seeders: (j['seeders'] as num?)?.toInt() ?? 0,
-        coverUrl: j['coverUrl'] as String?,
+        coverUrl: spokenCoverUrl(j['coverUrl'] as String?),
         added: j['added'] as String?,
         bookId: j['bookId'] as String?,
         status: j['status'] as String?,
@@ -98,7 +99,7 @@ class SpokenBook {
       title: j['title'] as String? ?? '',
       author: j['author'] as String?,
       narrator: j['narrator'] as String?,
-      coverUrl: j['coverUrl'] as String?,
+      coverUrl: spokenCoverUrl(j['coverUrl'] as String?),
       releaseTitle: j['releaseTitle'] as String? ?? '',
       sizeBytes: (j['sizeBytes'] as num?)?.toInt(),
       status: j['status'] as String? ?? 'pending',
@@ -153,6 +154,14 @@ List<NowPlayingInfo> spokenQueue(SpokenBook book) => [
 
 String spokenStreamUrl(String baseUrl, String fileId) => withDeviceToken('$baseUrl/spoken/files/$fileId/stream');
 
+/// Obal přichází jako cesta na našem API (spoken/cover/<hash>) -- appka se
+/// na SkTorrent nepřipojuje sama. Klíč v ?t= kvůli nativnímu načítání.
+String? spokenCoverUrl(String? path) {
+  if (path == null || path.isEmpty) return null;
+  if (path.startsWith('http')) return path;
+  return withDeviceToken('${AppConfig.apiBaseUrl}/$path');
+}
+
 String formatSize(int? bytes) {
   if (bytes == null) return '';
   if (bytes >= 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
@@ -204,7 +213,6 @@ Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r) async {
     'infohash': r.infohash,
     'title': r.title,
     'sizeBytes': r.sizeBytes,
-    'coverUrl': r.coverUrl,
   });
   ref.invalidate(spokenBooksProvider);
   ref.invalidate(spokenSearchProvider);

@@ -83,7 +83,7 @@ def parse_results(page: str) -> list[Release]:
                 size_bytes=size,
                 seeders=int(m.group("seed")),
                 leechers=int(m.group("leech")),
-                cover_url=f"https://cdn.sktorrent.eu/obrazky/{m.group('hash')}.jpg",
+                cover_url=cover_path(m.group("hash")),
                 added=m.group("added"),
             )
         )
@@ -96,6 +96,22 @@ async def search(query: str) -> list[Release]:
         resp = await c.get(f"{BASE}/torrents_v2.php", params={"search": query, "category": SPOKEN_CATEGORY, "active": "0"})
         resp.raise_for_status()
     return sorted(parse_results(resp.text), key=lambda r: (r.seeders == 0, -r.seeders))
+
+
+def cover_path(infohash: str) -> str:
+    """Cesta obalu na našem API (relativní k /api/v1) -- appka obal nikdy
+    nestahuje ze SkTorrentu sama (viz routes/spoken.py `cover`)."""
+    return f"spoken/cover/{infohash}"
+
+
+async def fetch_cover(infohash: str) -> bytes | None:
+    async with httpx.AsyncClient(proxy=_proxy(), timeout=20, follow_redirects=True, headers={"User-Agent": _UA}) as c:
+        resp = await c.get(f"https://cdn.sktorrent.eu/obrazky/{infohash}.jpg")
+    if resp.status_code != 200 or not resp.headers.get("content-type", "").startswith("image/"):
+        return None
+    if len(resp.content) > 5 * 1024 * 1024:
+        return None
+    return resp.content
 
 
 def credentials() -> tuple[str, str] | None:

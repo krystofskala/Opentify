@@ -34,7 +34,7 @@ def test_parse_results_keeps_only_spoken_word_and_reads_numbers():
     assert r.title == "Saturnin - Zdeněk Jirotka (2010) čte Oldřich Vízner"
     assert r.size_bytes == int(500.4 * 1024**2)
     assert (r.seeders, r.leechers) == (8, 1)
-    assert r.cover_url == f"https://cdn.sktorrent.eu/obrazky/{HASH_A}.jpg"
+    assert r.cover_url == f"spoken/cover/{HASH_A}"  # přes náš server, ne přímo
 
 
 def test_guess_narrator_from_release_title():
@@ -87,7 +87,7 @@ def test_acquire_twice_is_one_book_and_failed_retries(eng):
         first = routes.acquire(body, session=s, current=("me", "d"))
         second = routes.acquire(body, session=s, current=("dad", "d"))
         assert first["id"] == second["id"]
-        assert first["coverUrl"] is None  # jen obaly ze SkTorrentu
+        assert first["coverUrl"] == f"spoken/cover/{HASH_A}"  # nikdy adresa od klienta
         assert first["narrator"] == "Oldřich Vízner"
         book = s.get(SpokenBook, first["id"])
         book.status, book.error = "failed", "torrent: error"
