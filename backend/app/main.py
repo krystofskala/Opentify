@@ -83,6 +83,21 @@ app = FastAPI(title="Vault API", version="0.1.0", lifespan=_lifespan)
 # "zkus to znovu" a ne "něco se rozbilo".
 
 @app.middleware("http")
+async def _public_guard(request, call_next):  # type: ignore[no-untyped-def]
+    """Veřejný internet (Funnel): jen v režimu přihlašování a s omezením
+    počtu požadavků z jedné IP (app/public_access.py)."""
+    from app import public_access
+    from app.auth import auth_mode
+
+    if public_access.is_public(request):
+        if auth_mode() != "login":
+            return JSONResponse(status_code=403, content={"detail": "Z internetu jen s přihlášením."})
+        if public_access.over_limit(public_access.client_ip(request)):
+            return JSONResponse(status_code=429, content={"detail": "Moc požadavků, zkus to za chvíli."})
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _log_slow_requests(request, call_next):  # type: ignore[no-untyped-def]
     """Požadavky nad 1,5 s do logu (bez dotazu -- `?t=` je klíč zařízení)."""
     import logging

@@ -28,6 +28,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import AppUser, AuthToken
+from app.public_access import is_public
 from app.utils import utcnow
 
 ADMIN_ID = "demo-user"
@@ -170,6 +171,10 @@ def resolve_user(request: Request) -> tuple[AppUser | None, AppUser | None]:
         # dřív i cookie na 10 let: prohlížeč ji posílal sám a část požadavků
         # šla za jiný profil než zbytek (živě: tvoje nastavení, tátova Domů).
         act_as = request.headers.get("x-act-as") or request.query_params.get("act_as")
+        # Z veřejného internetu (Funnel) se profily nepřepínají -- správa
+        # jen přes Tailscale (app/public_access.py).
+        if is_public(request):
+            act_as = None
         if user.role == "admin" and act_as and act_as != user.id:
             other = session.get(AppUser, act_as)
             if other is not None:
@@ -190,6 +195,9 @@ def get_current_user(request: Request) -> tuple[str, str]:
 def require_admin(request: Request) -> tuple[str, str]:
     """Správcovské věci (kontrola stažených, sken, mazání sdílených
     souborů) -- jen admin a jen za sebe."""
+    if is_public(request):
+        # Správa nikdy z veřejného internetu, ani s klíčem admina.
+        raise HTTPException(status_code=403, detail="Správa jde jen přes Tailscale.")
     user, acting = resolve_user(request)
     if user is None or user.role != "admin":
         raise HTTPException(status_code=403, detail="Tohle může jen správce.")
