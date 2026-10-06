@@ -81,6 +81,19 @@ def test_import_orders_cd_folders_and_numbers_naturally(eng, tmp_path):
         assert s.get(SpokenBook, "b1").storage_dir == str(tmp_path)
 
 
+def test_same_part_titles_become_numbered(eng, tmp_path, monkeypatch):
+    for rel in ["01_Saturnin.mp3", "02_Saturnin.mp3"]:
+        (tmp_path / rel).write_bytes(b"neni zvuk")
+    monkeypatch.setattr(importer, "_tag", lambda audio, *keys: "Saturnin" if "title" in keys else None)
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref=HASH_A, release_title="x", title="x", requested_by_user_id="me"))
+        s.commit()
+    importer.import_book("b1", tmp_path)
+    with Session(eng) as s:
+        files = s.exec(select(SpokenFile).order_by(SpokenFile.position)).all()
+        assert [f.title for f in files] == ["Část 1", "Část 2"]
+
+
 def test_one_format_per_book(tmp_path):
     for rel in ["a/kniha.mp3", "a/kniha_64kb.mp3", "a/kniha.ogg", "a/kniha.m4b"]:
         p = tmp_path / rel

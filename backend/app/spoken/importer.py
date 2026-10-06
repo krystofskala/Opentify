@@ -125,6 +125,11 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
         for path, row in existing.items():
             if path not in keep:
                 session.delete(row)
+        # Všechny části se často jmenují jako kniha ("Saturnin", "Saturnin")
+        # -- v seznamu kapitol by nešly rozlišit, pak radši "Část N".
+        titles = [_tag(audio, "title") or p.stem for p, audio in rows]
+        if len(rows) > 1 and len(set(titles)) < len(titles):
+            titles = [f"Část {i + 1}" for i in range(len(rows))]
         total = 0
         for i, (p, audio) in enumerate(rows):
             length = getattr(getattr(audio, "info", None), "length", None)
@@ -132,7 +137,7 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
             total += duration or 0
             row = existing.get(str(p)) or SpokenFile(book_id=book_id, position=i, path=str(p))
             row.position = i
-            row.title = _tag(audio, "title") or p.stem
+            row.title = titles[i]
             row.duration_ms = duration
             row.chapters = _chapters(p)
             session.add(row)
