@@ -2269,6 +2269,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _unannouncedResume = null;
     if (isSpokenId(info.recordingId)) {
       // Kniha: jen "právě hraje" pro Connect, žádný poslech ani historie.
+      // Předchozí hudební skladbu ale dopočítat (jinak by se ztratil poslech).
+      _finishScrobble();
       _scrobbleId = null;
       if (!paused) _realtime.playbackPlay(info.recordingId, positionMs: resumedAt?.inMilliseconds ?? 0);
       return;
