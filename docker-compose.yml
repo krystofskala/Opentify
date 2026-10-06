@@ -56,6 +56,9 @@ services:
       # Tailscale účet admina (profil podle Tailscale, viz app/auth.py).
       TAILSCALE_ADMIN_LOGIN: ${TAILSCALE_ADMIN_LOGIN:-}
       LOCAL_MUSIC_ROOT: /data/local-music
+      # Podcasty jen na YouTube (app/podcasts/feeds.py) -- stejná cesta jako
+      # stahování hudby z YouTube ve `worker`u.
+      YTDLP_PROXY: ${YTDLP_PROXY:-}
       # Audioknihy: jen aby hledání vědělo, jestli je SkTorrent účet nastavený.
       SKTORRENT_USERNAME: ${SKTORRENT_USERNAME:-}
       SKTORRENT_PASSWORD: ${SKTORRENT_PASSWORD:-}

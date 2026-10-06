@@ -355,7 +355,7 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
             padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.xs),
             child: GlassSearchField(
               controller: _controller,
-              hintText: books ? 'Kniha, autor, kdo čte…' : 'Název podcastu…',
+              hintText: books ? 'Kniha, autor, kdo čte…' : 'Název podcastu nebo odkaz na YouTube kanál…',
               onSubmitted: (q) => setState(() => _query = q.trim()),
               onCleared: () => setState(() => _query = ''),
             ),
@@ -367,7 +367,7 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
                     icon: books ? Symbols.menu_book_rounded : Symbols.podcasts_rounded,
                     message: books
                         ? 'Hledá se v českých a slovenských audioknihách. Stažení začne až po klepnutí na Stáhnout.'
-                        : 'Hledá se v katalogu podcastů. Nové díly odebíraných pořadů najdeš na Domů.',
+                        : 'Hledá se v katalogu podcastů. Pořad, který je jen na YouTube, přidáš vložením odkazu na kanál.',
                   )
                 : books
                     ? _Results(query: _query)

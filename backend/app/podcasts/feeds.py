@@ -203,4 +203,131 @@ async def fetch_feed(url: str) -> dict:
                     raise ValueError("RSS je příliš velké")
         finally:
             await resp.aclose()
+    if is_youtube_feed(url):
+        return await _youtube_feed(bytes(data), url)
     return await asyncio.to_thread(parse_feed, bytes(data))
+
+
+# --- YouTube kanál jako podcast ------------------------------------------------
+#
+# Pořady, které nemají RSS (jen YouTube; Spotify ho mimo svou appku nepustí).
+# Kanál: YouTube RSS (data, pořadí) + seznam videí přes yt-dlp (délky, bez
+# Shorts). Zvuk: yt-dlp najde adresu audia a server ji přeposílá jako
+# u běžné epizody -- stejný yt-dlp a proxy jako stahování hudby z YouTube.
+
+_YT_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id="
+_YT_WATCH = "https://www.youtube.com/watch?v="
+_ATOM = "{http://www.w3.org/2005/Atom}"
+_YT = "{http://www.youtube.com/xml/schemas/2015}"
+_MEDIA = "{http://search.yahoo.com/mrss/}"
+
+
+def youtube_proxy() -> str | None:
+    return os.environ.get("YTDLP_PROXY") or None
+
+
+def is_youtube_feed(url: str) -> bool:
+    return url.startswith(_YT_FEED)
+
+
+def youtube_video_id(audio_url: str) -> str | None:
+    return audio_url[len(_YT_WATCH):] if audio_url.startswith(_YT_WATCH) else None
+
+
+_YT_LINK = re.compile(r"(?:https?://)?(?:www\.|m\.)?youtube\.com/(@[\w.\-]+|channel/UC[\w-]{22}|c/[\w.\-]+)", re.I)
+
+
+def youtube_channel_link(query: str) -> str | None:
+    """Odkaz na kanál / @jméno z vyhledávacího pole, jinak None."""
+    q = query.strip()
+    m = _YT_LINK.search(q)
+    if m:
+        return f"https://www.youtube.com/{m.group(1)}"
+    if re.fullmatch(r"@[\w.\-]{3,}", q):
+        return f"https://www.youtube.com/{q}"
+    return None
+
+
+async def resolve_youtube_channel(link: str) -> dict | None:
+    """Výsledek ve tvaru hledání (`feedUrl` = RSS kanálu), nebo None."""
+    async with httpx.AsyncClient(
+        proxy=youtube_proxy(), timeout=20, follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "cs"}, cookies={"SOCS": "CAI"},
+    ) as c:
+        page = (await c.get(link)).text
+    m = re.search(r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[\w-]{22})"', page) or re.search(
+        r'"channelId":"(UC[\w-]{22})"', page
+    )
+    if not m:
+        return None
+    title = re.search(r'<meta property="og:title" content="([^"]+)"', page)
+    image = re.search(r'<meta property="og:image" content="([^"]+)"', page)
+    return {
+        "itunesId": None,
+        "title": html.unescape(title.group(1)) if title else "YouTube kanál",
+        "author": "YouTube",
+        "artworkUrl": html.unescape(image.group(1)) if image else None,
+        "feedUrl": _YT_FEED + m.group(1),
+    }
+
+
+async def _yt_dlp(*args: str, timeout: float = 90) -> str:
+    cmd = ["yt-dlp", "--no-warnings", *args]
+    if youtube_proxy():
+        cmd[1:1] = ["--proxy", youtube_proxy()]
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise
+    if proc.returncode != 0:
+        raise RuntimeError(f"yt-dlp: {err.decode(errors='replace')[-200:]}")
+    return out.decode()
+
+
+async def youtube_audio_url(video_id: str) -> str:
+    out = await _yt_dlp("-f", "bestaudio[ext=m4a]/bestaudio", "-g", _YT_WATCH + video_id)
+    return out.strip().splitlines()[-1]
+
+
+async def _youtube_feed(xml: bytes, url: str) -> dict:
+    import json
+
+    root = ET.fromstring(xml)
+    channel_id = url[len(_YT_FEED):]
+    try:
+        listing = json.loads(await _yt_dlp(
+            "--flat-playlist", "-J", "--playlist-end", "60", f"https://www.youtube.com/channel/{channel_id}/videos"
+        ))
+    except Exception as e:  # noqa: BLE001 -- bez seznamu aspoň RSS (i s klipy)
+        logger.warning("youtube %s: seznam videí nešel načíst (%s)", channel_id, e)
+        listing = {}
+    durations = {e["id"]: e.get("duration") for e in listing.get("entries") or [] if e.get("id")}
+    episodes = []
+    for entry in root.findall(f"{_ATOM}entry"):
+        vid = _text(entry, f"{_YT}videoId")
+        if not vid or (durations and vid not in durations):
+            continue  # Shorts / klipy nejsou mezi videi kanálu
+        group = entry.find(f"{_MEDIA}group")
+        thumb = group.find(f"{_MEDIA}thumbnail") if group is not None else None
+        published = _text(entry, f"{_ATOM}published")
+        dur = durations.get(vid)
+        episodes.append({
+            "guid": f"yt:{vid}",
+            "title": (_text(entry, f"{_ATOM}title") or "Bez názvu")[:500],
+            "description": _plain(_text(group, f"{_MEDIA}description") if group is not None else None),
+            "publishedAt": datetime.fromisoformat(published) if published else None,
+            "durationMs": int(dur * 1000) if dur else None,
+            "audioUrl": _YT_WATCH + vid,
+            "artworkUrl": thumb.get("url") if thumb is not None else None,
+        })
+    thumbs = listing.get("thumbnails") or []
+    avatar = next((t.get("url") for t in reversed(thumbs) if "avatar" in (t.get("id") or "") or t.get("width") == t.get("height")), None)
+    return {
+        "title": (listing.get("channel") or _text(root, f"{_ATOM}title") or "YouTube kanál")[:500],
+        "author": "YouTube",
+        "description": _plain(listing.get("description")),
+        "artworkUrl": avatar,
+        "episodes": episodes,
+    }

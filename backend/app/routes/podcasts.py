@@ -72,7 +72,15 @@ async def search(q: str, session: Session = Depends(get_session), current: tuple
     q = q.strip()
     if len(q) < 2:
         return {"shows": []}
-    results = await feeds.search(q)
+    # Odkaz na YouTube kanál (pořady jen na YouTube) -> ten kanál.
+    if link := feeds.youtube_channel_link(q):
+        try:
+            channel = await feeds.resolve_youtube_channel(link)
+        except httpx.HTTPError:
+            channel = None
+        results = [channel] if channel else []
+    else:
+        results = await feeds.search(q)
     mine = {
         s.feed_url
         for s in session.exec(
@@ -253,6 +261,8 @@ async def new_episodes(
 
 _final_urls: dict[str, tuple[str, float]] = {}
 _FINAL_URL_TTL = 30 * 60
+# Adresa audia z YouTube platí ~6 h.
+_YT_URL_TTL = 3 * 3600
 _prewarming: set[asyncio.Task] = set()
 
 
@@ -268,6 +278,12 @@ def _prewarm(items: list[tuple[str, str]]) -> None:
             proxy=feeds.proxy(), timeout=httpx.Timeout(20.0), headers={"User-Agent": "Opentify-Podcasts/1.0"}
         ) as c:
             for eid, url in todo:
+                if vid := feeds.youtube_video_id(url):
+                    try:
+                        _final_urls[eid] = (await feeds.youtube_audio_url(vid), time.monotonic() + _YT_URL_TTL)
+                    except Exception:  # noqa: BLE001 -- jen předpříprava
+                        pass
+                    continue
                 try:
                     resp = await feeds.safe_get(c, url, headers={"Range": "bytes=0-0"}, stream=True)
                     if resp.status_code < 400:
@@ -289,22 +305,32 @@ async def stream_episode(episode_id: str, request: Request, session: Session = D
     if ep is None:
         raise HTTPException(status_code=404, detail="epizoda nenalezena")
     headers = {"Range": request.headers["range"]} if request.headers.get("range") else None
+    video = feeds.youtube_video_id(ep.audio_url)
+    # YouTube: stejná proxy jako yt-dlp (adresa audia platí jen pro tu IP).
     client = httpx.AsyncClient(
-        proxy=feeds.proxy(), timeout=httpx.Timeout(30.0, read=90.0), headers={"User-Agent": "Opentify-Podcasts/1.0"}
+        proxy=feeds.youtube_proxy() if video else feeds.proxy(),
+        timeout=httpx.Timeout(30.0, read=90.0),
+        headers={"User-Agent": "Mozilla/5.0" if video else "Opentify-Podcasts/1.0"},
     )
     # Vydavatelé vedou přes řetěz přesměrování (měření poslechů) -- ~3 s.
     # Konečnou adresu si chvíli pamatovat: přetáčení (nový Range) pak hned.
     cached = _final_urls.get(episode_id)
-    url = cached[0] if cached and cached[1] > time.monotonic() else ep.audio_url
+    fresh = cached is not None and cached[1] > time.monotonic()
     try:
+        if video:
+            url = cached[0] if fresh else await feeds.youtube_audio_url(video)
+        else:
+            url = cached[0] if fresh else ep.audio_url
         resp = await feeds.safe_get(client, url, headers=headers, stream=True)
-        if resp.status_code >= 400 and url != ep.audio_url:
+        if resp.status_code >= 400 and fresh:
+            # Zapamatovaná adresa vypršela -> znovu.
             await resp.aclose()
-            resp = await feeds.safe_get(client, ep.audio_url, headers=headers, stream=True)
-    except (feeds.UnsafeUrl, httpx.HTTPError):
+            url = await feeds.youtube_audio_url(video) if video else ep.audio_url
+            resp = await feeds.safe_get(client, url, headers=headers, stream=True)
+    except (feeds.UnsafeUrl, httpx.HTTPError, RuntimeError, asyncio.TimeoutError):
         await client.aclose()
         raise HTTPException(status_code=502, detail="epizodu se nepodařilo načíst od vydavatele")
-    _final_urls[episode_id] = (str(resp.url), time.monotonic() + _FINAL_URL_TTL)
+    _final_urls[episode_id] = (str(resp.url), time.monotonic() + (_YT_URL_TTL if video else _FINAL_URL_TTL))
     if len(_final_urls) > 500:
         _final_urls.pop(next(iter(_final_urls)))
     ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
