@@ -442,6 +442,11 @@ class _SlskdProfile:
     max_peers: int
 
 
+# Dohledání dokončeného souboru: 10 pokusů po 1,5 s (viz `_locate_with_retry`).
+_LOCATE_RETRIES = 10
+_LOCATE_RETRY_S = 1.5
+
+
 def _append_lines(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
@@ -1060,7 +1065,7 @@ class SlskdProvider:
         if source_path is None or (expected_size and _size_of(source_path) != expected_size):
             # Po dokončení přesně podle velikosti -- se třemi workery mohl
             # rostoucí soubor patřit jinému stažení se stejným jménem.
-            source_path = await asyncio.to_thread(self._locate_downloaded_file, basename, remote_dir, since, expected_size)
+            source_path = await self._locate_with_retry(basename, remote_dir, since, expected_size)
         if source_path is None:
             raise _PeerFailed(f"dokončený transfer '{basename}' se nenašel pod {self.downloads_dir}")
         if expected_size and _size_of(source_path) != expected_size:
@@ -1093,6 +1098,19 @@ class SlskdProvider:
             )
         except httpx.HTTPError:
             pass
+
+    async def _locate_with_retry(self, basename: str, remote_dir: str, since: float, size: int) -> Path | None:
+        """slskd hlásí "dokončeno" o chvilku dřív, než soubor přesune ze
+        složky rozpracovaných (přes Docker mount na Windows i se zpožděním)
+        -- živě: soubor se objevil 1 s po vzdání a stažený FLAC propadl na
+        YouTube. Proto pár pokusů s krátkou pauzou."""
+        for attempt in range(_LOCATE_RETRIES + 1):
+            if attempt:
+                await asyncio.sleep(_LOCATE_RETRY_S)
+            found = await asyncio.to_thread(self._locate_downloaded_file, basename, remote_dir, since, size)
+            if found is not None:
+                return found
+        return None
 
     def _locate_downloaded_file(
         self, basename: str, remote_dir: str = "", since: float = 0.0, size: int = 0
