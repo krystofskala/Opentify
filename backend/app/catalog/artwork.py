@@ -23,6 +23,7 @@ import asyncio
 import difflib
 import logging
 import re
+import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -307,10 +308,18 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
 
     from app.catalog.identity import is_own_id, local_only_artist
 
-    if is_own_id(mbid):
-        return False  # vlastní interpret (tátův Kontrast): fotku nikdy podle jména
-    if not mbid and await asyncio.to_thread(local_only_artist, name) is not None:
-        return False  # vlastní hudba: fotku ne podle jména (kapel stejného jména je víc)
+    # Vlastní interpret (tátův Kontrast) / vlastní hudba: fotku nikdy podle
+    # jména (kapel stejného jména je víc). Označit jako zkontrolované --
+    # jinak je `_pending` vracel pořád dokola a smyčka nikdy neusnula
+    # (API trvale na 70-100 % CPU, pomalé spouštění skladeb).
+    if is_own_id(mbid) or (not mbid and await asyncio.to_thread(local_only_artist, name) is not None):
+        with Session(engine) as session:
+            artist = session.get(Artist, artist_id)
+            if artist is not None:
+                artist.external_refs = _mark_checked(artist.external_refs or {})
+                session.add(artist)
+                session.commit()
+        return False
     picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force, deezer_id=deezer_id)
 
     with Session(engine) as session:
@@ -327,7 +336,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
     return picture is not None
 
 
-def _pending(limit: int) -> tuple[list[str], list[str], list[str]]:
+def _pending(limit: int, skip: frozenset[str] = frozenset()) -> tuple[list[str], list[str], list[str]]:
     """Nejdřív to, co je v knihovně (má přehratelnou skladbu) -- to uživatel
     vidí na Domů/Knihovně, zbytek katalogu (výsledky hledání, diskografie)
     až potom."""
@@ -349,17 +358,28 @@ def _pending(limit: int) -> tuple[list[str], list[str], list[str]]:
         releases = [
             r
             for r in session.exec(select(Release)).all()
-            if not r.images and not _recently_checked(r.external_refs or {})
+            if not r.images and not _recently_checked(r.external_refs or {}) and r.id not in skip
         ]
         artists = [
             a
             for a in session.exec(select(Artist)).all()
             if (not a.images or _is_deezer_placeholder(a.images[0])) and not _recently_checked(a.external_refs or {})
+            and a.id not in skip
         ]
-        banner_ids = pending_banner_artist_ids(session, library_artist_ids, limit)
+        banner_ids = [
+            i for i in pending_banner_artist_ids(session, library_artist_ids, limit + len(skip))
+            if f"banner:{i}" not in skip
+        ][:limit]
     releases.sort(key=lambda r: r.id not in library_release_ids)
     artists.sort(key=lambda a: a.id not in library_artist_ids)
     return [r.id for r in releases[:limit]], [a.id for a in artists[:limit]], banner_ids
+
+
+# Položky zkoušené v posledních `_RETRY_AFTER_S` (id -> čas): smyčka je
+# znovu nebere, ani když se nepodařilo je označit (síťová chyba, nový
+# speciální případ) -- jinak by točila naprázdno bez pauzy.
+_attempted: dict[str, float] = {}
+_RETRY_AFTER_S = 3600.0
 
 
 artwork_progress: dict[str, int | bool] = {"running": False, "filled": 0, "checked": 0, "embedded": 0}
@@ -416,7 +436,13 @@ async def artwork_backfill_loop(idle_interval_s: float = 300.0, pause_s: float =
         logger.exception("artwork: průchod vloženými obaly selhal")
     while True:
         try:
-            release_ids, artist_ids, banner_ids = await asyncio.to_thread(_pending, 40)
+            now = time.monotonic()
+            skip = frozenset(k for k, at in _attempted.items() if now - at < _RETRY_AFTER_S)
+            release_ids, artist_ids, banner_ids = await asyncio.to_thread(_pending, 40, skip)
+            for i in release_ids + artist_ids:
+                _attempted[i] = now
+            for i in banner_ids:
+                _attempted[f"banner:{i}"] = now
             if not release_ids and not artist_ids and not banner_ids:
                 artwork_progress["running"] = False
                 await asyncio.sleep(idle_interval_s)

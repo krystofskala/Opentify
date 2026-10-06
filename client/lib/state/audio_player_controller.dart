@@ -1458,8 +1458,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   String _switchTag = '';
   final List<String> _startSamples = [];
 
+  /// Generace zdroje v okamžiku přepnutí: počítá se až pozice NOVĚ
+  /// načteného zdroje. Dřív stačila pozice ještě hrající předchozí skladby
+  /// a u stažených skladeb vycházely nesmyslné 2-4 ms (web test 6. 10.).
+  int _switchGen = -1;
+
   void _markSwitch(String tag) {
     _switchAt = DateTime.now();
+    _switchGen = _sourceGen;
     _switchTag = '$_switchKind $tag${_radioMode ? ' radio' : ''}';
     _switchKind = 'manual';
   }
@@ -1467,6 +1473,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   void _maybeRecordStart(Duration position) {
     final at = _switchAt;
     if (at == null || _priming || !_player.playing || position <= Duration.zero) return;
+    if (_readyGen <= _switchGen || _readyGen != _sourceGen) return;
     _switchAt = null;
     final ms = DateTime.now().difference(at).inMilliseconds;
     if (ms > 120000) return; // mezitím pauza / pryč od appky

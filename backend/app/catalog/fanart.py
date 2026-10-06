@@ -117,6 +117,8 @@ def pending_banner_artist_ids(session: Session, library_artist_ids: set[str], li
         a
         for a in session.exec(select(Artist).where(Artist.mbid.is_not(None))).all()  # type: ignore[union-attr]
         if not (a.external_refs or {}).get("bannerUrl") and not _recently_checked(a.external_refs or {})
+        # Vlastní interpret ("own:..." není MusicBrainz) -- fanart.tv ho nezná.
+        and not str(a.mbid).startswith("own:")
     ]
     candidates.sort(key=lambda a: a.id not in library_artist_ids)
     return [a.id for a in candidates[:limit]]
