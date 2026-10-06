@@ -65,10 +65,11 @@ def expired(req: DownloadRequest) -> bool:
     return utcnow() - aware(req.created_at) > timedelta(hours=VALID_H)
 
 
-def out(req: DownloadRequest) -> dict:
+def out(req: DownloadRequest, user_name: str | None = None) -> dict:
     return {
         "id": req.id,
         "userId": req.user_id,
+        "userName": user_name,
         "title": req.title,
         "sizeBytes": req.size_bytes,
         "reason": req.reason,

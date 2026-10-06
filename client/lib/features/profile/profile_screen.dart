@@ -236,6 +236,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             onPressed: () => context.push('/verify-downloads'),
                           ),
                           _ActionRow(
+                            icon: Symbols.inbox_rounded,
+                            title: 'Žádosti o stažení',
+                            description: 'Co si kdo chce stáhnout a musíš schválit (velké audioknihy, audioknihy z internetu). '
+                                'Stejné jako tlačítka v upozornění na telefonu.',
+                            buttonLabel: 'Otevřít',
+                            onPressed: () => context.push('/download-requests'),
+                          ),
+                          _ActionRow(
                             icon: Symbols.speed_rounded,
                             title: 'Test přehrávání',
                             description: 'Appka sama pustí asi 20 skladeb jako ty a změří, za jak dlouho začnou hrát. '

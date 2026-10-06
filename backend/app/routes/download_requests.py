@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 from app import download_requests as dr
 from app.auth import require_admin
 from app.db import get_session
-from app.models import DownloadRequest
+from app.models import AppUser, DownloadRequest
 from app.notify import notify
 from app.utils import utcnow
 
@@ -66,7 +66,10 @@ async def decide_by_link(req_id: str, t: str = "", a: str = "", session: Session
 @download_requests_router.get("")
 def list_requests(_admin=Depends(require_admin), session: Session = Depends(get_session)):
     rows = session.exec(select(DownloadRequest).order_by(DownloadRequest.created_at.desc()).limit(50)).all()
-    return {"requests": [dr.out(r) for r in rows]}
+    names = {u.id: u.name for u in session.exec(select(AppUser).where(AppUser.id.in_({r.user_id for r in rows}))).all()}  # type: ignore[attr-defined]
+    # Čekající nahoře, pak vyřízené (nejnovější první).
+    rows = sorted(rows, key=lambda r: r.status != "pending")
+    return {"requests": [dr.out(r, names.get(r.user_id)) for r in rows]}
 
 
 @download_requests_router.post("/{req_id}/approve")
