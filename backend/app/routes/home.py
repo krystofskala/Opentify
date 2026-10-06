@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -133,6 +134,45 @@ async def discoveries(current: tuple[str, str] = Depends(get_current_user)):
             return out
 
     return {**{k: v for k, v in data.items() if k != "recentCaught"}, "recentCaught": await asyncio.to_thread(tracks)}
+
+
+@home_router.get("/history")
+def history(
+    limit: int = 100,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Profil › Historie: posledních `limit` poslechů profilu v appce,
+    nejnovější první, i opakované skladby. Importy z jiných služeb ne (staré
+    poslechy jinde). "Puštěné" = poslech (polovina / 4 min), ne každé
+    rozehrání -- přeskočené skladby by historii zahltily."""
+    from app.home.service import _recording_out
+
+    user_id, _device_id = current
+    limit = max(1, min(limit, 200))
+    listens = session.exec(
+        select(Listen)
+        .where(Listen.user_id == user_id, (Listen.source.is_(None)) | (Listen.source.notin_(IMPORTED_SOURCES)))  # type: ignore[union-attr]
+        .order_by(Listen.played_at.desc())  # type: ignore[attr-defined]
+        .limit(limit)
+    ).all()
+    outs: dict[str, dict] = {}
+    items = []
+    for listen in listens:
+        if listen.recording_id not in outs:
+            recording = session.get(Recording, listen.recording_id)
+            if recording is None:
+                continue
+            outs[listen.recording_id] = _recording_out(session, recording).model_dump(mode="json", by_alias=True)
+        played = listen.played_at
+        items.append(
+            {
+                **outs[listen.recording_id],
+                "playedAt": (played if played.tzinfo else played.replace(tzinfo=timezone.utc)).isoformat(),
+                "playedFrom": listen.source,
+            }
+        )
+    return {"items": items}
 
 
 @home_router.get("/recent")

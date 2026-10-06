@@ -195,6 +195,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           onPressed: () => context.push('/discoveries'),
                         ),
                         _ActionRow(
+                          icon: Symbols.history_rounded,
+                          title: 'Historie',
+                          description: 'Posledních 100 skladeb, které sis v appce poslechl, a odkud hrály.',
+                          buttonLabel: 'Otevřít',
+                          onPressed: () => context.push('/history'),
+                        ),
+                        _ActionRow(
                           icon: Symbols.cloud_upload_rounded,
                           title: 'Import ze Spotify, Apple Music a YouTube Music',
                           description: 'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
