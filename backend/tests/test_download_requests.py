@@ -10,6 +10,7 @@ from starlette.requests import Request
 import app.download_limits as dl
 import app.download_requests as dr
 import app.routes.download_requests as dr_routes
+import app.routes.download_requests as dr_routes_mod
 import app.routes.spoken as spoken
 import app.spoken.importer as importer
 from app.models import AppUser, DownloadRequest, SpokenBook
@@ -25,6 +26,7 @@ def eng(monkeypatch):
         monkeypatch.setattr(mod, "engine", e)
     sent = []
     monkeypatch.setattr(dr, "notify", lambda *a, **k: sent.append((a, k)) or True)
+    monkeypatch.setattr(dr_routes_mod, "notify", lambda *a, **k: sent.append((a, k)) or True)
     with Session(e) as s:
         s.add(AppUser(id="pepa", name="Pepa", role="user"))
         s.commit()
@@ -55,6 +57,7 @@ def test_public_audiobook_becomes_request_and_link_approves_once(eng, monkeypatc
         assert e.value.status_code == 404
         res = asyncio.run(dr_routes.decide_by_link(req.id, t=token, a="approve", session=s))
         assert res["status"] == "approved"
+        assert "Povoleno" in eng.sent[-1][0][0]  # potvrzení na telefon
         book = s.exec(select(SpokenBook)).one()
         assert book.requested_by_user_id == "pepa"
         again = asyncio.run(dr_routes.decide_by_link(req.id, t=token, a="deny", session=s))

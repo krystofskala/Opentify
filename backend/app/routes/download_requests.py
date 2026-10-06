@@ -15,6 +15,7 @@ from app import download_requests as dr
 from app.auth import require_admin
 from app.db import get_session
 from app.models import DownloadRequest
+from app.notify import notify
 from app.utils import utcnow
 
 download_requests_router = APIRouter(prefix="/download-requests", tags=["download-requests"])
@@ -22,6 +23,8 @@ download_requests_router = APIRouter(prefix="/download-requests", tags=["downloa
 
 async def _decide(session: Session, req: DownloadRequest, approve: bool) -> dict:
     if req.status != "pending":
+        label = {"approved": "povolená", "denied": "zamítnutá", "expired": "vypršelá"}.get(req.status, req.status)
+        notify(f"ℹ️ Žádost už je {label}", req.title, tags=["information_source"], key=f"already:{req.id}", every_s=60)
         return {"ok": True, "status": req.status, "title": req.title, "already": True}
     if dr.expired(req):
         req.status = "expired"
@@ -40,6 +43,12 @@ async def _decide(session: Session, req: DownloadRequest, approve: bool) -> dict
     req.decided_at = utcnow()
     session.add(req)
     session.commit()
+    # Potvrzení na telefon -- ntfy na iPhonu po klepnutí na tlačítko nic
+    # neukáže (živě: "nevypadalo, že by se něco stalo").
+    if approve:
+        notify("✅ Povoleno – stahuje se", req.title, tags=["white_check_mark"])
+    else:
+        notify("❌ Zamítnuto", req.title, tags=["x"])
     return {"ok": True, "status": req.status, "title": req.title}
 
 
