@@ -49,3 +49,17 @@ def test_sliding_window_forgets_old_hits():
     assert not any(pa.over_limit("x", now=t, limit=2) for t in (0, 1))
     assert pa.over_limit("x", now=2, limit=2)
     assert not pa.over_limit("x", now=62, limit=2)
+
+
+def test_audiobook_downloads_only_through_tailscale():
+    from app.public_access import deny_public
+    from app.routes import spoken
+
+    with pytest.raises(HTTPException) as e:
+        deny_public(_request(FUNNEL))
+    assert e.value.status_code == 403
+    deny_public(_request({}))  # tailnet: projde
+    # stahování i "Zkusit znovu" mají tuhle kontrolu
+    for route in spoken.spoken_router.routes:
+        if route.path in ("/spoken/books", "/spoken/books/{book_id}/retry") and "POST" in route.methods:
+            assert any(d.call is deny_public for d in route.dependant.dependencies), route.path

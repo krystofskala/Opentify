@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
+from app.public_access import deny_public
 from app.db import get_session
 from app.models import SpokenBook, SpokenFile, SpokenProgress
 from app.spoken import sktorrent, slsk_books
@@ -149,6 +150,7 @@ async def acquire(
     body: AcquireIn,
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
+    _local_only: None = Depends(deny_public),
 ):
     """"Stáhnout": jednorázově, jen na pokyn. Stejné vydání podruhé = stejná
     kniha (a její stav); po chybě se zkusí znovu."""
@@ -337,7 +339,12 @@ def _failed_book(session: Session, book_id: str) -> SpokenBook:
 
 
 @spoken_router.post("/books/{book_id}/retry", status_code=202)
-def retry(book_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+def retry(
+    book_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+    _local_only: None = Depends(deny_public),
+):
     """Nepovedené stažení znovu (stejné vydání, stejný výběr souborů)."""
     book = _failed_book(session, book_id)
     book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()

@@ -17,12 +17,21 @@ from __future__ import annotations
 import time
 from collections import deque
 
+from fastapi import HTTPException, Request
+
 FUNNEL_HEADER = "tailscale-funnel-request"
 
 # Požadavků za minutu z jedné IP. Přehrávač stahuje skladbu po kouscích
 # (Range), takže strop je volný; přihlášení má vlastní přísnější limit.
 PUBLIC_RATE_PER_MIN = 600
 _hits: dict[str, deque[float]] = {}
+
+
+def deny_public(request: Request) -> None:
+    """Závislost pro věci, které zvenku zatím nejdou (stahování audioknih
+    -- desítky GB, limity na uživatele ještě nejsou)."""
+    if is_public(request):
+        raise HTTPException(status_code=403, detail="Tohle jde zatím jen přes Tailscale.")
 
 
 def is_public(conn) -> bool:  # Request i WebSocket mají `.headers`
