@@ -5,6 +5,7 @@ import 'dart:math' show Random, pow;
 import 'dart:typed_data' show BytesBuilder;
 
 import 'package:audio_session/audio_session.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
 // Flutter má od 3.47 vlastní `RepeatMode` (`RepeatingAnimationBuilder`) --
 // skrytý, ať nekoliduje s naším (viz níže).
@@ -15,7 +16,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
-import '../core/device_token.dart' show withDeviceToken;
+import '../core/device_token.dart' show authHeaders, withDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
 import '../core/prefetch_cache.dart';
 import '../core/media_session.dart';
@@ -1767,7 +1768,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final nextIndex = state.nextIndex;
     if (nextIndex == null || nextIndex >= state.queue.length) return;
     final next = state.queue[nextIndex];
-    if (next.recordingId == current.recordingId || isSpokenId(next.recordingId)) return;
+    if (next.recordingId == current.recordingId) return;
+    // Další kapitola / epizoda: jen předem do telefonu (nic se neobstarává).
+    if (isSpokenId(next.recordingId)) {
+      unawaited(_prefetchFile(next.recordingId));
+      return;
+    }
 
     final provisioning = _ref.read(provisioningControllerProvider.notifier);
     final nextState = _ref.read(provisioningControllerProvider)[next.recordingId];
@@ -1786,6 +1792,23 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   final Map<String, String> _prefetched = {};
   final Set<String> _prefetching = {};
 
+  /// Kapitolu nad tuhle velikost předem do telefonu nestahovat.
+  static const _maxSpokenPrefetchBytes = 200 * 1024 * 1024;
+
+  /// Velikost souboru na serveru (1 bajt s Range -> Content-Range), bez stažení.
+  Future<int?> _remoteSize(String path) async {
+    try {
+      final url = withDeviceToken('${_ref.read(apiClientProvider).baseUrl}$path');
+      final resp = await http
+          .get(Uri.parse(url), headers: {'Range': 'bytes=0-0', ...authHeaders()})
+          .timeout(const Duration(seconds: 20));
+      final range = resp.headers['content-range'];
+      return range == null ? null : int.tryParse(range.split('/').last);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _prefetchFile(String id) async {
     if (!PrefetchCache.supported || _radioMode || _prefetched.containsKey(id) || !_prefetching.add(id)) return;
     try {
@@ -1795,16 +1818,26 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _prefetched[id] = earlier;
         return;
       }
-      // Soubor musí být na serveru celý (ne ještě se stahující).
-      final deadline = DateTime.now().add(const Duration(minutes: 3));
-      while (true) {
-        final s = _ref.read(provisioningControllerProvider)[id];
-        if (s != null && s.isAvailable && s.streamUrl != null) break;
-        if (s == null || s.isFailed || DateTime.now().isAfter(deadline)) return;
-        await Future<void>.delayed(const Duration(seconds: 3));
+      final String path;
+      if (isSpokenId(id)) {
+        // Kapitola knihy / epizoda: na serveru je celá; obří soubor (celá
+        // kniha v jednom m4b) dopředu ne -- paměť i data.
+        final episode = podcastEpisodeId(id);
+        path = episode != null ? '/podcasts/episodes/$episode/stream' : '/spoken/files/${spokenParts(id)!.fileId}/stream';
+        final size = await _remoteSize(path);
+        if (size == null || size > _maxSpokenPrefetchBytes) return;
+      } else {
+        // Soubor musí být na serveru celý (ne ještě se stahující).
+        final deadline = DateTime.now().add(const Duration(minutes: 3));
+        while (true) {
+          final s = _ref.read(provisioningControllerProvider)[id];
+          if (s != null && s.isAvailable && s.streamUrl != null) break;
+          if (s == null || s.isFailed || DateTime.now().isAfter(deadline)) return;
+          await Future<void>.delayed(const Duration(seconds: 3));
+        }
+        path = '/tracks/$id/stream';
       }
-      final bytes =
-          await _ref.read(apiClientProvider).getBytes('/tracks/$id/stream', timeout: const Duration(minutes: 3));
+      final bytes = await _ref.read(apiClientProvider).getBytes(path, timeout: const Duration(minutes: 5));
       final url = await PrefetchCache.put(id, bytes);
       if (url != null) _prefetched[id] = url;
     } catch (e) {
@@ -2048,6 +2081,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Mluvené slovo: nic se neobstarává (kniha je na serveru celá, podcast
     // server přeposílá). Epizoda stažená do telefonu hraje odtud.
     if (isSpokenId(info.recordingId)) {
+      // Další kapitola předem v telefonu (jako u hudby) -- hned a bez sítě.
+      final ready = _radioMode ? null : _prefetched[info.recordingId];
+      if (ready != null) {
+        unawaited(_startStream(info, ready, isProgressive: false, isLocal: true));
+        return;
+      }
       if (podcastEpisodeId(info.recordingId) != null && offline.has(info.recordingId)) {
         final local = await offline.localUrl(info.recordingId);
         if (state.nowPlaying?.recordingId != info.recordingId) return;

@@ -24,7 +24,11 @@ String _ext(Uint8List b) {
   return 'mp3';
 }
 
+// Kapitola / epizoda má v id dvojtečky (`sp:kniha:soubor`) -- do jména souboru ne.
+String _name(String id) => id.replaceAll(':', '_');
+
 Future<File?> _find(String id) async {
+  id = _name(id);
   final dir = await _dir();
   for (final ext in const ['mp3', 'm4a', 'flac', 'ogg']) {
     final f = File('${dir.path}/$id.$ext');
@@ -34,6 +38,7 @@ Future<File?> _find(String id) async {
 }
 
 Future<String?> put(String id, Uint8List bytes) async {
+  id = _name(id);
   final dir = await _dir();
   final tmp = File('${dir.path}/$id.part');
   await tmp.writeAsBytes(bytes, flush: true);
