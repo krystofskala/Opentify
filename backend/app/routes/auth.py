@@ -594,9 +594,10 @@ async def login(body: LoginIn, request: Request, response: Response):
     # Chybějící kód se hlásí PŘED ověřením hesla -- odpověď tak neprozradí,
     # jestli heslo sedělo.
     if need_code and len(_norm_pair(body.code)) != 8:
+        _notify_failed_login(request, username, "bez kódu zařízení")
         raise HTTPException(
             status_code=401,
-            detail="Zadej kód zařízení – vytvoří ho správce, nebo ty v Profilu na zařízení, kde už jsi přihlášený.",
+            detail="Zadej kód zařízení – vytvoří ho správce.",
         )
     with Session(engine) as session:
         rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
@@ -609,6 +610,7 @@ async def login(body: LoginIn, request: Request, response: Response):
             await _login_ok(request, username)
         if not ok:
             session.rollback()
+            _notify_failed_login(request, username, "špatné jméno, heslo nebo kód")
             await asyncio.sleep(1.0)  # zpomalit hádání
             raise HTTPException(
                 status_code=401,
@@ -619,6 +621,16 @@ async def login(body: LoginIn, request: Request, response: Response):
     _set_cookie(response, TOKEN_COOKIE, token)
     response.delete_cookie(ACT_AS_COOKIE, path="/")
     return {"user": out, "acting": out, "token": token}
+
+
+def _notify_failed_login(request: Request, username: str, why: str) -> None:
+    """Neúspěšné přihlášení z internetu (Funnel) -- typicky bot. Jedna IP
+    nejvýš jednou za hodinu; z tailnetu nic (to jsem já / rodina)."""
+    if not is_public(request):
+        return
+    ip = client_ip(request)
+    notify("🤖 Pokus o přihlášení z internetu", f"Jméno „{username[:40]}“ · {why} · {ip}",
+           tags=["robot"], key=f"login-fail:{ip}", every_s=3600)
 
 
 def _token_label(request: Request, device: str | None) -> str:
