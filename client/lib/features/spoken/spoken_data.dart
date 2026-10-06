@@ -245,6 +245,22 @@ Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, St
   ref.invalidate(spokenForeignSearchProvider);
 }
 
+/// Nepovedené stažení znovu (stejné vydání).
+Future<void> retrySpokenBook(WidgetRef ref, String bookId) async {
+  await ref.read(apiClientProvider).postJson('/spoken/books/$bookId/retry');
+  ref.invalidate(spokenBookProvider(bookId));
+  ref.invalidate(spokenBooksProvider);
+}
+
+/// Odebrat knihu, jejíž stažení selhalo.
+Future<void> removeSpokenBook(WidgetRef ref, String bookId) async {
+  await ref.read(apiClientProvider).deleteJson('/spoken/books/$bookId');
+  ref.invalidate(spokenBooksProvider);
+}
+
+/// Hledání, které má Hledání (audioknihy) otevřít -- "Jiná verze" u knihy.
+final spokenSearchRequestProvider = StateProvider<String?>((ref) => null);
+
 /// Záloha za českou verzi: Soulseek (typicky anglické originály) -- zvlášť,
 /// je pomalejší (~10 s).
 final spokenForeignSearchProvider = FutureProvider.autoDispose.family<List<SpokenRelease>, String>((ref, q) async {

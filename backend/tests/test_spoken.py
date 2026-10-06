@@ -276,3 +276,22 @@ def test_first_chapter_playable_before_the_rest(eng, tmp_path, monkeypatch):
     with Session(eng) as s:
         assert s.get(SpokenBook, "b1").status == "ready"
         assert len(s.exec(select(SpokenFile)).all()) == 2
+
+
+def test_failed_book_can_be_retried_or_removed_ready_cannot(eng):
+    with Session(eng) as s:
+        s.add(SpokenBook(id="bad", source_ref=HASH_A, release_title="x", title="x", status="failed", error="e", requested_by_user_id="me"))
+        s.add(SpokenBook(id="ok", source_ref=HASH_B, release_title="y", title="y", status="ready", requested_by_user_id="me"))
+        s.add(SpokenFile(id="f1", book_id="bad", position=0, path="/data/spoken/x.mp3"))
+        s.commit()
+        assert routes.retry("bad", session=s, current=("me", "d"))["status"] == "pending"
+        with pytest.raises(HTTPException):
+            routes.remove_failed("bad", session=s, current=("me", "d"))  # už se zase stahuje
+        s.get(SpokenBook, "bad").status = "failed"
+        s.commit()
+        routes.remove_failed("bad", session=s, current=("me", "d"))
+        assert s.get(SpokenBook, "bad") is None and s.get(SpokenFile, "f1") is None
+        with pytest.raises(HTTPException):
+            routes.remove_failed("ok", session=s, current=("me", "d"))
+        with pytest.raises(HTTPException):
+            routes.retry("ok", session=s, current=("me", "d"))

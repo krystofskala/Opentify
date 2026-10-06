@@ -311,3 +311,36 @@ def save_progress(
     session.add(p)
     session.commit()
     return {"ok": True}
+
+
+def _failed_book(session: Session, book_id: str) -> SpokenBook:
+    book = session.get(SpokenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="kniha neexistuje")
+    if book.status != "failed":
+        raise HTTPException(status_code=409, detail="jde jen u knihy, jejíž stažení selhalo")
+    return book
+
+
+@spoken_router.post("/books/{book_id}/retry", status_code=202)
+def retry(book_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Nepovedené stažení znovu (stejné vydání, stejný výběr souborů)."""
+    book = _failed_book(session, book_id)
+    book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    return book_out(book)
+
+
+@spoken_router.delete("/books/{book_id}", status_code=204)
+def remove_failed(book_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Odebrat knihu, jejíž stažení selhalo (hotové knihy se nemažou --
+    jsou sdílené jako hudba)."""
+    book = _failed_book(session, book_id)
+    for row in session.exec(select(SpokenProgress).where(SpokenProgress.book_id == book_id)).all():
+        session.delete(row)
+    for row in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():
+        session.delete(row)
+    session.delete(book)
+    session.commit()

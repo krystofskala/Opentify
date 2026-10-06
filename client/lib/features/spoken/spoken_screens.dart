@@ -390,6 +390,23 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
   String _query = '';
 
   @override
+  void initState() {
+    super.initState();
+    // "Jiná verze" z detailu knihy: hledat rovnou její název.
+    final request = ref.read(spokenSearchRequestProvider);
+    if (request != null) {
+      _apply(request);
+      Future.microtask(() => ref.read(spokenSearchRequestProvider.notifier).state = null);
+    }
+  }
+
+  void _apply(String q) {
+    _controller.text = q;
+    _query = q;
+    ref.read(spokenKindProvider.notifier).state = SpokenKind.books;
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -397,6 +414,11 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(spokenSearchRequestProvider, (_, q) {
+      if (q == null) return;
+      setState(() => _apply(q));
+      ref.read(spokenSearchRequestProvider.notifier).state = null;
+    });
     final kind = ref.watch(spokenKindProvider);
     final books = kind == SpokenKind.books;
     return Scaffold(
@@ -766,6 +788,10 @@ class SpokenBookScreen extends ConsumerWidget {
                 style: muted,
                 textAlign: TextAlign.center,
               ),
+              if (book.status == 'failed') ...[
+                const SizedBox(height: AppSpacing.md),
+                _FailedActions(book: book),
+              ],
               if (book.status == 'downloading') ...[
                 const SizedBox(height: AppSpacing.xs),
                 LinearProgressIndicator(value: book.downloadProgress, minHeight: 4),
@@ -815,6 +841,60 @@ class SpokenBookScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Stažení selhalo: znovu, jiná verze (hledání s názvem knihy), nebo pryč.
+class _FailedActions extends ConsumerWidget {
+  const _FailedActions({required this.book});
+  final SpokenBook book;
+
+  /// "55-Heir to the Empire" -> "Heir to the Empire" (+ autor, je-li).
+  String get _query {
+    final title = book.title.replaceFirst(RegExp(r'^\d+\s*[-.]\s*'), '').replaceAll(RegExp(r'[\[(].*?[\])]'), '').trim();
+    return [title, if (book.author != null) book.author!].join(' ');
+  }
+
+  Future<void> _run(BuildContext context, Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (_) {
+      if (context.mounted) {
+        showToast(ScaffoldMessenger.maybeOf(context), 'Nepodařilo se, zkus to znovu.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Wrap(
+        alignment: WrapAlignment.center,
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          GlassButton(
+            label: 'Zkusit znovu',
+            icon: Symbols.refresh_rounded,
+            style: GlassButtonStyle.prominent,
+            onPressed: () => _run(context, () => retrySpokenBook(ref, book.id)),
+          ),
+          GlassButton(
+            label: 'Jiná verze',
+            icon: Symbols.search_rounded,
+            onPressed: () {
+              ref.read(spokenSearchRequestProvider.notifier).state = _query;
+              context.go('/search');
+            },
+          ),
+          GlassButton(
+            label: 'Odebrat',
+            icon: Symbols.delete_rounded,
+            style: GlassButtonStyle.plain,
+            onPressed: () => _run(context, () async {
+              await removeSpokenBook(ref, book.id);
+              if (context.mounted) context.pop();
+            }),
+          ),
+        ],
+      );
 }
 
 String _clock(int ms) {
