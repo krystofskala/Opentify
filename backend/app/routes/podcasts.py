@@ -17,8 +17,8 @@ from starlette.background import BackgroundTask
 
 from app.auth import get_current_user
 from app.db import get_session
-from app.models import PodcastEpisode, PodcastProgress, PodcastShow, PodcastSubscription
-from app.podcasts import feeds, service
+from app.models import PodcastEpisode, PodcastNameMatch, PodcastProgress, PodcastShow, PodcastSubscription
+from app.podcasts import feeds, history, service
 from app.utils import utcnow
 
 podcasts_router = APIRouter(prefix="/podcasts", tags=["podcasts"])
@@ -139,6 +139,11 @@ async def show_detail(show_id: str, session: Session = Depends(get_session), cur
         .limit(200)
     ).all()
     progress = _progress_map(session, current[0], [e.id for e in episodes])
+    # Nejspíš pustí rozposlouchané nebo nejnovější nepřehrané -- dohledat
+    # jejich konečnou adresu předem (start pak ~0,2 s místo ~4 s).
+    likely = [e for e in episodes if (p := progress.get(e.id)) is not None and not p.finished and p.position_ms > 0][:2]
+    likely += [e for e in episodes if not (progress.get(e.id) and progress[e.id].finished)][:2]
+    _prewarm([(e.id, e.audio_url) for e in likely])
     return {
         **_show_out(show, show_id in _subscribed_ids(session, current[0])),
         "episodes": [_episode_out(e, show, progress.get(e.id)) for e in episodes],
@@ -146,13 +151,59 @@ async def show_detail(show_id: str, session: Session = Depends(get_session), cur
 
 
 @podcasts_router.put("/shows/{show_id}/subscription")
-def subscribe(show_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
-    if session.get(PodcastShow, show_id) is None:
+async def subscribe(show_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    show = session.get(PodcastShow, show_id)
+    if show is None:
         raise HTTPException(status_code=404, detail="pořad nenalezen")
     if show_id not in _subscribed_ids(session, current[0]):
         session.add(PodcastSubscription(user_id=current[0], show_id=show_id))
         session.commit()
-    return {"subscribed": True}
+    # Epizody doposlouchané na Spotify (historie z importu) -> přehrané.
+    if show.fetched_at is None:
+        await service.refresh(show.id, show.feed_url)
+    marked = await asyncio.to_thread(history.mark_finished_from_history, current[0], show_id)
+    return {"subscribed": True, "markedFromHistory": marked}
+
+
+@podcasts_router.get("/history")
+def listen_history(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """"Poslouchal jsi na Spotify": pořady z importované historie, nejvíc
+    poslouchané první, u každého pořad z katalogu (párování běží na pozadí,
+    `pending` = ještě se hledá; `found` False = jen na Spotify)."""
+    shows = history.overview(current[0])
+    if not shows:
+        return {"shows": []}
+    matches = {
+        m.name: m
+        for m in session.exec(
+            select(PodcastNameMatch).where(PodcastNameMatch.name.in_([s["name"] for s in shows]))  # type: ignore[attr-defined]
+        ).all()
+    }
+    feeds_ = [m.feed_url for m in matches.values() if m.feed_url]
+    by_feed = {s.feed_url: s for s in session.exec(select(PodcastShow).where(PodcastShow.feed_url.in_(feeds_))).all()}  # type: ignore[attr-defined]
+    mine = _subscribed_ids(session, current[0])
+    out = []
+    for s in shows:
+        m = matches.get(s["name"])
+        local = by_feed.get(m.feed_url) if m and m.feed_url else None
+        out.append(
+            {
+                "name": s["name"],
+                "listenedMs": s["ms"],
+                "episodes": s["episodes"],
+                "lastPlayedAt": s["last"].isoformat() if s["last"] else None,
+                "pending": m is None,
+                "found": bool(m and m.feed_url),
+                "feedUrl": m.feed_url if m else None,
+                "title": (m.title if m and m.title else s["name"]),
+                "author": m.author if m else None,
+                "artworkUrl": m.artwork_url if m else None,
+                "itunesId": m.itunes_id if m else None,
+                "showId": local.id if local else None,
+                "subscribed": bool(local and local.id in mine),
+            }
+        )
+    return {"shows": out}
 
 
 @podcasts_router.delete("/shows/{show_id}/subscription")
@@ -166,7 +217,7 @@ def unsubscribe(show_id: str, session: Session = Depends(get_session), current: 
 
 
 @podcasts_router.get("/new")
-def new_episodes(
+async def new_episodes(
     limit: int = 30, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)
 ):
     """Nejnovější epizody odebíraných pořadů (Domů mluveného slova) a
@@ -192,6 +243,7 @@ def new_episodes(
             show = shows.get(ep.show_id) or session.get(PodcastShow, ep.show_id)
             in_progress.append(_episode_out(ep, show, p))
     progress = _progress_map(session, current[0], [e.id for e in episodes])
+    _prewarm([(e["id"], session.get(PodcastEpisode, e["id"]).audio_url) for e in in_progress[:3]])
     return {
         "inProgress": in_progress,
         "episodes": [_episode_out(e, shows.get(e.show_id), progress.get(e.id)) for e in episodes],
@@ -199,6 +251,33 @@ def new_episodes(
 
 
 _final_urls: dict[str, tuple[str, float]] = {}
+_FINAL_URL_TTL = 30 * 60
+_prewarming: set[asyncio.Task] = set()
+
+
+def _prewarm(items: list[tuple[str, str]]) -> None:
+    """Na pozadí projít řetěz přesměrování vydavatele (1 bajt) a zapamatovat
+    si konečnou adresu -- jen pro pár epizod, které uživatel nejspíš pustí."""
+    todo = [(eid, url) for eid, url in dict(items).items() if not (_final_urls.get(eid, ("", 0.0))[1] > time.monotonic())]
+    if not todo:
+        return
+
+    async def run() -> None:
+        async with httpx.AsyncClient(
+            proxy=feeds.proxy(), timeout=httpx.Timeout(20.0), headers={"User-Agent": "Opentify-Podcasts/1.0"}
+        ) as c:
+            for eid, url in todo:
+                try:
+                    resp = await feeds.safe_get(c, url, headers={"Range": "bytes=0-0"}, stream=True)
+                    if resp.status_code < 400:
+                        _final_urls[eid] = (str(resp.url), time.monotonic() + _FINAL_URL_TTL)
+                    await resp.aclose()
+                except (feeds.UnsafeUrl, httpx.HTTPError):
+                    pass
+
+    task = asyncio.get_running_loop().create_task(run())
+    _prewarming.add(task)
+    task.add_done_callback(_prewarming.discard)
 
 _PASS_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges", "last-modified", "etag")
 
@@ -224,7 +303,7 @@ async def stream_episode(episode_id: str, request: Request, session: Session = D
     except (feeds.UnsafeUrl, httpx.HTTPError):
         await client.aclose()
         raise HTTPException(status_code=502, detail="epizodu se nepodařilo načíst od vydavatele")
-    _final_urls[episode_id] = (str(resp.url), time.monotonic() + 600)
+    _final_urls[episode_id] = (str(resp.url), time.monotonic() + _FINAL_URL_TTL)
     if len(_final_urls) > 500:
         _final_urls.pop(next(iter(_final_urls)))
     ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()

@@ -180,6 +180,10 @@ class _AppRouter extends GoRouter {
 /// zvlášť pro každou záložku.
 List<RouteBase> _detailRoutes() => [
       GoRoute(
+        path: 'podcasts/history',
+        builder: (context, state) => const PodcastHistoryScreen(),
+      ),
+      GoRoute(
         path: 'podcasts/show/:showId',
         builder: (context, state) => PodcastShowScreen(showId: state.pathParameters['showId']!),
       ),

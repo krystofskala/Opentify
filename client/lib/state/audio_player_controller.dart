@@ -18,6 +18,7 @@ import '../core/api_client.dart' show ApiException;
 import '../core/device_token.dart' show withDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
 import '../core/prefetch_cache.dart';
+import '../features/spoken/podcast_offline.dart';
 import '../core/media_session.dart';
 import '../core/profile_prefs.dart';
 import '../core/radio_mode.dart';
@@ -2019,8 +2020,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         : prefetched != null
             ? 'p'
             : (knownAtStart?.status == 'AVAILABLE' && knownAtStart?.streamUrl != null ? 'r' : 'w'));
-    // Audiokniha: soubor je na serveru vždy celý, nic se neobstarává.
+    // Mluvené slovo: nic se neobstarává (kniha je na serveru celá, podcast
+    // server přeposílá). Epizoda stažená do telefonu hraje odtud.
     if (isSpokenId(info.recordingId)) {
+      final episode = podcastEpisodeId(info.recordingId);
+      if (episode != null) {
+        final local = await _ref.read(podcastOfflineProvider.notifier).localUrl(episode);
+        if (state.nowPlaying?.recordingId != info.recordingId) return;
+        if (local != null) {
+          unawaited(_startStream(info, local, isProgressive: false, isLocal: true));
+          return;
+        }
+      }
       unawaited(_startStream(info, _streamUrlFor(info.recordingId), isProgressive: false));
       return;
     }
@@ -2411,6 +2422,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final fromLocal = _currentLocal && !isProgressive;
     if (fromLocal && _prefetched.remove(info.recordingId) != null) {
       unawaited(PrefetchCache.remove(info.recordingId));
+    }
+    if (fromLocal && isSpokenId(info.recordingId)) {
+      // Stažená epizoda nejde přečíst -> hrát ze serveru (obstarávání se
+      // mluveného slova netýká), od stejného místa.
+      _currentLocal = false;
+      _resumeAt = state.position;
+      _resumeFor = info.recordingId;
+      unawaited(_startStream(info, _streamUrlFor(info.recordingId), isProgressive: false));
+      return;
     }
     if (isProgressive || fromLocal) {
       _currentLocal = false;

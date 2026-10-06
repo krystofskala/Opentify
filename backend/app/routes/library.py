@@ -900,6 +900,10 @@ async def import_spotify(
             result = await asyncio.to_thread(import_history, user_id, plays)
         finally:
             g.reset_home_user(token)
+        # Podcasty z téže historie -- jen nabídka k odběru, nic se samo neodebírá.
+        from app.podcasts import history as podcast_history
+
+        result = {**result, **await asyncio.to_thread(podcast_history.import_spotify, user_id, raw)}
         return {"kind": "history", **{k: v for k, v in result.items() if isinstance(v, (int, str, float, bool))}}
     try:
         # Stovky skladeb do DB -- mimo event loop, ať mezitím hraje hudba.

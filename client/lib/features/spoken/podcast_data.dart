@@ -139,6 +139,77 @@ final podcastHomeProvider = FutureProvider.autoDispose<PodcastHome>((ref) async 
   return (inProgress: list('inProgress'), latest: list('episodes'));
 });
 
+/// Pořad z importované historie (Spotify) -- nabídka k odběru.
+class PodcastHistoryItem {
+  const PodcastHistoryItem({
+    required this.name,
+    required this.title,
+    required this.listenedMs,
+    required this.episodes,
+    this.lastPlayedAt,
+    required this.pending,
+    required this.found,
+    this.feedUrl,
+    this.author,
+    this.artworkUrl,
+    this.itunesId,
+    this.showId,
+    required this.subscribed,
+  });
+
+  factory PodcastHistoryItem.fromJson(Map<String, dynamic> j) => PodcastHistoryItem(
+        name: j['name'] as String,
+        title: j['title'] as String? ?? j['name'] as String,
+        listenedMs: (j['listenedMs'] as num?)?.toInt() ?? 0,
+        episodes: (j['episodes'] as num?)?.toInt() ?? 0,
+        lastPlayedAt: j['lastPlayedAt'] == null ? null : DateTime.tryParse(j['lastPlayedAt'] as String)?.toLocal(),
+        pending: j['pending'] as bool? ?? false,
+        found: j['found'] as bool? ?? false,
+        feedUrl: j['feedUrl'] as String?,
+        author: j['author'] as String?,
+        artworkUrl: j['artworkUrl'] as String?,
+        itunesId: j['itunesId'] as String?,
+        showId: j['showId'] as String?,
+        subscribed: j['subscribed'] as bool? ?? false,
+      );
+
+  final String name;
+  final String title;
+  final int listenedMs;
+  final int episodes;
+  final DateTime? lastPlayedAt;
+  final bool pending;
+  final bool found;
+  final String? feedUrl;
+  final String? author;
+  final String? artworkUrl;
+  final String? itunesId;
+  final String? showId;
+  final bool subscribed;
+
+  PodcastSearchResult? get asResult => feedUrl == null
+      ? null
+      : PodcastSearchResult(title: title, feedUrl: feedUrl!, author: author, artworkUrl: artworkUrl, itunesId: itunesId);
+}
+
+final podcastHistoryProvider = FutureProvider.autoDispose<List<PodcastHistoryItem>>((ref) async {
+  final json = await ref.watch(apiClientProvider).getJson('/podcasts/history');
+  return [for (final s in json['shows'] as List<dynamic>? ?? const []) PodcastHistoryItem.fromJson(s as Map<String, dynamic>)];
+});
+
+/// Odebírat pořad z historie: založit ho v DB a přihlásit odběr. Vrací,
+/// kolik epizod se označilo jako přehrané podle historie.
+Future<int> subscribeFromHistory(WidgetRef ref, PodcastHistoryItem item) async {
+  final result = item.asResult;
+  if (result == null) return 0;
+  final id = item.showId ?? await openPodcast(ref, result);
+  final json = await ref.read(apiClientProvider).putJson('/podcasts/shows/$id/subscription');
+  ref.invalidate(podcastHistoryProvider);
+  ref.invalidate(myPodcastsProvider);
+  ref.invalidate(podcastHomeProvider);
+  return (json['markedFromHistory'] as num?)?.toInt() ?? 0;
+}
+
 /// Id pořadu v naší DB pro výsledek hledání (načte RSS při otevření).
 Future<String> openPodcast(WidgetRef ref, PodcastSearchResult r) async {
   final json = await ref.read(apiClientProvider).postJson('/podcasts/shows', body: {

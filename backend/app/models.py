@@ -585,3 +585,30 @@ class PodcastProgress(SQLModel, table=True):
     position_ms: int = 0
     finished: bool = False
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+class PodcastListenHistory(SQLModel, table=True):
+    """Poslechy podcastů z jiné služby (Spotify historie), sečtené po
+    epizodách -- jen pro nabídku "Poslouchal jsi na Spotify" a označení
+    doposlouchaných epizod. Do hudebních poslechů se nepočítá."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    source: str = "spotify"
+    show_name: str = Field(index=True)
+    episode_name: str
+    ms_played: int = 0
+    plays: int = 0
+    last_played_at: datetime | None = None
+
+
+class PodcastNameMatch(SQLModel, table=True):
+    """Název pořadu (ze Spotify) -> pořad v katalogu Apple s RSS. Společné
+    pro všechny profily; `feed_url` None = v katalogu není (jen Spotify)."""
+
+    name: str = Field(primary_key=True)
+    feed_url: str | None = None
+    title: str | None = None
+    author: str | None = None
+    artwork_url: str | None = None
+    itunes_id: str | None = None
+    checked_at: datetime = Field(default_factory=utcnow)

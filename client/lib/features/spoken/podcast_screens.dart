@@ -14,6 +14,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
 import 'podcast_data.dart';
+import 'podcast_offline.dart';
 import 'spoken_data.dart' show formatHours;
 
 /// Podcasty v režimu mluveného slova: pořad s epizodami, výsledky hledání,
@@ -86,11 +87,49 @@ class PodcastEpisodeTile extends ConsumerWidget {
             ),
         ],
       ),
-      trailing: Icon(
-        episode.finished ? Symbols.check_circle_rounded : Symbols.play_circle_rounded,
-        color: theme.colorScheme.primary,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _DownloadButton(episodeId: episode.id),
+          Icon(
+            episode.finished ? Symbols.check_circle_rounded : Symbols.play_circle_rounded,
+            color: theme.colorScheme.primary,
+          ),
+        ],
       ),
       onTap: () => playEpisode(ref, episode, showId: showId),
+    );
+  }
+}
+
+/// Stáhnout epizodu do zařízení / smazat ji odtud.
+class _DownloadButton extends ConsumerWidget {
+  const _DownloadButton({required this.episodeId});
+  final String episodeId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final offline = ref.watch(podcastOfflineProvider);
+    final saved = offline.saved.contains(episodeId);
+    if (offline.downloading.contains(episodeId)) {
+      return const Padding(
+        padding: EdgeInsets.all(AppSpacing.sm),
+        child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    final ctrl = ref.read(podcastOfflineProvider.notifier);
+    return IconButton(
+      tooltip: saved ? 'Smazat z telefonu' : 'Stáhnout do telefonu',
+      icon: Icon(saved ? Symbols.download_done_rounded : Symbols.download_rounded, size: 22),
+      onPressed: () async {
+        if (saved) {
+          await ctrl.remove(episodeId);
+          if (context.mounted) toast(context, 'Epizoda smazána z telefonu');
+          return;
+        }
+        final ok = await ctrl.download(episodeId);
+        if (context.mounted) toast(context, ok ? 'Epizoda je v telefonu – hraje i bez internetu' : 'Stažení se nepovedlo');
+      },
     );
   }
 }
@@ -147,8 +186,20 @@ class MyPodcastsList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(myPodcastsProvider);
+    final fromSpotify = ref.watch(podcastHistoryProvider).valueOrNull ?? const [];
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    // Nabídka pořadů ze Spotify historie -- jen odkaz, nic se samo neodebírá.
+    final historyRow = fromSpotify.isEmpty
+        ? null
+        : ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Symbols.history_rounded),
+            title: const Text('Poslouchal jsi na Spotify'),
+            subtitle: Text('${fromSpotify.length} pořadů – vyber, co odebírat', style: muted),
+            trailing: const Icon(Symbols.chevron_right_rounded),
+            onTap: () => context.push('/podcasts/history'),
+          );
     return async.when(
       loading: () => const LoadingState(),
       error: (e, _) => ErrorState(
@@ -156,17 +207,21 @@ class MyPodcastsList extends ConsumerWidget {
         error: e,
         onRetry: () => ref.invalidate(myPodcastsProvider),
       ),
-      data: (shows) => shows.isEmpty
+      data: (shows) => shows.isEmpty && historyRow == null
           ? const EmptyState(
               icon: Symbols.podcasts_rounded,
               message: 'Zatím nic neodebíráš. Najdi podcast v Hledání a dej Odebírat.',
             )
           : RefreshIndicator(
-              onRefresh: () async => ref.invalidate(myPodcastsProvider),
+              onRefresh: () async {
+                ref.invalidate(myPodcastsProvider);
+                ref.invalidate(podcastHistoryProvider);
+              },
               child: ListView(
                 padding:
                     EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
                 children: [
+                  if (historyRow != null) historyRow,
                   for (final s in shows)
                     ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -179,6 +234,89 @@ class MyPodcastsList extends ConsumerWidget {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// "Poslouchal jsi na Spotify": pořady z importované historie, u každého
+/// Odebírat. Nic se neodebírá samo (uživatel si vybere).
+class PodcastHistoryScreen extends ConsumerWidget {
+  const PodcastHistoryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(podcastHistoryProvider);
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return Scaffold(
+      appBar: const SectionAppBar('Poslouchal jsi na Spotify'),
+      body: async.when(
+        loading: () => const LoadingState(),
+        error: (e, _) => ErrorState(
+          message: 'Historii se nepodařilo načíst.',
+          error: e,
+          onRetry: () => ref.invalidate(podcastHistoryProvider),
+        ),
+        data: (items) {
+          final pending = items.where((i) => i.pending).length;
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(podcastHistoryProvider),
+            child: ListView(
+              padding:
+                  EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
+              children: [
+                Text(
+                  'Pořady z tvé historie ze Spotify, nejposlouchanější nahoře. Po odběru se epizody, '
+                  'které jsi tam doposlouchal, označí jako přehrané.'
+                  '${pending > 0 ? ' Ještě dohledávám $pending pořadů – stáhni dolů pro obnovení.' : ''}',
+                  style: muted,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                for (final i in items)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: _Art(url: i.artworkUrl),
+                    title: Text(i.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                      [
+                        formatHours(i.listenedMs),
+                        '${i.episodes} ${i.episodes == 1 ? 'epizoda' : (i.episodes < 5 ? 'epizody' : 'epizod')}',
+                        if (i.lastPlayedAt != null) 'naposledy ${i.lastPlayedAt!.year}',
+                        if (!i.found && !i.pending) 'jen na Spotify',
+                      ].where((s) => s.isNotEmpty).join(' · '),
+                      style: muted,
+                    ),
+                    trailing: i.pending
+                        ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : !i.found
+                            ? null
+                            : i.subscribed
+                                ? GlassButton(
+                                    label: 'Odebíráš',
+                                    compact: true,
+                                    onPressed: i.showId == null ? null : () => context.push('/podcasts/show/${i.showId}'),
+                                  )
+                                : GlassButton(
+                                    label: 'Odebírat',
+                                    compact: true,
+                                    style: GlassButtonStyle.prominent,
+                                    onPressed: () async {
+                                      try {
+                                        final marked = await subscribeFromHistory(ref, i);
+                                        if (context.mounted) {
+                                          toast(context, marked > 0 ? 'Odebíráš · $marked epizod označeno jako přehrané' : 'Odebíráš');
+                                        }
+                                      } catch (_) {
+                                        if (context.mounted) toast(context, 'Odběr se nepodařil');
+                                      }
+                                    },
+                                  ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }

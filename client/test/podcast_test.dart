@@ -43,6 +43,42 @@ void main() {
     expect(episodeDate(DateTime(2025, 12, 24), now), '24. pro 2025');
   });
 
+  testWidgets('Poslouchal jsi na Spotify: odebírat / odebíráš / jen na Spotify / hledá se', (tester) async {
+    tester.view.physicalSize = const Size(375 * 3, 812 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    PodcastHistoryItem item(String name, {bool pending = false, bool found = true, bool subscribed = false}) =>
+        PodcastHistoryItem.fromJson({
+          'name': name, 'title': name, 'listenedMs': 68 * 3600000, 'episodes': 109,
+          'lastPlayedAt': '2025-11-01T10:00:00Z', 'pending': pending, 'found': found,
+          'feedUrl': found ? 'https://example.org/$name' : null, 'showId': subscribed ? 's1' : null,
+          'subscribed': subscribed,
+        });
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        podcastHistoryProvider.overrideWith((ref) async => [
+              item('Buchty'),
+              item('Vinohradská 12', subscribed: true),
+              item('Exkluzivní pořad', found: false),
+              item('Ešus', pending: true),
+            ]),
+      ],
+      child: MaterialApp(
+        theme: buildAppTheme(seed: Colors.teal, brightness: Brightness.dark),
+        home: const PodcastHistoryScreen(),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Odebírat'), findsOneWidget);
+    expect(find.text('Odebíráš'), findsOneWidget);
+    expect(find.textContaining('jen na Spotify'), findsOneWidget);
+    expect(find.textContaining('dohledávám 1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('obrazovka pořadu se vykreslí bez chyb', (tester) async {
     tester.view.physicalSize = const Size(375 * 3, 812 * 3);
     tester.view.devicePixelRatio = 3;

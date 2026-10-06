@@ -1276,6 +1276,10 @@ async def _podcasts_tick(r) -> None:
     from app.podcasts import service
 
     await service.refresh_subscribed(r)
+    # Pořady ze Spotify historie -> katalog (pomalu, limit Apple).
+    from app.podcasts import history
+
+    await history.match_pending(r)
 
 
 async def main() -> None:
