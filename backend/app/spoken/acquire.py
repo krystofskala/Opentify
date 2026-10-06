@@ -1,0 +1,137 @@
+"""Stavový automat stahování knih -- worker ho posune o krok každých ~15 s
+(app/worker.py, úklidová smyčka; zámek v Redisu = jen jeden worker naráz).
+Bez vlastní fronty: stav je v DB, takže restart nic neztratí.
+
+pending -> (přihlášení na SkTorrent, .torrent do qBittorrentu) -> downloading
+downloading -> (qBittorrent hotovo) -> importing -> (mutagen) -> ready
+Chybějící přihlášení není chyba: kniha čeká v `pending`, dokud se do .env
+nedoplní, a pak se rozjede sama.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from datetime import timedelta
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from app.db import engine
+from app.events import publish_event
+from app.models import SpokenBook
+from app.spoken import qbit, sktorrent
+from app.spoken.importer import import_book
+from app.utils import utcnow
+
+logger = logging.getLogger(__name__)
+
+# Cesta, kterou vidí qBittorrent i worker (stejný svazek na stejném místě).
+SPOKEN_ROOT = Path(os.environ.get("SPOKEN_ROOT", "/data/spoken"))
+# Torrent, který se v klientu do té doby ani neobjeví / nepohne, je chyba.
+_LOST_AFTER = timedelta(minutes=15)
+_DONE_STATES = {"uploading", "stalledUP", "pausedUP", "stoppedUP", "queuedUP", "forcedUP", "checkingUP"}
+
+
+def book_out(book: SpokenBook) -> dict:
+    return {
+        "id": book.id,
+        "title": book.title,
+        "author": book.author,
+        "narrator": book.narrator,
+        "coverUrl": book.cover_url,
+        "releaseTitle": book.release_title,
+        "sizeBytes": book.size_bytes,
+        "status": book.status,
+        "progress": round(book.progress, 3),
+        "error": book.error,
+        "durationMs": book.duration_ms,
+        "createdAt": book.created_at.isoformat() if book.created_at else None,
+    }
+
+
+async def _save(book_id: str, **fields) -> SpokenBook | None:
+    def run() -> SpokenBook | None:
+        with Session(engine) as session:
+            book = session.get(SpokenBook, book_id)
+            if book is None:
+                return None
+            changed = any(getattr(book, k) != v for k, v in fields.items())
+            for k, v in fields.items():
+                setattr(book, k, v)
+            session.add(book)
+            session.commit()
+            session.refresh(book)
+            session.expunge(book)
+            return book if changed else None
+
+    book = await asyncio.to_thread(run)
+    if book is not None:
+        await publish_event(book.requested_by_user_id, "spoken.book", book_out(book))
+    return book
+
+
+async def _start(book: SpokenBook) -> None:
+    try:
+        torrent = await sktorrent.download_torrent(book.source_ref)
+    except sktorrent.NotConfigured as e:
+        await _save(book.id, error=str(e))
+        return
+    except PermissionError as e:
+        await _save(book.id, error=str(e))
+        return
+    save_path = str(SPOKEN_ROOT / book.source_ref)
+    await qbit.add(torrent, book.source_ref, save_path)
+    await _save(book.id, status="downloading", error=None, storage_dir=save_path)
+
+
+async def _follow(book: SpokenBook) -> None:
+    t = await qbit.info(book.source_ref)
+    if t is None:
+        created = book.created_at if book.created_at.tzinfo else book.created_at.replace(tzinfo=utcnow().tzinfo)
+        if utcnow() - created > _LOST_AFTER:
+            await _save(book.id, status="failed", error="torrent klient o knize neví")
+        return
+    state = str(t.get("state") or "")
+    if state in ("error", "missingFiles"):
+        await _save(book.id, status="failed", error=f"torrent: {state}")
+        return
+    progress = float(t.get("progress") or 0.0)
+    if progress < 1.0 and state not in _DONE_STATES:
+        await _save(book.id, progress=round(progress, 3))
+        return
+    root = Path(str(t.get("content_path") or book.storage_dir or SPOKEN_ROOT / book.source_ref))
+    await _save(book.id, status="importing", progress=1.0)
+    try:
+        count = await asyncio.to_thread(import_book, book.id, root)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("import knihy %s selhal", book.id)
+        await _save(book.id, status="failed", error=f"import: {e}")
+        return
+    logger.info("kniha %s připravená (%d souborů)", book.title, count)
+    await _save(book.id, status="ready", error=None, finished_at=utcnow())
+
+
+async def tick(r) -> None:
+    if not await r.set("spoken:tick", "1", nx=True, ex=60):
+        return
+    try:
+        def open_books() -> list[SpokenBook]:
+            with Session(engine) as session:
+                books = list(session.exec(select(SpokenBook).where(SpokenBook.status.in_(["pending", "downloading", "importing"]))).all())  # type: ignore[attr-defined]
+                for b in books:
+                    session.expunge(b)
+                return books
+
+        for book in await asyncio.to_thread(open_books):
+            try:
+                if book.status == "pending":
+                    await _start(book)
+                else:
+                    await _follow(book)
+            except Exception as e:  # noqa: BLE001 -- jedna kniha nezastaví ostatní
+                logger.warning("kniha %s: %s", book.id, e)
+                await _save(book.id, error=str(e)[:300])
+    finally:
+        await r.delete("spoken:tick")

@@ -56,6 +56,9 @@ services:
       # Tailscale účet admina (profil podle Tailscale, viz app/auth.py).
       TAILSCALE_ADMIN_LOGIN: ${TAILSCALE_ADMIN_LOGIN:-}
       LOCAL_MUSIC_ROOT: /data/local-music
+      # Audioknihy: jen aby hledání vědělo, jestli je SkTorrent účet nastavený.
+      SKTORRENT_USERNAME: ${SKTORRENT_USERNAME:-}
+      SKTORRENT_PASSWORD: ${SKTORRENT_PASSWORD:-}
     volumes:
       - vault-db:/data/db
       # Stažené skladby na velkém disku (MEDIA_DIR v .env, např. E:/opentify/media),
@@ -77,6 +80,8 @@ services:
       # a app/providers.py:OnFileLocated). Read-only: `api` soubory jen čte,
       # přesouvá/maže je výhradně `worker`.
       - ${SLSKD_DOWNLOADS_HOST_DIR:-./slskd-downloads}:/data/slskd-downloads:ro
+      # Audioknihy stažené qBittorrentem (app/spoken) -- api je jen streamuje.
+      - ${SPOKEN_DIR:-./mluvene-slovo}:/data/spoken:ro
     depends_on:
       - redis
     restart: unless-stopped
@@ -120,12 +125,19 @@ services:
       # Kontrola podezřelých stažení Shazamem (app/library/download_check.py)
       # -- stejně jako u api VÝHRADNĚ přes Mullvad.
       SHAZAM_PROXY: ${SHAZAM_PROXY:-http://gluetun:8888}
+      # Audioknihy: SkTorrent (stažení .torrent chce účet; hledání ne) a
+      # qBittorrent za VPN (app/spoken). Bez účtu kniha čeká ve frontě.
+      SKTORRENT_USERNAME: ${SKTORRENT_USERNAME:-}
+      SKTORRENT_PASSWORD: ${SKTORRENT_PASSWORD:-}
+      QBIT_URL: http://gluetun:8080
     volumes:
       - vault-db:/data/db
       - ${MEDIA_DIR:-./media}:/data/media
       # Sdílený se `slskd` službou -- worker po dokončení transferu soubor
       # přesune odsud do `media-library` (viz SlskdProvider.fetch).
       - ${SLSKD_DOWNLOADS_HOST_DIR:-./slskd-downloads}:/data/slskd-downloads
+      # Stejná cesta jako v `qbittorrent` (import čte, co torrent stáhl).
+      - ${SPOKEN_DIR:-./mluvene-slovo}:/data/spoken
     depends_on:
       - redis
       - slskd
@@ -235,6 +247,25 @@ services:
       - ${MEDIA_DIR:-./media}/sdilene:/data/sdilene:ro
     restart: unless-stopped
 
+  # Torrenty pro audioknihy (SkTorrent, app/spoken). Stejně jako slskd sdílí
+  # síť s `gluetun` -- veškerý provoz jde přes Mullvad, při výpadku tunelu
+  # nikudy. Web UI / API na gluetun:8080 jen z Docker sítě (není publikované
+  # na hostitele); z ní se pouští bez hesla (AuthSubnetWhitelist, nastavuje
+  # `docker/qbittorrent-init.sh` při startu). Stažené knihy dál seedují.
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    environment:
+      TZ: Europe/Prague
+      WEBUI_PORT: "8080"
+    volumes:
+      - qbittorrent-config:/config
+      - ${SPOKEN_DIR:-./mluvene-slovo}:/data/spoken
+      - ./docker/qbittorrent-init.sh:/custom-cont-init.d/10-opentify-auth:ro
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     # Strop paměti: cache katalogu (Deezer/MB/Wikidata, všechny s TTL) rostla
@@ -301,6 +332,7 @@ volumes:
   vault-db:
   redis-data:
   slskd-data:
+  qbittorrent-config:
   tailscale-state:
 
 networks:

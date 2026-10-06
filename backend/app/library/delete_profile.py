@@ -20,6 +20,8 @@ from app.models import (
     ArtistDislike,
     ArtistFeedback,
     PendingImportPlay,
+    SpokenBook,
+    SpokenProgress,
     AuthToken,
     Blend,
     CollectionProgress,
@@ -47,7 +49,7 @@ logger = logging.getLogger(__name__)
 # Každá tabulka se sloupcem `user_id` (hlídá test_delete_profile_covers_all).
 _PER_USER = [Listen, PlayEvent, SkipStreak, RecordingDislike, HeardFully, AuthToken, InviteCode, PairCode,
              LibraryEntry, PlaylistMember, PinnedPlaylist, ArtistDislike, FavoriteArtist, CollectionProgress,
-             ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay]
+             ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay, SpokenProgress]
 
 
 def delete_profile(user_id: str) -> dict[str, int]:
@@ -82,6 +84,7 @@ def delete_profile(user_id: str) -> dict[str, int]:
             delete(Blend).where(or_(Blend.user_a == user_id, Blend.user_b == user_id, Blend.created_by == user_id))
         ).rowcount
         # Joby stahování jsou společné -- jen bez vazby na profil.
+        session.exec(update(SpokenBook).where(SpokenBook.requested_by_user_id == user_id).values(requested_by_user_id=ADMIN_ID))
         session.exec(update(ProvisioningJob).where(ProvisioningJob.requested_by_user_id == user_id)
                      .values(requested_by_user_id=ADMIN_ID))
         counts["snapshots"] = session.exec(delete(HomeSnapshot).where(HomeSnapshot.key.contains(user_id))).rowcount  # type: ignore[attr-defined]

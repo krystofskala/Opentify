@@ -488,3 +488,57 @@ class Blend(SQLModel, table=True):
     status: str = "pending"  # pending | active
     created_at: datetime = Field(default_factory=utcnow)
     built_at: datetime | None = None
+
+
+# --- Mluvené slovo (audioknihy; app/spoken/) --------------------------------
+# Úplně oddělené od hudby: žádné Recording/Listen, takže se nic nedostane do
+# mixů, doporučení, Wrapped ani na ListenBrainz/Last.fm.
+
+
+class SpokenBook(SQLModel, table=True):
+    """Jedna stažená (nebo stahovaná) audiokniha = jedno vydání ze zdroje
+    (torrent). Sdílená mezi profily jako hudba; pozice má každý profil svou."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    source: str = "sktorrent"
+    # Infohash torrentu -- stejné vydání podruhé = stejná kniha.
+    source_ref: str = Field(index=True, unique=True)
+    release_title: str
+    title: str
+    author: str | None = None
+    narrator: str | None = None
+    cover_url: str | None = None
+    size_bytes: int | None = None
+    # pending -> downloading -> importing -> ready | failed
+    status: str = Field(default="pending", index=True)
+    progress: float = 0.0
+    error: str | None = None
+    storage_dir: str | None = None
+    duration_ms: int | None = None
+    requested_by_user_id: str
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    finished_at: datetime | None = None
+
+
+class SpokenFile(SQLModel, table=True):
+    """Soubor knihy v pořadí poslechu (kapitoly z m4b v `chapters`)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    book_id: str = Field(index=True)
+    position: int
+    path: str
+    title: str | None = None
+    duration_ms: int | None = None
+    chapters: list | None = Field(default=None, sa_column=Column(JSON))
+
+
+class SpokenProgress(SQLModel, table=True):
+    """Kde profil v knize skončil."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    book_id: str = Field(index=True)
+    file_id: str
+    position_ms: int = 0
+    finished: bool = False
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
