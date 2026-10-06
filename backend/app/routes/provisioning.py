@@ -71,32 +71,49 @@ def _job_out(job: ProvisioningJob) -> dict:
     }
 
 
+def _provision_sync(recording_id: str, user_id: str, device_id: str | None) -> tuple[dict | None, ProvisioningJob | None, bool, str]:
+    """DB a kontrola souboru na disku -- ve vlákně: v async routě blokovaly
+    event loop (na HDD přes Docker mount až stovky ms) a s ním i streamy
+    ostatních. Vrací (hotová odpověď pro AVAILABLE, job, created, stav)."""
+    with Session(engine) as session:
+        asset, job, created = get_or_create_job(session, recording_id, user_id, device_id)
+        status = asset.status.value
+        if job is None:
+            return (
+                {
+                    "recordingId": recording_id,
+                    "status": status,
+                    "streamUrl": stream_url_for(recording_id),
+                    "job": None,
+                    "loudnessGainDb": gain_for_client(asset.loudness_gain_db),
+                    "waveform": decode_waveform(asset.waveform),
+                },
+                None,
+                False,
+                status,
+            )
+        session.expunge(job)
+        return None, job, created, status
+
+
 @tracks_router.post("/{recording_id}/provision")
 async def provision_track(
     recording_id: str,
     response: Response,
     body: ProvisionRequest | None = Body(default=None),
-    session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
 ):
     user_id, device_id = current
     interactive = body is not None and body.priority == "interactive"
     try:
-        asset, job, created = get_or_create_job(session, recording_id, user_id, device_id)
+        ready, job, created, status = await asyncio.to_thread(_provision_sync, recording_id, user_id, device_id)
     except LookupError:
         raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
 
     if job is None:
         # MediaAsset už AVAILABLE -> žádný job, rovnou stream (HTTP 200)
         response.status_code = 200
-        return {
-            "recordingId": recording_id,
-            "status": asset.status.value,
-            "streamUrl": stream_url_for(recording_id),
-            "job": None,
-            "loudnessGainDb": gain_for_client(asset.loudness_gain_db),
-            "waveform": decode_waveform(asset.waveform),
-        }
+        return ready
 
     if created:
         # Nově založený job -> publikuj na frontu. Při opakovaném volání
@@ -114,7 +131,7 @@ async def provision_track(
     response.status_code = 202
     return {
         "recordingId": recording_id,
-        "status": asset.status.value,
+        "status": status,
         "streamUrl": None,
         "job": _job_out(job),
         "loudnessGainDb": None,
@@ -194,7 +211,8 @@ async def stream_track(recording_id: str, session: Session = Depends(get_session
     await mark_streaming(recording_id)
 
     if asset.status == MediaAssetStatus.AVAILABLE:
-        if not path.exists():
+        # Ve vlákně -- stat na HDD přes Docker mount blokoval event loop.
+        if not await asyncio.to_thread(path.exists):
             # Soubor zmizel -> MISSING, další /provision ho stáhne znovu
             # (dřív trvalé 409 až do ručního zásahu).
             healed = heal_missing_file(session, asset)
