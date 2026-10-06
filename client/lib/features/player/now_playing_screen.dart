@@ -12,6 +12,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../widgets/like_heart.dart';
+import '../spoken/chapters_sheet.dart';
 import '../../state/audio_player_controller.dart';
 import '../../state/glass_settings.dart';
 import '../../state/provisioning_controller.dart';
@@ -891,6 +892,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               ),
             ),
           ],
+          // Kniha v jednom souboru (m4b): název aktuální kapitoly.
+          if (ref
+                  .read(audioPlayerControllerProvider.notifier)
+                  .chapterTitleAt(nowPlaying.recordingId, playback.position)
+              case final chapter?) ...[
+            const SizedBox(height: 4),
+            Text(
+              chapter,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: playerFg(context).withValues(alpha: 0.6), fontSize: AppFontSize.small),
+            ),
+          ],
           // Chyba přehrávání -- jako mini přehrávač (dřív tady nebylo nic
           // vidět a tlačítko jen dál zkoušelo play).
           if (playback.error != null) ...[
@@ -1074,6 +1089,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final np = playback.nowPlaying;
     switch (button) {
       case PlayerButton.lyrics:
+        // Mluvené slovo: místo textu písně kapitoly knihy (podcast nic).
+        if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) {
+          final parts = AudioPlayerController.spokenParts(np.recordingId);
+          if (parts == null) return const SizedBox.square(dimension: 44);
+          return plain('Kapitoly', Symbols.toc_rounded, () => showChaptersSheet(context, parts.bookId));
+        }
         return _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, fg);
       case PlayerButton.queue:
         return _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, fg);

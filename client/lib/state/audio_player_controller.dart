@@ -1373,8 +1373,74 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (!state.isPlaying) await togglePlayPause();
   }
 
+  // --- Kapitoly knihy v jednom souboru (m4b) ---------------------------------
+  //
+  // Další / Předchozí (i z uzamčené obrazovky) skáčou po kapitolách, dokud
+  // je kam; pak na další / předchozí soubor jako jindy.
+
+  List<int> _chapterStarts = const [];
+  List<String> _chapterTitles = const [];
+  String? _chaptersFor;
+
+  /// Název kapitoly na pozici `at` v právě hrajícím souboru (m4b), jinak null.
+  String? chapterTitleAt(String recordingId, Duration at) {
+    if (_chaptersFor != recordingId) return null;
+    final ms = at.inMilliseconds;
+    String? title;
+    for (var i = 0; i < _chapterStarts.length; i++) {
+      if (_chapterStarts[i] <= ms) title = _chapterTitles[i];
+    }
+    return (title == null || title.isEmpty) ? null : title;
+  }
+
+  Future<void> _loadChapters(String recordingId) async {
+    final parts = spokenParts(recordingId);
+    _chapterStarts = const [];
+    _chaptersFor = null;
+    if (parts == null) return;
+    try {
+      final json = await _ref.read(apiClientProvider).getJson('/spoken/books/${parts.bookId}');
+      final file = (json['files'] as List<dynamic>? ?? const [])
+          .cast<Map<String, dynamic>>()
+          .where((f) => f['id'] == parts.fileId)
+          .firstOrNull;
+      final chapters = [
+        for (final c in file?['chapters'] as List<dynamic>? ?? const [])
+          (start: ((c as Map)['startMs'] as num).toInt(), title: c['title'] as String? ?? ''),
+      ]..sort((a, b) => a.start.compareTo(b.start));
+      if (state.nowPlaying?.recordingId == recordingId && chapters.length > 1) {
+        _chapterStarts = [for (final c in chapters) c.start];
+        _chapterTitles = [for (final c in chapters) c.title];
+        _chaptersFor = recordingId;
+      }
+    } catch (_) {}
+  }
+
+  /// `true` = přeskočeno v rámci souboru (nic dalšího nedělat).
+  bool _skipChapter({required bool forward}) {
+    if (_chaptersFor == null || _chaptersFor != state.nowPlaying?.recordingId) return false;
+    final pos = state.position.inMilliseconds;
+    if (forward) {
+      final next = _chapterStarts.where((s) => s > pos + 1000).firstOrNull;
+      if (next == null) return false;
+      unawaited(seek(Duration(milliseconds: next)));
+      return true;
+    }
+    final current = _chapterStarts.lastWhere((s) => s <= pos, orElse: () => 0);
+    // Jako u skladeb: po 3 s na začátek kapitoly, jinak předchozí.
+    if (pos - current > 3000) {
+      unawaited(seek(Duration(milliseconds: current)));
+      return true;
+    }
+    final earlier = _chapterStarts.where((s) => s < current).lastOrNull;
+    if (earlier == null) return false;
+    unawaited(seek(Duration(milliseconds: earlier)));
+    return true;
+  }
+
   /// `auto`: skladba dohrála (ne klepnutí) -- jen pro měření rychlosti startu.
   Future<void> next({bool auto = false}) async {
+    if (!auto && _skipChapter(forward: true)) return;
     final index = state.nextIndex;
     if (index == null) return;
     _switchKind = auto ? 'auto' : 'manual';
@@ -1416,6 +1482,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// aktuální -- jinak by neúmyslné dvojité kliknutí za sebou přeskočilo o
   /// dvě skladby zpátky místo restartu poslouchané.
   Future<void> previous() async {
+    if (_skipChapter(forward: false)) return;
     if (state.position > const Duration(seconds: 3) || state.previousIndex == null) {
       await seek(Duration.zero);
       return;
@@ -2367,6 +2434,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // Předchozí hudební skladbu ale dopočítat (jinak by se ztratil poslech).
       _finishScrobble();
       _scrobbleId = null;
+      unawaited(_loadChapters(info.recordingId));
       if (!paused) _realtime.playbackPlay(info.recordingId, positionMs: resumedAt?.inMilliseconds ?? 0);
       return;
     }
