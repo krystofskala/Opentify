@@ -2378,6 +2378,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // napřed (tady už nevadí: Play pak přijde z klepnutí).
       if (startPaused && _player.playing) await _player.pause();
       if (gen != _sourceGen) return;
+      // Pojistka: hotový soubor, který se ani za 15 s nenačte (zaseknuté
+      // spojení, iOS přehrávač čeká donekonečna), je chyba -- dřív se
+      // kolečko točilo navždy. Rostoucí soubor může čekat na data déle.
+      if (!isProgressive) {
+        Timer(_loadTimeout, () {
+          if (gen != _sourceGen || _readyGen == gen || state.nowPlaying?.recordingId != info.recordingId) return;
+          _handleStreamFailure(info, TimeoutException('zdroj se nenačetl', _loadTimeout), isProgressive: false);
+        });
+      }
       final durationFuture = _player.setUrl(streamUrl, initialPosition: resumeAt);
       if (!startPaused) {
         unawaited(_player.play().catchError((Object e) {
@@ -2389,6 +2398,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       await durationFuture;
       if (gen != _sourceGen) return; // mezitím spuštěn jiný zdroj
       _readyGen = gen;
+      _reprovisioned = null;
       // `setUrl` znovu načte celý zdroj -- pro jistotu znovu vynutíme
       // rychlost/hlasitost z předchozí skladby, ať se novým zdrojem
       // nevrátí na výchozí hodnoty.
@@ -2451,6 +2461,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
     _recordRecentlyPlayed(info);
   }
+
+  static const _loadTimeout = Duration(seconds: 15);
+
+  /// Skladba, kterou už `_handleStreamFailure` po chybě jednou znovu
+  /// obstarával (do dalšího úspěšného načtení) -- podruhé už chyba.
+  String? _reprovisioned;
 
   /// Generace zdroje, který je automatickým druhým pokusem po chybě sítě
   /// (`_handleStreamFailure`) -- jeho selhání už se ukáže jako chyba.
@@ -2545,6 +2561,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// opravdu konec -- tam už není na co čekat.
   void _handleStreamFailure(NowPlayingInfo info, Object error, {required bool isProgressive}) {
     if (state.nowPlaying?.recordingId != info.recordingId) return;
+    // Každé selhání na server (log) -- "občas se nepustí" jinak nejde dohledat.
+    diagReport(
+      'playback-error',
+      '${info.recordingId} ${_currentLocal ? 'local' : _radioActive ? 'radio' : isProgressive ? 'progressive' : 'server'}'
+          ' retry=${_sourceGen == _autoRetryGen} pos=${state.position.inSeconds}s: $error',
+    );
     // Navázání nesmí pozastavenou skladbu rozehrát (záměr z `_startStream`
     // zůstává, jinak podle přehrávače).
     _startPausedWhenReady = _startPausedWhenReady || !_player.playing;
@@ -2607,6 +2629,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
           isProgressive: false,
         ));
       });
+      return;
+    }
+    // Ani druhý pokus: server možná soubor zrovna vyměnil / ověřuje / ztratil
+    // (409 "zavolej znovu provision") a appka ho má pořád za hotový. Jednou
+    // ho znovu obstarat a počkat -- dřív rovnou "Nepodařilo se přehrát".
+    if (_reprovisioned != info.recordingId && !isSpokenId(info.recordingId)) {
+      _reprovisioned = info.recordingId;
+      _stopRadio();
+      _awaitingProvisioning = true;
+      state = state.copyWith(isBuffering: true);
+      final provisioning = _ref.read(provisioningControllerProvider.notifier);
+      provisioning.awaitedRecordingId = info.recordingId;
+      unawaited(provisioning.provision(info.recordingId, interactive: true).then((_) {
+        if (state.nowPlaying?.recordingId == info.recordingId) _waitForAvailability(info);
+      }));
       return;
     }
     _priming = false;
