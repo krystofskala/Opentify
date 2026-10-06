@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/api_client.dart' show ApiException;
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/app_mode.dart';
 import '../../state/library_scope.dart';
@@ -644,17 +645,18 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
       for (final g in widget.groups) {
         final picked = [for (final f in g.files) if (_selected.contains(f.index)) f.index];
         if (picked.isEmpty) continue;
-        await acquireSpoken(ref, widget.release, files: picked, folder: g.folder);
+        final size = [for (final f in g.files) if (_selected.contains(f.index)) f.size].fold(0, (a, b) => a + b);
+        await acquireSpoken(ref, widget.release, files: picked, folder: g.folder, sizeBytes: size);
         books++;
       }
       if (mounted) {
         Navigator.of(context).pop();
         toast(context, books == 1 ? 'Kniha se stahuje – najdeš ji na Domů' : 'Stahuje se $books knih – najdeš je na Domů');
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
-        toast(context, 'Stažení se nepodařilo spustit');
+        toast(context, e is ApiException && e.detail != null ? e.detail! : 'Stažení se nepodařilo spustit');
       }
     }
   }

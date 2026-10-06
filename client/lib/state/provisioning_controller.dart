@@ -1,3 +1,4 @@
+import '../core/api_client.dart' show ApiException;
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -256,6 +257,8 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
   }
 
   static String _humanError(Object e) {
+    // Odmítnutí serverem s vysvětlením (limit stahování...) -- jeho text.
+    if (e is ApiException && e.statusCode >= 400 && e.statusCode < 500 && e.detail != null) return e.detail!;
     final text = '$e';
     if (e is TimeoutException || text.contains('Timeout')) return 'Server neodpovídá, zkus to znovu';
     if (text.contains('SocketException') || text.contains('ClientException') || text.contains('XMLHttpRequest')) {

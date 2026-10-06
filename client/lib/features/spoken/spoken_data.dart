@@ -230,7 +230,9 @@ final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) async* {
   }
 });
 
-Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, String? folder}) async {
+/// `sizeBytes`: u výběru ze sbírky velikost jen vybraných souborů (limit
+/// audioknih na člověka se počítá z ní, ne z celého vydání).
+Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, String? folder, int? sizeBytes}) async {
   await ref.read(apiClientProvider).postJson('/spoken/books', body: {
     if (files != null) 'files': files,
     if (folder != null && folder.isNotEmpty) 'folder': folder,
@@ -238,7 +240,7 @@ Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, St
     if (r.ref != null) 'ref': r.ref,
     if (r.infohash.isNotEmpty) 'infohash': r.infohash,
     'title': r.title,
-    'sizeBytes': r.sizeBytes,
+    'sizeBytes': sizeBytes ?? r.sizeBytes,
   });
   ref.invalidate(spokenBooksProvider);
   ref.invalidate(spokenSearchProvider);

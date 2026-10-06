@@ -114,6 +114,19 @@ def heal_missing_file(session: Session, asset: MediaAsset) -> bool:
     return True
 
 
+def would_create_job(session: Session, recording_id: str) -> bool:
+    """Založilo by `get_or_create_job` NOVÉ stahování? (pro limity: hotové a
+    už běžící se nepočítají)."""
+    asset = session.get(MediaAsset, recording_id)
+    if asset is not None and asset.status == MediaAssetStatus.AVAILABLE and asset.storage_path:
+        return False
+    return session.exec(
+        select(ProvisioningJob.id)
+        .where(ProvisioningJob.recording_id == recording_id)
+        .where(ProvisioningJob.status.in_(ACTIVE_JOB_STATUSES))
+    ).first() is None
+
+
 def get_or_create_job(
     session: Session, recording_id: str, user_id: str, device_id: str | None
 ) -> tuple[MediaAsset, ProvisioningJob | None, bool]:

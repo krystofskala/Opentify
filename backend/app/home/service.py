@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 from sqlmodel import Session, select
 
 from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
-from app.catalog.cache import CACHE_PREFIX, cached_json
+from app.catalog.cache import CACHE_PREFIX, cached_json_swr
 from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine
 from app.home import generators as g
@@ -23,6 +23,8 @@ from app.utils import utcnow
 logger = logging.getLogger(__name__)
 
 HOME_CACHE_TTL_S = 5 * 60
+# Nejstarší uložené Domů, které se ještě ukáže (a hned na pozadí obnoví).
+HOME_KEEP_S = 60 * 60
 
 
 class PlaylistCardOut(CamelModel):
@@ -155,8 +157,9 @@ def _last_success(name: str) -> datetime | None:
 
 async def invalidate_home_cache() -> None:
     redis = get_redis()
-    async for key in redis.scan_iter(match=f"{CACHE_PREFIX}home:*"):
-        await redis.delete(key)
+    for pattern in (f"{CACHE_PREFIX}home:*", f"{CACHE_PREFIX}swr:home:*"):
+        async for key in redis.scan_iter(match=pattern):
+            await redis.delete(key)
 
 
 async def run_generators(*, force: bool = False) -> dict[str, Any]:
@@ -892,4 +895,6 @@ async def get_home(user_id: str) -> dict[str, Any]:
         finally:
             g.reset_home_user(token)
 
-    return await cached_json(f"home:{user_id}", HOME_CACHE_TTL_S, build)
+    # Hned z uložené verze, starší než 5 min se obnoví na pozadí (dřív se
+    # při prvním načtení čekalo na sestavení -- s víc lidmi naráz až 10 s).
+    return await cached_json_swr(f"home:{user_id}", HOME_CACHE_TTL_S, build, keep_seconds=HOME_KEEP_S)

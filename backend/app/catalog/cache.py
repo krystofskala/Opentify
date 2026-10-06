@@ -147,6 +147,21 @@ async def cached_json_swr(
             asyncio.get_running_loop().create_task(refresh())
         return envelope.get("value")
 
-    value = await fetch()
-    await store(value)
+    # Úplně poprvé: souběžné dotazy na stejný klíč čekají na jedno sestavení.
+    flight = (id(asyncio.get_running_loop()), cache_key)
+    pending = _inflight.get(flight)
+    if pending is not None:
+        return await asyncio.shield(pending)
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _inflight[flight] = future
+    try:
+        value = await fetch()
+        await store(value)
+    except BaseException as exc:
+        future.set_exception(exc)
+        future.exception()
+        raise
+    finally:
+        _inflight.pop(flight, None)
+    future.set_result(value)
     return value

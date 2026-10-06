@@ -13,10 +13,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from app import download_limits
 from app.auth import get_current_user
-from app.public_access import deny_public
 from app.db import get_session
 from app.models import SpokenBook, SpokenFile, SpokenProgress
+from app.public_access import deny_public
 from app.spoken import sktorrent, slsk_books
 from app.spoken.acquire import SPOKEN_ROOT, book_out
 from app.spoken.importer import _natural as importer_natural
@@ -154,6 +155,8 @@ async def acquire(
 ):
     """"Stáhnout": jednorázově, jen na pokyn. Stejné vydání podruhé = stejná
     kniha (a její stav); po chybě se zkusí znovu."""
+    # Limit audioknih na člověka (app/download_limits.py); admin bez limitu.
+    await asyncio.to_thread(download_limits.check_book, current[0], body.sizeBytes)
     if body.source == "slskd":
         return await _acquire_slskd(body, session, current[0])
     infohash = (body.infohash or "").strip().lower()

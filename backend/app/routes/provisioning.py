@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
+from app import download_limits
 from app.auth import get_current_user
 from app.db import engine, get_session
 from app.loudness import WAVEFORM_BUCKETS, decode_waveform, gain_for_client
@@ -27,6 +28,7 @@ from app.provisioning_service import (
     heal_missing_file,
     mark_streaming,
     stream_url_for,
+    would_create_job,
 )
 
 tracks_router = APIRouter(prefix="/tracks", tags=["provisioning"])
@@ -105,6 +107,15 @@ async def provision_track(
 ):
     user_id, device_id = current
     interactive = body is not None and body.priority == "interactive"
+    # Limit nových stahování na člověka (app/download_limits.py) -- jen když
+    # by se opravdu začalo stahovat.
+    if not await asyncio.to_thread(download_limits.is_admin, user_id):
+        def _new() -> bool:
+            with Session(engine) as session:
+                return would_create_job(session, recording_id)
+
+        if await asyncio.to_thread(_new):
+            await download_limits.check_music(user_id)
     try:
         ready, job, created, status = await asyncio.to_thread(_provision_sync, recording_id, user_id, device_id)
     except LookupError:
@@ -116,6 +127,7 @@ async def provision_track(
         return ready
 
     if created:
+        await download_limits.count_music(user_id)
         # Nově založený job -> publikuj na frontu. Při opakovaném volání
         # (created == False, job už PENDING/RUNNING) se nic nepublikuje
         # znovu — to je jádro idempotence tohoto endpointu.

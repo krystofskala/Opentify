@@ -1257,8 +1257,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         .then<void>((_) {}, onError: (Object _) {}));
   }
 
-  /// Kolik skladeb za právě hrající má být na serveru už stažených.
-  static const _provisionAheadCount = 2;
+  /// Kolik skladeb za právě hrající má být na serveru už stažených. Jedna:
+  /// přeskočení hraje hned a další se dožádá, jakmile se na ni přepne
+  /// (dvě dopředu stahovaly zbytečně -- Kryštof 7. 10.).
+  static const _provisionAheadCount = 1;
 
   /// Na serveru obstarat další skladby ve frontě hned, jak začne hrát nová
   /// (ne až v 80 % té aktuální): přeskočení na další pak hraje hned místo
