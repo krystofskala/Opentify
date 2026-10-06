@@ -93,7 +93,12 @@ class OfflineController extends StateNotifier<OfflineState> {
   int get totalBytes => state.tracks.values.fold(0, (a, t) => a + t.bytes);
 
   /// Cesta/URL pro přehrávač, když je skladba v zařízení.
-  Future<String?> localUrl(String id) async => has(id) ? OfflineStorage.localUrl(id) : null;
+  Future<String?> localUrl(String id) async => has(id) ? OfflineStorage.localUrl(_storageKey(id)) : null;
+
+  /// Epizoda podcastu (`pc:<id>`) -- dvojtečka do jména souboru nepatří.
+  static String _storageKey(String id) => id.replaceAll(':', '_');
+
+  static bool _isEpisode(String id) => id.startsWith('pc:');
 
   /// Stáhnout do zařízení (skladby, které tam ještě nejsou).
   void add(List<NowPlayingInfo> infos) {
@@ -123,14 +128,21 @@ class OfflineController extends StateNotifier<OfflineState> {
     final info = state.pending[id];
     if (info == null) return;
     try {
-      await _ensureOnServer(id);
-      final bytes = await _ref.read(apiClientProvider).getBytes('/tracks/$id/stream', timeout: const Duration(minutes: 5));
+      // Epizodu podcastu server přeposílá od vydavatele -- nic se neobstarává.
+      final bytes = _isEpisode(id)
+          ? await _ref
+              .read(apiClientProvider)
+              .getBytes('/podcasts/episodes/${id.substring(3)}/stream', timeout: const Duration(minutes: 15))
+          : await () async {
+              await _ensureOnServer(id);
+              return _ref.read(apiClientProvider).getBytes('/tracks/$id/stream', timeout: const Duration(minutes: 5));
+            }();
       if (!mounted || !state.pending.containsKey(id)) return; // mezitím zrušeno
-      await OfflineStorage.put(id, bytes, _mimeOf(bytes));
+      await OfflineStorage.put(_storageKey(id), bytes, _mimeOf(bytes));
       if (!mounted || !state.pending.containsKey(id)) {
         // Zrušeno během zápisu (remove/clear soubor smazaly dřív, než
         // vznikl) -- jinak by zůstal v zařízení bez záznamu a zabíral místo.
-        if (!mounted || !has(id)) await OfflineStorage.remove(id);
+        if (!mounted || !has(id)) await OfflineStorage.remove(_storageKey(id));
         return;
       }
       final track = (
@@ -174,7 +186,7 @@ class OfflineController extends StateNotifier<OfflineState> {
   Future<void> remove(String id) async {
     _queue.remove(id);
     state = (tracks: {...state.tracks}..remove(id), pending: {...state.pending}..remove(id));
-    await OfflineStorage.remove(id);
+    await OfflineStorage.remove(_storageKey(id));
     await _save();
   }
 

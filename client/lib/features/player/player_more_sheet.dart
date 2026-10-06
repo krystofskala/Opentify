@@ -122,7 +122,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             ),
                           if (song) _laterTile(context, nowPlaying),
                           if (song) _libraryTile(context, nowPlaying),
-                          if (song) _offlineTile(context, nowPlaying),
+                          // Stažení do zařízení i pro epizodu podcastu (stejná Offline knihovna).
+                          if (song || (nowPlaying != null && nowPlaying.recordingId.startsWith('pc:')))
+                            _offlineTile(context, nowPlaying),
                           if (song)
                             ListTile(
                               contentPadding: EdgeInsets.zero,

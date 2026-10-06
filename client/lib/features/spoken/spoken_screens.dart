@@ -7,6 +7,9 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/app_mode.dart';
+import '../../state/library_scope.dart';
+import '../library/local_library_screen.dart' show LibraryScopeToggle;
+import '../library/offline_tab.dart';
 import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass_button.dart';
@@ -356,15 +359,19 @@ class SpokenLibraryScreen extends ConsumerWidget {
               ),
             ),
     );
+    // Stejný rozsah jako hudební Knihovna; Offline = epizody v zařízení.
+    final offline = ref.watch(libraryScopeProvider) == LibraryScope.offline;
     return Scaffold(
-      appBar: const SectionAppBar('Knihovna', actions: [AppModeToggle()]),
-      body: Column(
-        children: [
-          const SizedBox(height: AppSpacing.xs),
-          const _KindSwitch(),
-          Expanded(child: kind == SpokenKind.books ? booksView : const MyPodcastsList()),
-        ],
-      ),
+      appBar: const SectionAppBar('Knihovna', actions: [LibraryScopeToggle(), AppModeToggle()]),
+      body: offline
+          ? const OfflineTab(episodes: true)
+          : Column(
+              children: [
+                const SizedBox(height: AppSpacing.xs),
+                const _KindSwitch(),
+                Expanded(child: kind == SpokenKind.books ? booksView : const MyPodcastsList()),
+              ],
+            ),
     );
   }
 }

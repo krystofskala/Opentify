@@ -22,13 +22,16 @@ String formatBytes(int bytes) {
 /// Knihovna › Offline: skladby uložené v TOMHLE zařízení (hrají i bez
 /// internetu) a kolik místa zabírají.
 class OfflineTab extends ConsumerWidget {
-  const OfflineTab({super.key});
+  const OfflineTab({super.key, this.episodes = false});
+
+  /// Režim mluveného slova: jen epizody podcastů (`pc:`); v hudbě jen skladby.
+  final bool episodes;
 
   Future<void> _clearAll(BuildContext context, WidgetRef ref) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Smazat offline skladby?'),
+        title: Text(episodes ? 'Smazat offline epizody?' : 'Smazat offline skladby?'),
         content: const Text('Smažou se jen z tohohle zařízení, v knihovně a na serveru zůstanou.'),
         actions: [
           GlassButton(
@@ -41,7 +44,13 @@ class OfflineTab extends ConsumerWidget {
         ],
       ),
     );
-    if (ok == true) await ref.read(offlineControllerProvider.notifier).clear();
+    if (ok != true) return;
+    final ctrl = ref.read(offlineControllerProvider.notifier);
+    // Jen to, co je v tomhle režimu vidět (skladby / epizody).
+    final ids = ref.read(offlineControllerProvider).tracks.keys.where((id) => id.startsWith('pc:') == episodes).toList();
+    for (final id in ids) {
+      await ctrl.remove(id);
+    }
   }
 
   @override
@@ -49,15 +58,20 @@ class OfflineTab extends ConsumerWidget {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final offline = ref.watch(offlineControllerProvider);
-    final tracks = offline.tracks.values.toList()..sort((a, b) => b.addedAt.compareTo(a.addedAt));
+    final tracks = offline.tracks.values.where((t) => t.id.startsWith('pc:') == episodes).toList()
+      ..sort((a, b) => b.addedAt.compareTo(a.addedAt));
+    final pendingCount = offline.pending.keys.where((id) => id.startsWith('pc:') == episodes).length;
+    String count(int n) => episodes ? '$n ${n == 1 ? 'epizoda' : (n < 5 && n > 0 ? 'epizody' : 'epizod')}' : songsCount(n);
     final usage = ref.watch(offlineUsageProvider).valueOrNull;
     final ownBytes = tracks.fold<int>(0, (a, t) => a + t.bytes);
 
-    if (tracks.isEmpty && offline.pending.isEmpty) {
-      return const EmptyState(
+    if (tracks.isEmpty && pendingCount == 0) {
+      return EmptyState(
         icon: Symbols.download_for_offline_rounded,
-        message: 'Skladby stažené do zařízení hrají i bez internetu. '
-            'Stáhneš je v menu skladby, alba nebo playlistu – „Stáhnout do zařízení“.',
+        message: episodes
+            ? 'Epizody stažené do zařízení hrají i bez internetu. Stáhneš je u epizody – „Stáhnout do zařízení“.'
+            : 'Skladby stažené do zařízení hrají i bez internetu. '
+                'Stáhneš je v menu skladby, alba nebo playlistu – „Stáhnout do zařízení“.',
       );
     }
 
@@ -82,7 +96,7 @@ class OfflineTab extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${songsCount(tracks.length)} · ${formatBytes(ownBytes)}', style: theme.textTheme.titleMedium),
+                  Text('${count(tracks.length)} · ${formatBytes(ownBytes)}', style: theme.textTheme.titleMedium),
                   Text(
                     usage?.quota != null && usage!.quota! > 0
                         ? 'v tomhle zařízení (volné pro appku ${formatBytes(usage.quota! - usage.usage)})'
@@ -101,13 +115,13 @@ class OfflineTab extends ConsumerWidget {
               ),
           ],
         ),
-        if (offline.pending.isNotEmpty) ...[
+        if (pendingCount > 0) ...[
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
               SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: muted)),
               const SizedBox(width: AppSpacing.sm),
-              Text('Stahuje se ${songsCount(offline.pending.length)}…', style: theme.textTheme.bodyMedium),
+              Text('Stahuje se ${count(pendingCount)}…', style: theme.textTheme.bodyMedium),
             ],
           ),
         ],

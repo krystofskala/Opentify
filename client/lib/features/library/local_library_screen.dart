@@ -122,7 +122,7 @@ class _LocalLibraryScreenState extends ConsumerState<LocalLibraryScreen> {
         appBar: SectionAppBar(
           'Knihovna',
           // Admin: celá sdílená knihovna na serveru, nebo jen ta jeho.
-          actions: const [_LibraryScopeToggle(), AppModeToggle()],
+          actions: const [LibraryScopeToggle(), AppModeToggle()],
           bottom: PreferredSize(
             preferredSize: Size.fromHeight(offline ? 0 : 64 + 48),
             child: offline ? const SizedBox.shrink() : Column(
@@ -1054,14 +1054,14 @@ class _LibraryTabSegments extends StatelessWidget {
 /// Admin: pohled Knihovny -- Moje (klasická knihovna) / Staženo (co sám
 /// stáhl) / Vše na serveru. Ostatní profily ho zatím nevidí ("Staženo" pro
 /// ně přijde s offline režimem v nativní appce).
-class _LibraryScopeToggle extends ConsumerWidget {
-  const _LibraryScopeToggle();
+class LibraryScopeToggle extends ConsumerWidget {
+  const LibraryScopeToggle({super.key});
 
   static const _labels = {
     LibraryScope.mine: ('Moje', Symbols.person_rounded, 'Co sis přidal do knihovny a lajkl'),
     LibraryScope.downloaded: ('Staženo', Symbols.download_done_rounded, 'Všechno, co sis stáhl nebo pustil'),
     LibraryScope.all: ('Server', Symbols.dns_rounded, 'Všechno stažené na serveru, i od ostatních profilů'),
-    LibraryScope.offline: ('Offline', Symbols.download_for_offline_rounded, 'Skladby uložené v tomhle zařízení'),
+    LibraryScope.offline: ('Offline', Symbols.download_for_offline_rounded, 'Uložené v tomhle zařízení (hraje i bez internetu)'),
   };
 
   @override

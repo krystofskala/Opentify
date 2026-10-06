@@ -18,7 +18,6 @@ import '../core/api_client.dart' show ApiException;
 import '../core/device_token.dart' show withDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
 import '../core/prefetch_cache.dart';
-import '../features/spoken/podcast_offline.dart';
 import '../core/media_session.dart';
 import '../core/profile_prefs.dart';
 import '../core/radio_mode.dart';
@@ -2023,9 +2022,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Mluvené slovo: nic se neobstarává (kniha je na serveru celá, podcast
     // server přeposílá). Epizoda stažená do telefonu hraje odtud.
     if (isSpokenId(info.recordingId)) {
-      final episode = podcastEpisodeId(info.recordingId);
-      if (episode != null) {
-        final local = await _ref.read(podcastOfflineProvider.notifier).localUrl(episode);
+      if (podcastEpisodeId(info.recordingId) != null && offline.has(info.recordingId)) {
+        final local = await offline.localUrl(info.recordingId);
         if (state.nowPlaying?.recordingId != info.recordingId) return;
         if (local != null) {
           unawaited(_startStream(info, local, isProgressive: false, isLocal: true));

@@ -14,7 +14,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
 import 'podcast_data.dart';
-import 'podcast_offline.dart';
+import '../../state/offline_controller.dart';
 import 'spoken_data.dart' show formatHours;
 
 /// Podcasty v režimu mluveného slova: pořad s epizodami, výsledky hledání,
@@ -90,7 +90,7 @@ class PodcastEpisodeTile extends ConsumerWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _DownloadButton(episodeId: episode.id),
+          _DownloadButton(episode: episode),
           Icon(
             episode.finished ? Symbols.check_circle_rounded : Symbols.play_circle_rounded,
             color: theme.colorScheme.primary,
@@ -103,32 +103,35 @@ class PodcastEpisodeTile extends ConsumerWidget {
 }
 
 /// Stáhnout epizodu do zařízení / smazat ji odtud.
+/// Stejné stahování do zařízení jako u skladeb (OfflineController,
+/// Knihovna › Offline) -- stejné texty i ikony.
 class _DownloadButton extends ConsumerWidget {
-  const _DownloadButton({required this.episodeId});
-  final String episodeId;
+  const _DownloadButton({required this.episode});
+  final PodcastEpisodeItem episode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offline = ref.watch(podcastOfflineProvider);
-    final saved = offline.saved.contains(episodeId);
-    if (offline.downloading.contains(episodeId)) {
-      return const Padding(
-        padding: EdgeInsets.all(AppSpacing.sm),
-        child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-      );
-    }
-    final ctrl = ref.read(podcastOfflineProvider.notifier);
+    final id = 'pc:${episode.id}';
+    final offline = ref.watch(offlineControllerProvider);
+    final saved = offline.tracks.containsKey(id);
+    final pending = offline.pending.containsKey(id);
     return IconButton(
-      tooltip: saved ? 'Smazat z telefonu' : 'Stáhnout do telefonu',
-      icon: Icon(saved ? Symbols.download_done_rounded : Symbols.download_rounded, size: 22),
-      onPressed: () async {
+      tooltip: saved ? 'Smazat ze zařízení' : (pending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení'),
+      icon: Icon(
+        saved
+            ? Symbols.mobile_off_rounded
+            : (pending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded),
+        size: 22,
+      ),
+      onPressed: () {
+        final ctrl = ref.read(offlineControllerProvider.notifier);
         if (saved) {
-          await ctrl.remove(episodeId);
-          if (context.mounted) toast(context, 'Epizoda smazána z telefonu');
-          return;
+          ctrl.remove(id);
+          toast(context, 'Smazáno ze zařízení');
+        } else if (!pending) {
+          ctrl.add([episode.toQueueItem()]);
+          toast(context, 'Stahuje se do zařízení');
         }
-        final ok = await ctrl.download(episodeId);
-        if (context.mounted) toast(context, ok ? 'Epizoda je v telefonu – hraje i bez internetu' : 'Stažení se nepovedlo');
       },
     );
   }
