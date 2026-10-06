@@ -117,6 +117,20 @@ async def release_files(infohash: str):
     return {"groups": sorted(groups.values(), key=lambda g: importer_natural(g["folder"]))}
 
 
+@spoken_router.get("/releases/foreign/files")
+async def foreign_release_files(ref: str):
+    """Obsah vydání ze Soulseeku před stažením (složka z výsledku hledání;
+    stahuje se celá)."""
+    found = await slsk_books.cached(ref.strip())
+    if found is None:
+        raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
+    files = [
+        {"index": i, "name": str(f["filename"]).replace("\\", "/").rsplit("/", 1)[-1], "size": int(f.get("size") or 0)}
+        for i, f in enumerate(found["files"])
+    ]
+    return {"groups": [{"folder": "", "size": sum(f["size"] for f in files), "files": files}]}
+
+
 class AcquireIn(BaseModel):
     infohash: str | None = None
     title: str

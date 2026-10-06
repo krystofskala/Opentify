@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -89,3 +90,13 @@ def test_acquire_needs_fresh_search_result(monkeypatch, redis):
         assert out["status"] == "pending"
         again = asyncio.run(routes.acquire(body, session=s, current=("dad", "d")))
         assert again["id"] == out["id"]
+
+
+def test_foreign_release_contents_before_download(redis):
+    with pytest.raises(HTTPException):
+        asyncio.run(routes.foreign_release_files("slsk:gone"))
+    redis.data["spoken:slsk:slsk:abc"] = json.dumps({"user": "anna", "size": 13, "files": [
+        {"filename": "Music\\Thrawn\\01.mp3", "size": 9}, {"filename": "Music\\Thrawn\\02.mp3", "size": 4}]})
+    out = asyncio.run(routes.foreign_release_files("slsk:abc"))
+    assert out == {"groups": [{"folder": "", "size": 13, "files": [
+        {"index": 0, "name": "01.mp3", "size": 9}, {"index": 1, "name": "02.mp3", "size": 4}]}]}

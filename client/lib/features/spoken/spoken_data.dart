@@ -274,8 +274,11 @@ typedef ReleaseFile = ({int index, String name, int size});
 typedef ReleaseGroup = ({String folder, int size, List<ReleaseFile> files});
 
 /// Obsah vydání před stažením (sbírka -> knihy). Chce účet SkTorrent.
-Future<List<ReleaseGroup>> fetchReleaseGroups(WidgetRef ref, String infohash) async {
-  final json = await ref.read(apiClientProvider).getJson('/spoken/releases/$infohash/files');
+Future<List<ReleaseGroup>> fetchReleaseGroups(WidgetRef ref, SpokenRelease r) async {
+  final api = ref.read(apiClientProvider);
+  final json = r.source == 'slskd'
+      ? await api.getJson('/spoken/releases/foreign/files', query: {'ref': r.ref ?? ''})
+      : await api.getJson('/spoken/releases/${r.infohash}/files');
   return [
     for (final g in json['groups'] as List<dynamic>? ?? const [])
       (

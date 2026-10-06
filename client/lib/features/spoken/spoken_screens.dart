@@ -229,15 +229,8 @@ class SpokenHomeScreen extends ConsumerWidget {
                         subtitle: b.reason,
                         imageUrl: b.release.coverUrl,
                         placeholderIcon: Symbols.menu_book_rounded,
-                        onTap: () => showGlassSheet<void>(
-                          context,
-                          builder: (_) => GlassSheet(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                              child: _ReleaseTile(release: b.release),
-                            ),
-                          ),
-                        ),
+                        // Rovnou obsah vydání (co by se stáhlo).
+                        onTap: () => _download(context, ref, b.release),
                       ),
                   ]),
                 ],
@@ -535,6 +528,8 @@ class _ReleaseTile extends ConsumerWidget {
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      // Klepnutí = obsah vydání (co přesně by se stáhlo).
+      onTap: r.bookId != null ? () => context.push('/spoken/book/${r.bookId}') : () => _download(context, ref, r),
       leading: _Cover(url: r.coverUrl),
       title: Text(r.title, maxLines: 3, overflow: TextOverflow.ellipsis),
       subtitle: Text(
@@ -562,23 +557,28 @@ class _ReleaseTile extends ConsumerWidget {
   }
 }
 
-/// Stáhnout vydání: jedna kniha rovnou, sbírka (víc složek) přes výběr
-/// knih / kapitol -- každá vybraná složka je v knihovně samostatná kniha.
+/// Stáhnout vydání: vždy nejdřív jeho obsah (složky a soubory), stahuje se
+/// až tlačítkem v něm. Sbírka (víc složek) = výběr knih / kapitol -- každá
+/// vybraná složka je v knihovně samostatná kniha.
 Future<void> _download(BuildContext context, WidgetRef ref, SpokenRelease r) async {
   try {
-    if (r.source == 'sktorrent' && r.infohash.isNotEmpty) {
-      final groups = await fetchReleaseGroups(ref, r.infohash);
-      if (!context.mounted) return;
-      if (groups.length > 1) {
-        await showGlassSheet<void>(context, builder: (_) => GlassSheet(child: CollectionPickSheet(release: r, groups: groups)));
-        return;
-      }
+    final groups = await fetchReleaseGroups(ref, r);
+    if (!context.mounted) return;
+    if (groups.isEmpty) {
+      toast(context, 'Ve vydání není žádný zvuk');
+      return;
     }
-    await acquireSpoken(ref, r);
-    if (context.mounted) toast(context, 'Kniha se stahuje – najdeš ji na Domů');
+    await showGlassSheet<void>(context, builder: (_) => GlassSheet(child: CollectionPickSheet(release: r, groups: groups)));
   } catch (e) {
     if (context.mounted) {
-      toast(context, '$e'.contains('SKTORRENT') ? 'Chybí přihlášení na SkTorrent' : 'Stažení se nepodařilo spustit');
+      toast(
+        context,
+        '$e'.contains('SKTORRENT')
+            ? 'Chybí přihlášení na SkTorrent'
+            : '$e'.contains('vypršel')
+                ? 'Výsledek hledání vypršel, vyhledej knihu znovu'
+                : 'Obsah vydání se nepodařilo načíst',
+      );
     }
   }
 }
@@ -597,6 +597,25 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
   final Set<String> _expanded = {};
   bool _busy = false;
 
+  /// Jedna kniha: rovnou rozbalená a celá vybraná.
+  bool get _single => widget.groups.length == 1;
+
+  /// Soulseek stahuje celou složku (výběr souborů jen u torrentu).
+  bool get _selectable => widget.release.source != 'slskd';
+
+  bool get _everything => widget.groups.every((g) => g.files.every((f) => _selected.contains(f.index)));
+
+  @override
+  void initState() {
+    super.initState();
+    if (_single || !_selectable) {
+      for (final g in widget.groups) {
+        _expanded.add(g.folder);
+        _selected.addAll(g.files.map((f) => f.index));
+      }
+    }
+  }
+
   int get _bytes => [
         for (final g in widget.groups)
           for (final f in g.files)
@@ -613,6 +632,15 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
     setState(() => _busy = true);
     var books = 0;
     try {
+      // Celé vydání jako jedna kniha (stejná jako dřív bez výběru).
+      if ((_single && _everything) || !_selectable) {
+        await acquireSpoken(ref, widget.release);
+        if (mounted) {
+          Navigator.of(context).pop();
+          toast(context, 'Kniha se stahuje – najdeš ji na Domů');
+        }
+        return;
+      }
       for (final g in widget.groups) {
         final picked = [for (final f in g.files) if (_selected.contains(f.index)) f.index];
         if (picked.isEmpty) continue;
@@ -646,8 +674,14 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Co stáhnout?', style: theme.textTheme.titleMedium),
-                Text('${widget.release.title} je sbírka. Vyber knihy, nebo jen některé části.', style: muted),
+                Text(_single ? 'Obsah' : 'Co stáhnout?', style: theme.textTheme.titleMedium),
+                Text(
+                  _single
+                      ? '${widget.release.title} · ${widget.groups.first.files.length} souborů · '
+                          '${formatSize(widget.groups.first.size)}'
+                      : '${widget.release.title} je sbírka. Vyber knihy, nebo jen některé části.',
+                  style: muted,
+                ),
               ],
             ),
           ),
@@ -661,7 +695,7 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
                         ? true
                         : (g.files.any((f) => _selected.contains(f.index)) ? null : false),
                     tristate: true,
-                    onChanged: (v) => _toggleGroup(g, !g.files.every((f) => _selected.contains(f.index))),
+                    onChanged: _selectable ? (v) => _toggleGroup(g, !g.files.every((f) => _selected.contains(f.index))) : null,
                     title: Text(g.folder.isEmpty ? widget.release.title : g.folder),
                     subtitle: Text('${formatSize(g.size)} · ${g.files.length} částí', style: muted),
                     secondary: IconButton(
@@ -679,7 +713,9 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
                         child: CheckboxListTile(
                           dense: true,
                           value: _selected.contains(f.index),
-                          onChanged: (v) => setState(() => v == true ? _selected.add(f.index) : _selected.remove(f.index)),
+                          onChanged: _selectable
+                              ? (v) => setState(() => v == true ? _selected.add(f.index) : _selected.remove(f.index))
+                              : null,
                           title: Text(f.name, maxLines: 2, overflow: TextOverflow.ellipsis),
                           subtitle: Text(formatSize(f.size), style: muted),
                         ),
@@ -691,7 +727,11 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
           Padding(
             padding: const EdgeInsets.all(AppSpacing.md),
             child: GlassButton(
-              label: _selected.isEmpty ? 'Vyber, co stáhnout' : 'Stáhnout vybrané (${formatSize(_bytes)})',
+              label: _selected.isEmpty
+                  ? 'Vyber, co stáhnout'
+                  : _everything
+                      ? 'Stáhnout (${formatSize(_bytes)})'
+                      : 'Stáhnout vybrané (${formatSize(_bytes)})',
               icon: Symbols.download_rounded,
               style: GlassButtonStyle.prominent,
               expand: true,
