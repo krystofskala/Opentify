@@ -13,6 +13,7 @@ import 'track_actions.dart' show nowPlayingInfoFor;
 import 'glass/glass.dart';
 import 'youtube_link_import.dart';
 import '../core/cz_plural.dart';
+import 'text_context_menu.dart';
 import 'toast.dart';
 
 /// Import z odkazu na Spotify: průběh, pak otevře nový playlist a řekne,
@@ -73,6 +74,7 @@ Future<void> showSpotifyLinkDialog(BuildContext context, WidgetRef ref) async {
     builder: (context) => AlertDialog(
       title: const Text('Přidat z odkazu'),
       content: TextField(
+        contextMenuBuilder: adaptiveTextContextMenu,
         controller: controller,
         autofocus: controller.text.isEmpty,
         decoration: const InputDecoration(hintText: 'Odkaz ze Spotify, Apple Music nebo YouTube'),

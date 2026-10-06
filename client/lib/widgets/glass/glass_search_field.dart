@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../theme/glass_tokens.dart';
+import '../text_context_menu.dart';
 import '../glass_container.dart';
 import 'glass_button.dart';
 import 'glass_pressable.dart';
@@ -110,6 +111,7 @@ class _GlassSearchFieldState extends State<GlassSearchField> {
               controller: _controller,
               focusNode: _focus,
               autofocus: widget.autofocus,
+              contextMenuBuilder: adaptiveTextContextMenu,
               onChanged: widget.onChanged,
               onSubmitted: widget.onSubmitted,
               textInputAction: TextInputAction.search,
