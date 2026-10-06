@@ -539,6 +539,27 @@ class SpokenFile(SQLModel, table=True):
     chapters: list | None = Field(default=None, sa_column=Column(JSON))
 
 
+class DownloadRequest(SQLModel, table=True):
+    """Žádost o stažení, které musí schválit správce (velká audiokniha,
+    audiokniha z internetu, přes týdenní limit). Schvaluje se v appce nebo
+    tlačítkem v upozornění (jednorázový `token`, v DB jen jeho otisk)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    kind: str = "audiobook"
+    title: str
+    size_bytes: int | None = None
+    reason: str = ""
+    # Vše potřebné ke stažení i po letech (výsledky hledání vyprší).
+    payload: dict | None = Field(default=None, sa_column=Column(JSON))
+    token_hash: str = Field(index=True)
+    # pending -> approved | denied | expired
+    status: str = Field(default="pending", index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    decided_at: datetime | None = None
+    book_id: str | None = None
+
+
 class SpokenProgress(SQLModel, table=True):
     """Kde profil v knize skončil."""
 

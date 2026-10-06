@@ -26,6 +26,7 @@ from app.loudness import backfill_loop
 from app.realtime import redis_listener, websocket_endpoint
 from app.routes.blends import blends_router
 from app.routes.spoken import spoken_router
+from app.routes.download_requests import download_requests_router
 from app.routes.podcasts import podcasts_router
 from app.auth import get_current_user
 from app.recommendations.listenbrainz import close_listenbrainz_client, close_listenbrainz_public_client
@@ -180,6 +181,8 @@ app.include_router(client_log_router, prefix="/api/v1", dependencies=[Depends(ge
 app.include_router(recognize_router, prefix="/api/v1")
 app.include_router(blends_router, prefix="/api/v1")
 app.include_router(spoken_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+# Bez globálního přihlášení: tlačítko v upozornění nese vlastní jednorázový klíč.
+app.include_router(download_requests_router, prefix="/api/v1")
 app.include_router(podcasts_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 
 

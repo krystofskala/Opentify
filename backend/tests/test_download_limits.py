@@ -57,15 +57,13 @@ def test_music_limit_per_hour(env, monkeypatch):
     asyncio.run(run())
 
 
-def test_books_big_release_needs_admin_and_weekly_cap(env):
-    with pytest.raises(HTTPException) as e:
-        dl.check_book("pepa", 6 * dl.GB)
-    assert e.value.status_code == 403
-    dl.check_book("admin", 30 * dl.GB)  # admin smí
+def test_book_approval_reasons(env):
+    assert dl.book_approval_reason("admin", 30 * dl.GB, public=True) is None  # admin nikdy
+    assert dl.book_approval_reason("pepa", 1 * dl.GB, public=True) == "z internetu"
+    assert "velké" in dl.book_approval_reason("pepa", 6 * dl.GB, public=False)
+    assert dl.book_approval_reason("pepa", 1 * dl.GB, public=False) is None
     with Session(env) as s:
         s.add(SpokenBook(source_ref="a", release_title="x", title="x", size_bytes=18 * dl.GB, requested_by_user_id="pepa"))
         s.commit()
-    dl.check_book("pepa", 1 * dl.GB)  # 19 GB -- ještě v limitu
-    with pytest.raises(HTTPException) as e:
-        dl.check_book("pepa", 3 * dl.GB)  # 21 GB
-    assert e.value.status_code == 429
+    assert dl.book_approval_reason("pepa", 1 * dl.GB, public=False) is None  # 19 GB
+    assert "limit" in dl.book_approval_reason("pepa", 3 * dl.GB, public=False)  # 21 GB

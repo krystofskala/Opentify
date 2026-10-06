@@ -26,6 +26,8 @@ PUBLIC = {
     ("GET", "/api/v1/radio/{session_id}/stream"),
     ("GET", "/api/v1/radio/{session_id}/index.m3u8"),
     ("GET", "/api/v1/radio/{session_id}/{name}"),
+    # Tlačítko Povolit/Zamítnout v upozornění: jednorázový klíč té jedné žádosti.
+    ("POST", "/api/v1/download-requests/{req_id}/decide"),
 }
 
 # Jen admin: správa profilů a zařízení, údržba knihovny a stahování.
@@ -42,6 +44,9 @@ ADMIN = {
     ("POST", "/api/v1/auth/signup-link"),
     ("POST", "/api/v1/auth/users/{user_id}/pair-code"),
     ("POST", "/api/v1/auth/pair-code"),
+    ("GET", "/api/v1/download-requests"),
+    ("POST", "/api/v1/download-requests/{req_id}/approve"),
+    ("POST", "/api/v1/download-requests/{req_id}/deny"),
     ("POST", "/api/v1/library/scan"),
     ("GET", "/api/v1/library/verify-report"),
     ("POST", "/api/v1/library/verify/{recording_id}"),

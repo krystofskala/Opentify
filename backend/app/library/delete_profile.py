@@ -19,6 +19,7 @@ from app.models import (
     AppUser,
     ArtistDislike,
     ArtistFeedback,
+    DownloadRequest,
     PendingImportPlay,
     PodcastListenHistory,
     PodcastProgress,
@@ -52,7 +53,8 @@ logger = logging.getLogger(__name__)
 # Každá tabulka se sloupcem `user_id` (hlídá test_delete_profile_covers_all).
 _PER_USER = [Listen, PlayEvent, SkipStreak, RecordingDislike, HeardFully, AuthToken, InviteCode, PairCode,
              LibraryEntry, PlaylistMember, PinnedPlaylist, ArtistDislike, FavoriteArtist, CollectionProgress,
-             ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay, SpokenProgress, PodcastSubscription, PodcastProgress, PodcastListenHistory]
+             ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay, SpokenProgress, PodcastSubscription, PodcastProgress, PodcastListenHistory,
+             DownloadRequest]
 
 
 def delete_profile(user_id: str) -> dict[str, int]:

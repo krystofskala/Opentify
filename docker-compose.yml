@@ -18,6 +18,8 @@ services:
       AUTH_MODE: ${AUTH_MODE:-login}
       # Upozornění správci na telefon (ntfy, app/notify.py); prázdné = vypnuto.
       NTFY_URL: ${NTFY_URL:-}
+      # Veřejná adresa (Funnel) pro tlačítka Povolit/Zamítnout v upozornění.
+      OPENTIFY_PUBLIC_URL: ${OPENTIFY_PUBLIC_URL:-}
       # Knihovna › Server: přehled sdílení na Soulseeku (jen čtení, viz
       # GET /library/soulseek) -- stejný klíč jako worker.
       SLSKD_URL: http://gluetun:5030

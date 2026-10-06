@@ -29,7 +29,7 @@ def _target() -> tuple[str, str] | None:
 
 
 def notify(title: str, message: str, *, tags: list[str] | None = None, priority: int = 3,
-           key: str | None = None, every_s: float = 0) -> bool:
+           key: str | None = None, every_s: float = 0, actions: list[dict] | None = None) -> bool:
     """`True` = odesláno (na pozadí), `False` = vypnuto nebo potlačeno."""
     target = _target()
     if target is None:
@@ -42,6 +42,8 @@ def notify(title: str, message: str, *, tags: list[str] | None = None, priority:
             _last[key] = now
     base, topic = target
     payload = {"topic": topic, "title": title, "message": message, "tags": tags or [], "priority": priority}
+    if actions:
+        payload["actions"] = actions  # tlačítka v oznámení (ntfy "http" akce)
 
     def send() -> None:
         try:

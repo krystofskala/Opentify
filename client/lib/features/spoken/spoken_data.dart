@@ -232,8 +232,10 @@ final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) async* {
 
 /// `sizeBytes`: u výběru ze sbírky velikost jen vybraných souborů (limit
 /// audioknih na člověka se počítá z ní, ne z celého vydání).
-Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, String? folder, int? sizeBytes}) async {
-  await ref.read(apiClientProvider).postJson('/spoken/books', body: {
+/// `true` = stahuje se; `false` = čeká na schválení správcem (velké vydání,
+/// z internetu, přes týdenní limit).
+Future<bool> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, String? folder, int? sizeBytes}) async {
+  final json = await ref.read(apiClientProvider).postJson('/spoken/books', body: {
     if (files != null) 'files': files,
     if (folder != null && folder.isNotEmpty) 'folder': folder,
     'source': r.source,
@@ -245,6 +247,7 @@ Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, St
   ref.invalidate(spokenBooksProvider);
   ref.invalidate(spokenSearchProvider);
   ref.invalidate(spokenForeignSearchProvider);
+  return json['status'] != 'awaiting_approval';
 }
 
 /// Nepovedené stažení znovu (stejné vydání).

@@ -629,16 +629,19 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
         }
       });
 
+  static const _waitingText = 'Požádal jsem správce o schválení – po schválení se kniha objeví v knihovně';
+
   Future<void> _submit() async {
     setState(() => _busy = true);
     var books = 0;
+    var waiting = 0; // čeká na schválení správcem
     try {
       // Celé vydání jako jedna kniha (stejná jako dřív bez výběru).
       if ((_single && _everything) || !_selectable) {
-        await acquireSpoken(ref, widget.release);
+        final started = await acquireSpoken(ref, widget.release);
         if (mounted) {
           Navigator.of(context).pop();
-          toast(context, 'Kniha se stahuje – najdeš ji na Domů');
+          toast(context, started ? 'Kniha se stahuje – najdeš ji na Domů' : _waitingText);
         }
         return;
       }
@@ -646,12 +649,22 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
         final picked = [for (final f in g.files) if (_selected.contains(f.index)) f.index];
         if (picked.isEmpty) continue;
         final size = [for (final f in g.files) if (_selected.contains(f.index)) f.size].fold(0, (a, b) => a + b);
-        await acquireSpoken(ref, widget.release, files: picked, folder: g.folder, sizeBytes: size);
-        books++;
+        if (await acquireSpoken(ref, widget.release, files: picked, folder: g.folder, sizeBytes: size)) {
+          books++;
+        } else {
+          waiting++;
+        }
       }
       if (mounted) {
         Navigator.of(context).pop();
-        toast(context, books == 1 ? 'Kniha se stahuje – najdeš ji na Domů' : 'Stahuje se $books knih – najdeš je na Domů');
+        toast(
+          context,
+          waiting > 0
+              ? _waitingText
+              : books == 1
+                  ? 'Kniha se stahuje – najdeš ji na Domů'
+                  : 'Stahuje se $books knih – najdeš je na Domů',
+        );
       }
     } catch (e) {
       if (mounted) {

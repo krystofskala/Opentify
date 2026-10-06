@@ -3,8 +3,9 @@ Soulseek). Admin je bez limitu. Počítá se jen NOVÉ stahování -- přehráv�
 a už stažené věci ne.
 
 - hudba: `MUSIC_PER_HOUR` / `MUSIC_PER_DAY` nově obstaraných skladeb,
-- audioknihy: `BOOKS_GB_PER_WEEK` za 7 dní, jedna kniha nad
-  `BOOK_MAX_GB_SELF` jen přes správce.
+- audioknihy: nad `BOOKS_GB_PER_WEEK` za 7 dní, jedna kniha nad
+  `BOOK_MAX_GB_SELF` a cokoli z internetu -> žádost o schválení
+  (app/download_requests.py).
 """
 
 from __future__ import annotations
@@ -78,18 +79,16 @@ async def count_music(user_id: str) -> None:
         await r.expire(key, ttl)
 
 
-def check_book(user_id: str, size_bytes: int | None) -> None:
-    """Před stažením audioknihy (sync -- jen DB)."""
+def book_approval_reason(user_id: str, size_bytes: int | None, *, public: bool) -> str | None:
+    """Proč tuhle audioknihu musí schválit správce (None = může hned).
+    Admin nikdy; z internetu vždy; jinak velké vydání nebo přes týdenní limit."""
     if is_admin(user_id):
-        return
+        return None
     size = size_bytes or 0
+    if public:
+        return "z internetu"
     if size > BOOK_MAX_GB_SELF * GB:
-        notify("📚 Žádost o velkou audioknihu", f"{_name(user_id)}: {size / GB:.1f} GB – stáhnout můžeš ty",
-               tags=["books"], key=f"book-big:{user_id}", every_s=600)
-        raise HTTPException(
-            status_code=403,
-            detail=f"Tohle vydání má přes {BOOK_MAX_GB_SELF} GB – požádej správce, ať ho stáhne.",
-        )
+        return f"velké vydání ({size / GB:.1f} GB)"
     since = utcnow() - timedelta(days=7)
     with Session(engine) as session:
         used = session.exec(
@@ -98,9 +97,5 @@ def check_book(user_id: str, size_bytes: int | None) -> None:
             )
         ).one()
     if used + size > BOOKS_GB_PER_WEEK * GB:
-        notify("📚 Limit audioknih", f"{_name(user_id)}: {used / GB:.1f} GB za týden",
-               tags=["books"], key=f"book-limit:{user_id}", every_s=3600)
-        raise HTTPException(
-            status_code=429,
-            detail=f"Za poslední týden už máš stažené audioknihy za {used / GB:.0f} GB (limit {BOOKS_GB_PER_WEEK} GB).",
-        )
+        return f"přes týdenní limit (už {used / GB:.1f} GB z {BOOKS_GB_PER_WEEK} GB)"
+    return None

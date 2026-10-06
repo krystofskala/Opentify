@@ -8,16 +8,16 @@ import asyncio
 import hashlib
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app import download_limits
+from app import download_limits, download_requests
 from app.auth import get_current_user
 from app.db import get_session
 from app.models import SpokenBook, SpokenFile, SpokenProgress
-from app.public_access import deny_public
+from app.public_access import deny_public, is_public
 from app.spoken import sktorrent, slsk_books
 from app.spoken.acquire import SPOKEN_ROOT, book_out
 from app.spoken.importer import _natural as importer_natural
@@ -151,66 +151,99 @@ async def acquire(
     body: AcquireIn,
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
-    _local_only: None = Depends(deny_public),
+    request: Request = None,  # type: ignore[assignment]  -- None jen v testech
 ):
     """"Stáhnout": jednorázově, jen na pokyn. Stejné vydání podruhé = stejná
-    kniha (a její stav); po chybě se zkusí znovu."""
-    # Limit audioknih na člověka (app/download_limits.py); admin bez limitu.
-    await asyncio.to_thread(download_limits.check_book, current[0], body.sizeBytes)
+    kniha (a její stav); po chybě se zkusí znovu. Když stažení musí schválit
+    správce (velké vydání, z internetu, přes týdenní limit -- viz
+    app/download_limits.py), založí se žádost a vrátí se
+    `{"status": "awaiting_approval"}`."""
+    user_id = current[0]
+    ref = _book_ref(body)
+    book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == ref)).first()
+    if book is not None and book.status != "failed":
+        return book_out(book)  # už je / stahuje se -- nic nového
+    found = None
     if body.source == "slskd":
-        return await _acquire_slskd(body, session, current[0])
+        found = await slsk_books.cached(ref)
+        if found is None:
+            raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
+    size = found["size"] if found else body.sizeBytes
+    public = request is not None and is_public(request)
+    reason = await asyncio.to_thread(download_limits.book_approval_reason, user_id, size, public=public)
+    if reason:
+        return await asyncio.to_thread(
+            download_requests.create, user_id, body.model_dump(), found, size, reason, _public_base(request)
+        )
+    return await acquire_now(body, session, user_id, found)
+
+
+def _public_base(request: Request | None) -> str:
+    """Adresa serveru pro tlačítka v upozornění (z `.env`, jinak z požadavku)."""
+    import os
+
+    base = os.environ.get("OPENTIFY_PUBLIC_URL", "").strip().rstrip("/")
+    if base:
+        return base
+    return str(request.base_url).rstrip("/") if request is not None else ""
+
+
+def _book_ref(body: AcquireIn) -> str:
+    """Id vydání: infohash (u výběru ze sbírky + otisk výběru), u Soulseeku ref."""
+    if body.source == "slskd":
+        ref = (body.ref or "").strip()
+        if not ref:
+            raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
+        return ref
     infohash = (body.infohash or "").strip().lower()
     if len(infohash) != 40 or any(c not in "0123456789abcdef" for c in infohash):
         raise HTTPException(status_code=422, detail="neplatný infohash")
     selection = sorted({int(i) for i in body.files}) if body.files else None
     # Kniha vybraná ze sbírky: vlastní id podle vybraných souborů.
-    ref = infohash if selection is None else (
+    return infohash if selection is None else (
         f"{infohash}:" + hashlib.sha1(",".join(map(str, selection)).encode()).hexdigest()[:12]
     )
+
+
+async def acquire_now(body: AcquireIn, session: Session, user_id: str, found: dict | None = None) -> dict:
+    """Založit (nebo po chybě obnovit) stahování -- bez kontroly limitů
+    (volá se po rozhodnutí: hned, nebo po schválení žádosti)."""
+    ref = _book_ref(body)
     book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == ref)).first()
     if book is None:
-        guess = guess_from_release(body.folder or body.title)
-        book = SpokenBook(
-            source_ref=ref,
-            source_files={"infohash": infohash, "indices": selection} if selection is not None else None,
-            language="cs",
-            release_title=body.title[:300],
-            title=guess["title"][:300],
-            narrator=guess["narrator"] or guess_from_release(body.title)["narrator"],
-            size_bytes=body.sizeBytes,
-            # Obal vždy přes náš server (viz `cover`), nic od klienta.
-            cover_url=sktorrent.cover_path(infohash),
-            requested_by_user_id=current[0],
-        )
-    elif book.status == "failed":
-        book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()
-    else:
-        return book_out(book)
-    session.add(book)
-    session.commit()
-    session.refresh(book)
-    return book_out(book)
-
-
-async def _acquire_slskd(body: AcquireIn, session: Session, user_id: str) -> dict:
-    ref = (body.ref or "").strip()
-    book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == ref)).first() if ref else None
-    if book is None:
-        found = await slsk_books.cached(ref) if ref else None
-        if found is None:
-            raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
-        guess = guess_from_release(body.title)
-        book = SpokenBook(
-            source="slskd",
-            source_ref=ref,
-            source_files={"user": found["user"], "files": found["files"]},
-            language="en",
-            release_title=body.title[:300],
-            title=guess["title"][:300],
-            narrator=guess["narrator"],
-            size_bytes=found["size"],
-            requested_by_user_id=user_id,
-        )
+        if body.source == "slskd":
+            if found is None:
+                found = await slsk_books.cached(ref)
+            if found is None:
+                raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
+            guess = guess_from_release(body.title)
+            book = SpokenBook(
+                source="slskd",
+                source_ref=ref,
+                source_files={"user": found["user"], "files": found["files"]},
+                language="en",
+                release_title=body.title[:300],
+                title=guess["title"][:300],
+                narrator=guess["narrator"],
+                size_bytes=found["size"],
+                requested_by_user_id=user_id,
+            )
+        else:
+            infohash = (body.infohash or "").strip().lower()
+            selection = sorted({int(i) for i in body.files}) if body.files else None
+            guess = guess_from_release(body.folder or body.title)
+            book = SpokenBook(
+                source_ref=ref,
+                source_files={"infohash": infohash, "indices": selection} if selection is not None else None,
+                language="cs",
+                release_title=body.title[:300],
+                title=guess["title"][:300],
+                narrator=guess["narrator"] or guess_from_release(body.title)["narrator"],
+                size_bytes=body.sizeBytes,
+                # Obal vždy přes náš server (viz `cover`), nic od klienta.
+                cover_url=sktorrent.cover_path(infohash),
+                requested_by_user_id=user_id,
+            )
     elif book.status == "failed":
         book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()
     else:
