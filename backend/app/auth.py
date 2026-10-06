@@ -197,6 +197,12 @@ def require_admin(request: Request) -> tuple[str, str]:
     souborů) -- jen admin a jen za sebe."""
     if is_public(request):
         # Správa nikdy z veřejného internetu, ani s klíčem admina.
+        from app.notify import notify
+        from app.public_access import client_ip
+
+        ip = client_ip(request)
+        notify("🚫 Admin z internetu", f"Odmítnuto: {request.method} {request.url.path} · {ip}",
+               tags=["no_entry"], priority=4, key=f"admin-public:{ip}", every_s=600)
         raise HTTPException(status_code=403, detail="Správa jde jen přes Tailscale.")
     user, acting = resolve_user(request)
     if user is None or user.role != "admin":

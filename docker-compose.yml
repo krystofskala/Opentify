@@ -16,6 +16,8 @@ services:
       OPENTIFY_DATA_KEY: ${OPENTIFY_DATA_KEY:-}
       # Přihlášení jménem a heslem (app/auth.py); `open` = bez přihlašování.
       AUTH_MODE: ${AUTH_MODE:-login}
+      # Upozornění správci na telefon (ntfy, app/notify.py); prázdné = vypnuto.
+      NTFY_URL: ${NTFY_URL:-}
       # Knihovna › Server: přehled sdílení na Soulseeku (jen čtení, viz
       # GET /library/soulseek) -- stejný klíč jako worker.
       SLSKD_URL: http://gluetun:5030

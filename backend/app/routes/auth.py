@@ -31,6 +31,8 @@ from app.auth import (
 )
 from app.db import engine
 from app.models import AppUser, AuthToken, InviteCode, PairCode
+from app.notify import notify
+from app.public_access import client_ip, is_public
 from app.utils import utcnow
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -98,10 +100,18 @@ def _user_out(u: AppUser | None) -> dict | None:
     }
 
 
-def _issue_token(session: Session, user_id: str, label: str | None) -> str:
+def _issue_token(session: Session, user_id: str, label: str | None, request: Request | None = None) -> str:
     token = new_secret()
     session.add(AuthToken(token_hash=hash_secret(token), user_id=user_id, label=label))
     session.commit()
+    user = session.get(AppUser, user_id)
+    where = "z internetu" if request is not None and is_public(request) else "přes Tailscale"
+    ip = client_ip(request) if request is not None else "?"
+    notify(
+        f"🔑 Nové zařízení: {user.name if user else user_id}",
+        f"Přihlášení {where} · {ip}\n{(label or '')[:80]}",
+        tags=["key"],
+    )
     return token
 
 
@@ -118,7 +128,7 @@ def me(request: Request, response: Response):
     tailscale = bool(request.headers.get("tailscale-user-login"))
     if token_from_request(request) is None and not tailscale and auth_mode() == "open" and user.id == ADMIN_ID:
         with Session(engine) as session:
-            issued = _issue_token(session, ADMIN_ID, request.headers.get("user-agent", "")[:120])
+            issued = _issue_token(session, ADMIN_ID, request.headers.get("user-agent", "")[:120], request)
         # Web: cookie; nativní appka si klíč vezme z těla a posílá ho jako Bearer.
         _set_cookie(response, TOKEN_COOKIE, issued)
     return {"user": _user_out(user), "acting": _user_out(acting), "mode": auth_mode(), "token": issued,
@@ -159,7 +169,7 @@ def join(body: JoinIn, request: Request, response: Response):
         if login and invited is not None and invited.tailscale_login is None:
             invited.tailscale_login = login
             session.add(invited)
-        token = _issue_token(session, invite.user_id, request.headers.get("user-agent", "")[:120])
+        token = _issue_token(session, invite.user_id, request.headers.get("user-agent", "")[:120], request)
         user = session.get(AppUser, invite.user_id)
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
@@ -178,7 +188,7 @@ def _signup(session: Session, request: Request, response: Response) -> dict:
         session.add(user)
         session.commit()
         session.refresh(user)
-    token = _issue_token(session, user.id, request.headers.get("user-agent", "")[:120])
+    token = _issue_token(session, user.id, request.headers.get("user-agent", "")[:120], request)
     out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
     response.delete_cookie(ACT_AS_COOKIE, path="/")
@@ -544,6 +554,11 @@ async def _login_throttle(request: Request, username: str) -> None:
         logging.getLogger(__name__).warning("login: Redis nedostupný, limit pokusů neplatí")
         return
     if any(c > limit for c, limit in zip(counts, _LOGIN_FAILS)):
+        notify(
+            "🔒 Někdo hádá heslo",
+            f"Přihlašování zablokované na čtvrt hodiny · jméno {username[:40]} · {client_ip(request)}",
+            tags=["lock"], priority=4, key=f"login:{username.lower()}", every_s=900,
+        )
         raise HTTPException(status_code=429, detail="Moc pokusů. Zkus to za čtvrt hodiny.")
 
 
@@ -599,7 +614,7 @@ async def login(body: LoginIn, request: Request, response: Response):
                 status_code=401,
                 detail="Špatné jméno, heslo nebo kód zařízení." if need_code else "Špatné jméno nebo heslo.",
             )
-        token = _issue_token(session, user.id, _token_label(request, body.device))
+        token = _issue_token(session, user.id, _token_label(request, body.device), request)
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
     response.delete_cookie(ACT_AS_COOKIE, path="/")
@@ -645,7 +660,7 @@ async def claim(body: ClaimIn, request: Request, response: Response):
         session.add(invite)
         session.commit()
         session.refresh(user)
-        token = _issue_token(session, user.id, _token_label(request, body.device))
+        token = _issue_token(session, user.id, _token_label(request, body.device), request)
         out = _user_out(user)
     _set_cookie(response, TOKEN_COOKIE, token)
     response.delete_cookie(ACT_AS_COOKIE, path="/")

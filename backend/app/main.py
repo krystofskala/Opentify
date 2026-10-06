@@ -92,7 +92,12 @@ async def _public_guard(request, call_next):  # type: ignore[no-untyped-def]
     if public_access.is_public(request):
         if auth_mode() != "login":
             return JSONResponse(status_code=403, content={"detail": "Z internetu jen s přihlášením."})
-        if public_access.over_limit(public_access.client_ip(request)):
+        ip = public_access.client_ip(request)
+        if public_access.over_limit(ip):
+            from app.notify import notify
+
+            notify("⚠️ Zahlcení z internetu", f"Adresa {ip} přes limit {public_access.PUBLIC_RATE_PER_MIN} požadavků/min",
+                   tags=["warning"], key=f"rate:{ip}", every_s=900)
             return JSONResponse(status_code=429, content={"detail": "Moc požadavků, zkus to za chvíli."})
     return await call_next(request)
 
