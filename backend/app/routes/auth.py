@@ -691,8 +691,10 @@ def update_user(user_id: str, body: UserPatchIn, _admin=Depends(require_admin)):
 
 
 @auth_router.post("/pair-code")
-def my_pair_code(current: tuple[str, str] = Depends(get_current_user)):
-    """"Přidat zařízení": kód pro přihlášení dalšího vlastního zařízení."""
+def my_pair_code(current: tuple[str, str] = Depends(require_admin)):
+    """"Přidat zařízení": kód pro další vlastní zařízení -- JEN admin.
+    Kódy pro nová zařízení vydává výhradně admin (pravidlo majitele);
+    ostatní profily si kód samy vytvořit nesmí."""
     user_id, _device = current
     with Session(engine) as session:
         code, expires = new_pair_code(session, user_id, user_id)

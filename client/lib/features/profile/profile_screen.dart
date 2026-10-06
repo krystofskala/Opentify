@@ -1167,8 +1167,10 @@ class _LogoutButton extends ConsumerWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
-        // Přihlásit další vlastní zařízení: kód k jménu a heslu.
-        GlassButton(
+        // Přihlásit další vlastní zařízení: kód k jménu a heslu. Kódy
+        // vydává jen admin (ostatní profily dostanou kód od něj).
+        if (auth!.user!.role == 'admin')
+          GlassButton(
           label: 'Přidat zařízení',
           icon: Symbols.devices_rounded,
           compact: true,
@@ -1176,14 +1178,14 @@ class _LogoutButton extends ConsumerWidget {
             final messenger = ScaffoldMessenger.maybeOf(context);
             try {
               final json = await ref.read(apiClientProvider).postJson('/auth/pair-code');
-              if (context.mounted) await showPairCodeDialog(context, auth!.user!.name, json);
+              if (context.mounted) await showPairCodeDialog(context, auth.user!.name, json);
             } catch (_) {
               showToast(messenger, 'Kód se nepodařilo vytvořit.');
             }
           },
         ),
         GlassButton(
-          label: 'Odhlásit se (${auth!.user!.name})',
+          label: 'Odhlásit se (${auth.user!.name})',
           icon: Symbols.logout_rounded,
           compact: true,
           onPressed: () async {
