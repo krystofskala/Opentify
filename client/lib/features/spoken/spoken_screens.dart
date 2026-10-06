@@ -141,6 +141,8 @@ class SpokenHomeScreen extends ConsumerWidget {
           final newEpisodes =
               (podcasts?.latest ?? const <PodcastEpisodeItem>[]).where((e) => !e.finished && !e.started).take(15).toList();
           final shows = ref.watch(myPodcastsProvider).valueOrNull ?? const <PodcastShowItem>[];
+          // Doporučení se načítají zvlášť -- Domů na ně nečeká.
+          final recs = ref.watch(spokenRecommendationsProvider).valueOrNull;
           // Rozposlouchané knihy i epizody dohromady, naposledy poslouchané první.
           final continuing = <_Continue>[
             for (final b in books)
@@ -149,7 +151,8 @@ class SpokenHomeScreen extends ConsumerWidget {
               _Continue(episode: e, at: e.listenedAt),
           ]..sort((a, b) => (b.at ?? DateTime(2000)).compareTo(a.at ?? DateTime(2000)));
           final hasPodcasts = podcasts != null && (podcasts.inProgress.isNotEmpty || podcasts.latest.isNotEmpty);
-          if (books.isEmpty && !hasPodcasts) {
+          final hasRecs = recs != null && (recs.books.isNotEmpty || recs.podcasts.isNotEmpty);
+          if (books.isEmpty && !hasPodcasts && !hasRecs) {
             return ListView(children: [
               const SizedBox(height: 80),
               EmptyState(
@@ -214,6 +217,47 @@ class SpokenHomeScreen extends ConsumerWidget {
                         imageUrl: s.artworkUrl,
                         placeholderIcon: Symbols.podcasts_rounded,
                         onTap: () => context.push('/podcasts/show/${s.id}'),
+                      ),
+                  ]),
+                ],
+                if (recs != null && recs.books.isNotEmpty) ...[
+                  const SectionHeader('Doporučené knihy'),
+                  _Rail(children: [
+                    for (final b in recs.books)
+                      MediaCard(
+                        title: b.release.title,
+                        subtitle: b.reason,
+                        imageUrl: b.release.coverUrl,
+                        placeholderIcon: Symbols.menu_book_rounded,
+                        onTap: () => showGlassSheet<void>(
+                          context,
+                          builder: (_) => GlassSheet(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                              child: _ReleaseTile(release: b.release),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ]),
+                ],
+                if (recs != null && recs.podcasts.isNotEmpty) ...[
+                  const SectionHeader('Doporučené podcasty'),
+                  _Rail(children: [
+                    for (final p in recs.podcasts)
+                      MediaCard(
+                        title: p.show.title,
+                        subtitle: p.reason,
+                        imageUrl: p.show.artworkUrl,
+                        placeholderIcon: Symbols.podcasts_rounded,
+                        onTap: () async {
+                          try {
+                            final id = await openPodcast(ref, p.show);
+                            if (context.mounted) unawaited(context.push('/podcasts/show/$id'));
+                          } catch (_) {
+                            if (context.mounted) toast(context, 'Pořad se nepodařilo otevřít');
+                          }
+                        },
                       ),
                   ]),
                 ],

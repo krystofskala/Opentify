@@ -38,6 +38,10 @@ void main() {
             _book('c', 'pending'),
             _book('d', 'ready'),
           ]),
+      spokenRecommendationsProvider.overrideWith((ref) async => (
+            podcasts: [(show: const PodcastSearchResult(title: 'Buchty', feedUrl: 'https://x/rss'), reason: 'Poslouchal jsi na Spotify')],
+            books: [(release: const SpokenRelease(infohash: 'b', title: 'Sága o impériu', seeders: 80), reason: 'Populární teď')],
+          )),
       myPodcastsProvider.overrideWith((ref) async => [PodcastShowItem.fromJson({'id': 's1', 'title': 'Vinohradská 12', 'subscribed': true})]),
       podcastHomeProvider.overrideWith((ref) async => (
             inProgress: <PodcastEpisodeItem>[],
@@ -48,6 +52,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Pokračovat'), findsOneWidget);
     expect(find.text('Tvoje pořady'), findsOneWidget);
+    expect(find.text('Doporučené knihy'), findsOneWidget);
+    expect(find.text('Doporučené podcasty'), findsOneWidget);
     expect(find.text('Nové díly'), findsOneWidget);
     expect(find.text('Tvoje knihy'), findsOneWidget);
     expect(find.text('Stahuje se'), findsOneWidget);

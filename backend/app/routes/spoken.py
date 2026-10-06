@@ -4,6 +4,7 @@ nepronikne do mixů, doporučení, Wrapped ani na ListenBrainz/Last.fm."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
@@ -51,6 +52,24 @@ async def search(q: str, session: Session = Depends(get_session)):
             item["status"] = book.status
         out.append(item)
     return {"releases": out, "loginConfigured": sktorrent.credentials() is not None}
+
+
+@spoken_router.get("/recommendations")
+async def recommendations(current: tuple[str, str] = Depends(get_current_user)):
+    """Domů mluveného slova: doporučené podcasty a audioknihy (6 h v mezipaměti)."""
+    from app.catalog.cache import cached_json
+    from app.spoken import recommend
+
+    user_id = current[0]
+
+    async def build() -> dict:
+        podcasts, books = await asyncio.gather(recommend.podcasts_for(user_id), recommend.books_for(user_id))
+        return {"podcasts": podcasts, "books": books}
+
+    return await cached_json(
+        f"spoken:recommendations:v1:{user_id}", 6 * 3600, build,
+        is_empty=lambda d: not d["podcasts"] and not d["books"],
+    )
 
 
 @spoken_router.get("/search/foreign")

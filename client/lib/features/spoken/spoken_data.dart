@@ -5,6 +5,7 @@ import '../../core/device_token.dart' show withDeviceToken;
 import '../../core/realtime_event.dart' show UnknownEvent;
 import '../../state/audio_player_controller.dart' show NowPlayingInfo;
 import '../../state/providers.dart';
+import 'podcast_data.dart' show PodcastSearchResult;
 
 /// Audioknihy (backend app/routes/spoken.py) -- odděleně od hudby.
 class SpokenRelease {
@@ -275,3 +276,24 @@ Future<List<ReleaseGroup>> fetchReleaseGroups(WidgetRef ref, String infohash) as
       ),
   ];
 }
+/// Doporučené na Domů mluveného slova -- podcasty (výsledek ve tvaru
+/// hledání) a knihy (vydání ze SkTorrentu), u každého krátké "proč".
+typedef SpokenRecommendations = ({
+  List<({PodcastSearchResult show, String reason})> podcasts,
+  List<({SpokenRelease release, String reason})> books,
+});
+
+final spokenRecommendationsProvider = FutureProvider.autoDispose<SpokenRecommendations>((ref) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/recommendations');
+  return (
+    podcasts: [
+      for (final p in json['podcasts'] as List<dynamic>? ?? const [])
+        if ((p as Map<String, dynamic>)['feedUrl'] != null)
+          (show: PodcastSearchResult.fromJson(p), reason: p['reason'] as String? ?? ''),
+    ],
+    books: [
+      for (final b in json['books'] as List<dynamic>? ?? const [])
+        (release: SpokenRelease.fromJson(b as Map<String, dynamic>), reason: (b['reason'] as String?) ?? ''),
+    ],
+  );
+});

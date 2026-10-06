@@ -100,6 +100,14 @@ async def search(query: str) -> list[Release]:
     return sorted(parse_results(resp.text), key=lambda r: (r.seeders == 0, -r.seeders))
 
 
+async def latest() -> list[Release]:
+    """Nejnovější audioknihy v kategorii Mluvené slovo (první stránka výpisu)."""
+    async with httpx.AsyncClient(proxy=_proxy(), timeout=20, follow_redirects=True, headers={"User-Agent": _UA}) as c:
+        resp = await c.get(f"{BASE}/torrents_v2.php", params={"category": SPOKEN_CATEGORY, "active": "0"})
+        resp.raise_for_status()
+    return parse_results(resp.text)
+
+
 def cover_path(infohash: str) -> str:
     """Cesta obalu na našem API (relativní k /api/v1) -- appka obal nikdy
     nestahuje ze SkTorrentu sama (viz routes/spoken.py `cover`)."""
