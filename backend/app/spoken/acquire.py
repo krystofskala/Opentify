@@ -21,8 +21,8 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.events import publish_event
 from app.models import SpokenBook, SpokenFile
-from app.spoken import qbit, sktorrent, slsk_books
-from app.spoken.importer import AUDIO, _natural, import_book
+from app.spoken import metadata, qbit, sktorrent, slsk_books
+from app.spoken.importer import AUDIO, CATALOG, _natural, import_book
 from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,35 @@ async def _follow(book: SpokenBook) -> None:
             await _save(book.id, status="failed", error="torrent klient o knize neví")
 
 
+async def enrich(r, limit: int = 3) -> None:
+    """Název a autor z katalogu pro knihy, které to ještě nezkusily (nové
+    i dřív stažené). Při chybě katalogu 10 minut pauza."""
+    if await r.get("spoken:meta:backoff"):
+        return
+
+    def todo() -> list[SpokenBook]:
+        with Session(engine) as session:
+            books = list(session.exec(
+                select(SpokenBook).where(SpokenBook.metadata_source.is_(None)).limit(limit)  # type: ignore[union-attr]
+            ).all())
+            for b in books:
+                session.expunge(b)
+            return books
+
+    for book in await asyncio.to_thread(todo):
+        try:
+            hit = await metadata.lookup(book.release_title)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("katalog audioknihy.cz: %s", e)
+            await r.set("spoken:meta:backoff", "1", ex=600)
+            return
+        if hit is None:
+            await _save(book.id, metadata_source="none")
+        else:
+            logger.info("kniha %r -> %r / %r", book.title, hit["title"], hit["author"])
+            await _save(book.id, metadata_source=CATALOG, title=hit["title"], author=hit["author"])
+
+
 async def tick(r) -> None:
     if not await r.set("spoken:tick", "1", nx=True, ex=60):
         return
@@ -225,5 +254,6 @@ async def tick(r) -> None:
             except Exception as e:  # noqa: BLE001 -- jedna kniha nezastaví ostatní
                 logger.warning("kniha %s: %s", book.id, e)
                 await _save(book.id, error=str(e)[:300])
+        await enrich(r)
     finally:
         await r.delete("spoken:tick")

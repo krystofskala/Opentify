@@ -94,6 +94,21 @@ def test_same_part_titles_become_numbered(eng, tmp_path, monkeypatch):
         assert [f.title for f in files] == ["Část 1", "Část 2"]
 
 
+def test_catalog_title_survives_import(eng, tmp_path, monkeypatch):
+    (tmp_path / "01.mp3").write_bytes(b"neni zvuk")
+    monkeypatch.setattr(importer, "_tag", lambda audio, *keys: "Album z tagu" if "album" in keys else None)
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref=HASH_A, release_title="x", title="Saturnin",
+                         metadata_source=importer.CATALOG, requested_by_user_id="me"))
+        s.add(SpokenBook(id="b2", source_ref=HASH_B, release_title="y", title="y", requested_by_user_id="me"))
+        s.commit()
+    importer.import_book("b1", tmp_path)
+    importer.import_book("b2", tmp_path)
+    with Session(eng) as s:
+        assert s.get(SpokenBook, "b1").title == "Saturnin"
+        assert s.get(SpokenBook, "b2").title == "Album z tagu"
+
+
 def test_one_format_per_book(tmp_path):
     for rel in ["a/kniha.mp3", "a/kniha_64kb.mp3", "a/kniha.ogg", "a/kniha.m4b"]:
         p = tmp_path / rel

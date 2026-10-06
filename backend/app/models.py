@@ -511,6 +511,9 @@ class SpokenBook(SQLModel, table=True):
     title: str
     author: str | None = None
     narrator: str | None = None
+    # Odkud je název a autor: "audioknihy.cz" (katalog, pak je tagy
+    # nepřepíšou) | "none" (v katalogu nic jistého) | None (nezkoušeno).
+    metadata_source: str | None = None
     cover_url: str | None = None
     size_bytes: int | None = None
     # pending -> downloading -> importing -> ready | failed

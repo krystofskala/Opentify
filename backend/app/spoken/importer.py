@@ -144,7 +144,7 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
         first = rows[0][1]
         # Album v tagu = název knihy (čistší než název vydání na trackeru).
         album = _tag(first, "album")
-        if album and len(album) <= 200:
+        if album and len(album) <= 200 and book.metadata_source != CATALOG:
             book.title = album
         book.author = book.author or _tag(first, "albumartist", "artist")
         book.narrator = book.narrator or _tag(first, "performer", "composer")
@@ -153,6 +153,9 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
         session.add(book)
         session.commit()
     return len(rows)
+
+
+CATALOG = "audioknihy.cz"
 
 
 _NARRATOR = re.compile(r"\(?\b(?:čte|cte|číta|cita|načetl|nacetl|interpret)\s*:?\s*([^()\[\]]+?)\s*[)\]]?(?:$|[(\[])", re.I)

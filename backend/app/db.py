@@ -99,7 +99,7 @@ def _ensure_columns() -> None:
             ("lastfm_connected_at", "DATETIME"),
         ],
         "playlistitem": [("added_by", "VARCHAR")],
-        "spokenbook": [("source_files", "JSON"), ("language", "VARCHAR")],
+        "spokenbook": [("source_files", "JSON"), ("language", "VARCHAR"), ("metadata_source", "VARCHAR")],
         "provisioningjob": [("source_provider", "VARCHAR"), ("audio_format", "VARCHAR"), ("interactive", "BOOLEAN")],
         "playlist": [
             ("description", "VARCHAR"),
