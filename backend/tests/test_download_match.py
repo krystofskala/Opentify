@@ -129,3 +129,22 @@ def test_duration():
     assert not duration_ok(240, 252)
     assert duration_ok(240, 252, strict=False)
     assert not duration_ok(None, 240)
+
+
+def test_aka_title_matches_either_name():
+    from app.download_match import match_label
+
+    title = "Draft Daughter's Blues a.k.a. Ootischenia"
+    assert match_label(title, "05 - Ootischenia.flac", artist="The Be Good Tanyas") is None
+    assert match_label(title, "The Be Good Tanyas - Draft Daughter's Blues", artist="The Be Good Tanyas") is None
+    assert match_label(title, "Draft Daughter's Blues aka Ootischenia", artist="The Be Good Tanyas") is None
+    assert match_label(title, "Littlest Birds", artist="The Be Good Tanyas") is not None
+
+
+def test_aka_names_become_search_alternatives():
+    from app.providers import TrackMetadata
+
+    t = TrackMetadata(recording_id="r1", title="Draft Daughter's Blues a.k.a. Ootischenia", artist_name="The Be Good Tanyas")
+    assert t.alt_titles == ("Draft Daughter's Blues", "Ootischenia")
+    queries = t.soulseek_queries
+    assert any(q.endswith("Ootischenia") and "Draft" not in q for q in queries)

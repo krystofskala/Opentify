@@ -42,7 +42,7 @@ from typing import Any, Awaitable, Callable, Protocol, Sequence
 import httpx
 
 from app.catalog.rate_limit import AsyncRateLimiter
-from app.download_match import artist_in, duration_ok, match_label
+from app.download_match import artist_in, duration_ok, match_label, title_aliases
 
 logger = logging.getLogger("vault.providers")
 
@@ -213,6 +213,14 @@ class TrackMetadata:
     # Jen oficiální audio stopa (náhrada videoklipu, viz upgrade_video_audio).
     official_audio_only: bool = False
 
+    def __post_init__(self) -> None:
+        # "Draft Daughter's Blues a.k.a. Ootischenia": soubory / videa nesou
+        # často jen jedno ze jmen -- obě jsou alternativní názvy (hledání
+        # i porovnání; dřív 0 vhodných z 13 odpovědí).
+        aliases = tuple(a for a in title_aliases(self.title)[1:] if a not in self.alt_titles)
+        if aliases:
+            self.alt_titles = (*self.alt_titles, *aliases)
+
     def label_mismatch(self, label: str, *, context: str = "") -> str | None:
         """`match_label` proti názvu i alternativním názvům (None = sedí)."""
         why = match_label(self.match_title, label, artist=self.artist_name, album=self.album_title, context=context)
@@ -257,7 +265,8 @@ class TrackMetadata:
         ):
             if query and query.lower() not in (q.lower() for q in out):
                 out.append(query)
-        return out[:3]
+        # Každé jméno z "X a.k.a. Y" dostane vlastní dotaz.
+        return out[: 3 + len(title_aliases(self.title)) - 1]
 
 
 @dataclass

@@ -189,7 +189,37 @@ def _scene_tail(label: str) -> str | None:
     return fold(last) if 2 <= len(last) <= 6 and re.fullmatch(r"[A-Za-z0-9]+", last) else None
 
 
+_AKA = re.compile(r"\s+(?:a\.\s?k\.\s?a\.?|aka)\s+", re.I)
+
+
+def title_aliases(title: str) -> list[str]:
+    """"Draft Daughter's Blues a.k.a. Ootischenia" -> celý název a pak každé
+    z jmen zvlášť (soubor / video nese často jen jedno)."""
+    parts = [p.strip() for p in _AKA.split(title or "") if p.strip()]
+    return [title] + parts if len(parts) > 1 else [title]
+
+
 def match_label(
+    title: str,
+    label: str,
+    *,
+    artist: str | None = None,
+    album: str | None = None,
+    context: str = "",
+) -> str | None:
+    """Jako `_match_label`, u názvu "X a.k.a. Y" stačí shoda s X nebo Y."""
+    # "a.k.a." i "aka" -- stejný zápis v názvu i kandidátovi.
+    label = _AKA.sub(" aka ", label or "")
+    first = None
+    for alias in [_AKA.sub(" aka ", title or ""), *title_aliases(title)[1:]]:
+        why = _match_label(alias, label, artist=artist, album=album, context=context)
+        if why is None:
+            return None
+        first = first or why
+    return first
+
+
+def _match_label(
     title: str,
     label: str,
     *,
