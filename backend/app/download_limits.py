@@ -21,8 +21,10 @@ from app.notify import notify
 from app.redis_bus import get_redis
 from app.utils import utcnow
 
-MUSIC_PER_HOUR = 60
-MUSIC_PER_DAY = 300
+# Volně: rychlé přetáčení stahuje skladbu i tu další -- limit má zastavit
+# jen hromadné stahování katalogu, ne divoké poslouchání (Kryštof 7. 10.).
+MUSIC_PER_HOUR = 300
+MUSIC_PER_DAY = 1500
 BOOKS_GB_PER_WEEK = 20
 BOOK_MAX_GB_SELF = 5
 GB = 1024**3
