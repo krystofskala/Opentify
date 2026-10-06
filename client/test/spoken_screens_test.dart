@@ -28,7 +28,7 @@ Widget _app(Widget child, List<Override> overrides) => ProviderScope(
 
 void main() {
   testWidgets('Domů mluveného slova: pokračovat, nové díly, polička, stahuje se', (tester) async {
-    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.physicalSize = const Size(390 * 3, 1800 * 3);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(_app(const SpokenHomeScreen(), [
@@ -38,6 +38,7 @@ void main() {
             _book('c', 'pending'),
             _book('d', 'ready'),
           ]),
+      myPodcastsProvider.overrideWith((ref) async => [PodcastShowItem.fromJson({'id': 's1', 'title': 'Vinohradská 12', 'subscribed': true})]),
       podcastHomeProvider.overrideWith((ref) async => (
             inProgress: <PodcastEpisodeItem>[],
             latest: [PodcastEpisodeItem.fromJson({'id': 'e1', 'title': 'Díl', 'showTitle': 'V12', 'durationMs': 60000})],
@@ -45,7 +46,8 @@ void main() {
     ]));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Pokračovat'), findsNWidgets(2)); // nadpis + tlačítko
+    expect(find.text('Pokračovat'), findsOneWidget);
+    expect(find.text('Tvoje pořady'), findsOneWidget);
     expect(find.text('Nové díly'), findsOneWidget);
     expect(find.text('Tvoje knihy'), findsOneWidget);
     expect(find.text('Stahuje se'), findsOneWidget);
