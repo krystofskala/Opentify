@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
 import '../core/diagnostics.dart' show diagReport;
+import '../core/prefetch_cache.dart';
 import '../core/media_session.dart';
 import '../core/profile_prefs.dart';
 import '../core/radio_mode.dart';
@@ -1679,6 +1680,40 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Jen naplní `_artworkCache`/`_accentColorCache` -- stav mění, jen když
     // `nowPlaying` odpovídá, což tu ještě neplatí.
     unawaited(_resolveArtworkAndAccent(next));
+    unawaited(_prefetchFile(next.recordingId));
+  }
+
+  /// Nativní appka: další skladba stažená do telefonu (`PrefetchCache`) --
+  /// id -> URL souboru. `_playCurrent` ji pak pustí bez sítě.
+  final Map<String, String> _prefetched = {};
+  final Set<String> _prefetching = {};
+
+  Future<void> _prefetchFile(String id) async {
+    if (!PrefetchCache.supported || _radioMode || _prefetched.containsKey(id) || !_prefetching.add(id)) return;
+    try {
+      if (_ref.read(offlineControllerProvider.notifier).has(id)) return;
+      final earlier = await PrefetchCache.existing(id);
+      if (earlier != null) {
+        _prefetched[id] = earlier;
+        return;
+      }
+      // Soubor musí být na serveru celý (ne ještě se stahující).
+      final deadline = DateTime.now().add(const Duration(minutes: 3));
+      while (true) {
+        final s = _ref.read(provisioningControllerProvider)[id];
+        if (s != null && s.isAvailable && s.streamUrl != null) break;
+        if (s == null || s.isFailed || DateTime.now().isAfter(deadline)) return;
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
+      final bytes =
+          await _ref.read(apiClientProvider).getBytes('/tracks/$id/stream', timeout: const Duration(minutes: 3));
+      final url = await PrefetchCache.put(id, bytes);
+      if (url != null) _prefetched[id] = url;
+    } catch (e) {
+      debugPrint('AudioPlayerController: předem stáhnout $id nešlo ($e)');
+    } finally {
+      _prefetching.remove(id);
+    }
   }
 
   /// Zamčený iPhone: když skladba dohraje, audio prvek "skončí", iOS uspí
@@ -1906,9 +1941,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Mimo rádio (to je stream ze serveru) -- viz `isLocal`.
     final offline = _ref.read(offlineControllerProvider.notifier);
     final knownAtStart = _ref.read(provisioningControllerProvider)[info.recordingId];
+    final prefetched = _radioMode ? null : _prefetched[info.recordingId];
     _markSwitch(offline.has(info.recordingId)
         ? 'l'
-        : (knownAtStart?.status == 'AVAILABLE' && knownAtStart?.streamUrl != null ? 'r' : 'w'));
+        : prefetched != null
+            ? 'p'
+            : (knownAtStart?.status == 'AVAILABLE' && knownAtStart?.streamUrl != null ? 'r' : 'w'));
+    // Předem stažená kopie v telefonu: hned a synchronně (zamčený telefon,
+    // viz rychlá cesta níž). Chyba souboru -> `_handleStreamFailure` jde na server.
+    if (prefetched != null && !offline.has(info.recordingId)) {
+      unawaited(_startStream(info, prefetched, isProgressive: false, isLocal: true));
+      return;
+    }
     if (offline.has(info.recordingId)) {
       final local = await offline.localUrl(info.recordingId);
       if (state.nowPlaying?.recordingId != info.recordingId) return;
@@ -2280,6 +2324,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Offline soubor nejde přečíst -> zkusit server (bez toho by nebylo na
     // co čekat: obstarávání o skladbě nemusí nic vědět).
     final fromLocal = _currentLocal && !isProgressive;
+    if (fromLocal && _prefetched.remove(info.recordingId) != null) {
+      unawaited(PrefetchCache.remove(info.recordingId));
+    }
     if (isProgressive || fromLocal) {
       _currentLocal = false;
       _awaitingProvisioning = true;
