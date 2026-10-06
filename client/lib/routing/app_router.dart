@@ -35,6 +35,7 @@ import 'home_shell.dart';
 import '../features/share/track_link_screen.dart';
 import '../features/blend/blend_screen.dart';
 import '../core/native_nav.dart';
+import '../features/profile/playback_test_screen.dart';
 import '../features/profile/verify_downloads_screen.dart';
 import '../features/library/playlist_join_screen.dart';
 
@@ -258,6 +259,10 @@ List<RouteBase> _detailRoutes() => [
       GoRoute(
         path: 'verify-downloads',
         builder: (context, state) => const VerifyDownloadsScreen(),
+      ),
+      GoRoute(
+        path: 'playback-test',
+        builder: (context, state) => const PlaybackTestScreen(),
       ),
       GoRoute(
         path: 'year-in-review',

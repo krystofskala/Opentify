@@ -236,6 +236,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             onPressed: () => context.push('/verify-downloads'),
                           ),
                           _ActionRow(
+                            icon: Symbols.speed_rounded,
+                            title: 'Test přehrávání',
+                            description: 'Appka sama pustí asi 20 skladeb jako ty a změří, za jak dlouho začnou hrát. '
+                                'Výsledek dostane server, do poslechů se nic nepočítá.',
+                            buttonLabel: 'Otevřít',
+                            onPressed: () => context.push('/playback-test'),
+                          ),
+                          _ActionRow(
                             icon: Symbols.folder_rounded,
                             title: 'Lokální knihovna',
                             description: 'Projde hudební soubory namapované z hostitele (proměnná MUSIC_DIR '

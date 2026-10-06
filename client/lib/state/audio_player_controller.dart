@@ -2448,6 +2448,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (!paused) _realtime.playbackPlay(info.recordingId, positionMs: resumedAt?.inMilliseconds ?? 0);
       return;
     }
+    if (testMode) {
+      // Test přehrávání (Profil): žádný poslech, historie ani "právě hraje".
+      _finishScrobble();
+      _scrobbleId = null;
+      return;
+    }
     if (resumedAt != null && _scrobbleId == info.recordingId) {
       // Navázání téhož přehrávání (po chybě, mikrofonu): poslech běží dál --
       // nový by u dlouhých skladeb nahlásil poslech podruhé a ztratil "slyšeno".
@@ -2463,6 +2469,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   static const _loadTimeout = Duration(seconds: 15);
+
+  /// Běží test přehrávání (`features/profile/playback_test_screen.dart`):
+  /// skladby se nezapočítají do poslechů / historie / ListenBrainz.
+  bool testMode = false;
 
   /// Skladba, kterou už `_handleStreamFailure` po chybě jednou znovu
   /// obstarával (do dalšího úspěšného načtení) -- podruhé už chyba.
