@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:opentify_client/features/spoken/podcast_data.dart';
 import 'package:opentify_client/features/spoken/spoken_data.dart';
 import 'package:opentify_client/features/spoken/spoken_screens.dart';
 import 'package:opentify_client/theme/app_theme.dart';
@@ -37,10 +38,15 @@ void main() {
             _book('c', 'pending'),
             _book('d', 'ready'),
           ]),
+      podcastHomeProvider.overrideWith((ref) async => (
+            inProgress: <PodcastEpisodeItem>[],
+            latest: [PodcastEpisodeItem.fromJson({'id': 'e1', 'title': 'Díl', 'showTitle': 'V12', 'durationMs': 60000})],
+          )),
     ]));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Rozposlouchané'), findsOneWidget);
+    expect(find.text('Rozposlouchané knihy'), findsOneWidget);
+    expect(find.text('Nové epizody'), findsOneWidget);
     expect(find.text('Stahuje se'), findsOneWidget);
     expect(find.text('Nově přidané'), findsOneWidget);
     expect(find.text('Stahuje se · 40 %'), findsOneWidget);

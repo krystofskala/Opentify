@@ -1271,6 +1271,13 @@ async def _spoken_tick(r) -> None:
     await acquire.tick(r)
 
 
+async def _podcasts_tick(r) -> None:
+    # Odebírané podcasty: nové epizody se jen ukážou, nic se nestahuje.
+    from app.podcasts import service
+
+    await service.refresh_subscribed(r)
+
+
 async def main() -> None:
     init_db()
     r = get_redis()
@@ -1298,6 +1305,7 @@ async def main() -> None:
             _housekeep("db-backup", "záloha databáze selhala", lambda: _db_backup(r))
             _housekeep("upgrades", "zpracování upgradů selhalo", lambda: _process_due_upgrades(r))
             _housekeep("spoken", "stahování audioknih selhalo", lambda: _spoken_tick(r))
+            _housekeep("podcasts", "obnova podcastů selhala", lambda: _podcasts_tick(r))
 
         # Prioritní stream první (Redis vrací v pořadí klíčů); běžnou frontu
         # čteme jen s volnou kapacitou -- jinak by si worker zprávy

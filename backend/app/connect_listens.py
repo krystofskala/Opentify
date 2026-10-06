@@ -53,8 +53,8 @@ class ConnectListens:
         now = time.time()
         np = state.get("nowPlaying") or {}
         rid = np.get("recordingId") if isinstance(np, dict) else None
-        # Mluvené slovo (soubor audioknihy, "sp:<id>") není hudební poslech.
-        if isinstance(rid, str) and rid.startswith("sp:"):
+        # Mluvené slovo (audiokniha "sp:", podcast "pc:") není hudební poslech.
+        if isinstance(rid, str) and rid.startswith(("sp:", "pc:")):
             rid = None
         pos = state.get("positionMs")
         pos = int(pos) if isinstance(pos, (int, float)) else None

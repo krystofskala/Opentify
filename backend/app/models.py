@@ -542,3 +542,46 @@ class SpokenProgress(SQLModel, table=True):
     position_ms: int = 0
     finished: bool = False
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+# --- Podcasty (app/podcasts/) ------------------------------------------------
+# Stejně oddělené od hudby jako audioknihy.
+
+
+class PodcastShow(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    feed_url: str = Field(index=True, unique=True)
+    title: str
+    author: str | None = None
+    description: str | None = None
+    artwork_url: str | None = None
+    itunes_id: str | None = None
+    fetched_at: datetime | None = None
+    fetch_error: str | None = None
+
+
+class PodcastEpisode(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    show_id: str = Field(index=True)
+    guid: str = Field(index=True)
+    title: str
+    description: str | None = None
+    published_at: datetime | None = Field(default=None, index=True)
+    duration_ms: int | None = None
+    audio_url: str
+    artwork_url: str | None = None
+
+
+class PodcastSubscription(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    show_id: str = Field(index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class PodcastProgress(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    episode_id: str = Field(index=True)
+    position_ms: int = 0
+    finished: bool = False
+    updated_at: datetime = Field(default_factory=utcnow, index=True)

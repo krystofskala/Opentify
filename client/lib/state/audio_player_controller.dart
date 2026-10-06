@@ -1170,7 +1170,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   // Hraje rovnou z `/spoken/files/<soubor>/stream` -- bez obstarávání,
   // poslechů, ListenBrainz a "Naposledy hrané" (nic z toho do hudby nepatří).
 
-  static bool isSpokenId(String id) => id.startsWith('sp:');
+  /// Mluvené slovo: soubor audioknihy (`sp:`) nebo epizoda podcastu (`pc:`).
+  static bool isSpokenId(String id) => id.startsWith('sp:') || id.startsWith('pc:');
+
+  static String? podcastEpisodeId(String id) => id.startsWith('pc:') ? id.substring(3) : null;
 
   static ({String bookId, String fileId})? spokenParts(String id) {
     if (!isSpokenId(id)) return null;
@@ -1179,6 +1182,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   String _streamUrlFor(String id) {
+    final episode = podcastEpisodeId(id);
+    if (episode != null) {
+      return withDeviceToken('${_ref.read(apiClientProvider).baseUrl}/podcasts/episodes/$episode/stream');
+    }
     final spoken = spokenParts(id);
     if (spoken != null) {
       return withDeviceToken('${_ref.read(apiClientProvider).baseUrl}/spoken/files/${spoken.fileId}/stream');
@@ -1191,12 +1198,26 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Kde v knize jsem -- každých 15 s při hraní, hned při pauze / odchodu.
   void _maybeSaveSpokenProgress({bool force = false}) {
     final s = state;
-    final parts = s.nowPlaying == null ? null : spokenParts(s.nowPlaying!.recordingId);
-    if (parts == null) return;
+    final id = s.nowPlaying?.recordingId;
+    if (id == null || !isSpokenId(id)) return;
     final now = DateTime.now();
     if (!force && now.difference(_spokenSavedAt) < const Duration(seconds: 15)) return;
     _spokenSavedAt = now;
     final duration = s.duration;
+    final episode = podcastEpisodeId(id);
+    if (episode != null) {
+      final done = duration != null && duration > Duration.zero && s.position >= duration - const Duration(seconds: 30);
+      unawaited(_ref
+          .read(apiClientProvider)
+          .putJson('/podcasts/episodes/$episode/progress', body: {
+            'positionMs': s.position.inMilliseconds,
+            'finished': done,
+          })
+          .then<void>((_) {}, onError: (Object _) {}));
+      return;
+    }
+    final parts = spokenParts(id);
+    if (parts == null) return;
     final finished =
         !s.hasNext && duration != null && duration > Duration.zero && s.position >= duration - const Duration(seconds: 30);
     unawaited(_ref

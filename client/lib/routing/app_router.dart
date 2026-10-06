@@ -24,6 +24,7 @@ import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/profile/discoveries_screen.dart';
 import '../features/profile/history_screen.dart';
+import '../features/spoken/podcast_screens.dart';
 import '../features/spoken/spoken_screens.dart';
 import '../state/app_mode.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
@@ -178,6 +179,10 @@ class _AppRouter extends GoRouter {
 /// záložka je má jako podstránky, takže tab bar zůstává a historie se drží
 /// zvlášť pro každou záložku.
 List<RouteBase> _detailRoutes() => [
+      GoRoute(
+        path: 'podcasts/show/:showId',
+        builder: (context, state) => PodcastShowScreen(showId: state.pathParameters['showId']!),
+      ),
       GoRoute(
         path: 'spoken/book/:bookId',
         builder: (context, state) => SpokenBookScreen(bookId: state.pathParameters['bookId']!),

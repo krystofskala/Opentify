@@ -15,6 +15,9 @@ import '../../widgets/media_card.dart' show ArtworkImage;
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
+import '../../widgets/glass/glass_segmented_control.dart';
+import 'podcast_data.dart';
+import 'podcast_screens.dart';
 import 'spoken_data.dart';
 
 /// Režim mluveného slova (audioknihy) -- Domů, Hledání, Knihovna a detail
@@ -116,6 +119,8 @@ class SpokenHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(spokenBooksProvider);
+    // Podcasty jsou na Domů navíc -- jejich chyba nesmí schovat knihy.
+    final podcasts = ref.watch(podcastHomeProvider).valueOrNull;
     return Scaffold(
       appBar: const SectionAppBar('Mluvené slovo', actions: [AppModeToggle()]),
       body: async.when(
@@ -129,14 +134,15 @@ class SpokenHomeScreen extends ConsumerWidget {
           final listening = [for (final b in books) if (b.isReady && b.inProgress) b];
           final working = [for (final b in books) if (b.isWorking || b.status == 'failed') b];
           final fresh = [for (final b in books) if (b.isReady && b.progress == null) b].take(10).toList();
-          if (books.isEmpty) {
+          final hasPodcasts = podcasts != null && (podcasts.inProgress.isNotEmpty || podcasts.latest.isNotEmpty);
+          if (books.isEmpty && !hasPodcasts) {
             return ListView(children: [
               const SizedBox(height: 80),
               EmptyState(
                 icon: Symbols.menu_book_rounded,
-                message: 'Zatím tu nejsou žádné knihy. Najdi audioknihu v Hledání a stáhni ji.',
+                message: 'Zatím tu nic není. V Hledání najdeš audioknihy i podcasty.',
                 action: GlassButton(
-                  label: 'Hledat audioknihy',
+                  label: 'Hledat',
                   icon: Symbols.search_rounded,
                   onPressed: () => context.go('/search'),
                 ),
@@ -144,15 +150,19 @@ class SpokenHomeScreen extends ConsumerWidget {
             ]);
           }
           return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(spokenBooksProvider),
+            onRefresh: () async {
+              ref.invalidate(spokenBooksProvider);
+              ref.invalidate(podcastHomeProvider);
+            },
             child: ListView(
               padding: EdgeInsets.fromLTRB(
                   AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
               children: [
                 if (listening.isNotEmpty) ...[
-                  const _Heading('Rozposlouchané'),
+                  const _Heading('Rozposlouchané knihy'),
                   for (final b in listening) _BookTile(book: b),
                 ],
+                if (podcasts != null) ...podcastHomeSections(context, podcasts, (t) => _Heading(t)),
                 if (working.isNotEmpty) ...[
                   const _Heading('Stahuje se'),
                   for (final b in working) _BookTile(book: b),
@@ -202,31 +212,56 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final kind = ref.watch(spokenKindProvider);
+    final books = kind == SpokenKind.books;
     return Scaffold(
-      appBar: const SectionAppBar('Hledat audioknihy', actions: [AppModeToggle()]),
+      appBar: const SectionAppBar('Hledat', actions: [AppModeToggle()]),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.xs),
             child: GlassSearchField(
               controller: _controller,
-              hintText: 'Kniha, autor, kdo čte…',
+              hintText: books ? 'Kniha, autor, kdo čte…' : 'Název podcastu…',
               onSubmitted: (q) => setState(() => _query = q.trim()),
               onCleared: () => setState(() => _query = ''),
             ),
           ),
+          const _KindSwitch(),
           Expanded(
             child: _query.length < 2
-                ? const EmptyState(
-                    icon: Symbols.menu_book_rounded,
-                    message: 'Hledá se v českých a slovenských audioknihách. Stažení začne až po klepnutí na Stáhnout.',
+                ? EmptyState(
+                    icon: books ? Symbols.menu_book_rounded : Symbols.podcasts_rounded,
+                    message: books
+                        ? 'Hledá se v českých a slovenských audioknihách. Stažení začne až po klepnutí na Stáhnout.'
+                        : 'Hledá se v katalogu podcastů. Nové díly odebíraných pořadů najdeš na Domů.',
                   )
-                : _Results(query: _query),
+                : books
+                    ? _Results(query: _query)
+                    : PodcastSearchResults(query: _query),
           ),
         ],
       ),
     );
   }
+}
+
+/// Audioknihy / Podcasty -- stejný přepínač v Hledání i Knihovně.
+class _KindSwitch extends ConsumerWidget {
+  const _KindSwitch();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+        child: GlassSegmentedControl<SpokenKind>(
+          segments: const [
+            GlassSegment(value: SpokenKind.books, label: 'Audioknihy'),
+            GlassSegment(value: SpokenKind.podcasts, label: 'Podcasty'),
+          ],
+          selected: ref.watch(spokenKindProvider),
+          onChanged: (k) => ref.read(spokenKindProvider.notifier).state = k,
+        ),
+      );
 }
 
 class _Results extends ConsumerWidget {
@@ -301,26 +336,34 @@ class SpokenLibraryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final kind = ref.watch(spokenKindProvider);
     final async = ref.watch(spokenBooksProvider);
-    return Scaffold(
-      appBar: const SectionAppBar('Audioknihy', actions: [AppModeToggle()]),
-      body: async.when(
-        loading: () => const LoadingState(),
-        error: (e, _) => ErrorState(
-          message: 'Knihy se nepodařilo načíst.',
-          error: e,
-          onRetry: () => ref.invalidate(spokenBooksProvider),
-        ),
-        data: (books) => books.isEmpty
-            ? const EmptyState(icon: Symbols.menu_book_rounded, message: 'Knihovna audioknih je zatím prázdná.')
-            : RefreshIndicator(
-                onRefresh: () async => ref.invalidate(spokenBooksProvider),
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(
-                      AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
-                  children: [for (final b in books) _BookTile(book: b)],
-                ),
+    final booksView = async.when(
+      loading: () => const LoadingState(),
+      error: (e, _) => ErrorState(
+        message: 'Knihy se nepodařilo načíst.',
+        error: e,
+        onRetry: () => ref.invalidate(spokenBooksProvider),
+      ),
+      data: (books) => books.isEmpty
+          ? const EmptyState(icon: Symbols.menu_book_rounded, message: 'Knihovna audioknih je zatím prázdná.')
+          : RefreshIndicator(
+              onRefresh: () async => ref.invalidate(spokenBooksProvider),
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(
+                    AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
+                children: [for (final b in books) _BookTile(book: b)],
               ),
+            ),
+    );
+    return Scaffold(
+      appBar: const SectionAppBar('Knihovna', actions: [AppModeToggle()]),
+      body: Column(
+        children: [
+          const SizedBox(height: AppSpacing.xs),
+          const _KindSwitch(),
+          Expanded(child: kind == SpokenKind.books ? booksView : const MyPodcastsList()),
+        ],
       ),
     );
   }
