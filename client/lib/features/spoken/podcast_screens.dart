@@ -324,19 +324,6 @@ class PodcastHistoryScreen extends ConsumerWidget {
   }
 }
 
-/// Sekce podcastů na Domů mluveného slova (rozposlouchané, nové epizody).
-List<Widget> podcastHomeSections(BuildContext context, PodcastHome home, Widget Function(String) heading) => [
-      if (home.inProgress.isNotEmpty) ...[
-        heading('Rozposlouchané epizody'),
-        for (final e in home.inProgress) PodcastEpisodeTile(episode: e, showShowTitle: true),
-      ],
-      if (home.latest.isNotEmpty) ...[
-        heading('Nové epizody'),
-        for (final e in home.latest.where((e) => !e.finished && !e.started).take(10))
-          PodcastEpisodeTile(episode: e, showShowTitle: true),
-      ],
-    ];
-
 class PodcastShowScreen extends ConsumerWidget {
   const PodcastShowScreen({super.key, required this.showId});
   final String showId;

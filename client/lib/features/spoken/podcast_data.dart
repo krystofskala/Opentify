@@ -48,6 +48,7 @@ class PodcastEpisodeItem {
     this.artworkUrl,
     this.positionMs = 0,
     this.finished = false,
+    this.listenedAt,
   });
 
   factory PodcastEpisodeItem.fromJson(Map<String, dynamic> j) => PodcastEpisodeItem(
@@ -60,8 +61,10 @@ class PodcastEpisodeItem {
         artworkUrl: j['artworkUrl'] as String?,
         positionMs: (j['positionMs'] as num?)?.toInt() ?? 0,
         finished: j['finished'] as bool? ?? false,
+        listenedAt: j['listenedAt'] == null ? null : DateTime.tryParse(j['listenedAt'] as String)?.toLocal(),
       );
 
+  final DateTime? listenedAt;
   final String id;
   final String title;
   final String? showTitle;

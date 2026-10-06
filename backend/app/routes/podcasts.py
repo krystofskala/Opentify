@@ -59,6 +59,7 @@ def _episode_out(ep: PodcastEpisode, show: PodcastShow | None, progress: Podcast
         "artworkUrl": ep.artwork_url or (show.artwork_url if show else None),
         "positionMs": progress.position_ms if progress else 0,
         "finished": bool(progress and progress.finished),
+        "listenedAt": progress.updated_at.isoformat() if progress and progress.updated_at else None,
     }
 
 

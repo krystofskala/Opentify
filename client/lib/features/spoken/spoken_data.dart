@@ -41,14 +41,16 @@ class SpokenRelease {
 }
 
 class SpokenProgress {
-  const SpokenProgress({required this.fileId, required this.positionMs, required this.finished});
+  const SpokenProgress({required this.fileId, required this.positionMs, required this.finished, this.updatedAt});
 
   factory SpokenProgress.fromJson(Map<String, dynamic> j) => SpokenProgress(
         fileId: j['fileId'] as String,
         positionMs: (j['positionMs'] as num?)?.toInt() ?? 0,
         finished: j['finished'] as bool? ?? false,
+        updatedAt: j['updatedAt'] == null ? null : DateTime.tryParse(j['updatedAt'] as String)?.toLocal(),
       );
 
+  final DateTime? updatedAt;
   final String fileId;
   final int positionMs;
   final bool finished;

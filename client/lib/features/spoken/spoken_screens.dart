@@ -17,6 +17,7 @@ import '../../widgets/glass/glass_search_field.dart';
 import '../../widgets/media_card.dart' show ArtworkImage;
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
+import '../../widgets/surface_card.dart';
 import '../../widgets/toast.dart';
 import '../../widgets/glass/glass_segmented_control.dart';
 import 'podcast_data.dart';
@@ -134,9 +135,17 @@ class SpokenHomeScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(spokenBooksProvider),
         ),
         data: (books) {
-          final listening = [for (final b in books) if (b.isReady && b.inProgress) b];
           final working = [for (final b in books) if (b.isWorking || b.status == 'failed') b];
-          final fresh = [for (final b in books) if (b.isReady && b.progress == null) b].take(10).toList();
+          final shelf = [for (final b in books) if (b.isReady && b.progress == null) b].take(6).toList();
+          final newEpisodes =
+              (podcasts?.latest ?? const <PodcastEpisodeItem>[]).where((e) => !e.finished && !e.started).take(5).toList();
+          // Rozposlouchané knihy i epizody dohromady, naposledy poslouchané první.
+          final continuing = <_Continue>[
+            for (final b in books)
+              if (b.isReady && b.inProgress) _Continue(book: b, at: b.progress?.updatedAt),
+            for (final e in podcasts?.inProgress ?? const <PodcastEpisodeItem>[])
+              _Continue(episode: e, at: e.listenedAt),
+          ]..sort((a, b) => (b.at ?? DateTime(2000)).compareTo(a.at ?? DateTime(2000)));
           final hasPodcasts = podcasts != null && (podcasts.inProgress.isNotEmpty || podcasts.latest.isNotEmpty);
           if (books.isEmpty && !hasPodcasts) {
             return ListView(children: [
@@ -161,24 +170,145 @@ class SpokenHomeScreen extends ConsumerWidget {
               padding: EdgeInsets.fromLTRB(
                   AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
               children: [
-                if (listening.isNotEmpty) ...[
-                  const _Heading('Rozposlouchané knihy'),
-                  for (final b in listening) _BookTile(book: b),
+                if (continuing.isNotEmpty) ...[
+                  const _Heading('Pokračovat'),
+                  _ContinueCard(item: continuing.first),
                 ],
-                if (podcasts != null) ...podcastHomeSections(context, podcasts, (t) => _Heading(t)),
+                if (continuing.length > 1) ...[
+                  const _Heading('Rozposlouchané'),
+                  for (final c in continuing.skip(1))
+                    if (c.book != null)
+                      _BookTile(book: c.book!)
+                    else
+                      PodcastEpisodeTile(episode: c.episode!, showShowTitle: true),
+                ],
+                if (newEpisodes.isNotEmpty) ...[
+                  const _Heading('Nové díly'),
+                  for (final e in newEpisodes) PodcastEpisodeTile(episode: e, showShowTitle: true),
+                ],
+                if (shelf.isNotEmpty) ...[
+                  const _Heading('Tvoje knihy'),
+                  _BookShelf(books: shelf),
+                ],
                 if (working.isNotEmpty) ...[
                   const _Heading('Stahuje se'),
                   for (final b in working) _BookTile(book: b),
-                ],
-                if (fresh.isNotEmpty) ...[
-                  const _Heading('Nově přidané'),
-                  for (final b in fresh) _BookTile(book: b),
                 ],
               ],
             ),
           );
         },
       ),
+    );
+  }
+}
+
+/// Rozposlouchaná kniha nebo epizoda (Domů › Pokračovat / Rozposlouchané).
+class _Continue {
+  const _Continue({this.book, this.episode, this.at});
+  final SpokenBook? book;
+  final PodcastEpisodeItem? episode;
+  final DateTime? at;
+}
+
+/// Velká karta "Pokračovat" -- to, co jsi poslouchal naposledy.
+class _ContinueCard extends ConsumerWidget {
+  const _ContinueCard({required this.item});
+  final _Continue item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final book = item.book;
+    final ep = item.episode;
+    final title = book != null ? book.title : ep!.title;
+    final cover = book != null ? book.coverUrl : ep!.artworkUrl;
+    final dur = ep?.durationMs;
+    final subtitle = book != null
+        ? book.byline
+        : [
+            if (ep!.showTitle != null) ep.showTitle!,
+            if (dur != null) 'zbývá ${formatHours(dur - ep.positionMs)}',
+          ].join(' · ');
+    Future<void> play() async {
+      if (book != null) {
+        playBook(ref, await ref.read(spokenBookProvider(book.id).future));
+      } else {
+        playEpisode(ref, ep!);
+      }
+    }
+
+    return SurfaceCard(
+      child: Row(
+        children: [
+          _Cover(url: cover, size: 96),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: muted),
+                ],
+                if (ep != null && dur != null && dur > 0) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  LinearProgressIndicator(value: (ep.positionMs / dur).clamp(0.0, 1.0), minHeight: 4),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                GlassButton(
+                  label: 'Pokračovat',
+                  icon: Symbols.play_arrow_rounded,
+                  style: GlassButtonStyle.prominent,
+                  compact: true,
+                  onPressed: () => unawaited(play()),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Polička obalů: připravené knihy, které jsi ještě nezačal.
+class _BookShelf extends StatelessWidget {
+  const _BookShelf({required this.books});
+  final List<SpokenBook> books;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const columns = 3;
+        final size = (constraints.maxWidth - AppSpacing.sm * (columns - 1)) / columns;
+        return Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            for (final b in books)
+              SizedBox(
+                width: size,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  onTap: () => context.push('/spoken/book/${b.id}'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Cover(url: b.coverUrl, size: size),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(b.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
