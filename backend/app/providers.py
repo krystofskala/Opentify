@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import glob
+import json
 import logging
 import os
 import re
@@ -34,6 +35,7 @@ import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol, Sequence
 
@@ -440,6 +442,12 @@ class _SlskdProfile:
     max_peers: int
 
 
+def _append_lines(path: Path, lines: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 # Rozestup hledání na Soulseeku napříč všemi workery (Redis, viz rate_limit).
 _slskd_search_limiter = AsyncRateLimiter(min_interval_seconds=1.2, key="slskd-search")
 
@@ -518,6 +526,57 @@ class SlskdProvider:
             return None
         return None
 
+    async def prune_searches(self, older_than: timedelta = timedelta(hours=1), archive: Path | None = None) -> int:
+        """Smaže dokončená hledání starší než `older_than`. Nahromaděná
+        historie (1317 hledání, 4. 10.) v slskd 0.26 rozbíjí nová hledání
+        (github.com/slskd/slskd/issues/1819). Před smazáním zapíše krátký
+        přehled (čas, dotaz, výsledek, počet odpovědí) do `archive` (JSON lines)."""
+        cutoff = datetime.now(timezone.utc) - older_than
+        async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=30.0) as client:
+            resp = await client.get("/api/v0/searches")
+            resp.raise_for_status()
+            old = []
+            for s in resp.json() or []:
+                try:
+                    started = datetime.fromisoformat(str(s.get("startedAt"))[:19]).replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                if s.get("isComplete") and started < cutoff:
+                    old.append(s)
+            if archive is not None and old:
+                lines = [
+                    json.dumps({k: s.get(k) for k in ("startedAt", "searchText", "state", "responseCount", "fileCount")},
+                               ensure_ascii=False)
+                    for s in old
+                ]
+                await asyncio.to_thread(_append_lines, archive, lines)
+            deleted = 0
+            for s in old:
+                try:
+                    (await client.delete(f"/api/v0/searches/{s['id']}")).raise_for_status()
+                    deleted += 1
+                except httpx.HTTPError:
+                    pass
+        return deleted
+
+    @staticmethod
+    async def _stop_and_collect(client: httpx.AsyncClient, search_id: str) -> list[dict]:
+        """Zastaví běžící hledání a vrátí jeho odpovědi (viz `_search_ranked`:
+        slskd 0.26 je vydá až po dokončení). Zastavení trvá ~0,3 s."""
+        try:
+            (await client.put(f"/api/v0/searches/{search_id}")).raise_for_status()
+            for _ in range(15):
+                payload = (await client.get(f"/api/v0/searches/{search_id}")).json()
+                if payload.get("isComplete") or str(payload.get("state") or "").lower().startswith("completed"):
+                    break
+                await asyncio.sleep(0.2)
+            responses = await client.get(f"/api/v0/searches/{search_id}/responses")
+            responses.raise_for_status()
+            return responses.json()
+        except (httpx.HTTPError, ValueError):
+            logger.warning("slskd: hledání %s nešlo zastavit / přečíst", search_id)
+            return []
+
     async def search_raw(self, query: str, cap_s: float = 20.0) -> list[dict]:
         """Surové odpovědi hledání (pro výběr složky celého alba)."""
         async with httpx.AsyncClient(base_url=self.base_url, headers=self._headers(), timeout=10.0) as client:
@@ -541,20 +600,27 @@ class SlskdProvider:
             loop = asyncio.get_running_loop()
             started = loop.time()
             active_since: float | None = None  # ve frontě slskd se nepočítá (viz resolve)
+            complete = False
             try:
                 while loop.time() - started < cap_s + 90:
                     payload = (await client.get(f"/api/v0/searches/{search_id}")).json()
                     state = str(payload.get("state") or "").lower()
                     if bool(payload.get("isComplete")) or state.startswith("completed"):
+                        complete = True
                         break
                     if active_since is None and state and not state.startswith(("queued", "requested", "none")):
                         active_since = loop.time()
                     if active_since is not None and loop.time() - active_since >= cap_s:
                         break
                     await asyncio.sleep(1.0)
-                responses = await client.get(f"/api/v0/searches/{search_id}/responses")
-                responses.raise_for_status()
-                return [r for r in responses.json() if r.get("username") and not self._is_blocked(r["username"])]
+                if complete:
+                    responses = await client.get(f"/api/v0/searches/{search_id}/responses")
+                    responses.raise_for_status()
+                    items = responses.json()
+                else:
+                    # Běžící hledání odpovědi nevydá (slskd 0.26) -- zastavit.
+                    items = await self._stop_and_collect(client, search_id)
+                return [r for r in items if r.get("username") and not self._is_blocked(r["username"])]
             finally:
                 if not reused:
                     try:
@@ -672,6 +738,15 @@ class SlskdProvider:
             first_good_at: float | None = None
             ranked: list[tuple[float, str, dict]] = []
             seen_responses = -1
+            # slskd 0.26 vrací odpovědi (`/responses`) až po DOKONČENÍ hledání,
+            # během běhu prázdný seznam. Populární dotaz dostává odpovědi pořád,
+            # takže se do našeho limitu nedokončil a z desítek odpovědí zbylo
+            # 0 kandidátů (živě: 28 z 34 hledání za noc, hudba šla z YouTube).
+            # Proto: počet odpovědí se ustálil / limit -> hledání zastavit
+            # (PUT, hotové za ~0,3 s) a odpovědi přečíst až potom.
+            unreadable = False
+            count_changed_at = started
+            complete = False
             try:
                 while True:
                     now = loop.time()
@@ -687,20 +762,30 @@ class SlskdProvider:
                     )
                     if count != seen_responses and (count > 0 or complete):
                         seen_responses = count
-                        responses = await client.get(f"/api/v0/searches/{search_id}/responses")
-                        responses.raise_for_status()
-                        ranked = self._rank(responses.json(), track, interactive=interactive)
-                        if first_good_at is None and ranked and self._is_good(ranked[0], interactive):
-                            first_good_at = now
+                        count_changed_at = now
+                        if not unreadable or complete:
+                            responses = await client.get(f"/api/v0/searches/{search_id}/responses")
+                            responses.raise_for_status()
+                            items = responses.json()
+                            unreadable = not items and count > 0 and not complete
+                            ranked = self._rank(items, track, interactive=interactive)
+                            if first_good_at is None and ranked and self._is_good(ranked[0], interactive):
+                                first_good_at = now
                     if complete:
                         break
                     if first_good_at is not None and now - first_good_at >= profile.settle_s:
                         break
+                    if unreadable and now - count_changed_at >= profile.settle_s:
+                        break  # odpovědi přestaly přibývat
                     if active_since is not None and now - active_since >= profile.search_cap_s:
                         break
                     if now - started >= hard_cap:
                         break
                     await asyncio.sleep(self.poll_interval_s)
+                if not complete and seen_responses > 0:
+                    items = await self._stop_and_collect(client, search_id)
+                    if items:
+                        ranked = self._rank(items, track, interactive=interactive)
             finally:
                 # Úklid -- slskd si jinak hromadí stovky starých hledání.
                 # Převzaté hledání patří jinému workeru, ten ho smaže sám.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
@@ -107,11 +108,24 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     from app.library import pending_plays
 
     registry.append(("maintenance:pending-imports", timedelta(minutes=30), pending_plays.run))
+    # Historie hledání v slskd: starší než hodina pryč (nahromaděná rozbíjí
+    # nová hledání), přehled se před smazáním uloží vedle DB.
+    registry.append(("maintenance:slskd-searches", timedelta(hours=1), _prune_slskd_searches))
     # Herní / filmové soundtracky: živé řady (Steam, Wikidata, Apple plakáty).
     from app import soundtrack_discovery
 
     registry.append(("soundtracks:discovery", g.DAILY_TTL, soundtrack_discovery.build_all))
     return registry
+
+
+async def _prune_slskd_searches() -> int:
+    from pathlib import Path
+
+    from app.providers import SlskdProvider
+
+    if os.environ.get("MEDIA_PROVIDER", "composite") == "placeholder":
+        return 0
+    return await SlskdProvider().prune_searches(archive=Path("/data/db/slskd-search-history.jsonl"))
 
 
 async def _build_years() -> int:
