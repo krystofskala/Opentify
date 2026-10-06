@@ -24,6 +24,8 @@ import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/profile/discoveries_screen.dart';
 import '../features/profile/history_screen.dart';
+import '../features/spoken/spoken_screens.dart';
+import '../state/app_mode.dart';
 import '../features/wrapped/wrapped_hub_screen.dart';
 import '../features/wrapped/wrapped_story_screen.dart';
 import '../features/games/games_screen.dart';
@@ -46,13 +48,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           builder: (context, state, navigationShell) => HomeShell(navigationShell: navigationShell),
           branches: [
             StatefulShellBranch(routes: [
-              GoRoute(path: '/', builder: (context, state) => const HomeScreen(), routes: _detailRoutes()),
+              GoRoute(path: '/', builder: (context, state) => const ModeSwitch(music: HomeScreen(), spoken: SpokenHomeScreen()), routes: _detailRoutes()),
             ]),
             StatefulShellBranch(routes: [
-              GoRoute(path: '/search', builder: (context, state) => const SearchScreen(), routes: _detailRoutes()),
+              GoRoute(path: '/search', builder: (context, state) => const ModeSwitch(music: SearchScreen(), spoken: SpokenSearchScreen()), routes: _detailRoutes()),
             ]),
             StatefulShellBranch(routes: [
-              GoRoute(path: '/library', builder: (context, state) => const LocalLibraryScreen(), routes: _detailRoutes()),
+              GoRoute(path: '/library', builder: (context, state) => const ModeSwitch(music: LocalLibraryScreen(), spoken: SpokenLibraryScreen()), routes: _detailRoutes()),
             ]),
             StatefulShellBranch(routes: [
               GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen(), routes: _detailRoutes()),
@@ -176,6 +178,10 @@ class _AppRouter extends GoRouter {
 /// záložka je má jako podstránky, takže tab bar zůstává a historie se drží
 /// zvlášť pro každou záložku.
 List<RouteBase> _detailRoutes() => [
+      GoRoute(
+        path: 'spoken/book/:bookId',
+        builder: (context, state) => SpokenBookScreen(bookId: state.pathParameters['bookId']!),
+      ),
       GoRoute(
         path: 'franchise/:franchiseId',
         builder: (context, state) => FranchiseScreen(franchiseId: state.pathParameters['franchiseId']!),

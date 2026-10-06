@@ -33,6 +33,7 @@ import '../../widgets/collection_actions.dart';
 import '../../core/cz_plural.dart';
 import '../../state/auth_controller.dart';
 import '../../state/library_scope.dart';
+import '../../state/app_mode.dart';
 import 'offline_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/toast.dart';
@@ -121,7 +122,7 @@ class _LocalLibraryScreenState extends ConsumerState<LocalLibraryScreen> {
         appBar: SectionAppBar(
           'Knihovna',
           // Admin: celá sdílená knihovna na serveru, nebo jen ta jeho.
-          actions: const [_LibraryScopeToggle()],
+          actions: const [_LibraryScopeToggle(), AppModeToggle()],
           bottom: PreferredSize(
             preferredSize: Size.fromHeight(offline ? 0 : 64 + 48),
             child: offline ? const SizedBox.shrink() : Column(

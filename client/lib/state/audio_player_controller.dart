@@ -15,6 +15,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
+import '../core/device_token.dart' show withDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
 import '../core/prefetch_cache.dart';
 import '../core/media_session.dart';
@@ -329,6 +330,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _maybeReleaseAutoRetry(position);
       _maybeWarmUpNext(position);
       _trackScrobble(position);
+      if (_player.playing) _maybeSaveSpokenProgress();
       if (_maybeLoopAb(position)) return;
       _maybeAdvanceEarly(position);
     });
@@ -354,7 +356,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _lifecycle = AppLifecycleListener(
       onResume: _refreshAccentIfMissing,
       onShow: _refreshAccentIfMissing,
-      onHide: () => _maybePersistSession(state, force: true),
+      onHide: () {
+        _maybePersistSession(state, force: true);
+        _maybeSaveSpokenProgress(force: true);
+      },
       onPause: () => _maybePersistSession(state, force: true),
     );
     _stallWatch = Timer.periodic(const Duration(seconds: 3), (_) => _checkStall());
@@ -1159,6 +1164,51 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
   }
 
+  // --- Mluvené slovo -----------------------------------------------------------
+  //
+  // Soubor audioknihy ve frontě: `sp:<kniha>:<soubor>` (features/spoken).
+  // Hraje rovnou z `/spoken/files/<soubor>/stream` -- bez obstarávání,
+  // poslechů, ListenBrainz a "Naposledy hrané" (nic z toho do hudby nepatří).
+
+  static bool isSpokenId(String id) => id.startsWith('sp:');
+
+  static ({String bookId, String fileId})? spokenParts(String id) {
+    if (!isSpokenId(id)) return null;
+    final parts = id.split(':');
+    return parts.length == 3 ? (bookId: parts[1], fileId: parts[2]) : null;
+  }
+
+  String _streamUrlFor(String id) {
+    final spoken = spokenParts(id);
+    if (spoken != null) {
+      return withDeviceToken('${_ref.read(apiClientProvider).baseUrl}/spoken/files/${spoken.fileId}/stream');
+    }
+    return _ref.read(provisioningRepositoryProvider).streamUrl(id);
+  }
+
+  DateTime _spokenSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Kde v knize jsem -- každých 15 s při hraní, hned při pauze / odchodu.
+  void _maybeSaveSpokenProgress({bool force = false}) {
+    final s = state;
+    final parts = s.nowPlaying == null ? null : spokenParts(s.nowPlaying!.recordingId);
+    if (parts == null) return;
+    final now = DateTime.now();
+    if (!force && now.difference(_spokenSavedAt) < const Duration(seconds: 15)) return;
+    _spokenSavedAt = now;
+    final duration = s.duration;
+    final finished =
+        !s.hasNext && duration != null && duration > Duration.zero && s.position >= duration - const Duration(seconds: 30);
+    unawaited(_ref
+        .read(apiClientProvider)
+        .putJson('/spoken/books/${parts.bookId}/progress', body: {
+          'fileId': parts.fileId,
+          'positionMs': s.position.inMilliseconds,
+          'finished': finished,
+        })
+        .then<void>((_) {}, onError: (Object _) {}));
+  }
+
   /// Kolik skladeb za právě hrající má být na serveru už stažených.
   static const _provisionAheadCount = 2;
 
@@ -1172,6 +1222,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final provisioning = _ref.read(provisioningControllerProvider.notifier);
     final known = _ref.read(provisioningControllerProvider);
     for (final id in upcomingRecordingIds(state, _provisionAheadCount)) {
+      if (isSpokenId(id)) continue;
       final k = known[id];
       if (k == null || (!k.isAvailable && !k.isInFlight && k.streamUrl == null)) {
         unawaited(provisioning.provision(id));
@@ -1669,7 +1720,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final nextIndex = state.nextIndex;
     if (nextIndex == null || nextIndex >= state.queue.length) return;
     final next = state.queue[nextIndex];
-    if (next.recordingId == current.recordingId) return;
+    if (next.recordingId == current.recordingId || isSpokenId(next.recordingId)) return;
 
     final provisioning = _ref.read(provisioningControllerProvider.notifier);
     final nextState = _ref.read(provisioningControllerProvider)[next.recordingId];
@@ -1947,6 +1998,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         : prefetched != null
             ? 'p'
             : (knownAtStart?.status == 'AVAILABLE' && knownAtStart?.streamUrl != null ? 'r' : 'w'));
+    // Audiokniha: soubor je na serveru vždy celý, nic se neobstarává.
+    if (isSpokenId(info.recordingId)) {
+      unawaited(_startStream(info, _streamUrlFor(info.recordingId), isProgressive: false));
+      return;
+    }
     // Předem stažená kopie v telefonu: hned a synchronně (zamčený telefon,
     // viz rychlá cesta níž). Chyba souboru -> `_handleStreamFailure` jde na server.
     if (prefetched != null && !offline.has(info.recordingId)) {
@@ -1973,7 +2029,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (known != null && known.status == 'AVAILABLE' && known.streamUrl != null) {
       unawaited(_startStream(
         info,
-        _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+        _streamUrlFor(info.recordingId),
         isProgressive: false,
       ));
       return;
@@ -2020,7 +2076,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // (`ApiClient.baseUrl`), stejně jako to dělal starší kód.
       await _startStream(
         info,
-        _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+        _streamUrlFor(info.recordingId),
         isProgressive: !result.isAvailable,
       );
     } else if (result != null && result.isFailed) {
@@ -2077,7 +2133,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         // backendova relativní `result.streamUrl`.
         unawaited(_startStream(
           info,
-          _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+          _streamUrlFor(info.recordingId),
           isProgressive: !result.isAvailable,
         ));
       }
@@ -2122,7 +2178,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // iOS: místo souboru skladby jeden nepřetržitý stream celé fronty (viz
     // `_startRadio`). Ještě se stahující soubor (progresivní přehrávání) jde
     // postaru -- rádio řadí jen hotové skladby.
-    if (_radioMode && !isProgressive && !isLocal) {
+    if (_radioMode && !isProgressive && !isLocal && !isSpokenId(info.recordingId)) {
       _radioStartGrace = _radioStartGraceMin;
       final radioResume = _takeResume(info);
       _unannouncedResume = radioResume;
@@ -2211,6 +2267,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   void _announceStart(NowPlayingInfo info, {required bool paused, Duration? resumedAt}) {
     _unannounced = null;
     _unannouncedResume = null;
+    if (isSpokenId(info.recordingId)) {
+      // Kniha: jen "právě hraje" pro Connect, žádný poslech ani historie.
+      _scrobbleId = null;
+      if (!paused) _realtime.playbackPlay(info.recordingId, positionMs: resumedAt?.inMilliseconds ?? 0);
+      return;
+    }
     if (resumedAt != null && _scrobbleId == info.recordingId) {
       // Navázání téhož přehrávání (po chybě, mikrofonu): poslech běží dál --
       // nový by u dlouhých skladeb nahlásil poslech podruhé a ztratil "slyšeno".
@@ -2284,7 +2346,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
             _startPausedWhenReady = !_player.playing;
             unawaited(_startStream(
               info,
-              _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+              _streamUrlFor(info.recordingId),
               isProgressive: false,
             ));
           }
@@ -2367,7 +2429,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _autoRetryFrom = null;
         unawaited(_startStream(
           info,
-          _ref.read(provisioningRepositoryProvider).streamUrl(info.recordingId),
+          _streamUrlFor(info.recordingId),
           isProgressive: false,
         ));
       });
@@ -2604,6 +2666,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       await _player.pause();
       _realtime.playbackPause();
       _maybePersistSession(state, force: true);
+      _maybeSaveSpokenProgress(force: true);
     } else if (_radioActive && !_appVisible) {
       // Zamčená obrazovka / appka na pozadí: iOS webové appce NEdovolí
       // spustit nový zdroj zvuku -- jen pokračovat ve stávajícím streamu

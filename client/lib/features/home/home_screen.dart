@@ -5,6 +5,7 @@ import '../browse/tag_screen.dart' show TagChips, tagRoute;
 import 'package:flutter/material.dart';
 import '../../widgets/artist_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../state/app_mode.dart';
 import 'package:go_router/go_router.dart';
 
 import '../library/listen_later_screen.dart' show ListenLaterReminder;
@@ -57,7 +58,7 @@ class HomeScreen extends ConsumerWidget {
 
     return Scaffold(
       // Úprava sekcí jen v Profil › Domů (na Domů žádná ikona navíc).
-      appBar: SectionAppBar(_greeting()),
+      appBar: SectionAppBar(_greeting(), actions: const [AppModeToggle()]),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(homeProvider);

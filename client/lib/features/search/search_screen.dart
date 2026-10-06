@@ -25,6 +25,7 @@ import '../../widgets/track_collection.dart' show foldForSearch;
 import '../../widgets/track_tile.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../theme/glass_tokens.dart';
+import '../../state/app_mode.dart';
 import '../../widgets/collection_actions.dart';
 import '../browse/tag_screen.dart' show tagRoute;
 import '../games/games_screen.dart' show WorkCover;
@@ -172,7 +173,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         // pole ani řádek rozsahů.
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.md),
+            padding: const EdgeInsets.only(right: AppSpacing.xs),
             child: GlassIconButton(
               icon: Symbols.library_music_rounded,
               tooltip: 'Jen moje knihovna',
@@ -182,6 +183,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               onPressed: () => ref.read(searchLibraryOnlyProvider.notifier).state = !libraryOnly,
             ),
           ),
+          const AppModeToggle(),
         ],
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(query.isEmpty ? 64 : 112),

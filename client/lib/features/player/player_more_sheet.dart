@@ -58,6 +58,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     final sleepEndAt = ref.watch(audioPlayerControllerProvider.select((s) => s.sleepTimerEndAt));
     final hasDuration = ref.watch(audioPlayerControllerProvider.select((s) => s.duration != null));
     final controller = ref.read(audioPlayerControllerProvider.notifier);
+    // Audiokniha: žádné akce skladby (playlist, rádio, knihovna...).
+    final song = nowPlaying != null && !AudioPlayerController.isSpokenId(nowPlaying.recordingId);
     final theme = Theme.of(context);
     final accent = accentColor ?? theme.colorScheme.primary;
 
@@ -97,15 +99,15 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Posun časování textu -- jen když je text vidět.
-                          if (nowPlaying != null)
+                          if (song)
                             Consumer(
                               builder: (context, ref, _) => ref.watch(lyricsVisibleProvider) > 0
                                   ? LyricsTimingRow(recordingId: nowPlaying.recordingId)
                                   : const SizedBox.shrink(),
                             ),
                           // Fronta je dole v přehrávači jako tlačítko -- tady už ne (audit UI).
-                          if (nowPlaying != null) const _SectionLabel('Skladba'),
-                          if (nowPlaying != null)
+                          if (song) const _SectionLabel('Skladba'),
+                          if (song)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.playlist_add_rounded),
@@ -118,10 +120,10 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                 showAddToPlaylistSheet(host, recordingId: nowPlaying.recordingId);
                               },
                             ),
-                          if (nowPlaying != null) _laterTile(context, nowPlaying),
-                          if (nowPlaying != null) _libraryTile(context, nowPlaying),
-                          if (nowPlaying != null) _offlineTile(context, nowPlaying),
-                          if (nowPlaying != null)
+                          if (song) _laterTile(context, nowPlaying),
+                          if (song) _libraryTile(context, nowPlaying),
+                          if (song) _offlineTile(context, nowPlaying),
+                          if (song)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.radio_rounded),
@@ -140,8 +142,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               },
                             ),
                           // Jediné „Sdílet…" (Poslat v Opentify / odkaz / jako obrázek).
-                          if (nowPlaying != null) _shareAllTile(context, nowPlaying),
-                          if (nowPlaying != null) _dislikeTile(context, nowPlaying),
+                          if (song) _shareAllTile(context, nowPlaying),
+                          if (song) _dislikeTile(context, nowPlaying),
                           const Divider(),
                           const _SectionLabel('Přehrávání'),
                           ListTile(

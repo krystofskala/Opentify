@@ -156,7 +156,7 @@ class ProgressIn(BaseModel):
     finished: bool = False
 
 
-@spoken_router.put("/books/{book_id}/progress", status_code=204)
+@spoken_router.put("/books/{book_id}/progress")
 def save_progress(
     book_id: str,
     body: ProgressIn,
@@ -172,3 +172,4 @@ def save_progress(
     p.file_id, p.position_ms, p.finished, p.updated_at = body.fileId, max(0, body.positionMs), body.finished, utcnow()
     session.add(p)
     session.commit()
+    return {"ok": True}

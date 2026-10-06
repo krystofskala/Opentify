@@ -279,7 +279,8 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                       child: Row(
                         children: [
                           Expanded(child: _swipeArea(playback, fg, hasError, isProvisioning, provisioningState)),
-                          LikeHeart(recordingId: nowPlaying.recordingId, size: 22, color: fg),
+                          if (!AudioPlayerController.isSpokenId(nowPlaying.recordingId))
+                            LikeHeart(recordingId: nowPlaying.recordingId, size: 22, color: fg),
                           IconButton(
                             icon: playback.isBuffering
                                 ? SizedBox(

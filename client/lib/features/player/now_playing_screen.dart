@@ -1125,6 +1125,27 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     AudioPlayerState playback,
     AudioPlayerController controller,
   ) {
+    // Audiokniha: místo náhodného pořadí a opakování posun o 30 s.
+    final np = playback.nowPlaying;
+    if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) {
+      final back = button == PlayerButton.shuffle;
+      return IconButton(
+        tooltip: back ? 'O 30 s zpět' : 'O 30 s dopředu',
+        style: IconButton.styleFrom(
+          foregroundColor: playerFg(context).withValues(alpha: 0.85),
+          fixedSize: const Size.square(44),
+        ),
+        icon: Icon(back ? Symbols.replay_30_rounded : Symbols.forward_30_rounded, size: 24),
+        onPressed: () {
+          final s = ref.read(audioPlayerControllerProvider);
+          var to = s.position + Duration(seconds: back ? -30 : 30);
+          if (to < Duration.zero) to = Duration.zero;
+          final d = s.duration;
+          if (d != null && to > d) to = d;
+          controller.seek(to);
+        },
+      );
+    }
     if (button == PlayerButton.shuffle) {
       return IconButton(
                   tooltip: 'Náhodné přehrávání',
@@ -1196,6 +1217,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // `fg` z kontextu UVNITŘ skla panelu (ne z `this.context`).
   Widget _likeButton(AudioPlayerState playback, Color fg) {
     final id = playback.nowPlaying!.recordingId;
+    if (AudioPlayerController.isSpokenId(id)) return const SizedBox.square(dimension: 44);
     return LikeHeart(recordingId: id, size: 22, color: fg.withValues(alpha: 0.72));
   }
 
