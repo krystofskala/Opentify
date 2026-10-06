@@ -15,6 +15,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
+import '../core/diagnostics.dart' show diagReport;
 import '../core/media_session.dart';
 import '../core/profile_prefs.dart';
 import '../core/radio_mode.dart';
@@ -316,6 +317,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _player.playerStateStream.listen(_onPlayerStateChanged);
     _player.positionStream.listen((position) {
       if (_priming) return;
+      _maybeRecordStart(position);
       if (_radioActive) {
         _radioLastRaw = position;
         _radioLastRawAt = DateTime.now();
@@ -1147,17 +1149,50 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // pořadí příchodu (XADD), takže opačné pořadí (živě pozorováno) mohlo
     // nechat skladbu, na kterou uživatel čeká, stát ve frontě ZA deseti
     // dalšími z prefetche, místo aby ji tři workery zpracovaly jako první.
+    _switchKind = 'tap';
     await _playCurrent();
     if (prefetchWholeQueue) {
       _prefetchQueue(items, except: items[index].recordingId);
     } else {
-      // Další skladbu až ve 80 % té aktuální řeší `_maybeWarmUpNext`; tady
-      // jen ta úplně první následující, ať přeskočení hned na začátku nečeká.
-      final next = state.nextIndex;
-      if (next != null && next != index) {
-        unawaited(_ref.read(provisioningControllerProvider.notifier).provision(items[next].recordingId));
+      _provisionAhead();
+    }
+  }
+
+  /// Kolik skladeb za právě hrající má být na serveru už stažených.
+  static const _provisionAheadCount = 2;
+
+  /// Na serveru obstarat další skladby ve frontě hned, jak začne hrát nová
+  /// (ne až v 80 % té aktuální): přeskočení na další pak hraje hned místo
+  /// čekání na stažení, i když uživatel přeskakuje rychle po sobě. Jen server
+  /// (do telefonu se nic nestahuje); už stažené / obstarávané se nežádají
+  /// znovu -- `provision()` by je na chvíli přepnul na REQUESTING a rychlá
+  /// cesta v `_playCurrent` by je minula.
+  void _provisionAhead() {
+    final provisioning = _ref.read(provisioningControllerProvider.notifier);
+    final known = _ref.read(provisioningControllerProvider);
+    for (final id in upcomingRecordingIds(state, _provisionAheadCount)) {
+      final k = known[id];
+      if (k == null || (!k.isAvailable && !k.isInFlight && k.streamUrl == null)) {
+        unawaited(provisioning.provision(id));
       }
     }
+  }
+
+  /// Nahrávky, které budou hrát po té aktuální (pořadí podle shuffle /
+  /// opakování), bez té právě hrající a bez opakování.
+  @visibleForTesting
+  static List<String> upcomingRecordingIds(AudioPlayerState state, int count) {
+    final out = <String>[];
+    final current = state.nowPlaying?.recordingId;
+    var s = state;
+    for (var i = 0; i < count; i++) {
+      final next = s.nextIndex;
+      if (next == null || next >= s.queue.length) break;
+      final id = s.queue[next].recordingId;
+      if (id != current && !out.contains(id)) out.add(id);
+      s = s.copyWith(queueIndex: next);
+    }
+    return out;
   }
 
   /// Spustí obstarávání zbytku fronty na pozadí, souběžně s přehráváním
@@ -1238,10 +1273,42 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (!state.isPlaying) await togglePlayPause();
   }
 
-  Future<void> next() async {
+  /// `auto`: skladba dohrála (ne klepnutí) -- jen pro měření rychlosti startu.
+  Future<void> next({bool auto = false}) async {
     final index = state.nextIndex;
     if (index == null) return;
+    _switchKind = auto ? 'auto' : 'manual';
     await _playAtIndex(index);
+  }
+
+  // --- Měření rychlosti startu skladby ---------------------------------------
+  //
+  // Od přepnutí (dohrání, Další, klepnutí) do prvního posunu pozice při
+  // přehrávání. Po 8 měřeních jedno hlášení do logu API (`client-log`,
+  // kind `playback-start`): druh, jestli byla skladba už stažená na serveru
+  // (r) / čekalo se na stažení (w) / z telefonu (l), milisekundy.
+  String _switchKind = 'tap';
+  DateTime? _switchAt;
+  String _switchTag = '';
+  final List<String> _startSamples = [];
+
+  void _markSwitch(String tag) {
+    _switchAt = DateTime.now();
+    _switchTag = '$_switchKind $tag${_radioMode ? ' radio' : ''}';
+    _switchKind = 'manual';
+  }
+
+  void _maybeRecordStart(Duration position) {
+    final at = _switchAt;
+    if (at == null || _priming || !_player.playing || position <= Duration.zero) return;
+    _switchAt = null;
+    final ms = DateTime.now().difference(at).inMilliseconds;
+    if (ms > 120000) return; // mezitím pauza / pryč od appky
+    _startSamples.add('$_switchTag $ms');
+    if (_startSamples.length >= 8) {
+      diagReport('playback-start', _startSamples.join('; '));
+      _startSamples.clear();
+    }
   }
 
   /// Standardní UX napříč přehrávači (Spotify, Finamp...): první ~3s skladby
@@ -1668,7 +1735,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (next == null || next.status != 'AVAILABLE' || next.streamUrl == null) return;
     _earlyAdvancedFrom = current.recordingId;
     _earlyAdvancedAt = DateTime.now();
-    unawaited(this.next());
+    unawaited(this.next(auto: true));
   }
 
   /// Prostý `Timer`, žádná Hive/background persistence jako u Finampu --
@@ -1807,6 +1874,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       sleepTimerEndAt: state.sleepTimerEndAt,
     );
     await _playCurrent();
+    // Až po `provision` právě hrající (pořadí ve frontě serveru, viz `playQueue`).
+    if (state.nowPlaying?.recordingId == info.recordingId) _provisionAhead();
   }
 
   /// Než skladbu přehraje, ověří/spustí obstarání přes `ProvisioningController`
@@ -1836,6 +1905,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Offline: skladba je uložená v zařízení -> hrát odtud (i bez internetu).
     // Mimo rádio (to je stream ze serveru) -- viz `isLocal`.
     final offline = _ref.read(offlineControllerProvider.notifier);
+    final knownAtStart = _ref.read(provisioningControllerProvider)[info.recordingId];
+    _markSwitch(offline.has(info.recordingId)
+        ? 'l'
+        : (knownAtStart?.status == 'AVAILABLE' && knownAtStart?.streamUrl != null ? 'r' : 'w'));
     if (offline.has(info.recordingId)) {
       final local = await offline.localUrl(info.recordingId);
       if (state.nowPlaying?.recordingId != info.recordingId) return;
@@ -2585,7 +2658,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         if (state.nextIndex == null && CollectionProgressController.isCollection(route)) {
           _ref.read(collectionProgressProvider.notifier).clear(route!);
         }
-        unawaited(next());
+        unawaited(next(auto: true));
       }
     }
   }
