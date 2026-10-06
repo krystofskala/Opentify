@@ -20,9 +20,9 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.events import publish_event
-from app.models import SpokenBook
+from app.models import SpokenBook, SpokenFile
 from app.spoken import qbit, sktorrent, slsk_books
-from app.spoken.importer import import_book
+from app.spoken.importer import AUDIO, _natural, import_book
 from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 SPOKEN_ROOT = Path(os.environ.get("SPOKEN_ROOT", "/data/spoken"))
 # Torrent, který se v klientu do té doby ani neobjeví / nepohne, je chyba.
 _LOST_AFTER = timedelta(minutes=15)
-_DONE_STATES = {"uploading", "stalledUP", "pausedUP", "stoppedUP", "queuedUP", "forcedUP", "checkingUP"}
 
 
 def book_out(book: SpokenBook) -> dict:
@@ -137,69 +136,73 @@ async def _start(book: SpokenBook) -> None:
         if indices is not None:
             await qbit.set_priority(infohash, [i for i in all_indices if i not in set(indices)], 0)
     # Už stahovaná sbírka (jiná kniha z ní): jen přidat tyhle soubory.
-    await qbit.set_priority(infohash, indices if indices is not None else all_indices, 1)
+    wanted = indices if indices is not None else all_indices
+    await qbit.set_priority(infohash, wanted, 1)
+    # Poslouchat hned: popořadě, první kapitola napřed.
+    audio = sorted(
+        (f for f in sktorrent.torrent_files(torrent) if f["index"] in set(wanted) and f["path"].lower().endswith(tuple(AUDIO))),
+        key=lambda f: _natural(f["path"]),
+    )
     await qbit.start(infohash)
+    await qbit.listen_early(infohash, audio[0]["index"] if audio else None)
     await _save(book.id, status="downloading", error=None, storage_dir=save_path)
 
 
-async def _follow_selection(book: SpokenBook, t: dict, indices: list[int]) -> None:
+def _imported_count(book_id: str) -> int:
+    with Session(engine) as session:
+        return len(session.exec(select(SpokenFile.id).where(SpokenFile.book_id == book_id)).all())
+
+
+async def _follow_torrent(book: SpokenBook, t: dict) -> None:
+    """Hotové kapitoly se importují průběžně -- první jde přehrát hned,
+    jak dorazí, další přibývají; po poslední je kniha `ready`."""
     infohash = _infohash(book)
-    wanted = set(indices)
-    files = [f for f in await qbit.files(infohash) if f.get("index") in wanted]
+    indices = _indices(book)
+    wanted = set(indices) if indices is not None else None
+    files = [
+        f for f in await qbit.files(infohash)
+        if (wanted is None or f.get("index") in wanted) and str(f.get("name") or "").lower().endswith(tuple(AUDIO))
+    ]
     if not files:
-        await _save(book.id, status="failed", error="vybrané soubory v torrentu nejsou")
+        await _save(book.id, status="failed", error="v torrentu není žádný zvuk")
         return
     total = sum(int(f.get("size") or 0) for f in files) or 1
-    done = sum(int(f.get("size") or 0) * float(f.get("progress") or 0) for f in files)
-    if any(float(f.get("progress") or 0) < 1.0 for f in files):
-        await _save(book.id, progress=round(min(done / total, 0.99), 3))
-        return
+    done_bytes = sum(int(f.get("size") or 0) * float(f.get("progress") or 0) for f in files)
     save = Path(str(t.get("save_path") or SPOKEN_ROOT / infohash))
-    paths = [save / str(f["name"]) for f in files]
-    await _save(book.id, status="importing", progress=1.0)
-    try:
-        count = await asyncio.to_thread(import_book, book.id, save, paths)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("import knihy %s selhal", book.id)
-        await _save(book.id, status="failed", error=f"import: {e}")
-        return
-    logger.info("kniha %s připravená ze sbírky (%d souborů)", book.title, count)
-    await _save(book.id, status="ready", error=None, finished_at=utcnow())
+    completed = [save / str(f["name"]) for f in files if float(f.get("progress") or 0) >= 1.0]
+    all_done = len(completed) == len(files)
+    if completed and (all_done or len(completed) > await asyncio.to_thread(_imported_count, book.id)):
+        try:
+            # Celé vydání na konci jako dřív (jeden formát), jinak hotové soubory.
+            if all_done and indices is None and t.get("content_path"):
+                await asyncio.to_thread(import_book, book.id, Path(str(t["content_path"])))
+            else:
+                await asyncio.to_thread(import_book, book.id, save, completed)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("import knihy %s selhal", book.id)
+            await _save(book.id, status="failed", error=f"import: {e}")
+            return
+    if all_done:
+        logger.info("kniha %s připravená (%d souborů)", book.title, len(files))
+        await _save(book.id, status="ready", progress=1.0, error=None, finished_at=utcnow())
+    else:
+        await _save(book.id, progress=round(min(done_bytes / total, 0.99), 3))
 
 
 async def _follow(book: SpokenBook) -> None:
     if book.source == "slskd":
         return await _follow_slskd(book)
     t = await qbit.info(_infohash(book))
-    if t is not None and _indices(book) is not None:
+    if t is not None:
         state = str(t.get("state") or "")
         if state in ("error", "missingFiles"):
             await _save(book.id, status="failed", error=f"torrent: {state}")
             return
-        return await _follow_selection(book, t, _indices(book))
+        return await _follow_torrent(book, t)
     if t is None:
         created = book.created_at if book.created_at.tzinfo else book.created_at.replace(tzinfo=utcnow().tzinfo)
         if utcnow() - created > _LOST_AFTER:
             await _save(book.id, status="failed", error="torrent klient o knize neví")
-        return
-    state = str(t.get("state") or "")
-    if state in ("error", "missingFiles"):
-        await _save(book.id, status="failed", error=f"torrent: {state}")
-        return
-    progress = float(t.get("progress") or 0.0)
-    if progress < 1.0 and state not in _DONE_STATES:
-        await _save(book.id, progress=round(progress, 3))
-        return
-    root = Path(str(t.get("content_path") or book.storage_dir or SPOKEN_ROOT / book.source_ref))
-    await _save(book.id, status="importing", progress=1.0)
-    try:
-        count = await asyncio.to_thread(import_book, book.id, root)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("import knihy %s selhal", book.id)
-        await _save(book.id, status="failed", error=f"import: {e}")
-        return
-    logger.info("kniha %s připravená (%d souborů)", book.title, count)
-    await _save(book.id, status="ready", error=None, finished_at=utcnow())
 
 
 async def tick(r) -> None:

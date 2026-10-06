@@ -191,12 +191,17 @@ def books(session: Session = Depends(get_session), current: tuple[str, str] = De
         p.book_id: p
         for p in session.exec(select(SpokenProgress).where(SpokenProgress.user_id == current[0])).all()
     }
+    # Kolik částí už jde přehrát (stahuje se popořadě, první kapitola hned).
+    playable: dict[str, int] = {}
+    for book_id in session.exec(select(SpokenFile.book_id)).all():
+        playable[book_id] = playable.get(book_id, 0) + 1
     out = []
     for b in rows:
         item = book_out(b)
         p = progress.get(b.id)
         item["progress"] = _progress_out(p) if p else None
         item["downloadProgress"] = round(b.progress, 3)
+        item["playableFiles"] = playable.get(b.id, 0)
         out.append(item)
     return {"books": out}
 

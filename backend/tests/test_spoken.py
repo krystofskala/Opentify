@@ -191,3 +191,60 @@ def test_two_books_from_one_collection_are_separate(eng):
         assert a["title"] == "01 Posledni prani"
         book = s.get(SpokenBook, a["id"])
         assert book.source_files == {"infohash": HASH_A, "indices": [1, 3]}
+
+
+def test_progressive_import_keeps_file_ids(eng, tmp_path):
+    (tmp_path / "02.mp3").write_bytes(b"x")
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref="h", release_title="x", title="x", requested_by_user_id="me"))
+        s.commit()
+    importer.import_book("b1", tmp_path, [tmp_path / "02.mp3"])
+    with Session(eng) as s:
+        first_id = s.exec(select(SpokenFile)).one().id
+    (tmp_path / "01.mp3").write_bytes(b"x")
+    importer.import_book("b1", tmp_path, [tmp_path / "01.mp3", tmp_path / "02.mp3"])
+    with Session(eng) as s:
+        files = s.exec(select(SpokenFile).order_by(SpokenFile.position)).all()
+        assert [Path(f.path).name for f in files] == ["01.mp3", "02.mp3"]
+        assert files[1].id == first_id  # pozice v knize (file_id) přežije
+
+
+def test_first_chapter_playable_before_the_rest(eng, tmp_path, monkeypatch):
+    import app.spoken.acquire as acquire
+
+    monkeypatch.setattr(acquire, "engine", eng)
+
+    async def no_event(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(acquire, "publish_event", no_event)
+    (tmp_path / "Kniha").mkdir()
+    (tmp_path / "Kniha" / "01.mp3").write_bytes(b"x")
+    state = {"p2": 0.3}
+
+    async def fake_files(_h):
+        return [
+            {"index": 0, "name": "Kniha/01.mp3", "size": 100, "progress": 1.0},
+            {"index": 1, "name": "Kniha/02.mp3", "size": 100, "progress": state["p2"]},
+            {"index": 2, "name": "Kniha/obal.jpg", "size": 5, "progress": 0.0},
+        ]
+
+    monkeypatch.setattr(acquire.qbit, "files", fake_files)
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref=HASH_A, release_title="x", title="x", status="downloading",
+                         requested_by_user_id="me"))
+        s.commit()
+    t = {"save_path": str(tmp_path), "content_path": str(tmp_path / "Kniha"), "state": "downloading"}
+    with Session(eng) as s:
+        book = s.get(SpokenBook, "b1")
+        s.expunge(book)
+    asyncio.run(acquire._follow_torrent(book, t))
+    with Session(eng) as s:
+        assert s.get(SpokenBook, "b1").status == "downloading"
+        assert len(s.exec(select(SpokenFile)).all()) == 1  # první kapitola už hraje
+    (tmp_path / "Kniha" / "02.mp3").write_bytes(b"x")
+    state["p2"] = 1.0
+    asyncio.run(acquire._follow_torrent(book, t))
+    with Session(eng) as s:
+        assert s.get(SpokenBook, "b1").status == "ready"
+        assert len(s.exec(select(SpokenFile)).all()) == 2

@@ -51,6 +51,21 @@ async def set_priority(infohash: str, indices: list[int], priority: int) -> None
         resp.raise_for_status()
 
 
+async def listen_early(infohash: str, first_index: int | None) -> None:
+    """Poslouchat co nejdřív: stahovat popořadě (kapitoly v pořadí), první
+    a poslední kousek souboru napřed a první kapitolu s nejvyšší prioritou."""
+    t = await info(infohash)
+    if t is None:
+        return
+    async with await _client() as c:
+        if not t.get("seq_dl"):
+            (await c.post("/api/v2/torrents/toggleSequentialDownload", data={"hashes": infohash})).raise_for_status()
+        if not t.get("f_l_piece_prio"):
+            (await c.post("/api/v2/torrents/toggleFirstLastPiecePrio", data={"hashes": infohash})).raise_for_status()
+    if first_index is not None:
+        await set_priority(infohash, [first_index], 7)
+
+
 async def start(infohash: str) -> None:
     async with await _client() as c:
         resp = await c.post("/api/v2/torrents/start", data={"hashes": infohash})

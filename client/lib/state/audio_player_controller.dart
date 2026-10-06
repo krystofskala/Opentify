@@ -1193,6 +1193,32 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     return _ref.read(provisioningRepositoryProvider).streamUrl(id);
   }
 
+  /// Konec fronty knihy, která se ještě stahuje: načíst části, které mezitím
+  /// dorazily, přidat je za aktuální a pokračovat další.
+  Future<void> _continueSpokenBook() async {
+    final current = state.nowPlaying;
+    final parts = current == null ? null : spokenParts(current.recordingId);
+    if (parts == null) return;
+    try {
+      final json = await _ref.read(apiClientProvider).getJson('/spoken/books/${parts.bookId}');
+      if (state.nowPlaying?.recordingId != current!.recordingId) return;
+      final have = {for (final q in state.queue) q.recordingId};
+      final more = [
+        for (final f in json['files'] as List<dynamic>? ?? const [])
+          if (!have.contains('sp:${parts.bookId}:${(f as Map<String, dynamic>)['id']}'))
+            NowPlayingInfo(
+              recordingId: 'sp:${parts.bookId}:${f['id']}',
+              title: f['title'] as String? ?? current.title,
+              artistName: current.artistName,
+              artworkUrl: current.artworkUrl,
+            ),
+      ];
+      if (more.isEmpty) return;
+      state = state.copyWith(queue: [...state.queue, ...more]);
+      await next(auto: true);
+    } catch (_) {}
+  }
+
   DateTime _spokenSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Kde v knize jsem -- každých 15 s při hraní, hned při pauze / odchodu.
@@ -2808,6 +2834,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         final route = _queueContext;
         if (state.nextIndex == null && CollectionProgressController.isCollection(route)) {
           _ref.read(collectionProgressProvider.notifier).clear(route!);
+        }
+        // Kniha se ještě stahuje: mezitím dorazily další kapitoly -> přidat.
+        if (state.nextIndex == null && spokenParts(state.nowPlaying?.recordingId ?? '') != null) {
+          unawaited(_continueSpokenBook());
+          return;
         }
         unawaited(next(auto: true));
       }

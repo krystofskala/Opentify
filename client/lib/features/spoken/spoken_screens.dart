@@ -53,7 +53,8 @@ void playBook(WidgetRef ref, SpokenBook book, {int? fileIndex, Duration? positio
 
 String _statusLine(SpokenBook b) => switch (b.status) {
       'pending' => b.error ?? 'Ve frontě ke stažení',
-      'downloading' => 'Stahuje se · ${(b.downloadProgress * 100).round()} %',
+      'downloading' => 'Stahuje se · ${(b.downloadProgress * 100).round()} %'
+          '${b.playableFiles > 0 ? ' · už jde poslouchat' : ''}',
       'importing' => 'Připravuje se…',
       'failed' => 'Nepodařilo se: ${b.error ?? 'neznámá chyba'}',
       _ => [formatHours(b.durationMs), if (b.byline.isNotEmpty) b.byline].where((s) => s.isNotEmpty).join(' · '),
@@ -98,7 +99,7 @@ class _BookTile extends ConsumerWidget {
             ),
         ],
       ),
-      trailing: book.isReady
+      trailing: book.canPlay
           ? GlassIconButton(
               icon: Symbols.play_arrow_rounded,
               tooltip: book.inProgress ? 'Pokračovat' : 'Přehrát',
@@ -720,7 +721,8 @@ class SpokenBookScreen extends ConsumerWidget {
                 LinearProgressIndicator(value: book.downloadProgress, minHeight: 4),
               ],
               const SizedBox(height: AppSpacing.md),
-              if (book.isReady && book.files.isNotEmpty)
+              // I během stahování -- první kapitola je k dispozici hned.
+              if (book.files.isNotEmpty)
                 Center(
                   child: GlassButton(
                     label: book.inProgress ? 'Pokračovat' : 'Přehrát',

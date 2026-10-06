@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 import mutagen
-from sqlmodel import Session, delete
+from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import SpokenBook, SpokenFile
@@ -116,22 +116,26 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
         book = session.get(SpokenBook, book_id)
         if book is None:
             raise LookupError("kniha zmizela")
-        session.exec(delete(SpokenFile).where(SpokenFile.book_id == book_id))  # type: ignore[arg-type]
+        # Stejný soubor = stejný řádek (id): import běží i průběžně, jak
+        # dorážejí další kapitoly, a uložená pozice (file_id) nesmí zmizet.
+        existing = {
+            f.path: f for f in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all()
+        }
+        keep = {str(p) for p, _ in rows}
+        for path, row in existing.items():
+            if path not in keep:
+                session.delete(row)
         total = 0
         for i, (p, audio) in enumerate(rows):
             length = getattr(getattr(audio, "info", None), "length", None)
             duration = int(length * 1000) if length else None
             total += duration or 0
-            session.add(
-                SpokenFile(
-                    book_id=book_id,
-                    position=i,
-                    path=str(p),
-                    title=_tag(audio, "title") or p.stem,
-                    duration_ms=duration,
-                    chapters=_chapters(p),
-                )
-            )
+            row = existing.get(str(p)) or SpokenFile(book_id=book_id, position=i, path=str(p))
+            row.position = i
+            row.title = _tag(audio, "title") or p.stem
+            row.duration_ms = duration
+            row.chapters = _chapters(p)
+            session.add(row)
         first = rows[0][1]
         # Album v tagu = název knihy (čistší než název vydání na trackeru).
         album = _tag(first, "album")

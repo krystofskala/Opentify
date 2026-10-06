@@ -103,6 +103,7 @@ class SpokenBook {
     this.durationMs,
     this.progress,
     this.files = const [],
+    this.playableFiles = 0,
   });
 
   factory SpokenBook.fromJson(Map<String, dynamic> j) {
@@ -121,6 +122,7 @@ class SpokenBook {
       durationMs: (j['durationMs'] as num?)?.toInt(),
       progress: p is Map<String, dynamic> ? SpokenProgress.fromJson(p) : null,
       files: [for (final f in j['files'] as List<dynamic>? ?? const []) SpokenFileItem.fromJson(f as Map<String, dynamic>)],
+      playableFiles: (j['playableFiles'] as num?)?.toInt() ?? (j['files'] as List<dynamic>? ?? const []).length,
     );
   }
 
@@ -140,7 +142,13 @@ class SpokenBook {
   final SpokenProgress? progress;
   final List<SpokenFileItem> files;
 
+  /// Kolik částí už jde přehrát (stahuje se popořadě, první kapitola hned).
+  final int playableFiles;
+
   bool get isReady => status == 'ready';
+
+  /// Hraje už během stahování -- jakmile dorazí první kapitola.
+  bool get canPlay => isReady || playableFiles > 0;
   bool get isWorking => status == 'pending' || status == 'downloading' || status == 'importing';
   bool get inProgress => progress != null && !progress!.finished;
 
