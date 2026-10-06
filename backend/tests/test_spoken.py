@@ -1,6 +1,8 @@
 """Mluvené slovo: SkTorrent výpis, import souborů, "Stáhnout" a pozice."""
 from __future__ import annotations
 
+import asyncio
+
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,15 @@ def test_parse_results_keeps_only_spoken_word_and_reads_numbers():
     assert r.size_bytes == int(500.4 * 1024**2)
     assert (r.seeders, r.leechers) == (8, 1)
     assert r.cover_url == f"spoken/cover/{HASH_A}"  # přes náš server, ne přímo
+
+
+def test_sktorrent_never_goes_direct(monkeypatch):
+    from app.spoken import sktorrent
+
+    monkeypatch.setenv("SKTORRENT_PROXY", "")
+    assert sktorrent._proxy() == "http://gluetun:8888"
+    monkeypatch.delenv("SKTORRENT_PROXY")
+    assert sktorrent._proxy() == "http://gluetun:8888"
 
 
 def test_guess_narrator_from_release_title():
@@ -84,8 +95,8 @@ def test_one_format_per_book(tmp_path):
 def test_acquire_twice_is_one_book_and_failed_retries(eng):
     body = routes.AcquireIn(infohash=HASH_A.upper(), title="Saturnin (2010) čte Oldřich Vízner", coverUrl="https://evil.example/x.jpg")
     with Session(eng) as s:
-        first = routes.acquire(body, session=s, current=("me", "d"))
-        second = routes.acquire(body, session=s, current=("dad", "d"))
+        first = asyncio.run(routes.acquire(body, session=s, current=("me", "d")))
+        second = asyncio.run(routes.acquire(body, session=s, current=("dad", "d")))
         assert first["id"] == second["id"]
         assert first["coverUrl"] == f"spoken/cover/{HASH_A}"  # nikdy adresa od klienta
         assert first["narrator"] == "Oldřich Vízner"
@@ -93,10 +104,10 @@ def test_acquire_twice_is_one_book_and_failed_retries(eng):
         book.status, book.error = "failed", "torrent: error"
         s.add(book)
         s.commit()
-        again = routes.acquire(body, session=s, current=("me", "d"))
+        again = asyncio.run(routes.acquire(body, session=s, current=("me", "d")))
         assert (again["status"], again["error"]) == ("pending", None)
         with pytest.raises(HTTPException):
-            routes.acquire(routes.AcquireIn(infohash="nope", title="x"), session=s, current=("me", "d"))
+            asyncio.run(routes.acquire(routes.AcquireIn(infohash="nope", title="x"), session=s, current=("me", "d")))
 
 
 def test_progress_is_per_profile_and_file_must_belong_to_book(eng):

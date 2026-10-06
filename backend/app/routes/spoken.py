@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 from app.auth import get_current_user
 from app.db import get_session
 from app.models import SpokenBook, SpokenFile, SpokenProgress
-from app.spoken import sktorrent
+from app.spoken import sktorrent, slsk_books
 from app.spoken.acquire import SPOKEN_ROOT, book_out
 from app.spoken.importer import guess_from_release
 from app.utils import utcnow
@@ -51,22 +51,46 @@ async def search(q: str, session: Session = Depends(get_session)):
     return {"releases": out, "loginConfigured": sktorrent.credentials() is not None}
 
 
+@spoken_router.get("/search/foreign")
+async def search_foreign(q: str, session: Session = Depends(get_session)):
+    """Záloha: audioknihy ze Soulseeku (typicky anglické originály) --
+    zvlášť, ať české výsledky ze SkTorrentu nečekají na pomalejší hledání."""
+    q = q.strip()
+    if len(q) < 2:
+        return {"releases": []}
+    releases = await slsk_books.search(q)
+    known = {
+        b.source_ref: b
+        for b in session.exec(
+            select(SpokenBook).where(SpokenBook.source_ref.in_([r["ref"] for r in releases]))  # type: ignore[attr-defined]
+        ).all()
+    }
+    for r in releases:
+        if book := known.get(r["ref"]):
+            r["bookId"], r["status"] = book.id, book.status
+    return {"releases": releases}
+
+
 class AcquireIn(BaseModel):
-    infohash: str
+    infohash: str | None = None
     title: str
     sizeBytes: int | None = None
     coverUrl: str | None = None
+    source: str = "sktorrent"  # sktorrent | slskd
+    ref: str | None = None  # slskd: výsledek z /search/foreign
 
 
 @spoken_router.post("/books", status_code=202)
-def acquire(
+async def acquire(
     body: AcquireIn,
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
 ):
     """"Stáhnout": jednorázově, jen na pokyn. Stejné vydání podruhé = stejná
     kniha (a její stav); po chybě se zkusí znovu."""
-    infohash = body.infohash.strip().lower()
+    if body.source == "slskd":
+        return await _acquire_slskd(body, session, current[0])
+    infohash = (body.infohash or "").strip().lower()
     if len(infohash) != 40 or any(c not in "0123456789abcdef" for c in infohash):
         raise HTTPException(status_code=422, detail="neplatný infohash")
     book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == infohash)).first()
@@ -81,6 +105,35 @@ def acquire(
             # Obal vždy přes náš server (viz `cover`), nic od klienta.
             cover_url=sktorrent.cover_path(infohash),
             requested_by_user_id=current[0],
+        )
+    elif book.status == "failed":
+        book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()
+    else:
+        return book_out(book)
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    return book_out(book)
+
+
+async def _acquire_slskd(body: AcquireIn, session: Session, user_id: str) -> dict:
+    ref = (body.ref or "").strip()
+    book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == ref)).first() if ref else None
+    if book is None:
+        found = await slsk_books.cached(ref) if ref else None
+        if found is None:
+            raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
+        guess = guess_from_release(body.title)
+        book = SpokenBook(
+            source="slskd",
+            source_ref=ref,
+            source_files={"user": found["user"], "files": found["files"]},
+            language="en",
+            release_title=body.title[:300],
+            title=guess["title"][:300],
+            narrator=guess["narrator"],
+            size_bytes=found["size"],
+            requested_by_user_id=user_id,
         )
     elif book.status == "failed":
         book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()

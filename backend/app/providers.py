@@ -565,19 +565,34 @@ class SlskdProvider:
         return deleted
 
     @staticmethod
+    async def _read_responses(client: httpx.AsyncClient, search_id: str, expected: int) -> list[dict]:
+        """Odpovědi dokončeného hledání. slskd hlásí "Completed" o chvilku
+        dřív, než odpovědi uloží -- prázdný seznam při `expected` > 0 (živě:
+        "completed with 5 responses", přečteno 0) se zkusí ještě pár krát."""
+        items: list[dict] = []
+        for attempt in range(8):
+            if attempt:
+                await asyncio.sleep(0.4)
+            resp = await client.get(f"/api/v0/searches/{search_id}/responses")
+            resp.raise_for_status()
+            items = resp.json()
+            if items or expected <= 0:
+                break
+        return items
+
+    @staticmethod
     async def _stop_and_collect(client: httpx.AsyncClient, search_id: str) -> list[dict]:
         """Zastaví běžící hledání a vrátí jeho odpovědi (viz `_search_ranked`:
         slskd 0.26 je vydá až po dokončení). Zastavení trvá ~0,3 s."""
         try:
             (await client.put(f"/api/v0/searches/{search_id}")).raise_for_status()
+            payload: dict = {}
             for _ in range(15):
                 payload = (await client.get(f"/api/v0/searches/{search_id}")).json()
                 if payload.get("isComplete") or str(payload.get("state") or "").lower().startswith("completed"):
                     break
                 await asyncio.sleep(0.2)
-            responses = await client.get(f"/api/v0/searches/{search_id}/responses")
-            responses.raise_for_status()
-            return responses.json()
+            return await SlskdProvider._read_responses(client, search_id, int(payload.get("responseCount") or 0))
         except (httpx.HTTPError, ValueError):
             logger.warning("slskd: hledání %s nešlo zastavit / přečíst", search_id)
             return []
@@ -619,9 +634,7 @@ class SlskdProvider:
                         break
                     await asyncio.sleep(1.0)
                 if complete:
-                    responses = await client.get(f"/api/v0/searches/{search_id}/responses")
-                    responses.raise_for_status()
-                    items = responses.json()
+                    items = await self._read_responses(client, search_id, int(payload.get("responseCount") or 0))
                 else:
                     # Běžící hledání odpovědi nevydá (slskd 0.26) -- zastavit.
                     items = await self._stop_and_collect(client, search_id)
@@ -769,9 +782,12 @@ class SlskdProvider:
                         seen_responses = count
                         count_changed_at = now
                         if not unreadable or complete:
-                            responses = await client.get(f"/api/v0/searches/{search_id}/responses")
-                            responses.raise_for_status()
-                            items = responses.json()
+                            if complete:
+                                items = await self._read_responses(client, search_id, count)
+                            else:
+                                responses = await client.get(f"/api/v0/searches/{search_id}/responses")
+                                responses.raise_for_status()
+                                items = responses.json()
                             unreadable = not items and count > 0 and not complete
                             ranked = self._rank(items, track, interactive=interactive)
                             if first_good_at is None and ranked and self._is_good(ranked[0], interactive):
@@ -791,6 +807,11 @@ class SlskdProvider:
                     items = await self._stop_and_collect(client, search_id)
                     if items:
                         ranked = self._rank(items, track, interactive=interactive)
+                elif complete and unreadable and seen_responses > 0:
+                    # Doběhlo samo, ale odpovědi jsme za běhu přečíst nemohli
+                    # a počet se při dokončení už nezměnil -> přečíst teď.
+                    items = await self._read_responses(client, search_id, seen_responses)
+                    ranked = self._rank(items, track, interactive=interactive)
             finally:
                 # Úklid -- slskd si jinak hromadí stovky starých hledání.
                 # Převzaté hledání patří jinému workeru, ten ho smaže sám.

@@ -75,6 +75,31 @@ def test_prune_searches_archives_then_deletes_only_old_finished(monkeypatch, tmp
     assert '"searchText": "a"' in archive.read_text(encoding="utf-8")
 
 
+def test_read_responses_waits_for_late_save(monkeypatch):
+    """slskd hlásí Completed dřív, než odpovědi uloží."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=RESPONSES if calls["n"] >= 3 else [])
+
+    async def no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(providers.asyncio, "sleep", no_sleep)
+
+    async def run():
+        async with httpx.AsyncClient(base_url="http://slskd", transport=httpx.MockTransport(handler)) as client:
+            return (
+                await SlskdProvider._read_responses(client, "s1", expected=2),
+                await SlskdProvider._read_responses(client, "s1", expected=0),
+            )
+
+    calls["n"] = 0
+    first, _ = asyncio.run(run())
+    assert first == RESPONSES
+
+
 def test_search_raw_stops_running_search(monkeypatch):
     handler, stopped = _fake_slskd()
     real_client = httpx.AsyncClient

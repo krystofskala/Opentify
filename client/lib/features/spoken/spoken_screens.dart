@@ -403,61 +403,94 @@ class _Results extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(spokenSearchProvider(query));
+    final czech = ref.watch(spokenSearchProvider(query));
+    // Záloha (Soulseek, typicky anglicky) se načítá zvlášť -- je pomalejší.
+    final foreign = ref.watch(spokenForeignSearchProvider(query));
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-    return async.when(
-      loading: () => const LoadingState(),
-      error: (e, _) => ErrorState(
-        message: 'Hledání se nepovedlo.',
-        error: e,
-        onRetry: () => ref.invalidate(spokenSearchProvider(query)),
+    final cz = czech.valueOrNull;
+    final other = foreign.valueOrNull ?? const <SpokenRelease>[];
+    if (czech.isLoading && foreign.isLoading) return const LoadingState();
+    if (cz != null && cz.releases.isEmpty && !foreign.isLoading && other.isEmpty) {
+      return const EmptyState(icon: Symbols.menu_book_rounded, message: 'Nic se nenašlo – ani česky, ani v jiných jazycích.');
+    }
+    return ListView(
+      padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
+      children: [
+        const _Heading('Česky'),
+        if (czech.isLoading)
+          const Padding(padding: EdgeInsets.all(AppSpacing.sm), child: LinearProgressIndicator(minHeight: 2))
+        else if (czech.hasError)
+          Text('České hledání se nepovedlo.', style: muted)
+        else if (cz!.releases.isEmpty)
+          Text('Česká verze se nenašla.', style: muted)
+        else ...[
+          if (!cz.loginConfigured)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Text('Stažení se rozjede, až bude na serveru nastavený účet SkTorrent.', style: muted),
+            ),
+          for (final r in cz.releases) _ReleaseTile(release: r),
+        ],
+        const _Heading('Anglicky a další jazyky'),
+        if (foreign.isLoading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Text('Hledám na Soulseeku…', style: muted),
+          )
+        else if (foreign.hasError)
+          Text('Hledání na Soulseeku se nepovedlo.', style: muted)
+        else if (other.isEmpty)
+          Text('Nic se nenašlo.', style: muted)
+        else
+          for (final r in other) _ReleaseTile(release: r),
+      ],
+    );
+  }
+}
+
+/// Jedno vydání knihy (SkTorrent i Soulseek stejně).
+class _ReleaseTile extends ConsumerWidget {
+  const _ReleaseTile({required this.release});
+  final SpokenRelease release;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final r = release;
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: _Cover(url: r.coverUrl),
+      title: Text(r.title, maxLines: 3, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [
+          formatSize(r.sizeBytes),
+          if (r.files != null) '${r.files} souborů',
+          r.seeders > 0 ? '${r.seeders} zdrojů' : 'teď nikdo nesdílí',
+        ].where((s) => s.isNotEmpty).join(' · '),
+        style: muted,
       ),
-      data: (result) {
-        if (result.releases.isEmpty) return const EmptyState(icon: Symbols.menu_book_rounded, message: 'Nic se nenašlo.');
-        return ListView(
-          padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
-          children: [
-            if (!result.loginConfigured)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                child: Text('Stažení se rozjede, až bude na serveru nastavený účet SkTorrent.', style: muted),
-              ),
-            for (final r in result.releases)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: _Cover(url: r.coverUrl),
-                title: Text(r.title, maxLines: 3, overflow: TextOverflow.ellipsis),
-                subtitle: Text(
-                  [formatSize(r.sizeBytes), r.seeders > 0 ? '${r.seeders} zdrojů' : 'teď nikdo nesdílí']
-                      .where((s) => s.isNotEmpty)
-                      .join(' · '),
-                  style: muted,
-                ),
-                trailing: r.bookId != null
-                    ? GlassButton(
-                        label: r.status == 'ready' ? 'Otevřít' : 'Stahuje se',
-                        compact: true,
-                        onPressed: () => context.push('/spoken/book/${r.bookId}'),
-                      )
-                    : GlassButton(
-                        label: 'Stáhnout',
-                        icon: Symbols.download_rounded,
-                        compact: true,
-                        style: GlassButtonStyle.prominent,
-                        onPressed: () async {
-                          try {
-                            await acquireSpoken(ref, r);
-                            if (context.mounted) toast(context, 'Kniha se stahuje – najdeš ji na Domů');
-                          } catch (e) {
-                            if (context.mounted) toast(context, 'Stažení se nepodařilo spustit');
-                          }
-                        },
-                      ),
-              ),
-          ],
-        );
-      },
+      trailing: r.bookId != null
+          ? GlassButton(
+              label: r.status == 'ready' ? 'Otevřít' : 'Stahuje se',
+              compact: true,
+              onPressed: () => context.push('/spoken/book/${r.bookId}'),
+            )
+          : GlassButton(
+              label: 'Stáhnout',
+              icon: Symbols.download_rounded,
+              compact: true,
+              style: GlassButtonStyle.prominent,
+              onPressed: () async {
+                try {
+                  await acquireSpoken(ref, r);
+                  if (context.mounted) toast(context, 'Kniha se stahuje – najdeš ji na Domů');
+                } catch (e) {
+                  if (context.mounted) toast(context, 'Stažení se nepodařilo spustit');
+                }
+              },
+            ),
     );
   }
 }

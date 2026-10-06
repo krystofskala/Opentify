@@ -17,10 +17,16 @@ class SpokenRelease {
     this.added,
     this.bookId,
     this.status,
+    this.source = 'sktorrent',
+    this.ref,
+    this.files,
   });
 
   factory SpokenRelease.fromJson(Map<String, dynamic> j) => SpokenRelease(
-        infohash: j['infohash'] as String,
+        infohash: j['infohash'] as String? ?? '',
+        source: j['source'] as String? ?? 'sktorrent',
+        ref: j['ref'] as String?,
+        files: (j['files'] as num?)?.toInt(),
         title: j['title'] as String,
         sizeBytes: (j['sizeBytes'] as num?)?.toInt(),
         seeders: (j['seeders'] as num?)?.toInt() ?? 0,
@@ -38,6 +44,11 @@ class SpokenRelease {
   final String? added;
   final String? bookId;
   final String? status;
+
+  /// sktorrent (česky) | slskd (Soulseek, typicky anglicky).
+  final String source;
+  final String? ref;
+  final int? files;
 }
 
 class SpokenProgress {
@@ -212,10 +223,21 @@ final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) async* {
 
 Future<void> acquireSpoken(WidgetRef ref, SpokenRelease r) async {
   await ref.read(apiClientProvider).postJson('/spoken/books', body: {
-    'infohash': r.infohash,
+    'source': r.source,
+    if (r.ref != null) 'ref': r.ref,
+    if (r.infohash.isNotEmpty) 'infohash': r.infohash,
     'title': r.title,
     'sizeBytes': r.sizeBytes,
   });
   ref.invalidate(spokenBooksProvider);
   ref.invalidate(spokenSearchProvider);
+  ref.invalidate(spokenForeignSearchProvider);
 }
+
+/// Záloha za českou verzi: Soulseek (typicky anglické originály) -- zvlášť,
+/// je pomalejší (~10 s).
+final spokenForeignSearchProvider = FutureProvider.autoDispose.family<List<SpokenRelease>, String>((ref, q) async {
+  ref.watch(spokenEventsProvider);
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/search/foreign', query: {'q': q});
+  return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
+});

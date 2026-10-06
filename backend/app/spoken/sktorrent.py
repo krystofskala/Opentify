@@ -23,8 +23,10 @@ SPOKEN_CATEGORY = "24"
 _UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
 
-def _proxy() -> str | None:
-    return os.environ.get("SKTORRENT_PROXY", "http://gluetun:8888") or None
+def _proxy() -> str:
+    """Vždy přes VPN -- prázdná / chybějící hodnota NEZNAMENÁ napřímo
+    (SkTorrent nikdy nesmí vidět domácí IP)."""
+    return os.environ.get("SKTORRENT_PROXY", "").strip() or "http://gluetun:8888"
 
 
 @dataclass

@@ -21,7 +21,7 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.events import publish_event
 from app.models import SpokenBook
-from app.spoken import qbit, sktorrent
+from app.spoken import qbit, sktorrent, slsk_books
 from app.spoken.importer import import_book
 from app.utils import utcnow
 
@@ -72,7 +72,40 @@ async def _save(book_id: str, **fields) -> SpokenBook | None:
     return book
 
 
+async def _start_slskd(book: SpokenBook) -> None:
+    data = book.source_files or {}
+    await slsk_books.start(data["user"], data["files"])
+    await _save(book.id, status="downloading", error=None, storage_dir=str(SPOKEN_ROOT / book.id))
+
+
+async def _follow_slskd(book: SpokenBook) -> None:
+    data = book.source_files or {}
+    share, state = await slsk_books.progress(data["user"], data["files"])
+    if state == "failed":
+        await _save(book.id, status="failed", error="Soulseek: stažení od tohoto uživatele selhalo, zkus jinou verzi")
+        return
+    if state != "done":
+        await _save(book.id, progress=round(share, 3))
+        return
+    dest = SPOKEN_ROOT / book.id
+    await _save(book.id, status="importing", progress=1.0)
+    moved = await slsk_books.collect(data["files"], dest)
+    if moved == 0:
+        await _save(book.id, status="failed", error="stažené soubory se nenašly")
+        return
+    try:
+        count = await asyncio.to_thread(import_book, book.id, dest)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("import knihy %s selhal", book.id)
+        await _save(book.id, status="failed", error=f"import: {e}")
+        return
+    logger.info("kniha %s připravená ze Soulseeku (%d souborů)", book.title, count)
+    await _save(book.id, status="ready", error=None, finished_at=utcnow())
+
+
 async def _start(book: SpokenBook) -> None:
+    if book.source == "slskd":
+        return await _start_slskd(book)
     try:
         torrent = await sktorrent.download_torrent(book.source_ref)
     except sktorrent.NotConfigured as e:
@@ -87,6 +120,8 @@ async def _start(book: SpokenBook) -> None:
 
 
 async def _follow(book: SpokenBook) -> None:
+    if book.source == "slskd":
+        return await _follow_slskd(book)
     t = await qbit.info(book.source_ref)
     if t is None:
         created = book.created_at if book.created_at.tzinfo else book.created_at.replace(tzinfo=utcnow().tzinfo)

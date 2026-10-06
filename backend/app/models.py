@@ -500,9 +500,13 @@ class SpokenBook(SQLModel, table=True):
     (torrent). Sdílená mezi profily jako hudba; pozice má každý profil svou."""
 
     id: str = Field(default_factory=new_uuid, primary_key=True)
-    source: str = "sktorrent"
-    # Infohash torrentu -- stejné vydání podruhé = stejná kniha.
+    source: str = "sktorrent"  # sktorrent (česky) | slskd (zahraniční záloha)
+    # Infohash torrentu / "uživatel|složka" na Soulseeku -- stejné vydání
+    # podruhé = stejná kniha.
     source_ref: str = Field(index=True, unique=True)
+    # Soulseek: {"user": ..., "files": [{filename, size}]} -- složka ke stažení.
+    source_files: dict | None = Field(default=None, sa_column=Column(JSON))
+    language: str | None = None  # cs | en (podle zdroje)
     release_title: str
     title: str
     author: str | None = None
