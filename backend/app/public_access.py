@@ -14,10 +14,13 @@ přidá sám, jen si sám zpřísní pravidla. Pro veřejné požadavky platí:
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 
 from fastapi import HTTPException, Request
+
+logger = logging.getLogger("uvicorn.error.public")
 
 FUNNEL_HEADER = "tailscale-funnel-request"
 
@@ -49,6 +52,9 @@ def over_limit(ip: str, now: float | None = None, limit: int | None = None) -> b
     """Klouzavé okno 60 s. `True` = tenhle požadavek už je nad limit."""
     now = time.monotonic() if now is None else now
     limit = PUBLIC_RATE_PER_MIN if limit is None else limit
+    if ip not in _hits:
+        # Přehled, kdo chodí zvenku (a podklad pro upozornění).
+        logger.info("funnel: nová veřejná IP %s", ip)
     q = _hits.setdefault(ip, deque())
     while q and now - q[0] > 60:
         q.popleft()
