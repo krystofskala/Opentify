@@ -238,7 +238,13 @@ services:
     environment:
       SLSKD_SLSK_USERNAME: ${SLSKD_SLSK_USERNAME:?Soulseek účet -- nastav v .env}
       SLSKD_SLSK_PASSWORD: ${SLSKD_SLSK_PASSWORD:?Soulseek heslo -- nastav v .env}
-      SLSKD_API_KEY: "role=ReadWrite;cidr=0.0.0.0/0,::/0;${SLSKD_API_KEY_SECRET:?vygeneruj: openssl rand -base64 32}"
+      # Administrator: worker nastavuje za běhu port z VPN (PATCH
+      # /api/v0/options, app/vpn_ports.py) -- s ReadWrite 403. Klíč platí
+      # jen z Docker sítě (dřív odkudkoli; web UI jde přes heslo níž).
+      SLSKD_API_KEY: "role=Administrator;cidr=172.28.0.0/16,127.0.0.1/32;${SLSKD_API_KEY_SECRET:?vygeneruj: openssl rand -base64 32}"
+      # Bez toho slskd změnu portu za běhu zablokuje ("remote configuration
+      # is disabled"). Smí jen klíč výš, tedy jen z Docker sítě.
+      SLSKD_REMOTE_CONFIGURATION: "true"
       # Přihlášení do webového UI slskd (http://127.0.0.1:5030) -- jinak
       # výchozí slskd/slskd (bezpečnostní audit V1). Appka jde přes API klíč.
       SLSKD_USERNAME: ${SLSKD_WEB_USERNAME:-slskd}

@@ -74,8 +74,8 @@ def test_progress_uses_latest_attempt_per_file(monkeypatch):
             super().__init__(*a, **k)
 
     monkeypatch.setattr(slsk.httpx, "AsyncClient", _Client)
-    share, state = asyncio.run(slsk.progress("anna", files))
-    assert state == "downloading" and share == pytest.approx(0.75)
+    share, state, retry, reason = asyncio.run(slsk.progress("anna", files))
+    assert state == "downloading" and share == pytest.approx(0.75) and retry == [] and reason is None
 
 
 def test_acquire_needs_fresh_search_result(monkeypatch, redis):

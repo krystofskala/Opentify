@@ -1271,6 +1271,14 @@ async def _spoken_tick(r) -> None:
     await acquire.tick(r)
 
 
+async def _vpn_port_tick(r) -> None:
+    # Port z ProtonVPN do slskd (app/vpn_ports.py) -- jednou za minutu.
+    if await r.set("maintenance:vpn-port", CONSUMER_NAME, nx=True, ex=60):
+        from app import vpn_ports
+
+        await vpn_ports.sync_slskd_port()
+
+
 async def _podcasts_tick(r) -> None:
     # Odebírané podcasty: nové epizody se jen ukážou, nic se nestahuje.
     from app.podcasts import service
@@ -1310,6 +1318,7 @@ async def main() -> None:
             _housekeep("upgrades", "zpracování upgradů selhalo", lambda: _process_due_upgrades(r))
             _housekeep("spoken", "stahování audioknih selhalo", lambda: _spoken_tick(r))
             _housekeep("podcasts", "obnova podcastů selhala", lambda: _podcasts_tick(r))
+            _housekeep("vpn-port", "port z VPN do slskd se nenastavil", lambda: _vpn_port_tick(r))
 
         # Prioritní stream první (Redis vrací v pořadí klíčů); běžnou frontu
         # čteme jen s volnou kapacitou -- jinak by si worker zprávy

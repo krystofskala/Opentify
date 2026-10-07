@@ -85,7 +85,8 @@ def audio_files(root: Path) -> list[Path]:
     m4b má přednost (kapitoly), jinak formát s nejvíc soubory (pak větší)."""
     if root.is_file():
         return [root] if root.suffix.lower() in AUDIO else []
-    files = [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO]
+    # "._03.mp3" = skrytý doprovodný soubor z Macu (AppleDouble), ne kapitola.
+    files = [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO and not p.name.startswith("._")]
     by_ext: dict[str, list[Path]] = {}
     for p in files:
         by_ext.setdefault(p.suffix.lower(), []).append(p)

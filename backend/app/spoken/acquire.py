@@ -79,9 +79,15 @@ async def _start_slskd(book: SpokenBook) -> None:
 
 async def _follow_slskd(book: SpokenBook) -> None:
     data = book.source_files or {}
-    share, state = await slsk_books.progress(data["user"], data["files"])
+    share, state, retry, reason = await slsk_books.progress(data["user"], data["files"])
     if state == "failed":
-        await _save(book.id, status="failed", error="Soulseek: stažení od tohoto uživatele selhalo, zkus jinou verzi")
+        await _save(book.id, status="failed", error=reason or "Soulseek: stažení selhalo, zkus jinou verzi")
+        return
+    if state == "retry":
+        # Přechodná chyba u části souborů: jen ty znovu do fronty.
+        logger.info("kniha %s: znovu %d souborů ze Soulseeku", book.id, len(retry))
+        await slsk_books.start(data["user"], retry)
+        await _save(book.id, progress=round(share, 3))
         return
     if state != "done":
         await _save(book.id, progress=round(share, 3))

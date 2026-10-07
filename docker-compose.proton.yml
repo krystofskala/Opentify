@@ -1,0 +1,56 @@
+# ProtonVPN jen pro qBittorrent (české audioknihy ze SkTorrentu) --
+# varianta A (rozhodnutí 7. 10. 2026). Mullvad (`gluetun`) zůstává pro
+# všechno ostatní: Soulseek, Shazam, YouTube, stažení .torrent souboru
+# a audioknihy.cz.
+#
+# Proč: Mullvad neumí přesměrovat port, takže se nedá připojit ke zdrojům,
+# které jsou samy za routerem (u starých českých audioknih se 3 zdroji
+# běžné -- Zaklínač I. stál na 0 %). ProtonVPN (tarif Plus) port přidělí
+# a gluetun ho předá qBittorrentu.
+#
+# Zapnutí -- v `.env` na serveru:
+#   PROTON_WIREGUARD_PRIVATE_KEY=<PrivateKey z WireGuard konfigurace Protonu,
+#                                 vygenerované s volbou "NAT-PMP (Port Forwarding)">
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.proton.yml
+# a `docker compose up -d`. Vypnutí = odebrat ten soubor z COMPOSE_FILE
+# (qBittorrent se vrátí do sítě Mullvadu, nic dalšího se nemění).
+# Proměnné ověřeny proti gluetun-wiki (setup/providers/protonvpn.md,
+# setup/advanced/vpn-port-forwarding.md).
+
+services:
+  gluetun-proton:
+    image: qmcgaw/gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER: protonvpn
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${PROTON_WIREGUARD_PRIVATE_KEY:?vygeneruj WireGuard konfiguraci v Proton účtu (s Port Forwarding), viz komentář výš}
+      WIREGUARD_ADDRESSES: ${PROTON_WIREGUARD_ADDRESSES:-10.2.0.2/32}
+      SERVER_COUNTRIES: ${PROTON_SERVER_COUNTRIES:-Czech Republic,Germany,Netherlands}
+      # Jen servery, které port přesměrovat umí (P2P).
+      PORT_FORWARD_ONLY: "on"
+      VPN_PORT_FORWARDING: "on"
+      # Přidělený port rovnou do qBittorrentu (sdílí s tímhle kontejnerem síť,
+      # API na 127.0.0.1:8080 bez hesla -- WebUI\LocalHostAuth=false v
+      # docker/qbittorrent-init.sh). Port se při obnovení může změnit.
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -O- -q --retry-connrefused --post-data "json={\"listen_port\":{{PORTS}},\"random_port\":false,\"upnp\":false}" http://127.0.0.1:8080/api/v2/app/setPreferences'
+      # api/worker -> qBittorrent API (gluetun-proton:8080) z Docker sítě.
+      FIREWALL_OUTBOUND_SUBNETS: 172.28.0.0/16
+    restart: unless-stopped
+
+  qbittorrent:
+    network_mode: "service:gluetun-proton"
+    depends_on: !override
+      - gluetun-proton
+
+  api:
+    environment:
+      QBIT_URL: http://gluetun-proton:8080
+
+  worker:
+    environment:
+      QBIT_URL: http://gluetun-proton:8080
