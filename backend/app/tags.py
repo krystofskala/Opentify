@@ -260,7 +260,10 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
             w += 0.5 ** ((now - taste.last_played[rid]).total_seconds() / 86400 / 30)
         rec_weight[rid] = w
         artist_weight[artist_id] = artist_weight.get(artist_id, 0.0) + w
-    top_artists = sorted(artist_weight, key=lambda a: -artist_weight[a])[:70]
+    # 300, ne 70: styl, který posloucháš jen okrajově (rap u folkaře --
+    # Eminem 150., mgk 210.), jinak mix neměl z čeho vzniknout. Štítky
+    # interpretů jsou v cache týden, takže je to levné.
+    top_artists = sorted(artist_weight, key=lambda a: -artist_weight[a])[:300]
     names = {a: taste.artist_name.get(a) for a in top_artists}
     sem = asyncio.Semaphore(6)
 
@@ -295,8 +298,10 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
         similar |= {_normalize(n) for n, _m in await lt.similar_artist_names(names[a] or "", 25)}
     pool = [x for x in await lastfm.tag_top_tracks(t, limit=200) if _normalize(x["artist"]) in (known_names | similar)]
     rng.shuffle(pool)
-    discovery = [r for r in await _resolve_tracks(pool, 20) if r not in set(own)][:14]
-    if len(own) + len(discovery) < 12 or len(own) < 4:
+    # Málo vlastních (okrajový styl): víc objevů, ať mix vznikne i tak.
+    want = 14 if len(own) >= 8 else 24
+    discovery = [r for r in await _resolve_tracks(pool, want + 6) if r not in set(own)][:want]
+    if len(own) + len(discovery) < 12 or not own:
         return None
     ids: list[str] = []
     while own or discovery:
