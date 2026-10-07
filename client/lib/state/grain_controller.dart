@@ -33,9 +33,10 @@ class NoGrainController extends StateNotifier<bool> {
 final noGrainProvider = StateNotifierProvider<NoGrainController, bool>((ref) => NoGrainController());
 
 /// "Poloviční zrno": stejné zrno, poloviční síla (živě: tátovi plné zrno
-/// vadilo, úplně hladké nechtěl).
+/// vadilo, úplně hladké nechtěl). Od 7. 10. VÝCHOZÍ pro každého, kdo si
+/// nevybral jinak (uživatel: "z polovičního udělat základ").
 class HalfGrainController extends StateNotifier<bool> {
-  HalfGrainController() : super(false) {
+  HalfGrainController() : super(true) {
     _load();
   }
 

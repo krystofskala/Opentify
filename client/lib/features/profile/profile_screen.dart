@@ -510,7 +510,7 @@ class _AppearanceSettings extends ConsumerWidget {
         const SizedBox(height: 12),
         Text('Zrno na pozadí', style: theme.textTheme.titleSmall),
         Text(
-          'Jemná filmová zrnitost. Poloviční = stejné zrno, ale slabší; vypnuté = úplně hladké plochy.',
+          'Jemná filmová zrnitost. Výchozí je poloviční; plné = výraznější, vypnuté = úplně hladké plochy.',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 6),

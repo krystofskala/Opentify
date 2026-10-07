@@ -468,6 +468,8 @@ _APPEARANCE_KEYS = {
     "appearance.glass_colorfulness", "appearance.glass_tint_main", "appearance.glass_accent_tint",
     "appearance.glass_tone", "appearance.glass_buttons", "appearance.glass_grain",
     "appearance.liquid_glass_test", "appearance.glass_off", "appearance.no_grain", "appearance.theme_mode",
+    # Chybělo -- "poloviční zrno" se k profilu nikdy neuložilo (jen v zařízení).
+    "appearance.half_grain",
 }
 
 
