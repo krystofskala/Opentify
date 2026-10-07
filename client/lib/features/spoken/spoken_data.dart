@@ -300,6 +300,12 @@ final spokenPersonImageProvider =
   return json['image'] as String?;
 });
 
+/// Popis knihy (Google Books, jen jistá shoda) -- načítá se zvlášť.
+final spokenBookDescriptionProvider = FutureProvider.autoDispose.family<String?, String>((ref, id) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/books/$id/description');
+  return json['description'] as String?;
+});
+
 /// Cesta na stránku autora / interpreta.
 String spokenPersonPath(String name, {bool narrator = false}) =>
     Uri(path: '/spoken/person', queryParameters: {'name': name, if (narrator) 'role': 'narrator'}).toString();

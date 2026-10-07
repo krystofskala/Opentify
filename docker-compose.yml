@@ -53,6 +53,8 @@ services:
       # Uživatelský token (listenbrainz.org -> Settings) pro odesílání poslechů.
       LISTENBRAINZ_TOKEN: ${LISTENBRAINZ_TOKEN:-}
       LASTFM_API_KEY: ${LASTFM_API_KEY:-}
+      # Google Books (volitelné, zdarma) -- popis audioknihy, jen při jisté shodě.
+      GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
       # Model vkusu: v2 = celá historie ve třech profilech (app/home/activation.py),
       # v1 = posledních 365 dní. Vrácení jedním řádkem v .env.
       TASTE_MODEL: ${TASTE_MODEL:-v2}

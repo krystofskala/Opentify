@@ -959,6 +959,11 @@ class SpokenBookScreen extends ConsumerWidget {
                 style: muted,
                 textAlign: TextAlign.center,
               ),
+              // Popis knihy, když se najde jistě (Google Books).
+              if (ref.watch(spokenBookDescriptionProvider(book.id)).valueOrNull case final description?) ...[
+                const SizedBox(height: AppSpacing.sm),
+                HeroTeaser(text: description),
+              ],
               if (book.status == 'failed') ...[
                 const SizedBox(height: AppSpacing.md),
                 _FailedActions(book: book),

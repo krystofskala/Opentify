@@ -486,6 +486,17 @@ def book_detail(book_id: str, session: Session = Depends(get_session), current: 
     }
 
 
+@spoken_router.get("/books/{book_id}/description")
+async def book_description(book_id: str, session: Session = Depends(get_session), _current=Depends(get_current_user)):
+    """Popis knihy (Google Books, jen jistá shoda) -- zvlášť, ať na něj detail nečeká."""
+    from app.spoken import describe
+
+    book = session.get(SpokenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="kniha nenalezena")
+    return {"description": await describe.describe(book.title, book.author)}
+
+
 @spoken_router.get("/files/{file_id}/stream")
 def stream_file(file_id: str, session: Session = Depends(get_session)):
     f = session.get(SpokenFile, file_id)
