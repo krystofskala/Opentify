@@ -15,6 +15,7 @@ Důvod se ukazuje jen pro celý výběr, ne u každé skladby.
 from __future__ import annotations
 
 import asyncio
+import functools
 import random
 import time
 from collections import Counter
@@ -80,7 +81,10 @@ def _activation(user_id: str) -> av.Activation:
     return act
 
 
+@functools.lru_cache(maxsize=200_000)
 def _title_key(title: str) -> str:
+    """Čistá funkce názvu -- v cache: `score()` ji volal ~100 tisíc× na várku
+    (2,5 s z 3,3 s výběru, držela GIL a brzdila ostatní požadavky)."""
     from app.download_match import core_title, tokens
 
     return " ".join(tokens(core_title(title or "")))
