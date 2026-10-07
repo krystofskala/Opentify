@@ -566,6 +566,8 @@ class SpokenBook(SQLModel, table=True):
     # Druh: "book" (audiokniha) | "drama" (rozhlasová hra / dramatizace) --
     # pozná se z názvu, v appce půjde přepnout a oddělit (s Českým rozhlasem).
     kind: str | None = None
+    # Popis vydání (u YouTube popis videa: obsazení, režie, rok).
+    description: str | None = None
     requested_by_user_id: str
     created_at: datetime = Field(default_factory=utcnow, index=True)
     finished_at: datetime | None = None

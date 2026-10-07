@@ -50,6 +50,8 @@ def summary(raw: dict) -> dict:
         "durationS": duration,
         # Odhad velikosti (m4a ~128 kb/s) -- pro limity stahování.
         "sizeBytes": duration * 16_000 if duration else None,
+        "description": (raw.get("description") or "").strip()[:4000] or None,
+        "thumbnail": raw.get("thumbnail"),
         "chapters": [
             {"title": str(c.get("title") or f"Kapitola {i + 1}"), "startMs": int(float(c.get("start_time") or 0) * 1000)}
             for i, c in enumerate(raw.get("chapters") or [])
@@ -62,7 +64,7 @@ async def info(vid: str) -> dict | None:
     from app.redis_bus import get_redis
 
     r = get_redis()
-    key = f"spoken:yt:info:{vid}"
+    key = f"spoken:yt:info:v2:{vid}"
     cached = await r.get(key)
     if cached:
         return json.loads(cached)
@@ -76,6 +78,25 @@ async def info(vid: str) -> dict | None:
         return None
     await r.set(key, json.dumps(data), ex=_INFO_TTL_S)
     return data
+
+
+def fetch_thumbnail(url: str, dest: Path) -> bool:
+    """Náhled videa jako obal knihy -- stáhne server (přes Mullvad), telefon
+    na YouTube nechodí."""
+    import os
+
+    import httpx
+
+    proxy = os.environ.get("YTDLP_PROXY") or None
+    try:
+        with httpx.Client(proxy=proxy, timeout=20, follow_redirects=True) as c:
+            resp = c.get(url)
+        if resp.status_code != 200 or not resp.content:
+            return False
+        dest.write_bytes(resp.content)
+        return True
+    except httpx.HTTPError:
+        return False
 
 
 def download(vid: str, dest: Path, on_progress: Callable[[float], None]) -> Path:

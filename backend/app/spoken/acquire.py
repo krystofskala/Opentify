@@ -152,25 +152,40 @@ async def _youtube_download(book_id: str, vid: str) -> None:
         await asyncio.to_thread(youtube.download, vid, dest, on_progress)
         await _save(book_id, status="importing", progress=1.0)
         count = await asyncio.to_thread(import_book, book_id, dest)
-        meta = await youtube.info(vid)
-        chapters = (meta or {}).get("chapters") or []
-        if chapters:
-            # Kapitoly videa = kapitoly knihy (jeden soubor).
-            def save_chapters() -> None:
-                with Session(engine) as session:
-                    for f in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():
-                        f.chapters = chapters
-                        session.add(f)
-                    session.commit()
-
-            await asyncio.to_thread(save_chapters)
-        logger.info("kniha %s připravená z YouTube (%d soubor, %d kapitol)", book_id, count, len(chapters))
+        meta = await youtube.info(vid) or {}
+        await asyncio.to_thread(youtube_finish, book_id, dest, meta)
+        logger.info("kniha %s připravená z YouTube (%d soubor, %d kapitol)", book_id, count, len(meta.get("chapters") or []))
         await _save(book_id, status="ready", error=None, finished_at=utcnow(), storage_dir=str(dest))
     except Exception as e:  # noqa: BLE001
         logger.warning("youtube kniha %s: %s", book_id, e)
         await _save(book_id, status="failed", error="YouTube: video se nepodařilo stáhnout")
     finally:
         await r.delete(f"spoken:yt:lock:{book_id}")
+
+
+def youtube_finish(book_id: str, dest: Path, meta: dict) -> None:
+    """Po stažení: název souboru = název videa (ne id), kapitoly videa,
+    náhled jako obal (přes server), popis videa, druh podle názvu."""
+    from app.spoken import youtube
+
+    cover = None
+    if meta.get("thumbnail") and youtube.fetch_thumbnail(meta["thumbnail"], dest / "cover.jpg"):
+        cover = f"spoken/books/{book_id}/cover"
+    with Session(engine) as session:
+        book = session.get(SpokenBook, book_id)
+        if book is None:
+            return
+        for f in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():
+            if meta.get("title"):
+                f.title = meta["title"]
+            if meta.get("chapters"):
+                f.chapters = meta["chapters"]
+            session.add(f)
+        book.cover_url = cover or book.cover_url
+        book.description = meta.get("description") or book.description
+        book.kind = guess_kind(meta.get("title") or book.release_title)
+        session.add(book)
+        session.commit()
 
 
 async def _start_youtube(book: SpokenBook) -> None:

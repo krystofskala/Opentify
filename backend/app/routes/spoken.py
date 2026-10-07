@@ -636,7 +636,19 @@ async def book_description(book_id: str, session: Session = Depends(get_session)
     book = session.get(SpokenBook, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="kniha nenalezena")
+    if book.description:  # z vydání (YouTube popis videa)
+        return {"description": book.description}
     return {"description": await describe.describe(book.title, book.author)}
+
+
+@spoken_router.get("/books/{book_id}/cover")
+def book_cover(book_id: str, session: Session = Depends(get_session)):
+    """Obal uložený u knihy (náhled videa z YouTube)."""
+    book = session.get(SpokenBook, book_id)
+    path = Path(book.storage_dir) / "cover.jpg" if book is not None and book.storage_dir else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="obal nenalezen")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
 
 
 @spoken_router.get("/files/{file_id}/stream")

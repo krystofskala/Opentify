@@ -100,7 +100,7 @@ def _ensure_columns() -> None:
         ],
         "playlistitem": [("added_by", "VARCHAR")],
         "playevent": [("rec_batch_id", "VARCHAR"), ("rec_slot", "VARCHAR")],
-        "spokenbook": [("source_files", "JSON"), ("language", "VARCHAR"), ("metadata_source", "VARCHAR"), ("kind", "VARCHAR")],
+        "spokenbook": [("source_files", "JSON"), ("language", "VARCHAR"), ("metadata_source", "VARCHAR"), ("kind", "VARCHAR"), ("description", "VARCHAR")],
         "provisioningjob": [("source_provider", "VARCHAR"), ("audio_format", "VARCHAR"), ("interactive", "BOOLEAN")],
         "playlist": [
             ("description", "VARCHAR"),
