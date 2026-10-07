@@ -32,8 +32,8 @@ final recordingArtworkProvider = FutureProvider.autoDispose.family<String?, Artw
     // byla zavádějící -- u Deezeru je to navíc občas obal JINÉHO alba
     // (živě: Small Talk na iPhonu, "Jeder Rappen zählt" s fotkou kapely).
     try {
-      final release = await repo.getRelease(key.releaseId!);
-      return release.coverImageUrl;
+      // Jen obal (rychlé), ne celý detail alba -- ten čeká na MusicBrainz.
+      return await repo.getReleaseCover(key.releaseId!);
     } catch (e, st) {
       final trace = st.toString().split('\n').take(6).join('\n');
       diagReport('artwork-release', '${key.releaseId}: $e\n$trace');

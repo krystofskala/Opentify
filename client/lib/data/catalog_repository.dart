@@ -1,4 +1,5 @@
 import '../core/api_client.dart';
+import '../core/media_url.dart';
 import '../models/artist_bio_model.dart';
 import '../models/discography_model.dart';
 import '../models/artist_model.dart';
@@ -63,6 +64,14 @@ class CatalogRepository {
   Future<ReleaseModel> getRelease(String releaseId) async {
     final json = await _api.getJson('/catalog/releases/$releaseId');
     return ReleaseModel.fromJson(json);
+  }
+
+  /// Jen obal alba -- bez čekání na MusicBrainz (žánry, obsazení) jako
+  /// u plného `getRelease`.
+  Future<String?> getReleaseCover(String releaseId) async {
+    final json = await _api.getJson('/catalog/releases/$releaseId/cover');
+    final images = resolveMediaUrls((json['images'] as List<dynamic>? ?? const []).cast<String>());
+    return images.isEmpty ? null : images.first;
   }
 
   Future<RecordingModel> getRecording(String recordingId) async {

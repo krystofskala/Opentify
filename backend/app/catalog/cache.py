@@ -165,3 +165,18 @@ async def cached_json_swr(
         _inflight.pop(flight, None)
     future.set_result(value)
     return value
+
+
+async def clear_stale_locks() -> int:
+    """Při startu API: zámky sestavení z procesu, který spadl/restartoval
+    uprostřed práce, by dalšího volajícího drželi až `LOCK_WAIT_SECONDS`
+    (změřeno 60 s na stránce interpreta po restartu). Smaže i zámek běžící
+    ve workeru -- to stojí nanejvýš jedno zdvojené sestavení."""
+    from app.redis_bus import get_redis
+
+    r = get_redis()
+    n = 0
+    async for key in r.scan_iter(match="lock:" + CACHE_PREFIX + "*", count=500):
+        n += await r.delete(key)
+    return n
+

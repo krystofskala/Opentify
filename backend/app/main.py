@@ -204,6 +204,12 @@ async def on_startup() -> None:
     from app.library.entries import seed_admin_library
 
     seed_admin_library()
+    try:
+        from app.catalog.cache import clear_stale_locks
+
+        await clear_stale_locks()
+    except Exception:  # noqa: BLE001 -- bez Redisu se startuje i tak
+        logging.getLogger(__name__).warning("zámky cache se nepodařilo uklidit")
     asyncio.create_task(redis_listener())
     asyncio.create_task(backfill_loop())
     asyncio.create_task(artwork_backfill_loop())

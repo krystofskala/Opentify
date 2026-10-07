@@ -411,6 +411,30 @@ async def get_release(
     return release.model_dump(by_alias=True)
 
 
+@catalog_router.get("/releases/{release_id}/cover")
+async def get_release_cover(release_id: str, _current=Depends(get_current_user)):
+    """Jen obal alba (dlaždice skladeb bez obalu). Plný detail alba navíc
+    čeká na MusicBrainz (žánry, obsazení, 1 dotaz/s pro celý server) --
+    40 dlaždic tak stálo 20-40 s fronty (audit výkonu 7. 10.). Obal se
+    dohledá stejně jako v detailu (`fill_release`)."""
+    from sqlmodel import Session
+
+    from app.catalog.artwork import fill_release
+    from app.db import engine
+    from app.models import Release
+
+    with Session(engine) as session:
+        release = session.get(Release, release_id)
+        if release is None:
+            raise HTTPException(status_code=404, detail="album nenalezen")
+        images = list(release.images or [])
+    if not images and await fill_release(release_id, force=True):
+        with Session(engine) as session:
+            release = session.get(Release, release_id)
+            images = list((release.images if release else None) or [])
+    return {"images": images}
+
+
 @catalog_router.get("/releases/{release_id}/tracks")
 async def get_release_tracks(
     release_id: str,

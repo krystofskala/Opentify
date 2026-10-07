@@ -66,7 +66,9 @@ class MusicBrainzClient:
             except RateLimitBusy as exc:
                 raise MusicBrainzError("MusicBrainz fronta je plná -- zkus to za chvíli znovu") from exc
             try:
-                resp = await self._client.get(path, params={**params, "fmt": "json"})
+                # Sloučené MBID vrací 301 na nové -- dřív `raise_for_status`
+                # a z toho 502 (audit výkonu 7. 10.).
+                resp = await self._client.get(path, params={**params, "fmt": "json"}, follow_redirects=True)
             except httpx.TransportError as exc:
                 last_exc = MusicBrainzError(f"MusicBrainz nedostupný: {exc}")
                 continue
