@@ -238,6 +238,10 @@ class PlayEvent(SQLModel, table=True):
     algorithmic: bool = False
     device_key: str | None = None
     origin: str = "connect"
+    # Skladba z várky doporučení (Pusť teď / nekonečné hraní) -- měření,
+    # jestli doporučování pomáhá (app/rec_log.py).
+    rec_batch_id: str | None = Field(default=None, index=True)
+    rec_slot: str | None = None  # familiar | new
 
 
 class PendingImportPlay(SQLModel, table=True):
@@ -289,6 +293,21 @@ class RecordingDislike(SQLModel, table=True):
     user_id: str = Field(index=True)
     recording_id: str = Field(foreign_key="recording.id", index=True)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class RecBatchItem(SQLModel, table=True):
+    """Co doporučování nabídlo: jedna řádka = skladba ve várce Pusť teď /
+    nekonečného hraní (app/rec_log.py). Přehrání se k ní připojí podle
+    profilu a skladby (PlayEvent.rec_batch_id)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    batch_id: str = Field(index=True)
+    user_id: str = Field(index=True)
+    recording_id: str = Field(index=True)
+    position: int = 0
+    slot: str = "familiar"  # familiar | new
+    mode: str = "fresh"  # fresh (ťuknutí) | endless | mood:<nálada>
+    created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class TrackFeatures(SQLModel, table=True):

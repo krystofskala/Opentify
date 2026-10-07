@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_admin
 from app.catalog.availability import recording_artist_name, resolve_artist_name
 from app.db import engine, get_session
 from app.home.generators import _covers_for
@@ -61,6 +61,14 @@ async def play_now(body: PlayNowIn, current: tuple[str, str] = Depends(get_curre
             if rec is not None
         ]
     return {"tracks": tracks, "reason": chunk["reason"]}
+
+
+@home_router.get("/rec-report")
+def rec_report(days: int = 7, _admin=Depends(require_admin)):
+    """Měření doporučování po profilech (app/rec_log.py) -- jen správce."""
+    from app import rec_log
+
+    return {"days": days, "profiles": rec_log.report(max(1, min(days, 90)))}
 
 
 class FeedbackIn(BaseModel):

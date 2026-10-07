@@ -203,6 +203,13 @@ def _play_event(
                 playlist
                 and playlist.kind in (PlaylistKind.PERSONAL_MIX, PlaylistKind.GENERATED_RECOMMENDATION, PlaylistKind.RADIO)
             ) or source == PLAY_NOW_LABEL  # fronta Pusť teď není playlist (audit 7. 10.)
+            # Skladba z várky Pusť teď / nekonečného hraní (app/rec_log.py) --
+            # i když fronta nese název alba či playlistu, ze kterého se navázalo.
+            from app import rec_log
+
+            offered = rec_log.match(session, user_id, recording_id) if not playlist or algorithmic else None
+            if offered is not None:
+                algorithmic = True
             session.add(
                 PlayEvent(
                     user_id=user_id,
@@ -216,6 +223,8 @@ def _play_event(
                     playlist_id=playlist.id if playlist else None,
                     algorithmic=algorithmic,
                     device_key=device_key,
+                    rec_batch_id=offered.batch_id if offered is not None else None,
+                    rec_slot=offered.slot if offered is not None else None,
                 )
             )
             session.commit()

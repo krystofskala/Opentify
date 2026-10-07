@@ -536,6 +536,7 @@ async def next_chunk(
             titles.add(key)
             kept.append(rid)
         new = kept[:want_new]
+    new_ids = set(new)
     # Nové proložit mezi známé (ne všechny na konec).
     out: list[str] = []
     step = max(1, len(familiar) // max(1, len(new))) if new else len(familiar) or 1
@@ -562,6 +563,13 @@ async def next_chunk(
         _prefetching.add(task)
         task.add_done_callback(_prefetching.discard)
     _remember_batch(user_id, out)
+    try:
+        from app import rec_log
+
+        mode = f"mood:{mood}" if mood else ("endless" if seeds else "fresh")
+        await asyncio.to_thread(rec_log.log_batch, user_id, out, new_ids, mode)
+    except Exception:  # noqa: BLE001 -- měření nesmí shodit várku
+        pass
     return {"recordingIds": out, "reason": reason}
 
 

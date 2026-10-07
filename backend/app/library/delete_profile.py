@@ -20,6 +20,7 @@ from app.models import (
     ArtistDislike,
     ArtistFeedback,
     DownloadRequest,
+    RecBatchItem,
     PendingImportPlay,
     PodcastListenHistory,
     PodcastProgress,
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 _PER_USER = [Listen, PlayEvent, SkipStreak, RecordingDislike, HeardFully, AuthToken, InviteCode, PairCode,
              LibraryEntry, PlaylistMember, PinnedPlaylist, ArtistDislike, FavoriteArtist, CollectionProgress,
              ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay, SpokenProgress, PodcastSubscription, PodcastProgress, PodcastListenHistory,
-             DownloadRequest]
+             DownloadRequest, RecBatchItem]
 
 
 def delete_profile(user_id: str) -> dict[str, int]:

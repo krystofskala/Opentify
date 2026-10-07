@@ -32,6 +32,7 @@ PUBLIC = {
 
 # Jen admin: správa profilů a zařízení, údržba knihovny a stahování.
 ADMIN = {
+    ("GET", "/api/v1/home/rec-report"),
     ("GET", "/api/v1/auth/users"),
     ("POST", "/api/v1/auth/users"),
     ("PATCH", "/api/v1/auth/users/{user_id}"),
