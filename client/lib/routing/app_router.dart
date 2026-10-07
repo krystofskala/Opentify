@@ -213,6 +213,13 @@ List<RouteBase> _detailRoutes() => [
         ),
       ),
       GoRoute(
+        path: 'spoken/series',
+        builder: (context, state) => SpokenSeriesScreen(
+          title: state.uri.queryParameters['title'] ?? '',
+          author: state.uri.queryParameters['author'] ?? '',
+        ),
+      ),
+      GoRoute(
         path: 'spoken/person',
         builder: (context, state) => SpokenPersonScreen(
           name: state.uri.queryParameters['name'] ?? '',

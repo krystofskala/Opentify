@@ -1196,13 +1196,20 @@ class SpokenBookScreen extends ConsumerWidget {
               // Všechna vydání téhle knihy (jiní interpreti, nezkrácené…).
               if (book.author != null) ...[
                 const SizedBox(height: AppSpacing.xs),
-                Center(
-                  child: GlassButton(
-                    label: 'Všechna vydání',
-                    icon: Symbols.library_books_rounded,
-                    compact: true,
-                    onPressed: () => context.push(spokenWorkPath(book.title, book.author!)),
-                  ),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    GlassButton(
+                      label: 'Všechna vydání',
+                      icon: Symbols.library_books_rounded,
+                      compact: true,
+                      onPressed: () => context.push(spokenWorkPath(book.title, book.author!)),
+                    ),
+                    // Řada a pořadí čtení (Wikidata) -- jen když se najde.
+                    _SeriesButton(title: book.title, author: book.author!),
+                  ],
                 ),
               ],
               if (book.status == 'failed') ...[
@@ -1313,6 +1320,11 @@ class SpokenWorkScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+                if (w.author != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+                    child: Align(alignment: Alignment.centerLeft, child: _SeriesButton(title: w.title, author: w.author!)),
+                  ),
                 if (w.summary != null) HeroTeaser(text: w.summary!),
                 if (recommended != null) ...[
                   const SectionHeader('Doporučené vydání'),
@@ -1543,6 +1555,148 @@ class SpokenPersonScreen extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "Díl 3 · Sága o zaklínači" -- otevře řadu s pořadím čtení. Bez řady nic.
+class _SeriesButton extends ConsumerWidget {
+  const _SeriesButton({required this.title, required this.author});
+  final String title;
+  final String author;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(spokenSeriesProvider((title: title, author: author))).valueOrNull;
+    if (s == null || s.name.isEmpty) return const SizedBox.shrink();
+    final part = spokenSeriesPartOf(s, title);
+    return GlassButton(
+      label: part?.number != null ? 'Díl ${_partNumber(part!.number!)} · ${s.name}' : s.name,
+      icon: Symbols.format_list_numbered_rounded,
+      compact: true,
+      onPressed: () => context.push(spokenSeriesPath(title, author)),
+    );
+  }
+}
+
+String _partNumber(num n) => n == n.roundToDouble() ? '${n.toInt()}' : '$n'.replaceAll('.', ',');
+
+/// Řada a pořadí čtení: díly v pořadí (u každého, co je na serveru a jak
+/// daleko jsi), díla mimo pořadí a celá řada ke stažení (komplety).
+class SpokenSeriesScreen extends ConsumerWidget {
+  const SpokenSeriesScreen({super.key, required this.title, required this.author});
+  final String title;
+  final String author;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final who = (title: title, author: author);
+    final async = ref.watch(spokenSeriesProvider(who));
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return Scaffold(
+      appBar: const SectionAppBar(''),
+      body: async.when(
+        skipLoadingOnReload: true,
+        loading: () => const LoadingState(),
+        error: (e, _) => ErrorState(
+          message: 'Řadu se nepodařilo načíst.',
+          error: e,
+          onRetry: () => ref.invalidate(spokenSeriesProvider(who)),
+        ),
+        data: (s) {
+          if (s == null) {
+            return const EmptyState(icon: Symbols.format_list_numbered_rounded, message: 'Řada knihy se nenašla.');
+          }
+          final current = spokenSeriesPartOf(s, title);
+          final done = s.parts.where((p) => p.state == 'finished').length;
+          final collections = s.name.isEmpty
+              ? null
+              : ref.watch(spokenSeriesCollectionsProvider((name: s.name, author: s.author))).valueOrNull;
+          return ListView(
+            padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.xs),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(s.name.isEmpty ? title : s.name, style: theme.textTheme.headlineMedium),
+                    _PersonLink(name: s.author, style: muted),
+                    Text(
+                      [
+                        czCount(s.parts.length, 'díl', 'díly', 'dílů'),
+                        if (done > 0) 'dočteno $done',
+                        'pořadí podle vydání',
+                      ].join(' · '),
+                      style: muted,
+                    ),
+                  ],
+                ),
+              ),
+              const SectionHeader('Pořadí čtení'),
+              for (final p in s.parts) _SeriesPartTile(part: p, author: s.author, current: identical(p, current)),
+              if (s.loose.isNotEmpty) ...[
+                const SectionHeader('Mimo pořadí'),
+                for (final p in s.loose) _SeriesPartTile(part: p, author: s.author),
+              ],
+              if (collections != null && collections.isNotEmpty) ...[
+                const SectionHeader('Celá řada ke stažení'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: Column(children: [for (final r in collections) _ReleaseTile(release: r)]),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SeriesPartTile extends StatelessWidget {
+  const _SeriesPartTile({required this.part, required this.author, this.current = false});
+  final SpokenSeriesPart part;
+  final String author;
+  final bool current;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final state = switch (part.state) {
+      'finished' => 'dočteno',
+      'listening' => 'rozposloucháno',
+      'ready' => 'na serveru',
+      'downloading' => 'stahuje se',
+      _ => null,
+    };
+    return ListTile(
+      selected: current,
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: theme.colorScheme.surfaceContainerHighest,
+        child: part.number != null
+            ? Text(_partNumber(part.number!), style: theme.textTheme.labelLarge)
+            : Icon(Symbols.more_horiz_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
+      ),
+      title: Text(part.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [if (part.year != null) '${part.year}', state ?? 'najít vydání'].join(' · '),
+        style: muted,
+      ),
+      trailing: Icon(
+        switch (part.state) {
+          'finished' => Symbols.check_circle_rounded,
+          'listening' || 'ready' => Symbols.play_circle_rounded,
+          'downloading' => Symbols.downloading_rounded,
+          _ => Symbols.chevron_right_rounded,
+        },
+        color: part.state == null ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.primary,
+      ),
+      // Na serveru -> kniha; jinak stránka knihy se všemi vydáními ke stažení.
+      onTap: () => context.push(part.bookId != null ? '/spoken/book/${part.bookId}' : spokenWorkPath(part.title, author)),
     );
   }
 }

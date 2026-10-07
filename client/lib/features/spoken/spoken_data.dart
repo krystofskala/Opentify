@@ -412,6 +412,63 @@ final spokenWorkProvider =
 });
 
 /// Cesta na stránku knihy.
+/// Díl řady: číslo (u prequelu i 0.5), rok a co z něj je na serveru
+/// (`state`: ready | listening | finished | downloading | null = není).
+typedef SpokenSeriesPart = ({String title, num? number, int? year, String? bookId, String? state});
+
+/// Řada knihy z Wikidat a pořadí čtení (`loose` = díla řady bez čísla).
+typedef SpokenSeries = ({String name, String author, List<SpokenSeriesPart> parts, List<SpokenSeriesPart> loose});
+
+List<SpokenSeriesPart> _seriesParts(Object? list) => [
+      for (final p in (list as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        (
+          title: p['title'] as String? ?? '',
+          number: p['number'] as num?,
+          year: (p['year'] as num?)?.toInt(),
+          bookId: p['bookId'] as String?,
+          state: p['state'] as String?,
+        ),
+    ];
+
+/// Řada knihy (název + autor). Nenalezeno / Wikidata nedostupná = null.
+final spokenSeriesProvider =
+    FutureProvider.autoDispose.family<SpokenSeries?, ({String title, String author})>((ref, who) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/series', query: {'title': who.title, 'author': who.author});
+  final s = json['series'] as Map<String, dynamic>?;
+  if (s == null) return null;
+  return (
+    name: s['name'] as String? ?? '',
+    author: s['author'] as String? ?? who.author,
+    parts: _seriesParts(s['parts']),
+    loose: _seriesParts(s['loose']),
+  );
+});
+
+/// Celá řada ke stažení: komplety / sbírky ze SkTorrentu.
+final spokenSeriesCollectionsProvider =
+    FutureProvider.autoDispose.family<List<SpokenRelease>, ({String name, String author})>((ref, who) async {
+  final json =
+      await ref.watch(apiClientProvider).getJson('/spoken/series/collections', query: {'name': who.name, 'author': who.author});
+  return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
+});
+
+/// Stejné porovnání názvů jako server: bez diakritiky a interpunkce.
+String spokenFoldTitle(String text) => spokenPersonRef(text).substring('author:'.length);
+
+/// Díl řady, kterým je kniha ("Zaklínač I - Poslední přání" = Poslední přání).
+SpokenSeriesPart? spokenSeriesPartOf(SpokenSeries s, String bookTitle) {
+  final b = spokenFoldTitle(bookTitle);
+  for (final p in s.parts) {
+    final t = spokenFoldTitle(p.title);
+    if (t.isEmpty) continue;
+    if (b == t || (t.length >= 8 && ' $b '.contains(' $t '))) return p;
+  }
+  return null;
+}
+
+String spokenSeriesPath(String title, String author) =>
+    Uri(path: '/spoken/series', queryParameters: {'title': title, 'author': author}).toString();
+
 String spokenWorkPath(String title, String author) =>
     Uri(path: '/spoken/work', queryParameters: {'title': title, 'author': author}).toString();
 

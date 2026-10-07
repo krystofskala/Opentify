@@ -84,7 +84,7 @@ def split_title(title: str) -> dict:
 
 def _names(line: str, limit: int = 3) -> str | None:
     """"Andrea Elsnerová a Kamil Halbich" / "A, B, C a další" -> "A, B"."""
-    line = re.sub(r"\s+a\s+(?:další|jiní).*$", "", line.strip(" .")).strip()
+    line = re.sub(r"\s+a\s+(?:další|jiní)\b.*$", "", line.strip(" .")).strip()
     names = [n.strip(" .") for n in re.split(r",\s*|\s+a\s+", line) if n.strip(" .")]
     names = [n for n in names if 1 < len(n.split()) <= 4 and n[:1].isupper()]
     return ", ".join(names[:limit]) or None

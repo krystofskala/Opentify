@@ -40,6 +40,14 @@ async def _wd(params: dict[str, Any]) -> dict[str, Any]:
             await asyncio.sleep(wait)
         try:
             resp = await _http.get(WIKIDATA, params={**params, "format": "json"})
+            if resp.status_code == 429:
+                # Jednou znovu po pauze, kterou si Wikidata řeknou (nejvýš 10 s).
+                try:
+                    pause = min(float(resp.headers.get("retry-after") or 5), 10.0)
+                except ValueError:
+                    pause = 5.0
+                await asyncio.sleep(pause)
+                resp = await _http.get(WIKIDATA, params={**params, "format": "json"})
         finally:
             _last = time.monotonic()
     resp.raise_for_status()  # 429 -> chyba, výsledek se neuloží

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -477,6 +478,64 @@ def _names(field: str | None) -> list[str]:
             last, _, first = n.partition(",")
             out.append(_fold(f"{first} {last}"))
     return out
+
+
+@spoken_router.get("/series")
+async def series(title: str, author: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Řada knihy a pořadí čtení (Wikidata, 30 dní v mezipaměti) a u každého
+    dílu, co je na serveru a jak daleko jsi. Nic nenalezeno / Wikidata
+    nedostupná = `{"series": null}` (appka řadu prostě neukáže)."""
+    from app.spoken import series as series_mod
+
+    title, author = title.strip(), author.strip()
+    if len(title) < 2 or len(author) < 2:
+        return {"series": None}
+    try:
+        found = await series_mod.lookup(title, author)
+    except Exception as e:  # noqa: BLE001 -- 429 / výpadek Wikidat: bez řady, nic se neuloží
+        import logging
+
+        logging.getLogger(__name__).info("řada %r / %r: %s", title, author, e)
+        return {"series": None}
+    if found is None:
+        return {"series": None}
+    return {"series": await asyncio.to_thread(series_mod.with_library, found, current[0])}
+
+
+@spoken_router.get("/series/collections")
+async def series_collections(name: str, author: str, session: Session = Depends(get_session)):
+    """Celá řada ke stažení: komplety / sbírky ze SkTorrentu ("Zaklínač
+    komplet", "Harry Potter 1-7"). Výběr knih z nich je stejný jako u každé
+    sbírky (obsah vydání)."""
+    from app.spoken.catalog import fold, parse_release
+    from app.spoken.series import _surname
+
+    name, author = name.strip(), author.strip()
+    if len(name) < 2:
+        return {"releases": []}
+    try:
+        releases = await sktorrent.search(f"{name} {_surname(author)}".strip())
+    except Exception:  # noqa: BLE001
+        return {"releases": []}
+    want = fold(name)
+    # Komplet: "komplet / sbírka / trilogie", rozsah dílů ("1-7", "I.-VIII.") nebo přes 2 GB.
+    span = re.compile(r"\b(?:\d{1,2}|[ivx]{1,4})\s*\.?\s*[-–]\s*(?:\d{1,2}|[ivx]{1,4})\b", re.I)
+    picked = [
+        r for r in releases
+        if want in fold(r.title)
+        and (parse_release(r.title)["collection"] or span.search(r.title) or (r.size_bytes or 0) > 2 * 1024**3)
+    ]
+    known = {
+        b.source_ref: b
+        for b in session.exec(select(SpokenBook).where(SpokenBook.source_ref.in_([r.infohash for r in picked]))).all()  # type: ignore[attr-defined]
+    }
+    out = []
+    for r in picked:
+        item = r.to_json()
+        if book := known.get(r.infohash):
+            item["bookId"], item["status"] = book.id, book.status
+        out.append(item)
+    return {"releases": out}
 
 
 @spoken_router.get("/work")

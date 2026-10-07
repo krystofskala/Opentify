@@ -240,6 +240,50 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('Řada: pořadí čtení, stav dílů a celá řada ke stažení', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1800 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(const SpokenSeriesScreen(title: 'Krev elfů', author: 'Andrzej Sapkowski'), [
+      spokenSeriesProvider.overrideWith((ref, who) async => (
+            name: 'Sága o zaklínači',
+            author: 'Andrzej Sapkowski',
+            parts: <SpokenSeriesPart>[
+              (title: 'Poslední přání', number: 1, year: 1993, bookId: 'b1', state: 'finished'),
+              (title: 'Meč osudu', number: 2, year: 1992, bookId: 'b2', state: 'listening'),
+              (title: 'Krev elfů', number: 3, year: 1994, bookId: null, state: null),
+            ],
+            loose: <SpokenSeriesPart>[(title: 'Rozcestí krkavců', number: null, year: 2024, bookId: null, state: null)],
+          )),
+      spokenSeriesCollectionsProvider.overrideWith((ref, who) async => [
+            const SpokenRelease(infohash: 'h', title: 'Sapkowski - Zaklínač komplet I-VIII', seeders: 12),
+          ]),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Sága o zaklínači'), findsOneWidget);
+    expect(find.text('3 díly · dočteno 1 · pořadí podle vydání'), findsOneWidget);
+    expect(find.text('1993 · dočteno'), findsOneWidget);
+    expect(find.text('1994 · najít vydání'), findsOneWidget);
+    expect(find.text('Mimo pořadí'), findsOneWidget);
+    expect(find.text('Celá řada ke stažení'), findsOneWidget);
+    expect(find.text('Stáhnout'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  test('díl řady podle názvu knihy', () {
+    const s = (
+      name: 'Sága o zaklínači',
+      author: 'A',
+      parts: <SpokenSeriesPart>[(title: 'Poslední přání', number: 1, year: null, bookId: null, state: null)],
+      loose: <SpokenSeriesPart>[],
+    );
+    expect(spokenSeriesPartOf(s, 'Zaklínač I - Poslední přání')?.number, 1);
+    expect(spokenSeriesPartOf(s, 'Krev elfů'), isNull);
+  });
+
   collectionSheetTests();
 }
 
