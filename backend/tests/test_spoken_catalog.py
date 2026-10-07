@@ -85,3 +85,9 @@ def test_series_only_from_main_title():
     from app.spoken.catalog import _series
 
     assert _series(rec("Old Shatterhand : Na motivy románu K. Maye napsali D. 1, Smrt", "Karl May")) is None
+
+
+def test_title_section_only_for_numbered_series_part():
+    guide = rec("Potterovský průvodce : malá příručka k sérii Harry Potter od J. K. Rowling. Harry Potter",
+                "J. K. Rowling, 1965-", section="Harry Potter /")
+    assert match_record(parse_release("J.K. Rowling - Harry Potter (AudioBook)(2008)(EN)"), [guide]) is None

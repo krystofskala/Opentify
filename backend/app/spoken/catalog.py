@@ -179,6 +179,11 @@ def _title_variants(record: dict[str, Any]) -> set[str]:
             out.add(fold(m.group(2)))
             out.add(fold(f"{m.group(1)} {m.group(2)}"))
     section = record.get("titleSection")
+    # Část názvu jen u očíslovaného dílu řady ("Zaklínač. I., Poslední
+    # přání"). Jinak to bývá cokoli -- "Potterovský průvodce … . Harry
+    # Potter" má část "Harry Potter" (měření 7. 10.: falešná shoda).
+    if section and not _SERIES_PREFIX.match(re.split(r"\s+:\s+|\s+/\s*", record.get("title") or "")[0]):
+        section = None
     if section:
         section = re.sub(r"^\s*(?:[IVXLC]+|\d+)\s*\.?,?\s*", "", section).strip(" /")
         if section:
