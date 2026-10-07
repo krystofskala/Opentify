@@ -30,7 +30,7 @@ import '../../widgets/collection_actions.dart';
 import '../browse/tag_screen.dart' show tagRoute;
 import '../games/games_screen.dart' show WorkCover;
 
-const _searchSourceLabel = 'Výsledky hledání';
+const _searchSourceLabel = 'Hledání';
 
 enum SearchFilter { all, tracks, artists, albums }
 

@@ -266,8 +266,13 @@ def books(session: Session = Depends(get_session), current: tuple[str, str] = De
     playable: dict[str, int] = {}
     for book_id in session.exec(select(SpokenFile.book_id)).all():
         playable[book_id] = playable.get(book_id, 0) + 1
+    admin = download_limits.is_admin(current[0])
     out = []
     for b in rows:
+        # Nepovedené stažení vidí jen ten, kdo o knihu žádal (a správce) --
+        # ostatním by v „Stahuje se“ strašila cizí chyba (UX audit 7. 10.).
+        if b.status == "failed" and not admin and b.requested_by_user_id != current[0]:
+            continue
         item = book_out(b)
         p = progress.get(b.id)
         item["progress"] = _progress_out(p) if p else None
@@ -365,9 +370,9 @@ def save_progress(
     return {"ok": True}
 
 
-def _failed_book(session: Session, book_id: str) -> SpokenBook:
+def _failed_book(session: Session, book_id: str, user_id: str) -> SpokenBook:
     book = session.get(SpokenBook, book_id)
-    if book is None:
+    if book is None or (book.requested_by_user_id != user_id and not download_limits.is_admin(user_id)):
         raise HTTPException(status_code=404, detail="kniha neexistuje")
     if book.status != "failed":
         raise HTTPException(status_code=409, detail="jde jen u knihy, jejíž stažení selhalo")
@@ -382,7 +387,7 @@ def retry(
     _local_only: None = Depends(deny_public),
 ):
     """Nepovedené stažení znovu (stejné vydání, stejný výběr souborů)."""
-    book = _failed_book(session, book_id)
+    book = _failed_book(session, book_id, current[0])
     book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()
     session.add(book)
     session.commit()
@@ -394,7 +399,7 @@ def retry(
 def remove_failed(book_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
     """Odebrat knihu, jejíž stažení selhalo (hotové knihy se nemažou --
     jsou sdílené jako hudba)."""
-    book = _failed_book(session, book_id)
+    book = _failed_book(session, book_id, current[0])
     for row in session.exec(select(SpokenProgress).where(SpokenProgress.book_id == book_id)).all():
         session.delete(row)
     for row in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():

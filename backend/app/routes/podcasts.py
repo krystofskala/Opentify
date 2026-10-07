@@ -6,6 +6,7 @@ nepřipojuje a nic se dopředu nestahuje."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import httpx
@@ -20,6 +21,8 @@ from app.db import get_session
 from app.models import PodcastEpisode, PodcastNameMatch, PodcastProgress, PodcastShow, PodcastSubscription
 from app.podcasts import feeds, history, service
 from app.utils import utcnow
+
+log = logging.getLogger("uvicorn.error.podcasts")
 
 podcasts_router = APIRouter(prefix="/podcasts", tags=["podcasts"])
 
@@ -309,7 +312,9 @@ async def stream_episode(episode_id: str, request: Request, session: Session = D
     # YouTube: stejná proxy jako yt-dlp (adresa audia platí jen pro tu IP).
     client = httpx.AsyncClient(
         proxy=feeds.youtube_proxy() if video else feeds.proxy(),
-        timeout=httpx.Timeout(30.0, read=90.0),
+        # Spojení krátce: když proxy (VPN) zrovna obnovuje tunel, ať appka
+        # chybu ukáže hned a ne po 2 minutách (UX audit 7. 10.).
+        timeout=httpx.Timeout(30.0, connect=10.0, read=90.0),
         headers={"User-Agent": "Mozilla/5.0" if video else "Opentify-Podcasts/1.0"},
     )
     # Vydavatelé vedou přes řetěz přesměrování (měření poslechů) -- ~3 s.
@@ -327,8 +332,9 @@ async def stream_episode(episode_id: str, request: Request, session: Session = D
             await resp.aclose()
             url = await feeds.youtube_audio_url(video) if video else ep.audio_url
             resp = await feeds.safe_get(client, url, headers=headers, stream=True)
-    except (feeds.UnsafeUrl, httpx.HTTPError, RuntimeError, asyncio.TimeoutError):
+    except (feeds.UnsafeUrl, httpx.HTTPError, RuntimeError, asyncio.TimeoutError) as e:
         await client.aclose()
+        log.warning("epizoda %s: %s %s", episode_id, type(e).__name__, e)
         raise HTTPException(status_code=502, detail="epizodu se nepodařilo načíst od vydavatele")
     _final_urls[episode_id] = (str(resp.url), time.monotonic() + (_YT_URL_TTL if video else _FINAL_URL_TTL))
     if len(_final_urls) > 500:
@@ -337,6 +343,7 @@ async def stream_episode(episode_id: str, request: Request, session: Session = D
     if resp.status_code not in (200, 206) or not (
         ctype.startswith("audio/") or ctype in ("application/octet-stream", "video/mp4", "binary/octet-stream")
     ):
+        log.warning("epizoda %s: HTTP %s, %s z %s", episode_id, resp.status_code, ctype, resp.url.host)
         await resp.aclose()
         await client.aclose()
         raise HTTPException(status_code=502, detail="vydavatel nevrátil zvuk")

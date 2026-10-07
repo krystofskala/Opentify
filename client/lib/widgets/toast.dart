@@ -6,6 +6,16 @@ import 'package:flutter/material.dart';
 const toastDuration = Duration(milliseconds: 2500);
 const toastWithActionDuration = Duration(seconds: 5);
 
+/// Delší text potřebuje víc času na přečtení (UX audit 7. 10.: dlouhé
+/// hlášky zmizely dřív, než se daly dočíst) -- ~15 znaků za sekundu, max 7 s.
+Duration toastDurationFor(String text, {bool hasAction = false}) {
+  final base = hasAction ? toastWithActionDuration : toastDuration;
+  final reading = Duration(milliseconds: 1000 + text.length * 65);
+  final d = reading > base ? reading : base;
+  const max = Duration(seconds: 7);
+  return d > max ? max : d;
+}
+
 void showToast(
   ScaffoldMessengerState? messenger,
   String text, {
@@ -19,7 +29,7 @@ void showToast(
       content: Text(text),
       action: action,
       persist: false,
-      duration: duration ?? (action != null ? toastWithActionDuration : toastDuration),
+      duration: duration ?? toastDurationFor(text, hasAction: action != null),
     ));
 }
 

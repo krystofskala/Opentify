@@ -309,7 +309,8 @@ def _card(session: Session, playlist: Playlist) -> PlaylistCardOut:
         accent_color=_accent_for(playlist.source),
         art_style=_art_style(playlist.source),
         id=playlist.id,
-        title=playlist.title,
+        # Oblíbené mají v DB anglický název z importu ("Liked Songs").
+        title="Oblíbené skladby" if playlist.source == "liked-songs" else playlist.title,
         description=playlist.description,
         kind=playlist.kind.value if hasattr(playlist.kind, "value") else str(playlist.kind),
         source=playlist.source,

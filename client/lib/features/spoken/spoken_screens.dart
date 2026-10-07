@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../../core/cz_plural.dart';
 import '../../core/api_client.dart' show ApiException;
 import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/app_mode.dart';
@@ -196,7 +197,7 @@ class SpokenHomeScreen extends ConsumerWidget {
                   ]),
                 ],
                 if (shelf.isNotEmpty) ...[
-                  const SectionHeader('Tvoje knihy'),
+                  const SectionHeader('V knihovně'),
                   _Rail(children: [
                     for (final b in shelf)
                       MediaCard(
@@ -536,8 +537,8 @@ class _ReleaseTile extends ConsumerWidget {
       subtitle: Text(
         [
           formatSize(r.sizeBytes),
-          if (r.files != null) '${r.files} souborů',
-          r.seeders > 0 ? '${r.seeders} zdrojů' : 'teď nikdo nesdílí',
+          if (r.files != null) czCount(r.files!, 'soubor', 'soubory', 'souborů'),
+          r.seeders > 0 ? czCount(r.seeders, 'zdroj', 'zdroje', 'zdrojů') : 'teď nikdo nesdílí',
         ].where((s) => s.isNotEmpty).join(' · '),
         style: muted,
       ),
@@ -692,7 +693,7 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
                 Text(_single ? 'Obsah' : 'Co stáhnout?', style: theme.textTheme.titleMedium),
                 Text(
                   _single
-                      ? '${widget.release.title} · ${widget.groups.first.files.length} souborů · '
+                      ? '${widget.release.title} · ${czCount(widget.groups.first.files.length, 'soubor', 'soubory', 'souborů')} · '
                           '${formatSize(widget.groups.first.size)}'
                       : '${widget.release.title} je sbírka. Vyber knihy, nebo jen některé části.',
                   style: muted,

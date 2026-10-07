@@ -1197,6 +1197,29 @@ class _LogoutButton extends ConsumerWidget {
           icon: Symbols.logout_rounded,
           compact: true,
           onPressed: () async {
+            // Omylem klepnuté odhlášení = znovu jméno a heslo (UX audit 7. 10.).
+            final sure = await showDialog<bool>(
+              context: context,
+              builder: (dialog) => AlertDialog(
+                title: const Text('Odhlásit se?'),
+                content: const Text('Na tomhle zařízení se pak znovu přihlásíš jménem a heslem.'),
+                actions: [
+                  GlassButton(
+                    label: 'Zrušit',
+                    style: GlassButtonStyle.plain,
+                    compact: true,
+                    onPressed: () => Navigator.of(dialog).pop(false),
+                  ),
+                  GlassButton(
+                    label: 'Odhlásit',
+                    destructive: true,
+                    compact: true,
+                    onPressed: () => Navigator.of(dialog).pop(true),
+                  ),
+                ],
+              ),
+            );
+            if (sure != true) return;
             try {
               await ref.read(apiClientProvider).postJson('/auth/logout');
             } catch (_) {}

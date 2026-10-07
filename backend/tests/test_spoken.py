@@ -295,3 +295,20 @@ def test_failed_book_can_be_retried_or_removed_ready_cannot(eng):
             routes.remove_failed("ok", session=s, current=("me", "d"))
         with pytest.raises(HTTPException):
             routes.retry("ok", session=s, current=("me", "d"))
+
+
+def test_failed_book_is_only_for_requester(eng, monkeypatch):
+    monkeypatch.setattr(routes.download_limits, "is_admin", lambda uid: uid == "admin")
+    with Session(eng) as s:
+        s.add(SpokenBook(id="bad", source_ref=HASH_A, release_title="x", title="x", status="failed", error="e", requested_by_user_id="me"))
+        s.add(SpokenBook(id="ok", source_ref=HASH_B, release_title="y", title="y", status="ready", requested_by_user_id="me"))
+        s.commit()
+        ids = lambda uid: {b["id"] for b in routes.books(session=s, current=(uid, "d"))["books"]}
+        assert ids("me") == {"bad", "ok"}
+        assert ids("admin") == {"bad", "ok"}
+        assert ids("friend") == {"ok"}  # hotové knihy jsou sdílené, cizí chyba ne
+        with pytest.raises(HTTPException):
+            routes.remove_failed("bad", session=s, current=("friend", "d"))
+        with pytest.raises(HTTPException):
+            routes.retry("bad", session=s, current=("friend", "d"))
+        assert routes.retry("bad", session=s, current=("admin", "d"))["status"] == "pending"
