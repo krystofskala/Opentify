@@ -6,7 +6,9 @@ import 'package:opentify_client/features/spoken/spoken_data.dart';
 import 'package:opentify_client/features/spoken/spoken_screens.dart';
 import 'package:opentify_client/theme/app_theme.dart';
 
-SpokenBook _book(String id, String status, {Map<String, dynamic>? progress, double dl = 0}) => SpokenBook.fromJson({
+SpokenBook _book(String id, String status, {Map<String, dynamic>? progress, double dl = 0, bool mine = true}) =>
+    SpokenBook.fromJson({
+      'mine': mine,
       'id': id,
       'title': 'Saturnin – velmi dlouhý název knihy, který se nevejde na jeden řádek',
       'author': 'Zdeněk Jirotka',
@@ -28,7 +30,7 @@ Widget _app(Widget child, List<Override> overrides) => ProviderScope(
 
 void main() {
   testWidgets('Domů mluveného slova: pokračovat, nové díly, polička, stahuje se', (tester) async {
-    tester.view.physicalSize = const Size(390 * 3, 1800 * 3);
+    tester.view.physicalSize = const Size(390 * 3, 2400 * 3);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(_app(const SpokenHomeScreen(), [
@@ -37,15 +39,31 @@ void main() {
             _book('b', 'downloading', dl: 0.4),
             _book('c', 'pending'),
             _book('d', 'ready'),
+            _book('o', 'ready', mine: false),
           ]),
+      spokenHomeLayoutProvider.overrideWith((ref) async => null),
       spokenRecommendationsProvider.overrideWith((ref) async => (
-            podcasts: [(show: const PodcastSearchResult(title: 'Buchty', feedUrl: 'https://x/rss'), reason: 'Poslouchal jsi na Spotify')],
-            books: [(release: const SpokenRelease(infohash: 'b', title: 'Sága o impériu', seeders: 80), reason: 'Populární teď')],
+            podcasts: [
+              (
+                show: const PodcastSearchResult(title: 'Buchty', feedUrl: 'https://x/rss'),
+                reason: 'Poslouchal jsi na Spotify'
+              )
+            ],
+            books: [
+              (
+                release: const SpokenRelease(infohash: 'b', title: 'Sága o impériu', seeders: 80),
+                reason: 'Populární teď'
+              )
+            ],
           )),
-      myPodcastsProvider.overrideWith((ref) async => [PodcastShowItem.fromJson({'id': 's1', 'title': 'Vinohradská 12', 'subscribed': true})]),
+      myPodcastsProvider.overrideWith((ref) async => [
+            PodcastShowItem.fromJson({'id': 's1', 'title': 'Vinohradská 12', 'subscribed': true})
+          ]),
       podcastHomeProvider.overrideWith((ref) async => (
             inProgress: <PodcastEpisodeItem>[],
-            latest: [PodcastEpisodeItem.fromJson({'id': 'e1', 'title': 'Díl', 'showTitle': 'V12', 'durationMs': 60000})],
+            latest: [
+              PodcastEpisodeItem.fromJson({'id': 'e1', 'title': 'Díl', 'showTitle': 'V12', 'durationMs': 60000})
+            ],
           )),
     ]));
     await tester.pump();
@@ -55,10 +73,37 @@ void main() {
     expect(find.text('Doporučené knihy'), findsOneWidget);
     expect(find.text('Doporučené podcasty'), findsOneWidget);
     expect(find.text('Nové díly'), findsOneWidget);
-    expect(find.text('V knihovně'), findsOneWidget);
+    expect(find.text('Tvoje knihy'), findsOneWidget);
+    expect(find.text('Knihy ostatních'), findsOneWidget);
     expect(find.text('Stahuje se'), findsOneWidget);
     expect(find.text('Stahuje se · 40 %'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('Domů mluveného slova: pořadí a skryté sekce podle profilu', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1800 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(const SpokenHomeScreen(), [
+      spokenBooksProvider.overrideWith((ref) async => [_book('d', 'ready'), _book('o', 'ready', mine: false)]),
+      spokenRecommendationsProvider.overrideWith((ref) async => (
+            podcasts: <({PodcastSearchResult show, String reason})>[],
+            books: <({SpokenRelease release, String reason})>[]
+          )),
+      myPodcastsProvider.overrideWith((ref) async => <PodcastShowItem>[]),
+      podcastHomeProvider
+          .overrideWith((ref) async => (inProgress: <PodcastEpisodeItem>[], latest: <PodcastEpisodeItem>[])),
+      spokenHomeLayoutProvider.overrideWith((ref) async => [
+            (id: 'others_books', visible: true),
+            (id: 'my_books', visible: false),
+          ]),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Knihy ostatních'), findsOneWidget);
+    expect(find.text('Tvoje knihy'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
   });
@@ -110,7 +155,11 @@ void collectionSheetTests() {
     addTearDown(tester.view.reset);
     const mb = 1024 * 1024;
     final groups = <ReleaseGroup>[
-      (folder: 'kniha 1.poslední přání', size: 700 * mb, files: [(index: 0, name: '01.mp3', size: 350 * mb), (index: 1, name: '02.mp3', size: 350 * mb)]),
+      (
+        folder: 'kniha 1.poslední přání',
+        size: 700 * mb,
+        files: [(index: 0, name: '01.mp3', size: 350 * mb), (index: 1, name: '02.mp3', size: 350 * mb)]
+      ),
       (folder: 'kniha 2.meč osudu', size: 800 * mb, files: [(index: 2, name: '01.mp3', size: 800 * mb)]),
     ];
     await tester.pumpWidget(_app(
