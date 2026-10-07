@@ -637,7 +637,9 @@ class _QuickPicks extends ConsumerWidget {
         builder: (context, constraints) {
           const gap = AppSpacing.xs;
           final columns = constraints.maxWidth >= 720 ? 3 : 2;
-          final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+          // Samotné Pusť teď (nový profil) přes celou šířku, ne půlka.
+          final width =
+              cards.isEmpty ? constraints.maxWidth : (constraints.maxWidth - gap * (columns - 1)) / columns;
           // Pusť teď je navíc -> mřížka bez díry na konci (ubere se poslední).
           final total = cards.length + 1;
           final fit = total < columns ? total : total - total % columns;

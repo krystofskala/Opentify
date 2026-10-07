@@ -546,7 +546,7 @@ def build_home(user_id: str) -> dict[str, Any]:
         daily = [c for c in mixes if (c.source or "").startswith("personal:daily-mix:")]
         newcomer = not daily
         quick = _quick_picks(session, user_id, by_section, cards_by_section, other_mixes, daily, allow_wide=not newcomer)
-        if quick:
+        if quick or newcomer:  # nováček: aspoň Pusť teď (dlaždici přidává appka)
             sections.append({"id": "quick_picks", "title": "Rychlý výběr", "type": "quick_picks", "items": [c.model_dump(mode="json", by_alias=True) for c in quick]})
 
         # Žánry připnuté profilem (Profil › Žánry na Domů) -- tátův bluegrass.
