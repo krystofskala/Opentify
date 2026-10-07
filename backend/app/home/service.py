@@ -413,11 +413,10 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
         select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.kind == PlaylistKind.USER)
     ).all()
     candidates.append(liked)
-    # Žebříčky a nálady soutěží taky, ale mají jen `qp.WIDE_SLOTS` míst -- a
-    # jen když si je člověk na Domů zapnul. Dřív je dostal i nováček, který
-    # je vypnuté má (rozpor s pravidlem "nic, co si nevybral"; audit 7. 10.).
-    layout = get_layout(session, user_id)
-    wide_keys = [key for key in ("charts", "editorial") if is_visible(layout, key)]
+    # Žebříčky a nálady soutěží taky, ale mají jen `qp.WIDE_SLOTS` míst.
+    # Dočasně jako dřív: jedno místo pro žebříček / náladu vždy (bez něj má
+    # nováček prázdné Domů, uživatel 7. 10.).
+    wide_keys = ["charts", "editorial"]
     wide = {p.id for key in wide_keys for p in by_section.get(key, [])}
     candidates += [p for key in wide_keys for p in by_section.get(key, [])]
     candidates = [p for p in {p.id: p for p in candidates}.values() if p.id not in taken]
@@ -663,10 +662,9 @@ def layout_key(user_id: str) -> str:
 # Výchozí stav: základní sada zapnutá, ostatní (a všechny nové sekce) si
 # profil zapne sám v Profil › Domů -- ať si každý dá přesně, co mu přináší.
 DEFAULT_OFF = {
-    # Žebříčky, novinky a česká hudba nováčka postrkují k cizímu vkusu --
-    # zapne si je sám (uživatel 4. 10. 2026; stávající profily mají
-    # rozložení uložené, nezmění se).
-    "charts", "new_releases", "czech",
+    # Žebříčky, novinky a česká hudba jsou pro nováčka ZAPNUTÉ, dokud
+    # nedoladíme start (uživatel 7. 10. 2026: bez nich je Domů nového profilu
+    # prázdné). Pokus z 4. 10. je vypnul -- vrátit až s hotovým novým Domů.
     "years", "trending_tracks", "top_albums", "genres", "editorial", "popular_playlists",
     "now_mix", "year_ago", "forgotten", "unfinished", "anniversaries", "release_radar", "deep_cuts",
     "artist_discovery", "album_picks", "shazam", "soundcloud", "family",
