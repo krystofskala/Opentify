@@ -156,7 +156,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     id: 'home',
                     icon: Symbols.home_rounded,
                     title: 'Domů',
-                    summary: 'Pořadí sekcí, skryté sekce, žánry',
+                    summary: 'Pořadí sekcí, skryté sekce, žánry, mluvené slovo',
                     child: Column(
                       children: [
                         _ActionRow(
@@ -165,6 +165,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           description: 'Přetažením změníš pořadí sekcí na Domů, vypínačem je skryješ.',
                           buttonLabel: 'Upravit',
                           onPressed: () => showHomeLayoutSheet(context),
+                        ),
+                        _ActionRow(
+                          icon: Symbols.menu_book_rounded,
+                          title: 'Upravit Domů mluveného slova',
+                          description: 'Pořadí a viditelnost sekcí na Domů audioknih a podcastů.',
+                          buttonLabel: 'Upravit',
+                          onPressed: () => showHomeLayoutSheet(context, spoken: true),
                         ),
                         const _ShareListeningRow(),
                         _ActionRow(
@@ -240,7 +247,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           _ActionRow(
                             icon: Symbols.inbox_rounded,
                             title: 'Žádosti o stažení',
-                            description: 'Co si kdo chce stáhnout a musíš schválit (velké audioknihy, audioknihy z internetu). '
+                            description:
+                                'Co si kdo chce stáhnout a musíš schválit (velké audioknihy, audioknihy z internetu). '
                                 'Stejné jako tlačítka v upozornění na telefonu.',
                             buttonLabel: 'Otevřít',
                             onPressed: () => context.push('/download-requests'),
@@ -876,7 +884,10 @@ class _ImportedHistoryLine extends ConsumerWidget {
     final counts = ref.watch(importedHistoryProvider).valueOrNull ?? const {};
     final counted = ref.watch(tasteSourcesProvider).valueOrNull ?? const {};
     const names = {'spotify': 'Spotify', 'ytmusic': 'YouTube Music', 'applemusic': 'Apple Music'};
-    final present = [for (final e in names.entries) if ((counts[e.key] ?? 0) > 0) e];
+    final present = [
+      for (final e in names.entries)
+        if ((counts[e.key] ?? 0) > 0) e
+    ];
     if (present.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
@@ -1221,19 +1232,19 @@ class _LogoutButton extends ConsumerWidget {
         // vydává jen admin (ostatní profily dostanou kód od něj).
         if (auth!.user!.role == 'admin')
           GlassButton(
-          label: 'Přidat zařízení',
-          icon: Symbols.devices_rounded,
-          compact: true,
-          onPressed: () async {
-            final messenger = ScaffoldMessenger.maybeOf(context);
-            try {
-              final json = await ref.read(apiClientProvider).postJson('/auth/pair-code');
-              if (context.mounted) await showPairCodeDialog(context, auth.user!.name, json);
-            } catch (_) {
-              showToast(messenger, 'Kód se nepodařilo vytvořit.');
-            }
-          },
-        ),
+            label: 'Přidat zařízení',
+            icon: Symbols.devices_rounded,
+            compact: true,
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.maybeOf(context);
+              try {
+                final json = await ref.read(apiClientProvider).postJson('/auth/pair-code');
+                if (context.mounted) await showPairCodeDialog(context, auth.user!.name, json);
+              } catch (_) {
+                showToast(messenger, 'Kód se nepodařilo vytvořit.');
+              }
+            },
+          ),
         GlassButton(
           label: 'Odhlásit se (${auth.user!.name})',
           icon: Symbols.logout_rounded,
@@ -1244,7 +1255,8 @@ class _LogoutButton extends ConsumerWidget {
               context: context,
               builder: (dialog) => AlertDialog(
                 title: const Text('Odhlásit se?'),
-                content: const Text('Pro nové přihlášení na tomhle zařízení budeš potřebovat jméno, heslo a nový kód zařízení od správce.'),
+                content: const Text(
+                    'Pro nové přihlášení na tomhle zařízení budeš potřebovat jméno, heslo a nový kód zařízení od správce.'),
                 actions: [
                   GlassButton(
                     label: 'Zrušit',

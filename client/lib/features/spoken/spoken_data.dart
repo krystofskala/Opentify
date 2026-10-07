@@ -105,6 +105,7 @@ class SpokenBook {
     this.progress,
     this.files = const [],
     this.playableFiles = 0,
+    this.mine = true,
   });
 
   factory SpokenBook.fromJson(Map<String, dynamic> j) {
@@ -124,6 +125,7 @@ class SpokenBook {
       progress: p is Map<String, dynamic> ? SpokenProgress.fromJson(p) : null,
       files: [for (final f in j['files'] as List<dynamic>? ?? const []) SpokenFileItem.fromJson(f as Map<String, dynamic>)],
       playableFiles: (j['playableFiles'] as num?)?.toInt() ?? (j['files'] as List<dynamic>? ?? const []).length,
+      mine: j['mine'] as bool? ?? true,
     );
   }
 
@@ -145,6 +147,10 @@ class SpokenBook {
 
   /// Kolik částí už jde přehrát (stahuje se popořadě, první kapitola hned).
   final int playableFiles;
+
+  /// O knihu jsem žádal, nebo ji poslouchám. Ostatní knihy na serveru jsou
+  /// na Domů ve vlastní sekci "Knihy ostatních".
+  final bool mine;
 
   bool get isReady => status == 'ready';
 
@@ -203,6 +209,20 @@ final spokenBooksProvider = FutureProvider.autoDispose<List<SpokenBook>>((ref) a
   ref.watch(spokenEventsProvider);
   final json = await ref.watch(apiClientProvider).getJson('/spoken/books');
   return [for (final b in json['books'] as List<dynamic>? ?? const []) SpokenBook.fromJson(b as Map<String, dynamic>)];
+});
+
+/// Pořadí a viditelnost sekcí Domů mluveného slova (Profil › Domů ›
+/// Upravit Domů mluveného slova). Při chybě výchozí (všechno, `null`).
+final spokenHomeLayoutProvider = FutureProvider.autoDispose<List<({String id, bool visible})>?>((ref) async {
+  try {
+    final json = await ref.watch(apiClientProvider).getJson('/spoken/home/layout');
+    return [
+      for (final s in (json['sections'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        (id: s['id'] as String, visible: s['visible'] as bool? ?? true),
+    ];
+  } catch (_) {
+    return null;
+  }
 });
 
 final spokenBookProvider = FutureProvider.autoDispose.family<SpokenBook, String>((ref, id) async {

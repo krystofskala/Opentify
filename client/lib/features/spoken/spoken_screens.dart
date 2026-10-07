@@ -43,13 +43,13 @@ void playBook(WidgetRef ref, SpokenBook book, {int? fileIndex, Duration? positio
     }
   }
   unawaited(ref.read(audioPlayerControllerProvider.notifier).playQueue(
-        queue,
-        index,
-        sourceLabel: book.title,
-        startPosition: start,
-        rememberProgress: false,
-        context: (route: '/spoken/book/${book.id}'),
-      ));
+    queue,
+    index,
+    sourceLabel: book.title,
+    startPosition: start,
+    rememberProgress: false,
+    context: (route: '/spoken/book/${book.id}'),
+  ));
 }
 
 String _statusLine(SpokenBook b) => switch (b.status) {
@@ -138,10 +138,34 @@ class SpokenHomeScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(spokenBooksProvider),
         ),
         data: (books) {
-          final working = [for (final b in books) if (b.isWorking || b.status == 'failed') b];
-          final shelf = [for (final b in books) if (b.isReady && b.progress == null) b].take(20).toList();
-          final newEpisodes =
-              (podcasts?.latest ?? const <PodcastEpisodeItem>[]).where((e) => !e.finished && !e.started).take(15).toList();
+          final working = [
+            for (final b in books)
+              if (b.isWorking || b.status == 'failed') b
+          ];
+          final shelf = [
+            for (final b in books)
+              if (b.isReady && b.mine && b.progress == null) b
+          ].take(20).toList();
+          // Knihy, které už na serveru stáhl někdo jiný -- pustit hned, bez
+          // dalšího stahování (uživatel 7. 10.).
+          final others = [
+            for (final b in books)
+              if (b.isReady && !b.mine) b
+          ].take(20).toList();
+          // Pořadí a skryté sekce podle profilu (Upravit Domů mluveného slova).
+          final layout = ref.watch(spokenHomeLayoutProvider).valueOrNull;
+          List<Widget> ordered(Map<String, List<Widget>> sections) {
+            if (layout == null) return [for (final w in sections.values) ...w];
+            return [
+              for (final e in layout)
+                if (e.visible) ...?sections[e.id],
+            ];
+          }
+
+          final newEpisodes = (podcasts?.latest ?? const <PodcastEpisodeItem>[])
+              .where((e) => !e.finished && !e.started)
+              .take(15)
+              .toList();
           final shows = ref.watch(myPodcastsProvider).valueOrNull ?? const <PodcastShowItem>[];
           // Doporučení se načítají zvlášť -- Domů na ně nečeká.
           final recs = ref.watch(spokenRecommendationsProvider).valueOrNull;
@@ -172,105 +196,129 @@ class SpokenHomeScreen extends ConsumerWidget {
             onRefresh: () async {
               ref.invalidate(spokenBooksProvider);
               ref.invalidate(podcastHomeProvider);
+              ref.invalidate(spokenHomeLayoutProvider);
             },
             // Sekce jako na hudebním Domů: nadpis a vodorovná řada karet.
             child: ListView(
               padding: EdgeInsets.only(top: AppSpacing.sm, bottom: AppSpacing.lg + navBottomInset(context)),
               children: [
-                if (continuing.isNotEmpty) ...[
-                  const SectionHeader('Pokračovat'),
-                  _Rail(children: [for (final c in continuing) _ContinueCard(item: c)]),
-                ],
-                if (newEpisodes.isNotEmpty) ...[
-                  const SectionHeader('Nové díly'),
-                  _Rail(children: [
-                    for (final e in newEpisodes)
-                      MediaCard(
-                        title: e.title,
-                        subtitle: [e.showTitle ?? '', episodeDate(e.publishedAt, DateTime.now())]
-                            .where((s) => s.isNotEmpty)
-                            .join(' · '),
-                        imageUrl: e.artworkUrl,
-                        placeholderIcon: Symbols.podcasts_rounded,
-                        onTap: () => playEpisode(ref, e),
-                      ),
-                  ]),
-                ],
-                if (shelf.isNotEmpty) ...[
-                  const SectionHeader('V knihovně'),
-                  _Rail(children: [
-                    for (final b in shelf)
-                      MediaCard(
-                        title: b.title,
-                        subtitle: b.author ?? formatHours(b.durationMs),
-                        imageUrl: b.coverUrl,
-                        placeholderIcon: Symbols.menu_book_rounded,
-                        onTap: () => context.push('/spoken/book/${b.id}'),
-                      ),
-                  ]),
-                ],
-                if (shows.isNotEmpty) ...[
-                  const SectionHeader('Tvoje pořady'),
-                  _Rail(children: [
-                    for (final s in shows)
-                      MediaCard(
-                        title: s.title,
-                        subtitle: s.author,
-                        imageUrl: s.artworkUrl,
-                        placeholderIcon: Symbols.podcasts_rounded,
-                        onTap: () => context.push('/podcasts/show/${s.id}'),
-                      ),
-                  ]),
-                ],
-                if (recs != null && recs.books.isNotEmpty) ...[
-                  const SectionHeader('Doporučené knihy'),
-                  _Rail(children: [
-                    for (final b in recs.books)
-                      MediaCard(
-                        title: b.release.title,
-                        subtitle: b.reason,
-                        imageUrl: b.release.coverUrl,
-                        placeholderIcon: Symbols.menu_book_rounded,
-                        // Rovnou obsah vydání (co by se stáhlo).
-                        onTap: () => _download(context, ref, b.release),
-                      ),
-                  ]),
-                ],
-                if (recs != null && recs.podcasts.isNotEmpty) ...[
-                  const SectionHeader('Doporučené podcasty'),
-                  _Rail(children: [
-                    for (final p in recs.podcasts)
-                      MediaCard(
-                        title: p.show.title,
-                        subtitle: p.reason,
-                        imageUrl: p.show.artworkUrl,
-                        placeholderIcon: Symbols.podcasts_rounded,
-                        onTap: () async {
-                          try {
-                            final id = await openPodcast(ref, p.show);
-                            if (context.mounted) unawaited(context.push('/podcasts/show/$id'));
-                          } catch (_) {
-                            if (context.mounted) toast(context, 'Pořad se nepodařilo otevřít');
-                          }
-                        },
-                      ),
-                  ]),
-                ],
-                if (working.isNotEmpty) ...[
-                  const SectionHeader('Stahuje se'),
-                  _Rail(children: [
-                    for (final b in working)
-                      MediaCard(
-                        title: b.title,
-                        subtitle: _statusLine(b),
-                        artwork: _ProgressArt(
-                          url: b.coverUrl,
-                          value: b.status == 'downloading' ? b.downloadProgress : null,
-                        ),
-                        onTap: () => context.push('/spoken/book/${b.id}'),
-                      ),
-                  ]),
-                ],
+                ...ordered(<String, List<Widget>>{
+                  if (continuing.isNotEmpty)
+                    'continue': [
+                      const SectionHeader('Pokračovat'),
+                      _Rail(children: [for (final c in continuing) _ContinueCard(item: c)]),
+                    ],
+                  if (newEpisodes.isNotEmpty)
+                    'new_episodes': [
+                      const SectionHeader('Nové díly'),
+                      _Rail(children: [
+                        for (final e in newEpisodes)
+                          MediaCard(
+                            title: e.title,
+                            subtitle: [e.showTitle ?? '', episodeDate(e.publishedAt, DateTime.now())]
+                                .where((s) => s.isNotEmpty)
+                                .join(' · '),
+                            imageUrl: e.artworkUrl,
+                            placeholderIcon: Symbols.podcasts_rounded,
+                            onTap: () => playEpisode(ref, e),
+                          ),
+                      ]),
+                    ],
+                  if (shelf.isNotEmpty)
+                    'my_books': [
+                      const SectionHeader('Tvoje knihy'),
+                      _Rail(children: [
+                        for (final b in shelf)
+                          MediaCard(
+                            title: b.title,
+                            subtitle: b.author ?? formatHours(b.durationMs),
+                            imageUrl: b.coverUrl,
+                            placeholderIcon: Symbols.menu_book_rounded,
+                            onTap: () => context.push('/spoken/book/${b.id}'),
+                          ),
+                      ]),
+                    ],
+                  if (shows.isNotEmpty)
+                    'shows': [
+                      const SectionHeader('Tvoje pořady'),
+                      _Rail(children: [
+                        for (final s in shows)
+                          MediaCard(
+                            title: s.title,
+                            subtitle: s.author,
+                            imageUrl: s.artworkUrl,
+                            placeholderIcon: Symbols.podcasts_rounded,
+                            onTap: () => context.push('/podcasts/show/${s.id}'),
+                          ),
+                      ]),
+                    ],
+                  if (recs != null && recs.books.isNotEmpty)
+                    'rec_books': [
+                      const SectionHeader('Doporučené knihy'),
+                      _Rail(children: [
+                        for (final b in recs.books)
+                          MediaCard(
+                            title: b.release.title,
+                            subtitle: b.reason,
+                            imageUrl: b.release.coverUrl,
+                            placeholderIcon: Symbols.menu_book_rounded,
+                            // Rovnou obsah vydání (co by se stáhlo).
+                            onTap: () => _download(context, ref, b.release),
+                          ),
+                      ]),
+                    ],
+                  if (recs != null && recs.podcasts.isNotEmpty)
+                    'rec_podcasts': [
+                      const SectionHeader('Doporučené podcasty'),
+                      _Rail(children: [
+                        for (final p in recs.podcasts)
+                          MediaCard(
+                            title: p.show.title,
+                            subtitle: p.reason,
+                            imageUrl: p.show.artworkUrl,
+                            placeholderIcon: Symbols.podcasts_rounded,
+                            onTap: () async {
+                              try {
+                                final id = await openPodcast(ref, p.show);
+                                if (context.mounted) unawaited(context.push('/podcasts/show/$id'));
+                              } catch (_) {
+                                if (context.mounted) toast(context, 'Pořad se nepodařilo otevřít');
+                              }
+                            },
+                          ),
+                      ]),
+                    ],
+                  if (others.isNotEmpty)
+                    'others_books': [
+                      const SectionHeader('Knihy ostatních'),
+                      _Rail(children: [
+                        for (final b in others)
+                          MediaCard(
+                            title: b.title,
+                            subtitle: b.author ?? formatHours(b.durationMs),
+                            imageUrl: b.coverUrl,
+                            placeholderIcon: Symbols.menu_book_rounded,
+                            onTap: () => context.push('/spoken/book/${b.id}'),
+                          ),
+                      ]),
+                    ],
+                  if (working.isNotEmpty)
+                    'downloading': [
+                      const SectionHeader('Stahuje se'),
+                      _Rail(children: [
+                        for (final b in working)
+                          MediaCard(
+                            title: b.title,
+                            subtitle: _statusLine(b),
+                            artwork: _ProgressArt(
+                              url: b.coverUrl,
+                              value: b.status == 'downloading' ? b.downloadProgress : null,
+                            ),
+                            onTap: () => context.push('/spoken/book/${b.id}'),
+                          ),
+                      ]),
+                    ],
+                }),
               ],
             ),
           );
@@ -481,7 +529,8 @@ class _Results extends ConsumerWidget {
     final other = foreign.valueOrNull ?? const <SpokenRelease>[];
     if (czech.isLoading && foreign.isLoading) return const LoadingState();
     if (cz != null && cz.releases.isEmpty && !foreign.isLoading && other.isEmpty) {
-      return const EmptyState(icon: Symbols.menu_book_rounded, message: 'Nic se nenašlo – ani česky, ani v jiných jazycích.');
+      return const EmptyState(
+          icon: Symbols.menu_book_rounded, message: 'Nic se nenašlo – ani česky, ani v jiných jazycích.');
     }
     return ListView(
       padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
@@ -576,7 +625,8 @@ Future<void> _download(BuildContext context, WidgetRef ref, SpokenRelease r) asy
       toast(context, 'Ve vydání není žádný zvuk');
       return;
     }
-    await showGlassSheet<void>(context, builder: (_) => GlassSheet(child: CollectionPickSheet(release: r, groups: groups)));
+    await showGlassSheet<void>(context,
+        builder: (_) => GlassSheet(child: CollectionPickSheet(release: r, groups: groups)));
   } catch (e) {
     if (context.mounted) {
       toast(
@@ -653,9 +703,15 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
         return;
       }
       for (final g in widget.groups) {
-        final picked = [for (final f in g.files) if (_selected.contains(f.index)) f.index];
+        final picked = [
+          for (final f in g.files)
+            if (_selected.contains(f.index)) f.index
+        ];
         if (picked.isEmpty) continue;
-        final size = [for (final f in g.files) if (_selected.contains(f.index)) f.size].fold(0, (a, b) => a + b);
+        final size = [
+          for (final f in g.files)
+            if (_selected.contains(f.index)) f.size
+        ].fold(0, (a, b) => a + b);
         if (await acquireSpoken(ref, widget.release, files: picked, folder: g.folder, sizeBytes: size)) {
           books++;
         } else {
@@ -717,12 +773,15 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
                         ? true
                         : (g.files.any((f) => _selected.contains(f.index)) ? null : false),
                     tristate: true,
-                    onChanged: _selectable ? (v) => _toggleGroup(g, !g.files.every((f) => _selected.contains(f.index))) : null,
+                    onChanged:
+                        _selectable ? (v) => _toggleGroup(g, !g.files.every((f) => _selected.contains(f.index))) : null,
                     title: Text(g.folder.isEmpty ? widget.release.title : g.folder),
                     subtitle: Text('${formatSize(g.size)} · ${g.files.length} částí', style: muted),
                     secondary: IconButton(
                       tooltip: _expanded.contains(g.folder) ? 'Skrýt části' : 'Vybrat jednotlivé části',
-                      icon: Icon(_expanded.contains(g.folder) ? Symbols.expand_less_rounded : Symbols.expand_more_rounded, semanticLabel: _expanded.contains(g.folder) ? 'Skrýt části' : 'Vybrat jednotlivé části'),
+                      icon: Icon(
+                          _expanded.contains(g.folder) ? Symbols.expand_less_rounded : Symbols.expand_more_rounded,
+                          semanticLabel: _expanded.contains(g.folder) ? 'Skrýt části' : 'Vybrat jednotlivé části'),
                       onPressed: () => setState(
                         () => _expanded.contains(g.folder) ? _expanded.remove(g.folder) : _expanded.add(g.folder),
                       ),
@@ -912,7 +971,8 @@ class _FailedActions extends ConsumerWidget {
 
   /// "55-Heir to the Empire" -> "Heir to the Empire" (+ autor, je-li).
   String get _query {
-    final title = book.title.replaceFirst(RegExp(r'^\d+\s*[-.]\s*'), '').replaceAll(RegExp(r'[\[(].*?[\])]'), '').trim();
+    final title =
+        book.title.replaceFirst(RegExp(r'^\d+\s*[-.]\s*'), '').replaceAll(RegExp(r'[\[(].*?[\])]'), '').trim();
     return [title, if (book.author != null) book.author!].join(' ');
   }
 

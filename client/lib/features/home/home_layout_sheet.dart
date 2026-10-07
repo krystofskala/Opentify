@@ -7,12 +7,14 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/toast.dart';
 import '../profile/home_genres_sheet.dart';
+import '../spoken/spoken_data.dart' show spokenHomeLayoutProvider;
 import '../../widgets/state_views.dart';
 
 /// Domů › Upravit: pořadí sekcí (přetažením) a které se ukazují. Ukládá se
-/// k profilu (`PUT /home/layout`), platí na všech zařízeních.
-Future<void> showHomeLayoutSheet(BuildContext context) =>
-    showGlassSheet<void>(context, builder: (_) => const _HomeLayoutSheet());
+/// k profilu (`PUT /home/layout`), platí na všech zařízeních. `spoken`:
+/// totéž pro Domů mluveného slova (`/spoken/home/layout`).
+Future<void> showHomeLayoutSheet(BuildContext context, {bool spoken = false}) =>
+    showGlassSheet<void>(context, builder: (_) => _HomeLayoutSheet(spoken: spoken));
 
 class _Entry {
   _Entry(this.id, this.title, this.visible, this.mode);
@@ -24,7 +26,9 @@ class _Entry {
 }
 
 class _HomeLayoutSheet extends ConsumerStatefulWidget {
-  const _HomeLayoutSheet();
+  const _HomeLayoutSheet({required this.spoken});
+
+  final bool spoken;
 
   @override
   ConsumerState<_HomeLayoutSheet> createState() => _HomeLayoutSheetState();
@@ -35,6 +39,8 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
   String? _error;
   bool _saving = false;
 
+  String get _path => widget.spoken ? '/spoken/home/layout' : '/home/layout';
+
   @override
   void initState() {
     super.initState();
@@ -43,7 +49,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
 
   Future<void> _load() async {
     try {
-      final json = await ref.read(apiClientProvider).getJson('/home/layout');
+      final json = await ref.read(apiClientProvider).getJson(_path);
       if (!mounted) return;
       setState(() {
         _entries = [
@@ -67,16 +73,22 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
     setState(() => _saving = true);
     try {
       await ref.read(apiClientProvider).putJson(
-        '/home/layout',
-        body: reset
-            ? {'order': <String>[], 'hidden': <String>[]}
-            : {
-                'order': [for (final e in entries) e.id],
-                'hidden': [for (final e in entries) if (!e.visible) e.id],
-                'modes': {for (final e in entries) if (e.mode != null) e.id: e.mode},
-              },
-      );
-      ref.invalidate(homeProvider);
+            _path,
+            body: reset
+                ? {'order': <String>[], 'hidden': <String>[]}
+                : {
+                    'order': [for (final e in entries) e.id],
+                    'hidden': [
+                      for (final e in entries)
+                        if (!e.visible) e.id
+                    ],
+                    'modes': {
+                      for (final e in entries)
+                        if (e.mode != null) e.id: e.mode
+                    },
+                  },
+          );
+      ref.invalidate(widget.spoken ? spokenHomeLayoutProvider : homeProvider);
       if (mounted) {
         Navigator.of(context).pop();
         showToast(ScaffoldMessenger.maybeOf(context), reset ? 'Domů je zase ve výchozím pořadí' : 'Domů upraveno');
@@ -102,6 +114,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
   /// Chytré seznamy (Mix na teď, Před rokem, Shazam...) se připínají do
   /// "Tvoje výběry" -- tady jde vrátit odepnutý (jinak se připíná v menu).
   List<Widget> _smartLists(ThemeData theme) {
+    if (widget.spoken) return const [];
     final pins = ref.watch(quickPinsProvider).valueOrNull;
     if (pins == null || pins.rails.isEmpty) return const [];
     return [
@@ -143,7 +156,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Upravit Domů', style: theme.textTheme.titleLarge),
+              Text(widget.spoken ? 'Upravit Domů mluveného slova' : 'Upravit Domů', style: theme.textTheme.titleLarge),
               const SizedBox(height: AppSpacing.xxs),
               Text(
                 'Přetažením změníš pořadí sekcí, vypínačem je skryješ.',
@@ -210,13 +223,15 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
                     },
                   ),
                 ),
-              const SizedBox(height: AppSpacing.sm),
-              GlassButton(
-                label: 'Přidat nebo odebrat žánry…',
-                icon: Symbols.category_rounded,
-                expand: true,
-                onPressed: _saving ? null : _editGenres,
-              ),
+              if (!widget.spoken) ...[
+                const SizedBox(height: AppSpacing.sm),
+                GlassButton(
+                  label: 'Přidat nebo odebrat žánry…',
+                  icon: Symbols.category_rounded,
+                  expand: true,
+                  onPressed: _saving ? null : _editGenres,
+                ),
+              ],
               ..._smartLists(theme),
               const SizedBox(height: AppSpacing.xs),
               Row(

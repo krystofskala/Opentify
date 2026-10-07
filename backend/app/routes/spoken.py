@@ -254,6 +254,26 @@ async def acquire_now(body: AcquireIn, session: Session, user_id: str, found: di
     return book_out(book)
 
 
+class SpokenLayoutIn(BaseModel):
+    order: list[str]
+    hidden: list[str] = []
+
+
+@spoken_router.get("/home/layout")
+def spoken_home_layout(current: tuple[str, str] = Depends(get_current_user)):
+    """Sekce Domů mluveného slova v pořadí profilu, i se skrytými."""
+    from app.spoken import home_layout
+
+    return {"sections": home_layout.entries(current[0])}
+
+
+@spoken_router.put("/home/layout")
+def set_spoken_home_layout(body: SpokenLayoutIn, current: tuple[str, str] = Depends(get_current_user)):
+    from app.spoken import home_layout
+
+    return {"sections": home_layout.save(current[0], body.order, body.hidden)}
+
+
 @spoken_router.get("/books")
 def books(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
     """Knihovna: všechny knihy na serveru (jako hudba), u každé moje pozice."""
@@ -278,6 +298,9 @@ def books(session: Session = Depends(get_session), current: tuple[str, str] = De
         item["progress"] = _progress_out(p) if p else None
         item["downloadProgress"] = round(b.progress, 3)
         item["playableFiles"] = playable.get(b.id, 0)
+        # Moje = o knihu jsem žádal, nebo ji poslouchám. Ostatní knihy na
+        # serveru má Domů ve vlastní sekci (pustit hned, bez stahování).
+        item["mine"] = b.requested_by_user_id == current[0] or p is not None
         out.append(item)
     return {"books": out}
 
