@@ -196,24 +196,51 @@ async def session_artist_counts(played: list[str]) -> Counter:
 
 
 def _session_signals(session: Session, user_id: str) -> tuple[Counter, Counter, bool]:
-    """(přeskočení interpreti, dohraní interpreti, změnit směr) za 40 minut."""
+    """(přeskočení interpreti, dohraní interpreti, změnit směr) za 40 minut.
+
+    Přeskočení a "jiný směr" jen z toho, co pustil ALGORITMUS (Pusť teď,
+    mix, rádio): proklikávání vlastního alba nebo playlistu je výběr, ne
+    "nelíbí se" (audit 7. 10., mezera 3 -- dřív spustilo "Zkouším jiný
+    směr"). Dohrání se počítá odkudkoli -- co teď posloucháš celé, sedí."""
     since = (utcnow() - timedelta(minutes=40)).replace(tzinfo=None)
     rows = session.exec(
-        select(PlayEvent.recording_id, PlayEvent.end_reason)
+        select(PlayEvent.recording_id, PlayEvent.end_reason, PlayEvent.algorithmic)
         .where(PlayEvent.user_id == user_id, PlayEvent.ended_at >= since)
         .order_by(PlayEvent.ended_at)
     ).all()
     skipped, done = Counter(), Counter()
-    for rid, reason in rows:
+    for rid, reason, algo in rows:
         rec = session.get(Recording, rid)
         if rec is None or not rec.artist_id:
             continue
-        if reason == "skipped":
+        if reason == "skipped" and algo:
             skipped[rec.artist_id] += 1
         elif reason == "completed":
             done[rec.artist_id] += 1
-    last_two = [r for _rid, r in rows[-2:]]
+    last_two = [r for _rid, r, algo in rows if algo][-2:]
     return skipped, done, len(last_two) == 2 and all(r == "skipped" for r in last_two)
+
+
+def _clean_seeds(user_id: str, seeds: list[str]) -> list[str]:
+    """Semínka nekonečného hraní bez přeskočených skladeb -- dřív se
+    navazovalo i na to, co jsi právě přeskočil (audit 7. 10., mezera 3).
+    Zůstane-li prázdné, aspoň poslední semínko (ať je na co navázat)."""
+    if not seeds:
+        return seeds
+    since = (utcnow() - timedelta(hours=2)).replace(tzinfo=None)
+    with Session(engine) as session:
+        skipped = set(
+            session.exec(
+                select(PlayEvent.recording_id).where(
+                    PlayEvent.user_id == user_id,
+                    PlayEvent.ended_at >= since,
+                    PlayEvent.end_reason == "skipped",
+                    PlayEvent.recording_id.in_(seeds),  # type: ignore[attr-defined]
+                )
+            ).all()
+        )
+    kept = [r for r in seeds if r not in skipped]
+    return kept or seeds[-1:]
 
 
 def _chosen_tracks(session: Session, user_id: str, limit: int = 200) -> list[str]:
@@ -669,6 +696,7 @@ async def next_chunk(
 
     rng = random.Random(f"{user_id}:{int(time.time() // 60)}:{len(played)}")
     mood = mood if mood in MOODS else None
+    seeds = await asyncio.to_thread(_clean_seeds, user_id, seeds)
     moods = None
     if mood and mood != "prekvap":
         moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
