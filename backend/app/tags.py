@@ -214,6 +214,75 @@ async def _resolve_tracks(items: list[dict[str, str]], limit: int) -> list[str]:
     return (await asyncio.to_thread(g._ingest_tracks, found[:limit])) if found else []
 
 
+# Štítky, které o hudbě nic neříkají (pro profil vkusu se nepočítají).
+_NOISE_TAGS = {"seen-live", "favorites", "favourites", "favorite", "male-vocalists", "female-vocalists", "awesome", "love"}
+
+
+def _strong(tags: list[tuple[str, int]], t: str) -> bool:
+    """Interpret styl opravdu hraje: silný štítek, nebo mezi jeho prvními
+    třemi. Sloučená jména na Last.fm ("John Smith" folk 100 / rap 22) ne."""
+    for i, (name, count) in enumerate(tags):
+        if slug(name) == t and (count >= 30 or (count >= 15 and i < 3)):
+            return True
+    return False
+
+
+async def _taste_bridge(
+    t: str, weighted: list[tuple[str, float]], skip_names: set[str], rng: random.Random, n_artists: int = 12
+) -> list[dict[str, str]]:
+    """Objevy stylu podle CELÉHO vkusu, ne jen podle pár interpretů stylu:
+    z tvých poslechů profil štítků (folk, jazz, akustické, česká…), pak
+    interpreti stylu -- z jeho žebříčku i kombinací "<tvůj štítek> <styl>"
+    (jazz rap, czech rap…) -- seřazení podle toho, kolik s tvým profilem
+    sdílí. Vrací (interpret, název) jejich nejznámějších skladeb."""
+    from app.catalog.lastfm import artist_top_tags
+
+    sem = asyncio.Semaphore(6)
+
+    async def tags_of(name: str) -> list[tuple[str, int]]:
+        async with sem:
+            try:
+                return await artist_top_tags(name)
+            except Exception:  # noqa: BLE001
+                return []
+
+    top = weighted[:100]
+    profile: dict[str, float] = {}
+    for (name, w), tags in zip(top, await asyncio.gather(*(tags_of(n) for n, _w in top))):
+        for tag, count in tags:
+            k = slug(tag)
+            if k != t and k not in _NOISE_TAGS and count:
+                profile[k] = profile.get(k, 0.0) + w * count / 100
+    if not profile:
+        return []
+    total = sum(profile.values())
+    profile = {k: v / total for k, v in profile.items()}
+    mine = sorted(profile, key=lambda k: -profile[k])[:8]
+    lists = await asyncio.gather(
+        lastfm.tag_top_artists(t, 100),
+        *(lastfm.tag_top_artists(f"{k.replace('-', ' ')} {t}", 30) for k in mine),
+        return_exceptions=True,
+    )
+    candidates = list(dict.fromkeys(
+        n for lst in lists if isinstance(lst, list) for n in lst if _normalize(n) not in skip_names
+    ))[:220]
+    scored: list[tuple[float, str]] = []
+    for name, tags in zip(candidates, await asyncio.gather(*(tags_of(n) for n in candidates))):
+        if not _strong(tags, t):
+            continue
+        fit = sum(profile.get(slug(tag), 0.0) * count / 100 for tag, count in tags if slug(tag) != t)
+        if fit > 0:
+            scored.append((fit * (0.8 + 0.4 * rng.random()), name))
+    scored.sort(reverse=True)
+    picked = [name for _f, name in scored[:n_artists]]
+    tracks = await asyncio.gather(*(lastfm.artist_top_tracks(n, 10) for n in picked), return_exceptions=True)
+    out: list[dict[str, str]] = []
+    for lst in tracks:
+        if isinstance(lst, list) and lst:
+            out += rng.sample(lst, min(2, len(lst)))
+    return out
+
+
 _for_you_inflight: dict[tuple[str, str], asyncio.Task] = {}
 
 
@@ -274,7 +343,7 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
             return False
         async with sem:
             tags = await artist_top_tags(name)
-        return any(slug(n) == t and c >= 15 for n, c in tags)
+        return _strong(tags, t)
 
     flags = await asyncio.gather(*(plays_tag(a) for a in top_artists))
     tag_artists = [a for a, ok in zip(top_artists, flags) if ok]
@@ -300,7 +369,15 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
     rng.shuffle(pool)
     # Málo vlastních (okrajový styl): víc objevů, ať mix vznikne i tak.
     want = 14 if len(own) >= 8 else 24
-    discovery = [r for r in await _resolve_tracks(pool, want + 6) if r not in set(own)][:want]
+    # Půlka objevů podle celého vkusu (jaký rap by se líbil folkaři), půlka
+    # od interpretů podobných těm, které ze stylu už posloucháš.
+    bridge = await _taste_bridge(
+        t, [(names[a] or "", artist_weight[a]) for a in top_artists if names.get(a)], known_names, rng
+    )
+    mixed: list[dict[str, str]] = []
+    for i in range(max(len(bridge), len(pool))):
+        mixed += bridge[i : i + 1] + pool[i : i + 1]
+    discovery = [r for r in await _resolve_tracks(mixed, want + 6) if r not in set(own)][:want]
     if len(own) + len(discovery) < 12 or not own:
         return None
     ids: list[str] = []
@@ -312,7 +389,7 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
     ids = list(dict.fromkeys(ids))[:40]
     return g._save_playlist(
         owner=user_id, source=source, title=f"Tvůj mix · {title_of(t)}",
-        description=f"{title_of(t)} podle tebe -- tvoje oblíbené a objevy od podobných interpretů",
+        description=f"{title_of(t)} podle tebe -- tvoje oblíbené a objevy podle celého tvého vkusu",
         kind=PlaylistKind.PERSONAL_MIX, section="tag", recording_ids=ids, cover_urls=g._covers_for(ids[:4]),
         ttl=g.DAILY_TTL,
     )
