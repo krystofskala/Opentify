@@ -37,6 +37,15 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Odkazy opentify:///<cesta> z o.html (pozvánka /join/KÓD, sdílené
+                 album/playlist): otevřít appku na té cestě (jako iOS). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="opentify"/>
+            </intent-filter>
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="true"/>
         </activity>
         <!-- audio_service: služba přehrávání na pozadí + tlačítka sluchátek. -->
         <service android:name="com.ryanheise.audioservice.AudioService"

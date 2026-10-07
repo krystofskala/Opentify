@@ -47,6 +47,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // `/artists/x` z kterékoli záložky -> detail v té záložce.
       redirect: (context, state) => branchRedirect(state.uri),
       routes: [
+        // Odkaz z pozvánky: kód si přečte přihlášení (core/page_location.dart).
+        GoRoute(path: '/join/:code', redirect: (context, state) => '/'),
         StatefulShellRoute.indexedStack(
           builder: (context, state, navigationShell) => HomeShell(navigationShell: navigationShell),
           branches: [

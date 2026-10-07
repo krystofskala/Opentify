@@ -1,10 +1,14 @@
 import 'config.dart';
+import 'join_route.dart';
 import 'package:web/web.dart' as web;
 
 String? joinCodeFromUrl() {
   try {
-    final code = Uri.parse(web.window.location.href).queryParameters['join'];
-    return code == null || code.isEmpty ? null : code;
+    final uri = Uri.parse(web.window.location.href);
+    final code = uri.queryParameters['join'];
+    if (code != null && code.isNotEmpty) return code;
+    // Odkaz z pozvánky přes o.html: `#/join/KÓD`.
+    return uri.fragment.isEmpty ? null : joinCodeFromRoute(uri.fragment);
   } catch (_) {
     return null;
   }

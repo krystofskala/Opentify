@@ -85,11 +85,12 @@ class ProfilesSection extends ConsumerWidget {
 
   /// Pozvánka: člověk si přes ni sám vybere přihlašovací jméno a heslo.
   Future<void> _showInvite(BuildContext context, String name, String code) async {
-    final link = '$_sharedOrigin/?join=$code';
+    // Přes o.html: na telefonu s appkou otevře appku (formulář s pozvánkou),
+    // jinak web.
+    final link = '$_sharedOrigin/o.html#/join/$code';
     final text = 'Pozvánka do Opentify: $link\n'
-        'Na webu: otevři odkaz a vyber si jméno a heslo. '
-        'V appce (iPhone, Android): odkaz neotvírej – zkopíruj ho a vlož na přihlašovací obrazovce '
-        '(Mám pozvánku od správce). '
+        'Otevři odkaz a vyber si jméno a heslo – když máš appku Opentify, otevře se v ní, jinak na webu. '
+        'Kdyby se appka neotevřela: zkopíruj odkaz a vlož ho na přihlašovací obrazovce (Mám pozvánku od správce). '
         'Pozvánka platí 14 dní a jen jednou.';
     await showDialog<void>(
       context: context,

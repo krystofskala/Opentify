@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../core/join_route.dart';
 import '../core/api_client.dart' show ApiException;
 import '../core/device_token.dart';
 import '../core/page_location.dart' show clearJoinFromUrl;
@@ -122,7 +123,10 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
 
   void _useInvite() {
     final text = _invite.text.trim();
-    final code = Uri.tryParse(text)?.queryParameters['join'] ?? (text.contains('/') || text.isEmpty ? null : text);
+    // Odkaz `…/o.html#/join/KÓD`, starší `…/?join=KÓD`, nebo jen kód.
+    final uri = Uri.tryParse(text);
+    final code = (uri == null ? null : joinCodeFromRoute(uri.toString().contains('#') ? uri.fragment : text)) ??
+        (text.contains('/') || text.isEmpty ? null : text);
     if (code == null) {
       setState(() => _error = 'Tohle nevypadá jako pozvánkový odkaz.');
       return;
