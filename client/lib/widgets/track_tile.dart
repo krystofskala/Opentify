@@ -1,5 +1,6 @@
 import 'toast.dart';
 import 'like_heart.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -139,7 +140,12 @@ class TrackTile extends ConsumerWidget {
     final effectiveSubtitle = subtitle ?? recording.artistName ?? artistName;
     // Jméno interpreta je proklikávací všude stejně -- jen když druhý řádek
     // opravdu JE jméno interpreta (ne "N poslechů" apod.) a máme kam jít.
-    final artistTap = subtitle == null && effectiveSubtitle != null && recording.artistId != null
+    // Na telefonu ne: malý odkaz v řádku se trefoval místo přehrání skladby
+    // (nahlášeno 7. 10.) -- prstem celý řádek pouští, k interpretovi přes ⋯.
+    final touch = defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android ||
+        MediaQuery.sizeOf(context).width < 600;
+    final artistTap = !touch && subtitle == null && effectiveSubtitle != null && recording.artistId != null
         ? () => context.push('/artists/${recording.artistId}')
         : null;
 
