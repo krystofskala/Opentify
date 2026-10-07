@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:opentify_client/features/spoken/podcast_data.dart';
 import 'package:opentify_client/features/spoken/spoken_data.dart';
 import 'package:opentify_client/features/spoken/spoken_screens.dart';
+import 'package:opentify_client/state/library_scope.dart';
 import 'package:opentify_client/theme/app_theme.dart';
 
 SpokenBook _book(String id, String title, String author, {bool mine = true, Map<String, dynamic>? progress}) =>
@@ -146,6 +147,10 @@ void main() {
               SpokenEdition({'infohash': 'h3', 'title': 'Zdenek Jirotka - Saturnin (2007)(CZ)', 'seeders': 0, 'why': ['celé', 'nezkrácené', 'teď nikdo nesdílí']}),
             ],
           )),
+    ]);
+    await shoot(tester, '5_knihovna', const SpokenLibraryScreen(), [
+      spokenBooksProvider.overrideWith((ref) async => books),
+      libraryScopeProvider.overrideWith((ref) => LibraryScopeController(ref)..state = LibraryScope.all),
     ]);
   });
 }

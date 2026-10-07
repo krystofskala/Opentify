@@ -19,6 +19,9 @@ import '../../widgets/detail_hero.dart' show HeroTeaser;
 import '../../widgets/glass/glass_search_field.dart';
 import '../../widgets/media_card.dart' show ArtworkImage, MediaCard;
 import '../../widgets/net_image.dart' show NetImage;
+import '../../widgets/sort_button.dart';
+import '../../widgets/view_mode_toggle.dart';
+import '../../widgets/edge_fade_scroll.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
@@ -881,14 +884,7 @@ class SpokenLibraryScreen extends ConsumerWidget {
       ),
       data: (books) => books.isEmpty
           ? const EmptyState(icon: Symbols.menu_book_rounded, message: 'Knihovna audioknih je zatím prázdná.')
-          : RefreshIndicator(
-              onRefresh: () async => ref.invalidate(spokenBooksProvider),
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(
-                    AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
-                children: [for (final b in books) _BookTile(book: b)],
-              ),
-            ),
+          : _BooksLibrary(books: books),
     );
     // Stejný rozsah jako hudební Knihovna; Offline = epizody v zařízení.
     final offline = ref.watch(libraryScopeProvider) == LibraryScope.offline;
@@ -903,6 +899,165 @@ class SpokenLibraryScreen extends ConsumerWidget {
                 Expanded(child: kind == SpokenKind.books ? booksView : const MyPodcastsList()),
               ],
             ),
+    );
+  }
+}
+
+/// Řazení knih v Knihovně (jako u hudby).
+enum _BookSort { recent, added, title, author, length }
+
+const _bookSortLabels = {
+  _BookSort.recent: 'Naposledy poslouchané',
+  _BookSort.added: 'Přidáno',
+  _BookSort.title: 'Název',
+  _BookSort.author: 'Autor',
+  _BookSort.length: 'Délka',
+};
+
+final _bookSortProvider = StateProvider<_BookSort>((ref) => _BookSort.recent);
+final _bookViewProvider = StateProvider<ViewMode>((ref) => ViewMode.list);
+final _bookFilterProvider = StateProvider<String?>((ref) => null); // null | listening | finished
+
+/// Knihovna audioknih jako hudební: hledání, řazení, filtr, seznam / karty.
+/// Rozsah (Moje / Stažené / Vše) je společný s hudbou (`LibraryScopeToggle`).
+class _BooksLibrary extends ConsumerStatefulWidget {
+  const _BooksLibrary({required this.books});
+  final List<SpokenBook> books;
+
+  @override
+  ConsumerState<_BooksLibrary> createState() => _BooksLibraryState();
+}
+
+class _BooksLibraryState extends ConsumerState<_BooksLibrary> {
+  String _query = '';
+
+  static String _fold(String text) => text.toLowerCase();
+
+  List<SpokenBook> _visible(LibraryScope scope, _BookSort sort, String? filter) {
+    final words = _fold(_query).split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    var books = widget.books.where((b) {
+      if (scope == LibraryScope.mine && !b.mine) return false;
+      if (filter == 'listening' && !b.inProgress) return false;
+      if (filter == 'finished' && !(b.progress?.finished ?? false)) return false;
+      if (words.isEmpty) return true;
+      final text = _fold([b.title, b.author ?? '', b.narrator ?? ''].join(' '));
+      return words.every(text.contains);
+    }).toList();
+    int byText(String a, String b) => a.toLowerCase().compareTo(b.toLowerCase());
+    DateTime old = DateTime(2000);
+    switch (sort) {
+      case _BookSort.recent:
+        books.sort((a, b) => (b.progress?.updatedAt ?? b.createdAt ?? old).compareTo(a.progress?.updatedAt ?? a.createdAt ?? old));
+      case _BookSort.added:
+        books.sort((a, b) => (b.createdAt ?? old).compareTo(a.createdAt ?? old));
+      case _BookSort.title:
+        books.sort((a, b) => byText(a.title, b.title));
+      case _BookSort.author:
+        books.sort((a, b) => byText(a.author ?? '~', b.author ?? '~'));
+      case _BookSort.length:
+        books.sort((a, b) => (b.durationMs ?? 0).compareTo(a.durationMs ?? 0));
+    }
+    return books;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = ref.watch(libraryScopeProvider);
+    final sort = ref.watch(_bookSortProvider);
+    final view = ref.watch(_bookViewProvider);
+    final filter = ref.watch(_bookFilterProvider);
+    final books = _visible(scope, sort, filter);
+    final bottom = AppSpacing.lg + navBottomInset(context);
+    final header = [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+        child: GlassSearchField(
+          hintText: 'Hledat v knihovně',
+          onChanged: (q) => setState(() => _query = q.trim()),
+          onCleared: () => setState(() => _query = ''),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xs),
+        child: Row(
+          children: [
+            Expanded(
+              child: EdgeFadeScroll(
+                child: Row(
+                  children: [
+                    SortButton<_BookSort>(
+                      value: sort,
+                      labels: _bookSortLabels,
+                      onChanged: (v) => ref.read(_bookSortProvider.notifier).state = v,
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    FilterChip(
+                      label: const Text('Rozposlouchané'),
+                      selected: filter == 'listening',
+                      onSelected: (on) => ref.read(_bookFilterProvider.notifier).state = on ? 'listening' : null,
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    FilterChip(
+                      label: const Text('Dočtené'),
+                      selected: filter == 'finished',
+                      onSelected: (on) => ref.read(_bookFilterProvider.notifier).state = on ? 'finished' : null,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            ViewModeToggle(mode: view, onChanged: (m) => ref.read(_bookViewProvider.notifier).state = m),
+          ],
+        ),
+      ),
+    ];
+    final empty = Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xl),
+      child: EmptyState(
+        icon: Symbols.menu_book_rounded,
+        message: _query.isNotEmpty || filter != null
+            ? 'Nic neodpovídá.'
+            : 'Tvoje knihy tu budou, až nějakou stáhneš. Ostatní knihy na serveru ukáže rozsah „Vše“.',
+      ),
+    );
+    return RefreshIndicator(
+      onRefresh: () async => ref.invalidate(spokenBooksProvider),
+      child: CustomScrollView(
+        slivers: [
+          SliverList(delegate: SliverChildListDelegate(header)),
+          if (books.isEmpty)
+            SliverToBoxAdapter(child: empty)
+          else if (view == ViewMode.list)
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, bottom),
+              sliver: SliverList.builder(itemCount: books.length, itemBuilder: (_, i) => _BookTile(book: books[i])),
+            )
+          else
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, bottom),
+              sliver: SliverGrid.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 180,
+                  mainAxisSpacing: AppSpacing.sm,
+                  crossAxisSpacing: AppSpacing.sm,
+                  childAspectRatio: 0.72,
+                ),
+                itemCount: books.length,
+                itemBuilder: (context, i) {
+                  final b = books[i];
+                  return MediaCard(
+                    title: b.title,
+                    subtitle: b.isReady ? (b.author ?? formatHours(b.durationMs)) : _statusLine(b),
+                    imageUrl: b.coverUrl,
+                    placeholderIcon: Symbols.menu_book_rounded,
+                    onTap: () => context.push('/spoken/book/${b.id}'),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:opentify_client/features/spoken/podcast_data.dart';
 import 'package:opentify_client/features/spoken/spoken_data.dart';
 import 'package:opentify_client/features/spoken/spoken_screens.dart';
+import 'package:opentify_client/state/library_scope.dart';
 import 'package:opentify_client/theme/app_theme.dart';
 
 SpokenBook _book(String id, String status, {Map<String, dynamic>? progress, double dl = 0, bool mine = true}) =>
@@ -161,6 +162,29 @@ void main() {
     expect(find.text('Otevřít'), findsOneWidget);
     expect(find.text('Stáhnout'), findsOneWidget);
     expect(find.text('poprvé vyšlo 1942'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('Knihovna audioknih: hledání, rozsah Moje a karty', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1600 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final saturnin = _book('a', 'ready');
+    final other = SpokenBook.fromJson({'id': 'o', 'title': 'Krakatit', 'author': 'Karel Čapek', 'releaseTitle': 'x', 'status': 'ready', 'mine': false});
+    await tester.pumpWidget(_app(const SpokenLibraryScreen(), [
+      spokenBooksProvider.overrideWith((ref) async => [saturnin, other]),
+      libraryScopeProvider.overrideWith((ref) => LibraryScopeController(ref)..state = LibraryScope.all),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Hledat v knihovně'), findsOneWidget);
+    expect(find.text('Krakatit'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, 'čapek');
+    await tester.pump();
+    expect(find.text('Krakatit'), findsOneWidget);
+    expect(find.textContaining('Saturnin'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));

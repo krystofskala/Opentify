@@ -107,6 +107,7 @@ class SpokenBook {
     this.files = const [],
     this.playableFiles = 0,
     this.mine = true,
+    this.createdAt,
   });
 
   factory SpokenBook.fromJson(Map<String, dynamic> j) {
@@ -127,6 +128,7 @@ class SpokenBook {
       files: [for (final f in j['files'] as List<dynamic>? ?? const []) SpokenFileItem.fromJson(f as Map<String, dynamic>)],
       playableFiles: (j['playableFiles'] as num?)?.toInt() ?? (j['files'] as List<dynamic>? ?? const []).length,
       mine: j['mine'] as bool? ?? true,
+      createdAt: DateTime.tryParse(j['createdAt'] as String? ?? ''),
     );
   }
 
@@ -152,6 +154,9 @@ class SpokenBook {
   /// O knihu jsem žádal, nebo ji poslouchám. Ostatní knihy na serveru jsou
   /// na Domů ve vlastní sekci "Knihy ostatních".
   final bool mine;
+
+  /// Kdy se kniha objevila na serveru (řazení "Přidáno").
+  final DateTime? createdAt;
 
   bool get isReady => status == 'ready';
 
