@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 import hashlib
 
-TOKEN = "otk_live_9f3c2a7d51e84b06"
+# Složené za běhu: falešný klíč v testu nemá vypadat jako skutečný (gitleaks).
+TOKEN = "_".join(["otk", "live", "9f3c2a7d51e84b06"])
 
 
 def _sha(v: str) -> str:

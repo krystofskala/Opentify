@@ -1,0 +1,2 @@
+# Falešný klíč v testu pasti (backend/tests/test_canary.py), žádné skutečné tajemství.
+6f857c95d02bb27a8bea5f8956ab755e28c47eec:backend/tests/test_canary.py:generic-api-key:8
