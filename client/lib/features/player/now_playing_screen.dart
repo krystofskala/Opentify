@@ -1124,6 +1124,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           return parts == null ? null : SpokenHeart(bookId: parts.bookId, size: 22, color: idle);
         }
         return _likeButton(playback, fg);
+      // Na později, rádio, sdílení skladby a playlist jsou pro hudbu -- u knihy
+      // nebo epizody ("sp:" / "pc:") vedly na neexistující skladbu (odkaz
+      // /track/sp:…, 404, nesmyslná položka Na později; audit 8. 10.). Jako
+      // menu ⋯ (`player_more_sheet`): u mluveného slova se tlačítko vynechá.
+      case PlayerButton.later || PlayerButton.radio || PlayerButton.share || PlayerButton.playlist
+          when np != null && AudioPlayerController.isSpokenId(np.recordingId):
+        return null;
       case PlayerButton.later:
         final later = np != null &&
             (ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.track, np.recordingId))) !=

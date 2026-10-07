@@ -182,7 +182,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                 ref.watch(audioPlayerControllerProvider.select((s) => s.position)),
                               ),
                             ),
-                          if (nowPlaying != null)
+                          // Jen skladba -- u knihy / epizody volalo /library/tracks/sp:…
+                          // a skončilo 404 (audit 8. 10.).
+                          if (song)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Symbols.sync_problem_rounded),
