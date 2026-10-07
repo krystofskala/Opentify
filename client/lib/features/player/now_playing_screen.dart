@@ -1114,9 +1114,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         }
         return _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, fg);
       case PlayerButton.queue:
-        // Kniha: fronta = její kapitoly, ty má tlačítko Kapitoly (dvě stejné
-        // funkce byly matoucí, živě 8. 10.).
-        if (np != null && AudioPlayerController.spokenParts(np.recordingId) != null) return null;
+        // I u knihy: fronta drží knihu i hudbu dohromady, Kapitoly jen
+        // kapitoly téhle knihy -- nejsou totéž (uživatel 8. 10.).
         return _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, fg);
       case PlayerButton.like:
         if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) {
