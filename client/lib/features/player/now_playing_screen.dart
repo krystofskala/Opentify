@@ -1062,8 +1062,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               // Uživatel si vybírá až 5 tlačítek (⋯ › Upravit tlačítka).
               children: [
+                // Tlačítko, které u přehrávaného nemá smysl (srdíčko u knihy),
+                // se nevykreslí -- dřív po něm zůstalo prázdné místo a řada byla
+                // posunutá doleva (živě 8. 10.).
                 for (final button in ref.watch(playerButtonsProvider))
-                  _playerButton(button, accent, playback, controller),
+                  if (_playerButton(button, accent, playback, controller) case final w?) w,
               ],
             ),
           ],
@@ -1072,7 +1075,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     ));
   }
 
-  Widget _playerButton(
+  Widget? _playerButton(
     PlayerButton button,
     Color accent,
     AudioPlayerState playback,
@@ -1092,13 +1095,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         // Mluvené slovo: místo textu písně kapitoly knihy (podcast nic).
         if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) {
           final parts = AudioPlayerController.spokenParts(np.recordingId);
-          if (parts == null) return const SizedBox.square(dimension: 44);
+          if (parts == null) return null;
           return plain('Kapitoly', Symbols.toc_rounded, () => showChaptersSheet(context, parts.bookId));
         }
         return _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, fg);
       case PlayerButton.queue:
         return _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, fg);
       case PlayerButton.like:
+        if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) return null;
         return _likeButton(playback, fg);
       case PlayerButton.later:
         final later = np != null &&

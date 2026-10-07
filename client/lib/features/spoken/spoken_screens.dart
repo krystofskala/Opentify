@@ -136,6 +136,8 @@ class SpokenHomeScreen extends ConsumerWidget {
     return Scaffold(
       appBar: const SectionAppBar('Mluvené slovo', actions: [AppModeToggle()]),
       body: async.when(
+        // Nové načtení (průběh stahování) nechá vidět původní obsah -- jinak bliklo načítání.
+        skipLoadingOnReload: true,
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(
           message: 'Knihy se nepodařilo načíst.',
@@ -876,6 +878,8 @@ class SpokenLibraryScreen extends ConsumerWidget {
     final kind = ref.watch(spokenKindProvider);
     final async = ref.watch(spokenBooksProvider);
     final booksView = async.when(
+        // Nové načtení (průběh stahování) nechá vidět původní obsah -- jinak bliklo načítání.
+        skipLoadingOnReload: true,
       loading: () => const LoadingState(),
       error: (e, _) => ErrorState(
         message: 'Knihy se nepodařilo načíst.',
@@ -1075,6 +1079,8 @@ class SpokenBookScreen extends ConsumerWidget {
     return Scaffold(
       appBar: const SectionAppBar(''),
       body: async.when(
+        // Nové načtení (průběh stahování) nechá vidět původní obsah -- jinak bliklo načítání.
+        skipLoadingOnReload: true,
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(
           message: 'Knihu se nepodařilo načíst.',
@@ -1202,6 +1208,8 @@ class SpokenWorkScreen extends ConsumerWidget {
     return Scaffold(
       appBar: const SectionAppBar(''),
       body: async.when(
+        // Nové načtení (průběh stahování) nechá vidět původní obsah -- jinak bliklo načítání.
+        skipLoadingOnReload: true,
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(
           message: 'Knihu se nepodařilo načíst.',
@@ -1394,6 +1402,8 @@ class SpokenPersonScreen extends ConsumerWidget {
     return Scaffold(
       appBar: const SectionAppBar(''),
       body: async.when(
+        // Nové načtení (průběh stahování) nechá vidět původní obsah -- jinak bliklo načítání.
+        skipLoadingOnReload: true,
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(
           message: 'Stránku se nepodařilo načíst.',

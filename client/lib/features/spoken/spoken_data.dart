@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart' show ApiException;
@@ -386,12 +388,36 @@ String spokenPersonPath(String name, {bool narrator = false}) =>
     Uri(path: '/spoken/person', queryParameters: {'name': name, if (narrator) 'role': 'narrator'}).toString();
 
 /// Počítadlo událostí `spoken.book` z WS (stav stahování knihy).
-final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) async* {
+final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) {
+  // Průběh stahování chodí každých pár sekund -- seznamy se nenačítají
+  // znovu častěji než jednou za 5 s (appka "se pořád obnovovala a blikala").
+  // Zpráva z doby čekání se pošle po jeho konci, poslední stav se neztratí.
+  final controller = StreamController<int>();
   var n = 0;
-  yield n;
-  await for (final e in ref.watch(realtimeClientProvider).events) {
-    if (e is UnknownEvent && e.type == 'spoken.book') yield ++n;
+  var last = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? pending;
+  void emit() {
+    pending = null;
+    last = DateTime.now();
+    controller.add(++n);
   }
+
+  controller.add(n);
+  final sub = ref.watch(realtimeClientProvider).events.listen((e) {
+    if (e is! UnknownEvent || e.type != 'spoken.book') return;
+    final wait = const Duration(seconds: 5) - DateTime.now().difference(last);
+    if (wait <= Duration.zero) {
+      emit();
+    } else {
+      pending ??= Timer(wait, emit);
+    }
+  });
+  ref.onDispose(() {
+    pending?.cancel();
+    sub.cancel();
+    controller.close();
+  });
+  return controller.stream;
 });
 
 /// `sizeBytes`: u výběru ze sbírky velikost jen vybraných souborů (limit
