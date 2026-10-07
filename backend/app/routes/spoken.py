@@ -113,6 +113,45 @@ async def search_foreign(q: str, session: Session = Depends(get_session)):
     return {"releases": releases}
 
 
+@spoken_router.get("/search/rozhlas")
+async def search_rozhlas(q: str, session: Session = Depends(get_session)):
+    """Archiv Českého rozhlasu (mujrozhlas.cz): četba a rozhlasové hry, které
+    jdou právě stáhnout. Zvlášť, ať ostatní hledání nečeká."""
+    from app.spoken import rozhlas
+    from app.spoken.youtube import video_id
+
+    q = q.strip()
+    if len(q) < 2 or video_id(q):
+        return {"releases": []}
+    try:
+        releases = [rozhlas.public(r) for r in await rozhlas.search(q)]
+    except Exception as e:  # noqa: BLE001 -- výpadek rozhlasu nesmí shodit hledání
+        raise HTTPException(status_code=502, detail="Český rozhlas teď neodpovídá") from e
+    known = {
+        b.source_ref: b
+        for b in session.exec(
+            select(SpokenBook).where(SpokenBook.source_ref.in_([r["ref"] for r in releases]))  # type: ignore[attr-defined]
+        ).all()
+    }
+    for r in releases:
+        if book := known.get(r["ref"]):
+            r["bookId"], r["status"] = book.id, book.status
+    return {"releases": releases}
+
+
+@spoken_router.get("/releases/rozhlas/files")
+async def rozhlas_release_files(ref: str):
+    """Obsah vydání z Českého rozhlasu: díly, které jdou stáhnout."""
+    from app.spoken import rozhlas
+
+    rel = await rozhlas.release(ref.strip()) if rozhlas.is_ref(ref.strip()) else None
+    if rel is None:
+        raise HTTPException(status_code=404, detail="pořad už není k poslechu")
+    names = rozhlas.part_titles(rel["title"], rel["episodes"])
+    files = [{"index": i, "name": names[i], "size": int(ep.get("size") or 0)} for i, ep in enumerate(rel["episodes"])]
+    return {"groups": [{"folder": "", "size": sum(f["size"] for f in files), "files": files}]}
+
+
 _AUDIO_EXT = (".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus", ".aac", ".wma")
 
 
@@ -173,7 +212,7 @@ class AcquireIn(BaseModel):
     title: str
     sizeBytes: int | None = None
     coverUrl: str | None = None
-    source: str = "sktorrent"  # sktorrent | slskd | youtube
+    source: str = "sktorrent"  # sktorrent | slskd | youtube | rozhlas
     ref: str | None = None  # slskd: výsledek z /search/foreign
     # Sbírka: jen tyhle soubory (indexy z /releases/{infohash}/files) jako
     # jedna kniha; `folder` = její název.
@@ -199,11 +238,19 @@ async def acquire(
     if book is not None and book.status != "failed":
         return book_out(book)  # už je / stahuje se -- nic nového
     found = None
+    size = body.sizeBytes
     if body.source == "slskd":
         found = await slsk_books.cached(ref)
         if found is None:
             raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
-    size = found["size"] if found else body.sizeBytes
+        size = found["size"]
+    elif body.source == "rozhlas":
+        from app.spoken import rozhlas
+
+        rel = await rozhlas.release(ref)
+        if rel is None:
+            raise HTTPException(status_code=404, detail="pořad už není k poslechu")
+        size = rel["sizeBytes"]
     public = request is not None and is_public(request)
     reason = await asyncio.to_thread(download_limits.book_approval_reason, user_id, size, public=public)
     if reason:
@@ -233,6 +280,13 @@ def _book_ref(body: AcquireIn) -> str:
         if not vid:
             raise HTTPException(status_code=422, detail="neplatný odkaz na YouTube")
         return f"yt:{vid}"
+    if body.source == "rozhlas":
+        from app.spoken.rozhlas import is_ref
+
+        ref = (body.ref or "").strip()
+        if not is_ref(ref):
+            raise HTTPException(status_code=422, detail="neplatný pořad Českého rozhlasu")
+        return ref
     if body.source == "slskd":
         ref = (body.ref or "").strip()
         if not ref:
@@ -266,6 +320,29 @@ async def acquire_now(body: AcquireIn, session: Session, user_id: str, found: di
             title=guess["title"][:300],
             narrator=guess["narrator"],
             size_bytes=body.sizeBytes,
+            requested_by_user_id=user_id,
+        )
+    elif book is None and body.source == "rozhlas":
+        from app.spoken import rozhlas
+
+        rel = await rozhlas.release(ref)
+        if rel is None:
+            raise HTTPException(status_code=404, detail="pořad už není k poslechu")
+        fields = rozhlas.book_fields(rel)
+        book = SpokenBook(
+            source="rozhlas",
+            source_ref=ref,
+            source_files={k: rel.get(k) for k in ("title", "coverUrl", "description", "kind", "episodes")},
+            language="cs",
+            release_title=rel["title"][:300],
+            title=fields["title"],
+            author=fields["author"],
+            narrator=fields["narrator"],
+            kind=fields["kind"],
+            description=fields["description"],
+            # Katalog audioknihy.cz rozhlasové pořady nezná -- název je z rozhlasu.
+            metadata_source="rozhlas",
+            size_bytes=rel["sizeBytes"],
             requested_by_user_id=user_id,
         )
     elif book is None:
@@ -718,6 +795,36 @@ def _failed_book(session: Session, book_id: str, user_id: str) -> SpokenBook:
     if book.status != "failed":
         raise HTTPException(status_code=409, detail="jde jen u knihy, jejíž stažení selhalo")
     return book
+
+
+class KindIn(BaseModel):
+    kind: str  # book | drama
+
+
+@spoken_router.put("/books/{book_id}/kind")
+async def set_kind(
+    book_id: str,
+    body: KindIn,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+    _local_only: None = Depends(deny_public),
+):
+    """Ručně: audiokniha, nebo rozhlasová hra (odhad z názvu se může plést).
+    Kniha je společná, takže to platí pro všechny profily."""
+    if body.kind not in ("book", "drama"):
+        raise HTTPException(status_code=400, detail="Neznámý druh.")
+    book = session.get(SpokenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="kniha nenalezena")
+    book.kind = body.kind
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    from app.events import publish_event
+
+    out = book_out(book)
+    await publish_event(current[0], "spoken.book", out)
+    return out
 
 
 @spoken_router.post("/books/{book_id}/retry", status_code=202)

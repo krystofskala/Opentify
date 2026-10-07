@@ -41,6 +41,7 @@ void main() {
             _book('c', 'pending'),
             _book('d', 'ready'),
             _book('o', 'ready', mine: false),
+            SpokenBook.fromJson({'id': 'h', 'title': 'Bílá velryba', 'releaseTitle': 'x', 'status': 'ready', 'kind': 'drama'}),
           ]),
       spokenHomeLayoutProvider.overrideWith((ref) async => null),
       spokenRecommendationsProvider.overrideWith((ref) async => (
@@ -78,6 +79,9 @@ void main() {
     expect(find.text('Knihy ostatních'), findsOneWidget);
     expect(find.text('Stahuje se'), findsOneWidget);
     expect(find.text('Stahuje se · 40 %'), findsOneWidget);
+    // Rozhlasová hra má vlastní sekci, mezi knihami není.
+    expect(find.text('Rozhlasové hry'), findsOneWidget);
+    expect(find.text('Bílá velryba'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
@@ -213,15 +217,24 @@ void main() {
             ],
             loginConfigured: false,
           )),
+      spokenRozhlasSearchProvider.overrideWith((ref, q) async => [
+            SpokenRelease.fromJson({
+              'source': 'rozhlas', 'ref': 'cro:s:x', 'title': 'Alena Mornštajnová: Čas vos', 'seeders': 1,
+              'files': 2, 'totalParts': 14, 'complete': false, 'uploader': 'Četba na pokračování', 'durationText': '55 min',
+            }),
+          ]),
+      spokenForeignSearchProvider.overrideWith((ref, q) async => <SpokenRelease>[]),
     ]));
     await tester.pump();
     await tester.enterText(find.byType(EditableText), 'saturnin');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Stáhnout'), findsOneWidget);
+    expect(find.text('Stáhnout'), findsNWidgets(2));
     expect(find.text('Stahuje se'), findsOneWidget);
     expect(find.textContaining('účet SkTorrent'), findsOneWidget);
+    expect(find.text('Český rozhlas'), findsOneWidget);
+    expect(find.text('Četba na pokračování · 55 min · jen 2 z 14 dílů'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));

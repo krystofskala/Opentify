@@ -30,6 +30,8 @@ SECTIONS: list[tuple[str, str]] = [
     ("my_books", "Tvoje knihy"),
     ("rec_books", "Doporučené knihy"),
     ("others_books", "Knihy ostatních"),
+    # Rozhlasové hry zvlášť od audioknih (druh knihy, 8. 10.).
+    ("dramas", "Rozhlasové hry"),
     ("downloading", "Stahuje se"),
 ]
 # Nové sekce, které by časem přibyly, si profil zapne sám.

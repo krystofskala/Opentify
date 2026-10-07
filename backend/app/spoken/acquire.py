@@ -204,9 +204,96 @@ async def _start_youtube(book: SpokenBook) -> None:
 _yt_tasks: dict[str, asyncio.Task] = {}
 
 
+# --- Český rozhlas (díly seriálu = soubory knihy) ---------------------------
+# Stejně jako YouTube: stahuje jeden worker pod zámkem; hotové díly se
+# importují průběžně (první jde poslouchat hned), po restartu se hotové
+# soubory nestahují znovu.
+
+
+async def _rozhlas_download(book_id: str, data: dict) -> None:
+    from app.redis_bus import get_redis
+    from app.spoken import rozhlas
+
+    r = get_redis()
+    loop = asyncio.get_running_loop()
+    dest = SPOKEN_ROOT / book_id
+    episodes = data.get("episodes") or []
+    last = [0.0]
+    done: list[Path] = []
+
+    def on_progress(share: float) -> None:
+        if share - last[0] < 0.01:
+            return
+        last[0] = share
+        asyncio.run_coroutine_threadsafe(_save(book_id, progress=round(share, 3)), loop)
+        asyncio.run_coroutine_threadsafe(r.set(f"spoken:cro:lock:{book_id}", "1", ex=_YT_LOCK_S), loop)
+
+    def on_file(path: Path) -> None:
+        done.append(path)
+        import_book(book_id, dest, list(done))
+        rozhlas_finish(book_id, dest, data)
+
+    try:
+        await asyncio.to_thread(rozhlas.download, episodes, dest, on_progress, on_file)
+        logger.info("kniha %s připravená z Českého rozhlasu (%d dílů)", book_id, len(episodes))
+        await _save(book_id, status="ready", progress=1.0, error=None, finished_at=utcnow(), storage_dir=str(dest))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("rozhlas kniha %s: %s", book_id, e)
+        await _save(book_id, status="failed", error="Český rozhlas: díl se nepodařilo stáhnout")
+    finally:
+        await r.delete(f"spoken:cro:lock:{book_id}")
+
+
+def rozhlas_finish(book_id: str, dest: Path, data: dict) -> None:
+    """Názvy dílů, obal (přes server), popis, autor / interpret a druh
+    z rozhlasu -- tagy v mp3 bývají prázdné nebo jen název pořadu."""
+    from app.spoken import rozhlas
+
+    episodes = data.get("episodes") or []
+    titles = dict(zip(
+        (rozhlas.file_name(i, ep) for i, ep in enumerate(episodes)),
+        rozhlas.part_titles(data.get("title") or "", episodes),
+    ))
+    cover = None
+    if (dest / "cover.jpg").is_file() or (data.get("coverUrl") and rozhlas.fetch_cover(data["coverUrl"], dest / "cover.jpg")):
+        cover = f"spoken/books/{book_id}/cover"
+    fields = rozhlas.book_fields(data)
+    with Session(engine) as session:
+        book = session.get(SpokenBook, book_id)
+        if book is None:
+            return
+        for f in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():
+            f.title = titles.get(Path(f.path).name, f.title)
+            session.add(f)
+        book.title = fields["title"]
+        book.author = fields["author"] or book.author
+        book.narrator = fields["narrator"] or book.narrator
+        book.description = fields["description"] or book.description
+        # Ručně přepnutý druh (rozhlasová hra / kniha) se nepřepisuje.
+        book.kind = book.kind or fields["kind"]
+        book.cover_url = cover or book.cover_url
+        session.add(book)
+        session.commit()
+
+
+async def _start_rozhlas(book: SpokenBook) -> None:
+    from app.redis_bus import get_redis
+
+    data = book.source_files or {}
+    if not data.get("episodes"):
+        await _save(book.id, status="failed", error="Český rozhlas: chybí díly")
+        return
+    if not await get_redis().set(f"spoken:cro:lock:{book.id}", "1", nx=True, ex=_YT_LOCK_S):
+        return  # stahuje jiný worker
+    await _save(book.id, status="downloading", error=None)
+    _yt_tasks[book.id] = asyncio.create_task(_rozhlas_download(book.id, data))
+
+
 async def _start(book: SpokenBook) -> None:
     if book.source == "youtube":
         return await _start_youtube(book)
+    if book.source == "rozhlas":
+        return await _start_rozhlas(book)
     if book.source == "slskd":
         return await _start_slskd(book)
     infohash, indices = _infohash(book), _indices(book)
@@ -287,6 +374,8 @@ async def _follow(book: SpokenBook) -> None:
     if book.source == "youtube":
         # Běží (zámek drží worker, který stahuje) -- jinak (restart) znovu.
         return await _start_youtube(book)
+    if book.source == "rozhlas":
+        return await _start_rozhlas(book)
     if book.source == "slskd":
         return await _follow_slskd(book)
     t = await qbit.info(_infohash(book))

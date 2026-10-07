@@ -152,13 +152,18 @@ class SpokenHomeScreen extends ConsumerWidget {
           ];
           final shelf = [
             for (final b in books)
-              if (b.isReady && b.mine && b.progress == null) b
+              if (b.isReady && b.mine && b.progress == null && !b.isDrama) b
+          ].take(20).toList();
+          // Rozhlasové hry zvlášť od audioknih -- moje i ostatních.
+          final dramas = [
+            for (final b in books)
+              if (b.isReady && b.isDrama) b
           ].take(20).toList();
           // Knihy, které už na serveru stáhl někdo jiný -- pustit hned, bez
           // dalšího stahování (uživatel 7. 10.).
           final others = [
             for (final b in books)
-              if (b.isReady && !b.mine) b
+              if (b.isReady && !b.mine && !b.isDrama) b
           ].take(20).toList();
           // Pořadí a skryté sekce podle profilu (Upravit Domů mluveného slova).
           final layout = ref.watch(spokenHomeLayoutProvider).valueOrNull;
@@ -306,6 +311,20 @@ class SpokenHomeScreen extends ConsumerWidget {
                             subtitle: b.author ?? formatHours(b.durationMs),
                             imageUrl: b.coverUrl,
                             placeholderIcon: Symbols.menu_book_rounded,
+                            onTap: () => context.push('/spoken/book/${b.id}'),
+                          ),
+                      ]),
+                    ],
+                  if (dramas.isNotEmpty)
+                    'dramas': [
+                      const SectionHeader('Rozhlasové hry'),
+                      _Rail(children: [
+                        for (final b in dramas)
+                          MediaCard(
+                            title: b.title,
+                            subtitle: b.author ?? formatHours(b.durationMs),
+                            imageUrl: b.coverUrl,
+                            placeholderIcon: Symbols.theater_comedy_rounded,
                             onTap: () => context.push('/spoken/book/${b.id}'),
                           ),
                       ]),
@@ -491,8 +510,9 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
                 ? EmptyState(
                     icon: books ? Symbols.menu_book_rounded : Symbols.podcasts_rounded,
                     message: books
-                        ? 'Hledá se v českých a slovenských audioknihách. Audioknihu nebo rozhlasovou hru z YouTube '
-                            'přidáš vložením odkazu na video. Stažení začne až po klepnutí na Stáhnout.'
+                        ? 'Hledá se v českých a slovenských audioknihách a v archivu Českého rozhlasu (četba, '
+                            'rozhlasové hry). Audioknihu nebo hru z YouTube přidáš vložením odkazu na video. '
+                            'Stažení začne až po klepnutí na Stáhnout.'
                         : 'Hledá se v katalogu podcastů. Pořad, který je jen na YouTube, přidáš vložením odkazu na kanál.',
                   )
                 : books
@@ -534,13 +554,22 @@ class _Results extends ConsumerWidget {
     final local = ref.watch(spokenLocalSearchProvider(query)).valueOrNull;
     // Záloha (Soulseek, typicky anglicky) se načítá zvlášť -- je pomalejší.
     final foreign = ref.watch(spokenForeignSearchProvider(query));
+    // Archiv Českého rozhlasu (četba, hry) -- taky zvlášť.
+    final rozhlas = ref.watch(spokenRozhlasSearchProvider(query));
+    final radio = rozhlas.valueOrNull ?? const <SpokenRelease>[];
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     final cz = czech.valueOrNull;
     final other = foreign.valueOrNull ?? const <SpokenRelease>[];
     if (czech.isLoading && foreign.isLoading) return const LoadingState();
     final hasLocal = local != null && (local.books.isNotEmpty || local.people.isNotEmpty);
-    if (cz != null && cz.releases.isEmpty && !foreign.isLoading && other.isEmpty && !hasLocal) {
+    if (cz != null &&
+        cz.releases.isEmpty &&
+        !foreign.isLoading &&
+        other.isEmpty &&
+        !rozhlas.isLoading &&
+        radio.isEmpty &&
+        !hasLocal) {
       return const EmptyState(
           icon: Symbols.menu_book_rounded, message: 'Nic se nenašlo – ani česky, ani v jiných jazycích.');
     }
@@ -601,6 +630,18 @@ class _Results extends ConsumerWidget {
             ),
           for (final r in cz.releases) _ReleaseTile(release: r),
         ],
+        const _Heading('Český rozhlas'),
+        if (rozhlas.isLoading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Text('Hledám v archivu rozhlasu…', style: muted),
+          )
+        else if (rozhlas.hasError)
+          Text('Archiv Českého rozhlasu teď neodpovídá.', style: muted)
+        else if (radio.isEmpty)
+          Text('Nic, co by teď šlo poslouchat.', style: muted)
+        else
+          for (final r in radio) _ReleaseTile(release: r),
         const _Heading('Anglicky a další jazyky'),
         if (foreign.isLoading)
           Padding(
@@ -635,7 +676,15 @@ class _ReleaseTile extends ConsumerWidget {
       leading: _Cover(url: r.coverUrl),
       title: Text(r.title, maxLines: 3, overflow: TextOverflow.ellipsis),
       subtitle: Text(
-        r.isYoutube
+        r.isRozhlas
+            ? [
+                r.uploader ?? 'Český rozhlas',
+                if (r.kind == 'drama') 'rozhlasová hra',
+                if (r.durationText != null) r.durationText!,
+                // Seriál, ze kterého jde stáhnout jen část (práva vypršela).
+                if (!r.complete && r.totalParts != null) 'jen ${r.files} z ${r.totalParts} dílů',
+              ].join(' · ')
+            : r.isYoutube
             ? ['YouTube', if (r.uploader != null) r.uploader!, if (r.durationText != null) r.durationText!].join(' · ')
             : [
                 formatSize(r.sizeBytes),
@@ -705,8 +754,8 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
   /// Jedna kniha: rovnou rozbalená a celá vybraná.
   bool get _single => widget.groups.length == 1;
 
-  /// Soulseek stahuje celou složku (výběr souborů jen u torrentu).
-  bool get _selectable => widget.release.source != 'slskd';
+  /// Soulseek a rozhlas stahují celé vydání (výběr souborů jen u torrentu).
+  bool get _selectable => widget.release.source != 'slskd' && widget.release.source != 'rozhlas';
 
   bool get _everything => widget.groups.every((g) => g.files.every((f) => _selected.contains(f.index)));
 
@@ -924,7 +973,7 @@ const _bookSortLabels = {
 
 final _bookSortProvider = StateProvider<_BookSort>((ref) => _BookSort.recent);
 final _bookViewProvider = StateProvider<ViewMode>((ref) => ViewMode.list);
-final _bookFilterProvider = StateProvider<String?>((ref) => null); // null | listening | finished
+final _bookFilterProvider = StateProvider<String?>((ref) => null); // null | listening | finished | drama
 
 /// Knihovna audioknih jako hudební: hledání, řazení, filtr, seznam / karty.
 /// Rozsah (Moje / Stažené / Vše) je společný s hudbou (`LibraryScopeToggle`).
@@ -947,6 +996,7 @@ class _BooksLibraryState extends ConsumerState<_BooksLibrary> {
       if (scope == LibraryScope.mine && !b.mine) return false;
       if (filter == 'listening' && !b.inProgress) return false;
       if (filter == 'finished' && !(b.progress?.finished ?? false)) return false;
+      if (filter == 'drama' && !b.isDrama) return false;
       if (words.isEmpty) return true;
       final text = _fold([b.title, b.author ?? '', b.narrator ?? ''].join(' '));
       return words.every(text.contains);
@@ -1009,6 +1059,12 @@ class _BooksLibraryState extends ConsumerState<_BooksLibrary> {
                       label: const Text('Dočtené'),
                       selected: filter == 'finished',
                       onSelected: (on) => ref.read(_bookFilterProvider.notifier).state = on ? 'finished' : null,
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    FilterChip(
+                      label: const Text('Rozhlasové hry'),
+                      selected: filter == 'drama',
+                      onSelected: (on) => ref.read(_bookFilterProvider.notifier).state = on ? 'drama' : null,
                     ),
                   ],
                 ),
@@ -1130,6 +1186,8 @@ class SpokenBookScreen extends ConsumerWidget {
                 style: muted,
                 textAlign: TextAlign.center,
               ),
+              // Druh: odhad z názvu / pořadu se může plést -- klepnutím přepnout.
+              if (book.isReady) Center(child: _KindToggle(book: book)),
               // Popis knihy, když se najde jistě (Google Books).
               if (ref.watch(spokenBookDescriptionProvider(book.id)).valueOrNull case final description?) ...[
                 const SizedBox(height: AppSpacing.sm),
@@ -1487,6 +1545,30 @@ class SpokenPersonScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Audiokniha / rozhlasová hra -- ruční přepnutí (platí pro všechny profily).
+class _KindToggle extends ConsumerWidget {
+  const _KindToggle({required this.book});
+  final SpokenBook book;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => TextButton.icon(
+        icon: Icon(book.isDrama ? Symbols.theater_comedy_rounded : Symbols.menu_book_rounded, size: 18),
+        label: Text(book.isDrama ? 'Rozhlasová hra' : 'Audiokniha'),
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+        onPressed: () async {
+          final next = book.isDrama ? 'book' : 'drama';
+          try {
+            await setSpokenKind(ref, book.id, next);
+            if (context.mounted) {
+              toast(context, next == 'drama' ? 'Přesunuto mezi rozhlasové hry' : 'Přesunuto mezi audioknihy');
+            }
+          } catch (_) {
+            if (context.mounted) toast(context, 'Nepodařilo se uložit');
+          }
+        },
+      );
 }
 
 /// Stažení selhalo: znovu, jiná verze (hledání s názvem knihy), nebo pryč.

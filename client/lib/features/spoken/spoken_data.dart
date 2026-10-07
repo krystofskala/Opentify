@@ -26,6 +26,9 @@ class SpokenRelease {
     this.files,
     this.uploader,
     this.durationText,
+    this.totalParts,
+    this.complete = true,
+    this.kind,
   });
 
   factory SpokenRelease.fromJson(Map<String, dynamic> j) => SpokenRelease(
@@ -42,6 +45,9 @@ class SpokenRelease {
         status: j['status'] as String?,
         uploader: j['uploader'] as String?,
         durationText: j['durationText'] as String?,
+        totalParts: (j['totalParts'] as num?)?.toInt(),
+        complete: j['complete'] as bool? ?? true,
+        kind: j['kind'] as String?,
       );
 
   final String infohash;
@@ -53,7 +59,8 @@ class SpokenRelease {
   final String? bookId;
   final String? status;
 
-  /// sktorrent (česky) | slskd (Soulseek, typicky anglicky) | youtube (odkaz na video).
+  /// sktorrent (česky) | slskd (Soulseek, typicky anglicky) | youtube (odkaz na
+  /// video) | rozhlas (archiv Českého rozhlasu).
   final String source;
   final String? ref;
   final int? files;
@@ -62,7 +69,16 @@ class SpokenRelease {
   final String? uploader;
   final String? durationText;
 
+  /// Český rozhlas: kolik dílů seriálu vůbec bylo (`files` = kolik jich jde
+  /// stáhnout) -- u části vypršela práva.
+  final int? totalParts;
+  final bool complete;
+
+  /// book | drama (rozhlasová hra) -- u rozhlasu podle pořadu.
+  final String? kind;
+
   bool get isYoutube => source == 'youtube';
+  bool get isRozhlas => source == 'rozhlas';
 }
 
 class SpokenProgress {
@@ -120,6 +136,7 @@ class SpokenBook {
     this.playableFiles = 0,
     this.mine = true,
     this.createdAt,
+    this.kind = 'book',
   });
 
   factory SpokenBook.fromJson(Map<String, dynamic> j) {
@@ -141,6 +158,7 @@ class SpokenBook {
       playableFiles: (j['playableFiles'] as num?)?.toInt() ?? (j['files'] as List<dynamic>? ?? const []).length,
       mine: j['mine'] as bool? ?? true,
       createdAt: DateTime.tryParse(j['createdAt'] as String? ?? ''),
+      kind: j['kind'] as String? ?? 'book',
     );
   }
 
@@ -169,6 +187,10 @@ class SpokenBook {
 
   /// Kdy se kniha objevila na serveru (řazení "Přidáno").
   final DateTime? createdAt;
+
+  /// book | drama -- rozhlasová hra má na Domů a v Knihovně vlastní místo.
+  final String kind;
+  bool get isDrama => kind == 'drama';
 
   bool get isReady => status == 'ready';
 
@@ -489,6 +511,7 @@ Future<bool> acquireSpoken(WidgetRef ref, SpokenRelease r, {List<int>? files, St
   ref.invalidate(spokenBooksProvider);
   ref.invalidate(spokenSearchProvider);
   ref.invalidate(spokenForeignSearchProvider);
+  ref.invalidate(spokenRozhlasSearchProvider);
   return json['status'] != 'awaiting_approval';
 }
 
@@ -518,6 +541,20 @@ final spokenForeignSearchProvider = FutureProvider.autoDispose.family<List<Spoke
   return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
 });
 
+/// Archiv Českého rozhlasu (četba, rozhlasové hry) -- zvlášť, ať ostatní
+/// hledání nečeká.
+final spokenRozhlasSearchProvider = FutureProvider.autoDispose.family<List<SpokenRelease>, String>((ref, q) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/search/rozhlas', query: {'q': q});
+  return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
+});
+
+/// Audiokniha, nebo rozhlasová hra (ručně, platí pro všechny profily).
+Future<void> setSpokenKind(WidgetRef ref, String bookId, String kind) async {
+  await ref.read(apiClientProvider).putJson('/spoken/books/$bookId/kind', body: {'kind': kind});
+  ref.invalidate(spokenBookProvider(bookId));
+  ref.invalidate(spokenBooksProvider);
+}
+
 /// Kniha (složka) ve sbírce a její zvukové soubory (kapitoly).
 typedef ReleaseFile = ({int index, String name, int size});
 typedef ReleaseGroup = ({String folder, int size, List<ReleaseFile> files});
@@ -528,6 +565,7 @@ Future<List<ReleaseGroup>> fetchReleaseGroups(WidgetRef ref, SpokenRelease r) as
   final json = switch (r.source) {
     'slskd' => await api.getJson('/spoken/releases/foreign/files', query: {'ref': r.ref ?? ''}),
     'youtube' => await api.getJson('/spoken/releases/youtube/files', query: {'ref': r.ref ?? ''}),
+    'rozhlas' => await api.getJson('/spoken/releases/rozhlas/files', query: {'ref': r.ref ?? ''}),
     _ => await api.getJson('/spoken/releases/${r.infohash}/files'),
   };
   return [
