@@ -46,15 +46,25 @@ def _fold(text: str) -> str:
 
 def fix_title_encoding(title: str, stem: str) -> str:
     """Tag uložený ve Windows-1250, přečtený jako Latin-1 ("Zaklínaè",
-    "svìta", "ž" jako řídicí znak 0x9E). Opravená verze se vezme, jen když sedí na
-    název souboru -- skutečné "è" (francouzština) zůstane."""
-    try:
-        fixed = title.encode("latin-1").decode("cp1250")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        return title
-    if fixed != title and _fold(fixed) and _fold(fixed) in _fold(stem):
-        return fixed
-    return title
+    "svìta", "ž" jako řídicí znak 0x9E). Stejná oprava jako u hudby
+    (`rebuild_own_library.fix_text`): silné znaky vždy, samotné "è" jen když
+    opravený text líp sedí na název souboru (francouzské "Crème" zůstane).
+    Dřív jen při shodě s názvem souboru -- "ÈAS OPOVR\\x8eENÍ" zůstalo (7. 10.)."""
+    from app.tools.rebuild_own_library import fix_text
+
+    return fix_text(title, stem) or title
+
+
+def tidy_tag(text: str | None, path: str, person: bool = False) -> str | None:
+    """Oprava kódování + tag celý VELKÝMI písmeny na běžný zápis
+    ("ANDRZEJ SAPKOWSKI" -> "Andrzej Sapkowski", "ČAS OPOVRŽENÍ" -> "Čas opovržení")."""
+    if not text:
+        return text
+    text = fix_title_encoding(text, path)
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) >= 4 and all(c.isupper() for c in letters):
+        text = " ".join(w.capitalize() for w in text.lower().split(" ")) if person else text[:1] + text[1:].lower()
+    return text
 
 
 def _track_no(audio) -> int:
@@ -162,11 +172,12 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
             session.add(row)
         first = rows[0][1]
         # Album v tagu = název knihy (čistší než název vydání na trackeru).
-        album = _tag(first, "album")
+        where = str(rows[0][0])
+        album = tidy_tag(_tag(first, "album"), where)
         if album and len(album) <= 200 and book.metadata_source != CATALOG:
             book.title = album
-        book.author = book.author or _tag(first, "albumartist", "artist")
-        book.narrator = book.narrator or _tag(first, "performer", "composer")
+        book.author = book.author or tidy_tag(_tag(first, "albumartist", "artist"), where, person=True)
+        book.narrator = book.narrator or tidy_tag(_tag(first, "performer", "composer"), where, person=True)
         book.duration_ms = total or None
         book.storage_dir = str(root)
         session.add(book)

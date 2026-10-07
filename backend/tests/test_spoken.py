@@ -401,3 +401,13 @@ def test_foreign_release_files_route_is_not_taken_as_infohash():
             break
     else:
         raise AssertionError("cesta nenalezena")
+
+
+def test_tidy_tag_fixes_cp1250_and_all_caps():
+    from app.spoken.importer import tidy_tag
+
+    assert tidy_tag("ÈAS OPOVR\x8eENÍ", "/data/spoken/x/04.mp3") == "Čas opovržení"
+    assert tidy_tag("VÌ\x8e VLA\x8aTOVKY", "/x/y.mp3") == "Věž vlaštovky"
+    assert tidy_tag("ANDRZEJ SAPKOWSKI", "/x", person=True) == "Andrzej Sapkowski"
+    assert tidy_tag("Crème brûlée", "/x/a.mp3") == "Crème brûlée"
+    assert tidy_tag("Saturnin", "/x") == "Saturnin"
