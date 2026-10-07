@@ -169,15 +169,10 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
     source: str | None = None
     lastfm = await _lastfm_top(primary_artist_name(name))
     if len(lastfm) >= 5:
-        from app.catalog.lastfm import track_album
-
-        # Album každé skladby z Last.fm -- vybere se přesně ta verze, která se
-        # poslouchá (ne živá nahrávka se stejným názvem).
-        albums = await asyncio.gather(*(track_album(primary_artist_name(name), e["title"]) for e in lastfm[: LIMIT + 3]))
-        entries = [
-            {"title": e["title"], "listens": e["listens"], "release": album}
-            for e, album in zip(lastfm[: LIMIT + 3], albums)
-        ]
+        # Album každé skladby (track.getInfo) se dotáhne v `resolve` níž --
+        # vybere se přesně ta verze, která se poslouchá (ne živá nahrávka se
+        # stejným názvem).
+        entries = [{"title": e["title"], "listens": e["listens"], "album_from_lastfm": True} for e in lastfm[: LIMIT + 3]]
         source = "lastfm"
     elif mbid:
         entries = [
@@ -193,13 +188,6 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
 
     if entries:
         entries = [e for e in entries[: LIMIT * 2] if e.get("title")]
-        # Napřed místní katalog (rychlé), pak chybějící na Deezeru SOUBĚŽNĚ --
-        # dřív jedna po druhé, studená stránka interpreta 6 s.
-        local_ids: list[str | None] = []
-        with Session(engine) as session:
-            for entry in entries:
-                rec = _find_local(session, artist_id, entry.get("mbid"), entry["title"], entry.get("release"))
-                local_ids.append(rec.id if rec is not None else None)
         artist_q = primary_artist_name(name)
         sem = asyncio.Semaphore(5)
 
@@ -233,10 +221,24 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
                 )
                 return track or await dz.find_track(artist_q, title)
 
-        missing = [i for i, rid in enumerate(local_ids) if rid is None]
-        found_tracks = await asyncio.gather(*(lookup(entries[i]) for i in missing))
+        async def resolve(entry: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
+            """Každá skladba sama: album z Last.fm -> místní katalog -> Deezer.
+            Dřív se čekalo na alba VŠECH skladeb (Last.fm 4 req/s, ~3,5 s)
+            a teprve pak začal Deezer -- studená stránka interpreta 7-10 s."""
+            if entry.pop("album_from_lastfm", False):
+                from app.catalog.lastfm import track_album
+
+                entry["release"] = await track_album(artist_q, entry["title"])
+            with Session(engine) as session:
+                rec = _find_local(session, artist_id, entry.get("mbid"), entry["title"], entry.get("release"))
+                if rec is not None:
+                    return rec.id, None
+            return None, await lookup(entry)
+
+        resolved = await asyncio.gather(*(resolve(e) for e in entries))
+        local_ids: list[str | None] = [rid for rid, _ in resolved]
         with Session(engine) as session:
-            for i, track in zip(missing, found_tracks):
+            for i, (_, track) in enumerate(resolved):
                 if track:
                     rec = ingest_track_with_context(session, track)
                     session.flush()
