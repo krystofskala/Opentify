@@ -185,7 +185,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
     // Barva nové skladby ještě není spočítaná -> drží se předchozí (ne
     // okamžik přes `primary`, které se zrovna samo animuje).
     final targetAccent = playback.accentColor ?? ref.watch(effectiveAccentProvider) ?? theme.colorScheme.primary;
-    final duration = playback.duration ?? Duration.zero;
+    final duration = playback.shownDuration ?? Duration.zero;
     final hasError = playback.error != null;
     final provisioningState = ref.watch(provisioningControllerProvider.select((m) => m[nowPlaying.recordingId]));
     final isProvisioning = provisioningState?.isInFlight ?? false;

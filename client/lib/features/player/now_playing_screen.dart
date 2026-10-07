@@ -427,7 +427,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   Widget _buildSheet(BuildContext context, AudioPlayerState playback, Color accent) {
     final nowPlaying = playback.nowPlaying!;
-    final duration = playback.duration ?? Duration.zero;
+    final duration = playback.shownDuration ?? Duration.zero;
     final positionMs =
         playback.position.inMilliseconds.clamp(0, duration.inMilliseconds == 0 ? 1 : duration.inMilliseconds);
     final isWide = MediaQuery.sizeOf(context).width >= 720;

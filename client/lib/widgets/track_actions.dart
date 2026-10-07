@@ -36,6 +36,7 @@ NowPlayingInfo nowPlayingInfoFor(RecordingModel r, {String? artworkUrl, String? 
       artistId: r.artistId,
       releaseId: r.releaseId,
       artworkUrl: artworkUrl,
+      durationMs: r.durationMs,
     );
 
 /// Doplňková akce kontextového menu specifická pro místo, odkud se volá

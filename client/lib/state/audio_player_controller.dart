@@ -58,6 +58,7 @@ class NowPlayingInfo {
     this.artworkUrl,
     this.groupId,
     this.groupLabel,
+    this.durationMs,
   });
 
   final String recordingId;
@@ -80,6 +81,10 @@ class NowPlayingInfo {
   final String? groupId;
   final String? groupLabel;
 
+  /// Délka z katalogu -- ukáže se, než přehrávač zná skutečnou (po obnovení
+  /// stránky bylo „1:20 / 0:00“).
+  final int? durationMs;
+
   NowPlayingInfo withGroup(String? id, String? label) => NowPlayingInfo(
         recordingId: recordingId,
         title: title,
@@ -89,6 +94,7 @@ class NowPlayingInfo {
         artworkUrl: artworkUrl,
         groupId: id,
         groupLabel: label,
+        durationMs: durationMs,
       );
 }
 
@@ -139,6 +145,10 @@ class AudioPlayerState {
   final bool isBuffering;
   final Duration position;
   final Duration? duration;
+
+  /// Délka pro zobrazení: skutečná z přehrávače, jinak z katalogu.
+  Duration? get shownDuration =>
+      duration ?? (nowPlaying?.durationMs != null ? Duration(milliseconds: nowPlaying!.durationMs!) : null);
   final String? error;
 
   /// Dominantní/vibrantní barva z obalu právě hrající skladby (viz
@@ -439,6 +449,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         if (i.artworkUrl != null) 'art': i.artworkUrl,
         if (i.groupId != null) 'g': i.groupId,
         if (i.groupLabel != null) 'gl': i.groupLabel,
+        if (i.durationMs != null) 'd': i.durationMs,
       };
 
   static NowPlayingInfo _infoFromJson(Map<String, dynamic> j) => NowPlayingInfo(
@@ -450,6 +461,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         artworkUrl: j['art'] as String?,
         groupId: j['g'] as String?,
         groupLabel: j['gl'] as String?,
+        durationMs: (j['d'] as num?)?.toInt(),
       );
 
   /// Rozposlouchané album/playlist (ne náhodně, ne jedna skladba) -- detail
@@ -2766,6 +2778,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         artworkUrl: artworkUrl,
         groupId: info.groupId,
         groupLabel: info.groupLabel,
+        durationMs: info.durationMs,
       );
       final queueIndex = state.queue.indexWhere((i) => i.recordingId == info.recordingId);
       state = state.copyWith(
