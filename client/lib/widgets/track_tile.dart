@@ -604,6 +604,11 @@ class _CardTile extends StatelessWidget {
                                       : Symbols.download_rounded,
                               color: Colors.white,
                               shadows: const [Shadow(blurRadius: 6)],
+                              semanticLabel: isPlaying
+                                  ? 'Hraje'
+                                  : isAvailable
+                                      ? 'Přehrát'
+                                      : 'Ještě není na serveru – stáhne se při přehrání',
                             ),
                     ),
                   ],
