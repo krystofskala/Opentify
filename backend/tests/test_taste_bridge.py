@@ -30,3 +30,11 @@ def test_junk_versions() -> None:
     assert tb.is_junk_version("High Enough (Slowed)")
     assert tb.is_junk_version("Song - Sped Up")
     assert not tb.is_junk_version("High Enough")
+
+
+def test_strong_genre_is_stricter_for_genre_membership() -> None:
+    frankie = [("60s", 100), ("classic rock", 83), ("oldies", 55), ("jazz", 50)]
+    etta = [("blues", 100), ("soul", 90), ("jazz", 57)]
+    assert tb.strong(frankie, "jazz")  # pro styl by prošel
+    assert not tb.strong_genre(frankie, "jazz")  # do celého Jazzu ne
+    assert tb.strong_genre(etta, "jazz")

@@ -78,6 +78,17 @@ def plays_style(tags: list[tuple[str, int]], styles: set[str], fam: list[str] = 
     return any(strong(tags, s) for s in styles) or any(strong(tags, f) for f in fam)
 
 
+def strong_genre(tags: list[tuple[str, int]], t: str) -> bool:
+    """Přísnější "hraje celý žánr" (kontrola zařazení podle Deezeru): štítek
+    mezi prvními třemi, nebo váha aspoň 60. Frankie Valli má "jazz" 50 až
+    na 4. místě (za 60s, classic rock, oldies) -- do Jazzu nepatří; Etta
+    James "jazz" 57 na 3. místě ano."""
+    for i, (name, count) in enumerate(tags):
+        if name.strip().lower() == t and (count >= 60 or (count >= 25 and i < 3)):
+            return True
+    return False
+
+
 def _profile_tag(tag: str) -> bool:
     from app.tags import is_style
 
@@ -233,4 +244,7 @@ async def not_playing(artist_ids: list[str], styles: list[str], limit: int = 120
     sem = asyncio.Semaphore(6)
     pairs = [(a, n) for a, n in names.items() if n]
     tag_lists = await asyncio.gather(*(_tags_of(n, sem) for _a, n in pairs))
-    return {a for (a, _n), tags in zip(pairs, tag_lists) if tags and not plays_style(tags, names_set, fam)}
+    return {
+        a for (a, _n), tags in zip(pairs, tag_lists)
+        if tags and not any(strong_genre(tags, s) for s in names_set | set(fam))
+    }

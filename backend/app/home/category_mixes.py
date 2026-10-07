@@ -379,7 +379,20 @@ async def _listen_later_fitting(c: Category, taste: pm.Taste, mix_artists: list[
         shares = stored.get(artist_id) or {}
         return artist_id in in_mix or sum(shares.get(x, 0) for x in genres) >= (MEMBER_SHARE if c.group == "genre" else 0.5)
 
-    return [rid for rid, artist_id in candidates if fits(artist_id)]
+    fitting = [(rid, artist_id) for rid, artist_id in candidates if fits(artist_id)]
+    if c.group == "genre" and fitting:
+        # Stejná kontrola štítků jako u členů mixu (Angus Stone z "Poslechnout
+        # později" v Rap / Hip Hop, 7i).
+        from app import browse
+        from app.home import taste_bridge
+
+        styles = list(browse.LASTFM_TAGS.get(c.id) or (c.title.lower(),))
+        try:
+            wrong = await taste_bridge.not_playing(list({a for _r, a in fitting if a not in in_mix}), styles)
+        except Exception:  # noqa: BLE001
+            wrong = set()
+        fitting = [(r, a) for r, a in fitting if a not in wrong]
+    return [rid for rid, _a in fitting]
 
 
 def _section_for(category_id: str) -> str | None:
