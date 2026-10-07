@@ -68,6 +68,14 @@ def _names_match(a: str, b: str) -> bool:
     return bool(na) and bool(nb) and (na == nb or na.startswith(nb) or nb.startswith(na))
 
 
+def same_artist_name(a: str, b: str) -> bool:
+    """Interpret podle jména jen PŘESNĚ (bez diakritiky, velikosti, "The").
+    `_names_match` bere i začátek -- "Dio" pak dostal fotku "Dionne…"
+    a "Karel Gott" fotku dua "Karel Gott & Darinka"."""
+    na, nb = _normalize(a), _normalize(b)
+    return bool(na) and na == nb
+
+
 async def _caa_front(kind: str, mbid: str) -> str | None:
     if mbid.startswith("own:"):  # vlastní album -- na Cover Art Archive není
         return None
@@ -234,7 +242,7 @@ async def resolve_artist_image(
         artists = []
     for candidate in artists:
         picture = deezer_image(candidate.get("picture_xl") or candidate.get("picture_big"))
-        if _names_match(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture):
+        if same_artist_name(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture):
             return picture
     # Wikidata fallback potřebuje MusicBrainz (1 req/s sdílený s hledáním) --
     # jen na vyžádání (otevřený detail), nikdy z backfill smyčky, jinak ta

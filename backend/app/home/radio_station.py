@@ -22,7 +22,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.library.dislikes import without_disliked
-from app.catalog.artwork import _names_match, primary_artist_name
+from app.catalog.artwork import primary_artist_name, same_artist_name
 from app.catalog.canonical import album_recordings
 from app.catalog.deezer import get_deezer_client
 from app.catalog.identity import is_own_artist
@@ -101,7 +101,7 @@ async def _deezer_id(artist_id: str) -> str | None:
     except Exception:  # noqa: BLE001
         return None
     for candidate in candidates:
-        if _names_match(candidate.get("name", ""), name):
+        if same_artist_name(candidate.get("name", ""), name):
             return str(candidate["id"])
     return None
 

@@ -31,7 +31,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app import listen_later
-from app.catalog.artwork import _names_match, primary_artist_name
+from app.catalog.artwork import primary_artist_name, same_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.catalog.identity import is_own_artist
 from app.db import engine
@@ -300,7 +300,7 @@ async def _deezer_id(taste: Taste, artist_id: str) -> str | None:
     except Exception:  # noqa: BLE001
         return None
     for candidate in candidates:
-        if _names_match(candidate.get("name", ""), name):
+        if same_artist_name(candidate.get("name", ""), name):
             taste.artist_deezer[artist_id] = str(candidate["id"])
             return taste.artist_deezer[artist_id]
     return None
@@ -764,7 +764,7 @@ async def build_discover_weekly() -> int:
             hits = await dzc_lookup.search_artist(name, limit=5)
         except Exception:  # noqa: BLE001
             continue
-        hit = next((h for h in hits if _names_match(h.get("name", ""), name)), None)
+        hit = next((h for h in hits if same_artist_name(h.get("name", ""), name)), None)
         rid = str(hit["id"]) if hit and hit.get("id") else ""
         if rid and rid not in known_dz:
             candidates[rid] += 2 * score

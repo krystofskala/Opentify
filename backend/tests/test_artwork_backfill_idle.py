@@ -39,3 +39,13 @@ def test_recently_attempted_items_are_skipped(eng):
         s.add(Artist(id="a2", name="Jiný"))
         s.commit()
     assert artwork._pending(40, frozenset({"a1"}))[1] == ["a2"]
+
+
+def test_artist_photo_name_match_is_exact():
+    from app.catalog.artwork import same_artist_name
+
+    assert same_artist_name("Beyoncé", "beyonce")
+    assert same_artist_name("The Beatles", "Beatles")
+    assert not same_artist_name("Dionne Warwick", "Dio")
+    assert not same_artist_name("Karel Gott & Darinka", "Karel Gott")
+    assert not same_artist_name("", "")
