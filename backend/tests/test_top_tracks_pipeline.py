@@ -35,6 +35,16 @@ class FakeDeezer:
     async def find_track(self, artist, title):
         return None
 
+    async def search_artist(self, name, trust_name=True):
+        return [{"id": 1, "name": "twenty one pilots"}]
+
+    async def artist_top(self, artist_id, limit):
+        # Chlorine z Trench je mezi top skladbami -> nehledá se.
+        return [{"id": 7, "title": "Chlorine", "artist": {"id": 1, "name": "twenty one pilots"},
+                 "album": {"id": 4, "title": "Trench"}},
+                {"id": 8, "title": "Car Radio", "artist": {"id": 1, "name": "twenty one pilots"},
+                 "album": {"id": 5, "title": "Car Radio (Live)"}}]
+
 
 def test_each_track_resolves_on_its_own_and_keeps_exact_version(monkeypatch):
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -78,3 +88,6 @@ def test_each_track_resolves_on_its_own_and_keeps_exact_version(monkeypatch):
     assert sorted(started) == sorted(TITLES)
     # Ride je v katalogu (stejné album) -> na Deezer se pro ni nešlo.
     assert not any('track:"Ride"' in q for q in dz.queries)
+    # Chlorine se vzala z top skladeb Deezeru, Car Radio ne (jiné album).
+    assert not any('track:"Chlorine"' in q for q in dz.queries)
+    assert any('track:"Car Radio"' in q for q in dz.queries)

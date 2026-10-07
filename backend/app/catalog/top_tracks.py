@@ -136,6 +136,23 @@ def _find_local(
     return None  # ta verze tu ještě není -- dohledá se přes Deezer
 
 
+POOL_SIZE = 100
+
+
+async def _deezer_top_pool(dz: Any, name: str, deezer_id: str | None) -> list[dict[str, Any]]:
+    # `name`: celé jméno z katalogu; hledá se podle hlavního interpreta.
+    """Až 100 nejposlouchanějších skladeb interpreta na Deezeru, [] když
+    interpreta nenajde (jméno se páruje jen přesně, viz `trust_name`)."""
+    try:
+        if not deezer_id:
+            found = await dz.search_artist(primary_artist_name(name), trust_name=False)
+            match = next((a for a in found if _normalize(a.get("name", "")) == _normalize(name)), None)
+            deezer_id = str(match["id"]) if match else None
+        return (await dz.artist_top(deezer_id, POOL_SIZE) or []) if deezer_id else []
+    except Exception:  # noqa: BLE001 -- jen zkratka, hledání níž to zvládne i bez ní
+        return []
+
+
 async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
     with Session(engine) as session:
         artist = session.get(Artist, artist_id)
@@ -190,9 +207,26 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
         entries = [e for e in entries[: LIMIT * 2] if e.get("title")]
         artist_q = primary_artist_name(name)
         sem = asyncio.Semaphore(5)
+        # Nejposlouchanější skladby interpreta na Deezeru (1 dotaz, i s alby):
+        # skladba se stejným názvem I albem se vezme odtud a nemusí se
+        # hledat -- dřív 2-3 hledání na skladbu za globálním limitem Deezeru.
+        pool_task = asyncio.ensure_future(_deezer_top_pool(dz, name, deezer_id))
 
         async def lookup(entry: dict[str, Any]) -> dict[str, Any] | None:
             title = entry["title"]
+            if entry.get("release"):
+                hit = next(
+                    (
+                        t
+                        for t in await pool_task
+                        if _exact(t.get("title") or "") == _exact(title)
+                        and _exact((t.get("album") or {}).get("title") or "") == _exact(entry["release"])
+                        and str((t.get("album") or {}).get("id")) not in not_mine
+                    ),
+                    None,
+                )
+                if hit:
+                    return hit
             async with sem:
                 if entry.get("release"):
                     # Přesně ta verze: Deezer s názvem alba.
@@ -253,11 +287,7 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
 
     if len(out) < 5:
         # Doplnit z Deezeru (pořadí oblíbenosti, bez počtů).
-        if not deezer_id:
-            found = await dz.search_artist(primary_artist_name(name), trust_name=False)
-            match = next((a for a in found if _normalize(a.get("name", "")) == _normalize(name)), None)
-            deezer_id = str(match["id"]) if match else None
-        tracks = await dz.artist_top(deezer_id, LIMIT) if deezer_id else None
+        tracks = (await _deezer_top_pool(dz, name, deezer_id))[:LIMIT]
         for track in tracks or []:
             if str((track.get("album") or {}).get("id")) in not_mine:
                 continue  # album stejnojmenného cizího interpreta
