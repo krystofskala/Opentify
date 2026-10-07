@@ -33,7 +33,16 @@ _offset: int | None = None
 _last_sent = 0.0
 
 
+# Běžné dotazy vyhledávačů a prohlížečů -- nejsou útok, do souhrnu nepatří
+# (nginx je má filtrovat taky, tohle je pojistka: živě chodilo "robots.txt,
+# sitemap.xml").
+_BENIGN = ("/robots.txt", "/sitemap.xml", "/sitemap_index.xml", "/favicon.ico", "/ads.txt", "/humans.txt",
+           "/apple-touch-icon", "/.well-known/", "/manifest.json", "/site.webmanifest", "/browserconfig.xml")
+
+
 def record(ip: str, path: str) -> None:
+    if (path or "").split("?")[0].lower().startswith(_BENIGN):
+        return
     ip = ip or "?"
     if ip not in _pending and len(_pending) >= MAX_IPS:
         ip = "další"
@@ -99,7 +108,7 @@ def flush(now: float | None = None) -> bool:
         return False
     from app.notify import notify
 
-    notify(msg[0], msg[1], tags=["robot"], priority=2)
+    notify(msg[0], msg[1], priority=2)  # bez štítku "robot" -- ntfy ho kreslí jako druhého 🤖
     _pending.clear()
     _last_sent = now
     return True

@@ -76,3 +76,14 @@ def test_flood_is_capped(tmp_path, monkeypatch):
     for i in range(600):
         pw.record(f"1.1.{i}.1", "/a")
     assert len(pw._pending) <= pw.MAX_IPS + 1
+
+
+def test_benign_crawler_paths_are_not_probes():
+    pw._pending.clear()
+    pw.record("1.2.3.4", "/robots.txt")
+    pw.record("1.2.3.4", "/sitemap.xml?x=1")
+    pw.record("1.2.3.4", "/.well-known/security.txt")
+    assert not pw._pending
+    pw.record("1.2.3.4", "/wp-login.php")
+    assert pw._pending
+    pw._pending.clear()
