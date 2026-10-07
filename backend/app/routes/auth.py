@@ -590,6 +590,11 @@ async def login(body: LoginIn, request: Request, response: Response):
     pozvánku (`/claim`), jinak by si ho mohl zvolit kdokoli, kdo zná jméno."""
     username = body.username.strip()
     await _login_throttle(request, username)
+    from app import canary
+
+    if canary.check_username(request, username):
+        await asyncio.sleep(1.0)
+        raise HTTPException(status_code=401, detail="Špatné jméno, heslo nebo kód zařízení.")
     need_code = pair_code_required()
     # Chybějící kód se hlásí PŘED ověřením hesla -- odpověď tak neprozradí,
     # jestli heslo sedělo.

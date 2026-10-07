@@ -66,6 +66,9 @@ services:
       # Audioknihy: jen aby hledání vědělo, jestli je SkTorrent účet nastavený.
       SKTORRENT_USERNAME: ${SKTORRENT_USERNAME:-}
       SKTORRENT_PASSWORD: ${SKTORRENT_PASSWORD:-}
+      # Otisky hodnot, které appka nikdy nepoužívá (app/canary.py).
+      REQUEST_DENY_SHA256: ${REQUEST_DENY_SHA256:-}
+      LOGIN_DENY_SHA256: ${LOGIN_DENY_SHA256:-}
     volumes:
       - vault-db:/data/db
       # Log neexistujících cest z webu (app/probe_watch.py).

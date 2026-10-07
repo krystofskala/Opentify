@@ -87,9 +87,11 @@ app = FastAPI(title="Vault API", version="0.1.0", lifespan=_lifespan)
 async def _public_guard(request, call_next):  # type: ignore[no-untyped-def]
     """Veřejný internet (Funnel): jen v režimu přihlašování a s omezením
     počtu požadavků z jedné IP (app/public_access.py)."""
-    from app import public_access
+    from app import canary, public_access
     from app.auth import auth_mode
 
+    if canary.check_request(request):
+        return JSONResponse(status_code=403, content={"detail": "Zakázáno."})
     if public_access.is_public(request):
         if auth_mode() != "login":
             return JSONResponse(status_code=403, content={"detail": "Z internetu jen s přihlášením."})
