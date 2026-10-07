@@ -47,7 +47,15 @@ def book_out(book: SpokenBook) -> dict:
         "error": book.error,
         "durationMs": book.duration_ms,
         "createdAt": book.created_at.isoformat() if book.created_at else None,
+        "kind": book.kind or guess_kind(book.release_title or book.title),
     }
+
+
+def guess_kind(title: str | None) -> str:
+    """"drama" pro rozhlasovou hru / dramatizaci podle názvu, jinak "book"."""
+    from app.spoken.catalog import parse_release
+
+    return "drama" if title and parse_release(title)["drama"] else "book"
 
 
 async def _save(book_id: str, **fields) -> SpokenBook | None:
@@ -118,7 +126,72 @@ def _indices(book: SpokenBook) -> list[int] | None:
     return (book.source_files or {}).get("indices")
 
 
+# --- YouTube (celé video = kniha) --------------------------------------------
+# Stahuje jeden worker (zámek v Redisu, obnovuje se průběhem); po restartu
+# workeru zámek vyprší a stahování se v dalším kole spustí znovu.
+_YT_LOCK_S = 120
+
+
+async def _youtube_download(book_id: str, vid: str) -> None:
+    from app.redis_bus import get_redis
+    from app.spoken import youtube
+
+    r = get_redis()
+    loop = asyncio.get_running_loop()
+    dest = SPOKEN_ROOT / book_id
+    last = [0.0]
+
+    def on_progress(share: float) -> None:
+        if share - last[0] < 0.01:
+            return
+        last[0] = share
+        asyncio.run_coroutine_threadsafe(_save(book_id, progress=round(share, 3)), loop)
+        asyncio.run_coroutine_threadsafe(r.set(f"spoken:yt:lock:{book_id}", "1", ex=_YT_LOCK_S), loop)
+
+    try:
+        await asyncio.to_thread(youtube.download, vid, dest, on_progress)
+        await _save(book_id, status="importing", progress=1.0)
+        count = await asyncio.to_thread(import_book, book_id, dest)
+        meta = await youtube.info(vid)
+        chapters = (meta or {}).get("chapters") or []
+        if chapters:
+            # Kapitoly videa = kapitoly knihy (jeden soubor).
+            def save_chapters() -> None:
+                with Session(engine) as session:
+                    for f in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():
+                        f.chapters = chapters
+                        session.add(f)
+                    session.commit()
+
+            await asyncio.to_thread(save_chapters)
+        logger.info("kniha %s připravená z YouTube (%d soubor, %d kapitol)", book_id, count, len(chapters))
+        await _save(book_id, status="ready", error=None, finished_at=utcnow(), storage_dir=str(dest))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("youtube kniha %s: %s", book_id, e)
+        await _save(book_id, status="failed", error="YouTube: video se nepodařilo stáhnout")
+    finally:
+        await r.delete(f"spoken:yt:lock:{book_id}")
+
+
+async def _start_youtube(book: SpokenBook) -> None:
+    from app.redis_bus import get_redis
+
+    vid = (book.source_files or {}).get("video")
+    if not vid:
+        await _save(book.id, status="failed", error="chybí odkaz na video")
+        return
+    if not await get_redis().set(f"spoken:yt:lock:{book.id}", "1", nx=True, ex=_YT_LOCK_S):
+        return  # stahuje jiný worker
+    await _save(book.id, status="downloading", error=None)
+    _yt_tasks[book.id] = asyncio.create_task(_youtube_download(book.id, vid))
+
+
+_yt_tasks: dict[str, asyncio.Task] = {}
+
+
 async def _start(book: SpokenBook) -> None:
+    if book.source == "youtube":
+        return await _start_youtube(book)
     if book.source == "slskd":
         return await _start_slskd(book)
     infohash, indices = _infohash(book), _indices(book)
@@ -196,6 +269,9 @@ async def _follow_torrent(book: SpokenBook, t: dict) -> None:
 
 
 async def _follow(book: SpokenBook) -> None:
+    if book.source == "youtube":
+        # Běží (zámek drží worker, který stahuje) -- jinak (restart) znovu.
+        return await _start_youtube(book)
     if book.source == "slskd":
         return await _follow_slskd(book)
     t = await qbit.info(_infohash(book))

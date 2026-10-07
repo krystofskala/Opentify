@@ -491,7 +491,8 @@ class _SpokenSearchScreenState extends ConsumerState<SpokenSearchScreen> {
                 ? EmptyState(
                     icon: books ? Symbols.menu_book_rounded : Symbols.podcasts_rounded,
                     message: books
-                        ? 'Hledá se v českých a slovenských audioknihách. Stažení začne až po klepnutí na Stáhnout.'
+                        ? 'Hledá se v českých a slovenských audioknihách. Audioknihu nebo rozhlasovou hru z YouTube '
+                            'přidáš vložením odkazu na video. Stažení začne až po klepnutí na Stáhnout.'
                         : 'Hledá se v katalogu podcastů. Pořad, který je jen na YouTube, přidáš vložením odkazu na kanál.',
                   )
                 : books
@@ -579,7 +580,7 @@ class _Results extends ConsumerWidget {
               onTap: () => context.push('/spoken/book/${b.id}'),
             ),
         ],
-        const _Heading('Česky'),
+        _Heading(cz != null && cz.releases.isNotEmpty && cz.releases.every((r) => r.isYoutube) ? 'Z YouTube' : 'Česky'),
         if (czech.isLoading)
           const Padding(padding: EdgeInsets.all(AppSpacing.sm), child: LinearProgressIndicator(minHeight: 2))
         else if (czech.hasError)
@@ -634,11 +635,13 @@ class _ReleaseTile extends ConsumerWidget {
       leading: _Cover(url: r.coverUrl),
       title: Text(r.title, maxLines: 3, overflow: TextOverflow.ellipsis),
       subtitle: Text(
-        [
-          formatSize(r.sizeBytes),
-          if (r.files != null) czCount(r.files!, 'soubor', 'soubory', 'souborů'),
-          r.seeders > 0 ? czCount(r.seeders, 'zdroj', 'zdroje', 'zdrojů') : 'teď nikdo nesdílí',
-        ].where((s) => s.isNotEmpty).join(' · '),
+        r.isYoutube
+            ? ['YouTube', if (r.uploader != null) r.uploader!, if (r.durationText != null) r.durationText!].join(' · ')
+            : [
+                formatSize(r.sizeBytes),
+                if (r.files != null) czCount(r.files!, 'soubor', 'soubory', 'souborů'),
+                r.seeders > 0 ? czCount(r.seeders, 'zdroj', 'zdroje', 'zdrojů') : 'teď nikdo nesdílí',
+              ].where((s) => s.isNotEmpty).join(' · '),
         style: muted,
       ),
       trailing: r.bookId != null

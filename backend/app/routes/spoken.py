@@ -38,6 +38,23 @@ async def search(q: str, session: Session = Depends(get_session)):
     q = q.strip()
     if len(q) < 2:
         return {"releases": [], "loginConfigured": sktorrent.credentials() is not None}
+    # Odkaz na video z YouTube (audiokniha, rozhlasová hra): to jedno video.
+    from app.spoken import youtube
+
+    if vid := youtube.video_id(q):
+        meta = await youtube.info(vid)
+        if meta is None:
+            return {"releases": [], "loginConfigured": True}
+        known = session.exec(select(SpokenBook).where(SpokenBook.source_ref == f"yt:{vid}")).first()
+        hours, minutes = divmod(meta["durationS"] // 60, 60)
+        item = {
+            "source": "youtube", "ref": youtube.watch_url(vid), "infohash": "",
+            "title": meta["title"], "sizeBytes": meta["sizeBytes"], "seeders": 1, "files": 1,
+            "uploader": meta["uploader"], "durationText": f"{hours} h {minutes} min" if hours else f"{minutes} min",
+        }
+        if known is not None:
+            item["bookId"], item["status"] = known.id, known.status
+        return {"releases": [item], "loginConfigured": True}
     releases = await sktorrent.search(q)
     known = {
         b.source_ref: b
@@ -79,7 +96,9 @@ async def search_foreign(q: str, session: Session = Depends(get_session)):
     """Záloha: audioknihy ze Soulseeku (typicky anglické originály) --
     zvlášť, ať české výsledky ze SkTorrentu nečekají na pomalejší hledání."""
     q = q.strip()
-    if len(q) < 2:
+    from app.spoken.youtube import video_id
+
+    if len(q) < 2 or video_id(q):  # odkaz na YouTube řeší /search
         return {"releases": []}
     releases = await slsk_books.search(q)
     known = {
@@ -95,6 +114,19 @@ async def search_foreign(q: str, session: Session = Depends(get_session)):
 
 
 _AUDIO_EXT = (".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus", ".aac", ".wma")
+
+
+@spoken_router.get("/releases/youtube/files")
+async def youtube_release_files(ref: str):
+    """Obsah "vydání" z YouTube: jedno video (a jeho kapitoly)."""
+    from app.spoken import youtube
+
+    vid = youtube.video_id(ref)
+    meta = await youtube.info(vid) if vid else None
+    if meta is None:
+        raise HTTPException(status_code=404, detail="video se nepodařilo načíst")
+    size = int(meta["sizeBytes"] or 0)
+    return {"groups": [{"folder": "", "size": size, "files": [{"index": 0, "name": meta["title"], "size": size}]}]}
 
 
 # Musí být PŘED `/releases/{infohash}/files` -- jinak FastAPI vezme
@@ -141,7 +173,7 @@ class AcquireIn(BaseModel):
     title: str
     sizeBytes: int | None = None
     coverUrl: str | None = None
-    source: str = "sktorrent"  # sktorrent | slskd
+    source: str = "sktorrent"  # sktorrent | slskd | youtube
     ref: str | None = None  # slskd: výsledek z /search/foreign
     # Sbírka: jen tyhle soubory (indexy z /releases/{infohash}/files) jako
     # jedna kniha; `folder` = její název.
@@ -192,7 +224,15 @@ def _public_base(request: Request | None) -> str:
 
 
 def _book_ref(body: AcquireIn) -> str:
-    """Id vydání: infohash (u výběru ze sbírky + otisk výběru), u Soulseeku ref."""
+    """Id vydání: infohash (u výběru ze sbírky + otisk výběru), u Soulseeku ref,
+    u YouTube "yt:<id videa>"."""
+    if body.source == "youtube":
+        from app.spoken.youtube import video_id
+
+        vid = video_id(body.ref)
+        if not vid:
+            raise HTTPException(status_code=422, detail="neplatný odkaz na YouTube")
+        return f"yt:{vid}"
     if body.source == "slskd":
         ref = (body.ref or "").strip()
         if not ref:
@@ -213,7 +253,22 @@ async def acquire_now(body: AcquireIn, session: Session, user_id: str, found: di
     (volá se po rozhodnutí: hned, nebo po schválení žádosti)."""
     ref = _book_ref(body)
     book = session.exec(select(SpokenBook).where(SpokenBook.source_ref == ref)).first()
-    if book is None:
+    if book is None and body.source == "youtube":
+        from app.spoken.youtube import video_id
+
+        vid = video_id(body.ref)
+        guess = guess_from_release(body.title)
+        book = SpokenBook(
+            source="youtube",
+            source_ref=ref,
+            source_files={"video": vid},
+            release_title=body.title[:300],
+            title=guess["title"][:300],
+            narrator=guess["narrator"],
+            size_bytes=body.sizeBytes,
+            requested_by_user_id=user_id,
+        )
+    elif book is None:
         if body.source == "slskd":
             if found is None:
                 found = await slsk_books.cached(ref)

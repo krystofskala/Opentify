@@ -60,7 +60,8 @@ _COLLECTION = re.compile(
 )
 _YEAR_RANGE = re.compile(r"(?:19|20)\d\d\s*[-–]\s*(?:19|20)\d\d")
 _ABRIDGED = re.compile(r"\b(zkr[aá]cen\w*|kr[aá]ceno|abridged)\b", re.I)
-_DRAMA = re.compile(r"\b(rozhlasov\w*|dramatizac\w*|rozhlasova hra|rozhlasová hra|hra)\b", re.I)
+# Bez samotného "hra" -- "Hra o trůny" je kniha, ne rozhlasová hra.
+_DRAMA = re.compile(r"\b(rozhlasov\w*|dramatizac\w*|audiohr\w*|radio play|full cast)\b", re.I)
 # Šum na začátku: "55-", "01 ", "(UZ16)", "Série: Harry Hole 13. -"
 _LEAD_NOISE = re.compile(r"^\s*(?:\d{1,3}\s*[-.)]\s*|\d{1,3}\s+)")
 _TAGS = re.compile(r"\((?:UZ|ZE|HH)?\d+\)|\[[^\]]*\]", re.I)

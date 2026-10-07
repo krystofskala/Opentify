@@ -24,6 +24,8 @@ class SpokenRelease {
     this.source = 'sktorrent',
     this.ref,
     this.files,
+    this.uploader,
+    this.durationText,
   });
 
   factory SpokenRelease.fromJson(Map<String, dynamic> j) => SpokenRelease(
@@ -38,6 +40,8 @@ class SpokenRelease {
         added: j['added'] as String?,
         bookId: j['bookId'] as String?,
         status: j['status'] as String?,
+        uploader: j['uploader'] as String?,
+        durationText: j['durationText'] as String?,
       );
 
   final String infohash;
@@ -49,10 +53,16 @@ class SpokenRelease {
   final String? bookId;
   final String? status;
 
-  /// sktorrent (česky) | slskd (Soulseek, typicky anglicky).
+  /// sktorrent (česky) | slskd (Soulseek, typicky anglicky) | youtube (odkaz na video).
   final String source;
   final String? ref;
   final int? files;
+
+  /// YouTube: kanál a délka videa (místo velikosti a zdrojů).
+  final String? uploader;
+  final String? durationText;
+
+  bool get isYoutube => source == 'youtube';
 }
 
 class SpokenProgress {
@@ -515,9 +525,11 @@ typedef ReleaseGroup = ({String folder, int size, List<ReleaseFile> files});
 /// Obsah vydání před stažením (sbírka -> knihy). Chce účet SkTorrent.
 Future<List<ReleaseGroup>> fetchReleaseGroups(WidgetRef ref, SpokenRelease r) async {
   final api = ref.read(apiClientProvider);
-  final json = r.source == 'slskd'
-      ? await api.getJson('/spoken/releases/foreign/files', query: {'ref': r.ref ?? ''})
-      : await api.getJson('/spoken/releases/${r.infohash}/files');
+  final json = switch (r.source) {
+    'slskd' => await api.getJson('/spoken/releases/foreign/files', query: {'ref': r.ref ?? ''}),
+    'youtube' => await api.getJson('/spoken/releases/youtube/files', query: {'ref': r.ref ?? ''}),
+    _ => await api.getJson('/spoken/releases/${r.infohash}/files'),
+  };
   return [
     for (final g in json['groups'] as List<dynamic>? ?? const [])
       (
