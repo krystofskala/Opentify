@@ -196,6 +196,21 @@ class DeezerClient:
         except (DeezerUnavailable, httpx.HTTPError):
             return None
 
+    async def track_credits(self, track_id: str) -> dict[str, Any] | None:
+        """Detail skladby kvůli účinkujícím (`contributors`) -- ti se nemění,
+        takže 30 dní; bez `preview` (podepsaný odkaz vyprší). Hledání
+        spoluprací dřív tahalo desítky detailů při každém dotazu."""
+        try:
+            return await cached_json(f"dz:track_credits:{track_id}", 30 * 24 * 60 * 60, lambda: self._track_without_preview(track_id))
+        except (DeezerUnavailable, httpx.HTTPError):
+            return None
+
+    async def _track_without_preview(self, track_id: str) -> dict[str, Any]:
+        result = await self._get(f"/track/{track_id}")
+        if result is None or result.get("error"):
+            raise DeezerUnavailable(track_id)
+        return {k: v for k, v in result.items() if k != "preview"}
+
     async def album(self, album_id: str) -> dict[str, Any] | None:
         """Jedno album (kvůli obalu `cover_xl`), když Deezer id už známe."""
 

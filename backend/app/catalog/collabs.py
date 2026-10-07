@@ -100,7 +100,7 @@ async def find(dz: DeezerClient, a: dict[str, Any], b: dict[str, Any], limit: in
         if str(t.get("id")) in tracks:
             return
         async with sem:
-            detail = await dz.track(str(t["id"])) or {}
+            detail = await dz.track_credits(str(t["id"])) or {}
         if pair <= _ids(detail.get("contributors")):
             tracks.setdefault(str(t["id"]), {**t, **detail})
 
@@ -148,7 +148,7 @@ async def artist_versions(dz: DeezerClient, query: str, limit: int = 20) -> tupl
                 if str((t.get("artist") or {}).get("id")) == aid:
                     return t
                 async with sem:
-                    detail = await dz.track(str(t["id"])) or {}
+                    detail = await dz.track_credits(str(t["id"])) or {}
                 return {**t, **detail} if aid in _ids(detail.get("contributors")) else None
 
             hits = [h for h in await asyncio.gather(*(check(t) for t in list(candidates.values())[:40])) if h]
