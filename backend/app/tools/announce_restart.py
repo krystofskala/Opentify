@@ -23,6 +23,9 @@ async def main() -> int:
         await publish_event(user_id, "server.restarting", {})
     # Chvilka, ať zpráva doputuje přes Redis k zařízením dřív, než API spadne.
     await asyncio.sleep(2)
+    from app.redis_bus import get_redis
+
+    await get_redis().aclose()  # bez "Event loop is closed" na konci
     return len(users)
 
 
