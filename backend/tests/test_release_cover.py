@@ -92,3 +92,25 @@ def test_discography_artist_is_fresh_from_db(eng, monkeypatch):
     out = asyncio.run(cat.get_discography("a", None, _current=None))
     assert out["artist"]["images"] == ["https://img/spravna.jpg"]
     assert out["releases"] == [{"id": "with"}]
+
+
+def test_stats_ignore_lastfm_autocorrect_to_other_artist(eng, monkeypatch):
+    import app.catalog.lastfm as lf
+    import app.routes.catalog as cat
+
+    monkeypatch.setattr(db, "engine", eng)
+    with Session(eng) as s:
+        s.add(Artist(id="rh", name="Radio Head"))
+        s.add(Artist(id="beat", name="Beatles"))
+        s.commit()
+
+    async def info(name):
+        return {"name": "Radiohead" if name == "Radio Head" else "The Beatles", "listeners": 8_500_000, "playcount": 1, "tags": ["rock"]}
+
+    async def top(name, limit=40):
+        return []
+
+    monkeypatch.setattr(lf, "artist_info", info)
+    monkeypatch.setattr(lf, "top_albums", top)
+    assert asyncio.run(cat.get_artist_stats("rh", _current=None))["listeners"] is None
+    assert asyncio.run(cat.get_artist_stats("beat", _current=None))["listeners"] == 8_500_000

@@ -186,7 +186,7 @@ String? spokenCoverUrl(String? path) {
 
 String formatSize(int? bytes) {
   if (bytes == null) return '';
-  if (bytes >= 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  if (bytes >= 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1).replaceAll('.', ',')} GB';
   return '${(bytes / (1024 * 1024)).round()} MB';
 }
 
