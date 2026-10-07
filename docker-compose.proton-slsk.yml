@@ -1,0 +1,57 @@
+# Soulseek (slskd) přes ProtonVPN s přesměrovaným portem -- vlastní tunel,
+# protože Proton dává na jedno připojení jeden port a ten má qBittorrent
+# (docker-compose.proton.yml). Mullvad (`gluetun`) zůstává pro Shazam,
+# YouTube (proxy :8888), SkTorrent a audioknihy.cz.
+#
+# Proč: s otevřeným portem se k nám připojí i uživatelé za routerem --
+# víc výsledků hledání a méně selhaných stažení. Navíc přepínání serveru
+# Mullvadu kvůli YouTube (app/providers.py _rotate_vpn_server) už
+# nepřeruší Soulseek.
+#
+# Zapnutí -- v `.env` na serveru (DRUHÁ WireGuard konfigurace z Proton
+# účtu, s "NAT-PMP (Port Forwarding)"):
+#   PROTON_SLSK_WIREGUARD_PRIVATE_KEY=<PrivateKey>
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.proton.yml:docker-compose.proton-slsk.yml
+# a `docker compose up -d`. Port do slskd nastavuje worker
+# (app/vpn_ports.py) každou minutu přes control API tohohle gluetunu.
+
+services:
+  gluetun-slsk:
+    image: qmcgaw/gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER: protonvpn
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${PROTON_SLSK_WIREGUARD_PRIVATE_KEY:?druhá WireGuard konfigurace z Proton účtu (s Port Forwarding), viz komentář výš}
+      WIREGUARD_ADDRESSES: ${PROTON_SLSK_WIREGUARD_ADDRESSES:-10.2.0.2/32}
+      SERVER_COUNTRIES: ${PROTON_SERVER_COUNTRIES:-Czech Republic,Germany,Netherlands}
+      PORT_FORWARD_ONLY: "on"
+      VPN_PORT_FORWARDING: "on"
+      FIREWALL_OUTBOUND_SUBNETS: 172.28.0.0/16
+      # Control API (port 8000, jen Docker síť): worker z něj čte přidělený port.
+      HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE: '{"auth":"apikey","apikey":"${GLUETUN_CONTROL_API_KEY:?chybí v .env}"}'
+    ports:
+      # Web UI slskd jen pro tenhle počítač (přesunuto z `gluetun`).
+      - "127.0.0.1:5030:5030"
+    restart: unless-stopped
+
+  gluetun:
+    ports: !reset []
+
+  slskd:
+    network_mode: "service:gluetun-slsk"
+    depends_on: !override
+      - gluetun-slsk
+
+  api:
+    environment:
+      SLSKD_URL: http://gluetun-slsk:5030
+
+  worker:
+    environment:
+      SLSKD_URL: http://gluetun-slsk:5030
+      SLSK_GLUETUN_CONTROL_URL: http://gluetun-slsk:8000
+      SLSK_GLUETUN_CONTROL_API_KEY: ${GLUETUN_CONTROL_API_KEY}
