@@ -134,3 +134,31 @@ def test_stats_and_ampersand_is_same_artist(eng, monkeypatch):
     monkeypatch.setattr(lf, "artist_info", info)
     monkeypatch.setattr(lf, "top_albums", top)
     assert asyncio.run(cat.get_artist_stats("sg", _current=None))["listeners"] == 5
+
+
+def test_fallback_cover_skips_caa_and_keeps_stored_cover(eng, monkeypatch):
+    """archive.org nepřišel -> náhradní obal z Deezeru; uložený obal (CAA)
+    zůstává, CAA se znovu nezkouší, výsledek se pamatuje."""
+    from app.routes.catalog import get_cover_fallback
+
+    monkeypatch.setattr(artwork, "engine", eng)
+    artwork._FALLBACK_CACHE.clear()
+    with Session(eng) as s:
+        s.add(Release(id="caa", title="Pablo Honey", artist_id="a", mbid="mb-1", deezer_id="dz1",
+                      images=["https://coverartarchive.org/release-group/mb-1/front-500"]))
+        s.commit()
+    calls = []
+
+    async def resolve(mbid, artist, title, deezer_id=None, rejected=None):
+        calls.append((mbid, artist, title, deezer_id))
+        return "https://cdn-images.dzcdn.net/images/cover/x/1000x1000-000000-80-0-0.jpg"
+
+    monkeypatch.setattr(artwork, "resolve_release_cover", resolve)
+    out = asyncio.run(get_cover_fallback(" MB-1 ", _current=None))
+    assert out["url"].startswith("https://cdn-images.dzcdn.net/")
+    assert calls == [(None, "A", "Pablo Honey", "dz1")]
+    asyncio.run(get_cover_fallback("mb-1", _current=None))
+    assert len(calls) == 1
+    with Session(eng) as s:
+        assert s.get(Release, "caa").images == ["https://coverartarchive.org/release-group/mb-1/front-500"]
+    assert asyncio.run(get_cover_fallback("unknown", _current=None)) == {"url": None}

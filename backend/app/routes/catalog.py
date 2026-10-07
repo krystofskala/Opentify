@@ -454,6 +454,15 @@ async def get_release_cover(release_id: str, _current=Depends(get_current_user))
     return {"images": images}
 
 
+@catalog_router.get("/covers/fallback")
+async def get_cover_fallback(mbid: str, _current=Depends(get_current_user)):
+    """Náhradní obal (Deezer) pro album, jehož obal z Cover Art Archive se
+    klientovi nenačetl -- archive.org občas neodpovídá (audit 7. 10.)."""
+    from app.catalog.artwork import fallback_cover
+
+    return {"url": await fallback_cover(mbid.strip().lower())}
+
+
 @catalog_router.get("/releases/{release_id}/tracks")
 async def get_release_tracks(
     release_id: str,

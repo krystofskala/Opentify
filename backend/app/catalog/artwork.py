@@ -178,6 +178,36 @@ async def resolve_release_cover(
     return None
 
 
+# MBID -> (kdy, obal): náhradní obal pro alba, jejichž obal z Cover Art
+# Archive klientovi nepřišel (archive.org občas vypadne nebo neodpovídá --
+# audit 7. 10.: Creep / Pablo Honey bez obalu).
+_FALLBACK_CACHE: dict[str, tuple[float, str | None]] = {}
+_FALLBACK_TTL_S = 24 * 3600
+
+
+async def fallback_cover(mbid: str) -> str | None:
+    """Obal alba z Deezeru místo Cover Art Archive. Uložený obal alba se
+    nemění (CAA zůstává hlavní) -- jen klient ho použije, když CAA nepřijde."""
+    hit = _FALLBACK_CACHE.get(mbid)
+    if hit and time.monotonic() - hit[0] < _FALLBACK_TTL_S:
+        return hit[1]
+    with Session(engine) as session:
+        release = session.exec(select(Release).where(Release.mbid == mbid)).first()
+        if release is None or mbid.startswith("own:"):
+            return None
+        artist = session.get(Artist, release.artist_id)
+        artist_name, title, deezer_id = artist.name if artist else "", release.title, release.deezer_id
+        rejected = set((release.external_refs or {}).get("rejectedCovers") or [])
+    try:
+        cover = await resolve_release_cover(None, artist_name, title, deezer_id, rejected)
+    except Exception:  # noqa: BLE001 - best-effort
+        return None
+    if len(_FALLBACK_CACHE) > 5000:
+        _FALLBACK_CACHE.clear()
+    _FALLBACK_CACHE[mbid] = (time.monotonic(), cover)
+    return cover
+
+
 def _is_deezer_placeholder(url: str | None) -> bool:
     return not url or "/artist//" in url or "/images/artist/" not in url
 

@@ -5,6 +5,9 @@ import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../state/providers.dart' show apiClientProvider;
 
 /// Síťový obrázek (obaly, fotky interpretů) -- JEDINÝ způsob, jak v appce
 /// kreslit obrázek z URL.
@@ -98,9 +101,49 @@ class _NetImageState extends State<NetImage> {
           child: current,
         );
       },
-      errorBuilder: (context, _, __) => fallback,
+      // Obal z Cover Art Archive nepřišel (archive.org občas neodpovídá,
+      // audit 7. 10.: Creep / Pablo Honey bez obalu) -> náhradní z Deezeru.
+      errorBuilder: (context, _, __) {
+        final mbid = caaMbid(url);
+        if (mbid == null) return fallback;
+        return FutureBuilder<String?>(
+          future: _caaFallback(context, mbid),
+          builder: (context, snap) {
+            final alt = snap.data;
+            if (alt == null || alt == url) return fallback;
+            return NetImage(url: alt, fit: widget.fit, alignment: widget.alignment, placeholder: widget.placeholder);
+          },
+        );
+      },
     );
   }
+}
+
+final _caaUrl = RegExp(r'coverartarchive\.org/(?:release|release-group)/([^/]+)/');
+
+/// MBID alba z odkazu na Cover Art Archive (jinak `null`).
+@visibleForTesting
+String? caaMbid(String url) => _caaUrl.firstMatch(url)?.group(1);
+
+// Jeden dotaz na album za běh appky (i když se obal kreslí na deseti místech).
+final Map<String, Future<String?>> _caaFallbacks = {};
+
+Future<String?> _caaFallback(BuildContext context, String mbid) {
+  final ProviderContainer container;
+  try {
+    container = ProviderScope.containerOf(context, listen: false);
+  } catch (_) {
+    return Future.value();
+  }
+  return _caaFallbacks[mbid] ??= container
+      .read(apiClientProvider)
+      .getJson('/catalog/covers/fallback', query: {'mbid': mbid})
+      .then((json) => json['url'] as String?)
+      .catchError((Object _) {
+        // Chyba sítě: příště zkusit znovu.
+        _caaFallbacks.remove(mbid);
+        return null;
+      });
 }
 
 /// Provider pro [url] -- na webu rasterizovaný (viz [NetImage]).
