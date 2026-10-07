@@ -1067,7 +1067,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 // Tlačítko, které u přehrávaného nemá smysl (srdíčko u knihy),
                 // se nevykreslí -- dřív po něm zůstalo prázdné místo a řada byla
                 // posunutá doleva (živě 8. 10.).
-                for (final button in ref.watch(playerButtonsProvider))
+                for (final button in _orderedButtons(ref.watch(playerButtonsProvider), playback))
                   if (_playerButton(button, accent, playback, controller) case final w?) w,
               ],
             ),
@@ -1075,6 +1075,18 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         )),
       ),
     ));
+  }
+
+  /// Kniha: −30 s (místo Náhodně) vždy první, +30 s (místo Opakování) vždy
+  /// poslední, ostatní mezi nimi v pořadí uživatele (živě 8. 10.: +30 bylo
+  /// před srdíčkem).
+  List<PlayerButton> _orderedButtons(List<PlayerButton> buttons, AudioPlayerState playback) {
+    final np = playback.nowPlaying;
+    if (np == null || !AudioPlayerController.isSpokenId(np.recordingId)) return buttons;
+    int rank(PlayerButton b) => b == PlayerButton.shuffle ? 0 : (b == PlayerButton.repeat ? 2 : 1);
+    final indexed = buttons.indexed.toList()
+      ..sort((a, b) => rank(a.$2) != rank(b.$2) ? rank(a.$2) - rank(b.$2) : a.$1 - b.$1);
+    return [for (final (_, b) in indexed) b];
   }
 
   Widget? _playerButton(
