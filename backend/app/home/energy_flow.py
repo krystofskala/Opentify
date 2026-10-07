@@ -9,7 +9,13 @@ energie prvních / posledních 10 s skutečné hudby + jejich hlasitost vůči
 
 Skladby bez rozboru (ještě nestažené) dostanou průměr -- nevadí nikde.
 Řazení: hladově "nejbližší další" + pár průchodů 2-opt; stejný interpret
-vedle sebe stojí navíc (rozprostření jako dřív)."""
+vedle sebe stojí navíc (rozprostření jako dřív).
+
+Od 7. 10. (opentify-notes/rozbor-zvuku-navrh-2026-10-07.md) i **vzdálenost
+stylů** (štítky Last.fm interpretů): YUNGBLUD -> Tenório Jr. energií skoro
+nevybočí (0,78 -> 0,56), ale pop-punk -> brazilský jazz za sebou ruší. A
+navazuje se od skladby, která právě hraje (`anchor`), takže i hranice mezi
+várkami nekonečného hraní je plynulá."""
 
 from __future__ import annotations
 
@@ -66,6 +72,29 @@ def _feature_edges(session: Session, ids: list[str]) -> tuple[dict[str, tuple[fl
 
 TEMPO_MIN_CONFIDENCE = 0.5
 TEMPO_WEIGHT = 0.3
+STYLE_WEIGHT = 0.6
+# Velký skok: styly nemají skoro nic společného (YUNGBLUD -> Tenório Jr.,
+# energie jen 0,78 -> 0,56), nebo hodně jiná energie a k tomu jiný styl.
+JUMP_STYLE = 0.9
+JUMP_STYLE_WITH_ENERGY = 0.6
+JUMP_ENERGY = 0.5
+
+
+def is_jump(energy_gap: float | None, style_dist: float | None) -> bool:
+    if style_dist is None:
+        return False
+    return style_dist >= JUMP_STYLE or (energy_gap is not None and energy_gap >= JUMP_ENERGY and style_dist >= JUMP_STYLE_WITH_ENERGY)
+
+
+def style_distance(a: dict[str, float] | None, b: dict[str, float] | None) -> float | None:
+    """1 - kosinová podobnost stylových štítků dvou interpretů (0 = stejné,
+    1 = nic společného); None, když u jednoho štítky nejsou."""
+    if not a or not b:
+        return None
+    dot = sum(v * b.get(k, 0.0) for k, v in a.items())
+    na = sum(v * v for v in a.values()) ** 0.5
+    nb = sum(v * v for v in b.values()) ** 0.5
+    return 1.0 - dot / (na * nb) if na and nb else None
 
 
 def _tempo_gap(a: float, b: float) -> float:
@@ -74,20 +103,33 @@ def _tempo_gap(a: float, b: float) -> float:
     return min(1.0, gap / 0.15)
 
 
-def order(ids: list[str], artist_of: dict[str, str]) -> list[str]:
-    """Stejné skladby, plynulejší pořadí. První skladba zůstává první (mix
-    začíná tím, čím začínal)."""
-    if len(ids) < 3:
-        return list(ids)
+def _model(ids: list[str]) -> tuple[dict[str, tuple[float, float]], dict[str, float]]:
     with Session(engine) as session:
         # Nový rozbor má přednost, starý obrys jen pro skladby bez něj.
         edges = _edges(session, ids)
         new_edges, tempo = _feature_edges(session, ids)
         edges.update(new_edges)
+    return edges, tempo
+
+
+def order(
+    ids: list[str],
+    artist_of: dict[str, str],
+    anchor: str | None = None,
+    styles: dict[str, dict[str, float]] | None = None,
+) -> list[str]:
+    """Stejné skladby, plynulejší pořadí. Bez `anchor` zůstává první skladba
+    první (mix začíná tím, čím začínal); s `anchor` (právě hraje, není ve
+    výsledku) se navazuje na něj. `styles` = interpret -> stylové štítky."""
+    if len(ids) < (2 if anchor else 3):
+        return list(ids)
+    full = ([anchor] if anchor else []) + [r for r in ids if r != anchor]
+    edges, tempo = _model(full)
     if len(edges) < 3:
         return list(ids)  # skoro nic není rozebrané -- neměnit
     mean_in = sum(e[0] for e in edges.values()) / len(edges)
     mean_out = sum(e[1] for e in edges.values()) / len(edges)
+    styles = styles or {}
 
     def edge(r: str) -> tuple[float, float]:
         return edges.get(r, (mean_in, mean_out))
@@ -98,8 +140,12 @@ def order(ids: list[str], artist_of: dict[str, str]) -> list[str]:
             c += TEMPO_WEIGHT * _tempo_gap(tempo[a], tempo[b])
         if artist_of.get(a) and artist_of.get(a) == artist_of.get(b):
             c += SAME_ARTIST_PENALTY
+        d = style_distance(styles.get(artist_of.get(a, "")), styles.get(artist_of.get(b, "")))
+        if d is not None:
+            c += STYLE_WEIGHT * d
         return c
 
+    ids = full
     rest = list(ids[1:])
     path = [ids[0]]
     while rest:
@@ -124,11 +170,32 @@ def order(ids: list[str], artist_of: dict[str, str]) -> list[str]:
 
     def measured(p: list[str]) -> float:
         pairs = [(a, b) for a, b in zip(p, p[1:]) if a in edges and b in edges]
-        return sum(abs(edges[a][1] - edges[b][0]) for a, b in pairs) / len(pairs) if pairs else 0.0
+        energy = sum(abs(edges[a][1] - edges[b][0]) for a, b in pairs) / len(pairs) if pairs else 0.0
+        if not styles:
+            return energy
+        dists = [d for a, b in zip(p, p[1:]) if (d := style_distance(styles.get(artist_of.get(a, "")), styles.get(artist_of.get(b, "")))) is not None]
+        return energy + STYLE_WEIGHT * (sum(dists) / len(dists) if dists else 0.0)
 
     # Jen když je to opravdu plynulejší (skladby bez rozboru a stejní
     # interpreti můžou výsledek zhoršit -- živě Denní mix 5 o 34 %).
-    return path if measured(path) <= measured(list(ids)) else list(ids)
+    best_path = path if measured(path) <= measured(list(ids)) else list(ids)
+    return best_path[1:] if anchor else best_path
+
+
+def jumps(
+    ids: list[str], artist_of: dict[str, str], styles: dict[str, dict[str, float]] | None, anchor: str | None = None
+) -> list[tuple[int, float, float | None]]:
+    """Velké skoky v pořadí: (index skladby, PO které skok přijde v `ids`,
+    skok energie, vzdálenost stylů). Index -1 = skok hned od `anchor`."""
+    full = ([anchor] if anchor else []) + list(ids)
+    edges, _tempo = _model(full)
+    out = []
+    for i, (a, b) in enumerate(zip(full, full[1:])):
+        e = abs(edges[a][1] - edges[b][0]) if a in edges and b in edges else None
+        d = style_distance((styles or {}).get(artist_of.get(a, "")), (styles or {}).get(artist_of.get(b, "")))
+        if is_jump(e, d):
+            out.append((i - (1 if anchor else 0), e if e is not None else 0.0, d))
+    return out
 
 
 def roughness(ids: list[str]) -> float | None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import random
+import logging
 import time
 from collections import Counter
 from datetime import timedelta
@@ -31,6 +32,7 @@ from app.utils import utcnow
 
 NEW_SHARE = 0.2
 _CACHE_SECONDS = 600
+logger = logging.getLogger(__name__)
 # Strop interpreta pro celou relaci (návrh 1): každé zahrání v posledních
 # `SESSION_WINDOW` skladbách fronty sníží šanci dalšího na `SESSION_DECAY`×.
 SESSION_WINDOW = 30
@@ -368,6 +370,7 @@ def pick(
             act.artist_of.setdefault(rid, aid)
             act.title_of.setdefault(rid, title)
     chosen_set = set(chosen)
+    audio = _features_map() if moods is not None and mood not in (None, "prekvap") else {}
     # Mladý profil: interpret jen z jednoho dne (zkoušení, puštěné pro
     # někoho) má malý vliv, dokud se nevrátí jiný den nebo nedostane srdíčko.
     tentative: dict[str, float] = {}
@@ -403,6 +406,8 @@ def pick(
             f *= SESSION_DECAY ** session_counts[artist]
         if rid in recent_batches:
             f *= RECENT_BATCH_PENALTY
+        if audio and rid in audio:
+            f *= track_mood_fit(mood, *audio[rid])  # nálada i podle zvuku skladby
         if artist in tentative and not session_counts.get(artist) and not done_artists.get(artist):
             f *= tentative[artist]  # v právě běžící relaci platí, co hraje
         return base * f
@@ -472,6 +477,98 @@ def pick(
             first = session.get(Recording, fallback_seeds[0])
         reason = f"Navazuje na {first.title}" if first else reason
     return familiar, new_seeds, reason
+
+
+# Nálada podle ZVUKU skladby (bod 4, opentify-notes/rozbor-zvuku-navrh-
+# 2026-10-07.md): štítky říkají jen, jaký je interpret -- klidná píseň
+# energické kapely (nebo naopak) tak propadla. Energie 0-1 z rozboru zvuku
+# (decily 0,08 ... 0,88), tempo jen se spolehlivým odhadem.
+def track_mood_fit(mood: str | None, energy: float | None, bpm: float | None = None) -> float:
+    """Násobek pro skladbu v náladě (1 = beze změny / bez rozboru)."""
+    if energy is None or mood in (None, "prekvap"):
+        return 1.0
+    e = energy
+    if mood == "klid":
+        return 1.5 if e < 0.35 else 1.0 if e < 0.5 else 0.5 if e < 0.65 else 0.2
+    if mood == "energie":
+        f = 1.5 if e > 0.65 else 1.0 if e > 0.5 else 0.5 if e > 0.35 else 0.2
+        return f * (1.1 if bpm and bpm >= 120 else 1.0)
+    if mood == "melancholie":
+        return 1.3 if e < 0.5 else 0.8 if e < 0.65 else 0.3
+    if mood == "party":
+        f = 1.4 if e > 0.6 else 0.9 if e > 0.45 else 0.3
+        return f * (1.15 if bpm and 100 <= bpm <= 135 else 1.0)
+    if mood == "soustredeni":
+        return 1.2 if 0.15 <= e <= 0.6 else 0.9 if e < 0.15 else 0.3 if e > 0.75 else 0.7
+    return 1.0
+
+
+_feat_cache: tuple[float, dict[str, tuple[float | None, float | None]]] | None = None
+
+
+def _features_map() -> dict[str, tuple[float | None, float | None]]:
+    """Skladba -> (energie, spolehlivé tempo); cache 10 min."""
+    global _feat_cache
+    if _feat_cache and time.time() - _feat_cache[0] < _CACHE_SECONDS:
+        return _feat_cache[1]
+    from app.home.energy_flow import TEMPO_MIN_CONFIDENCE
+    from app.models import TrackFeatures
+
+    with Session(engine) as session:
+        rows = session.exec(select(TrackFeatures.recording_id, TrackFeatures.energy, TrackFeatures.bpm, TrackFeatures.bpm_confidence)).all()
+    out = {r: (e, b if (c or 0) >= TEMPO_MIN_CONFIDENCE else None) for r, e, b, c in rows}
+    _feat_cache = (time.time(), out)
+    return out
+
+
+MAX_DEFERRED_SHARE = 0.5  # nanejvýš polovinu nových odložit do další várky
+
+
+async def _smooth(
+    out: list[str], new_ids: set[str], anchor: str | None, mood: str | None
+) -> tuple[list[str], set[str]]:
+    """Plynulé přechody v celé várce (bod 4 + nahlášený skok YUNGBLUD ->
+    Tenório Jr., 7. 10.):
+    1. nové skladby bez rozboru -> rozbor z 30s ukázky Deezeru (nejvýš 4 s);
+    2. nové, které zvukem odporují zvolené náladě, ven;
+    3. celou várku (známé i nové) seřadit od skladby, která právě hraje
+       (energie konce -> začátku, tempo, vzdálenost stylů);
+    4. novou skladbu, která i tak dělá velký skok, odložit do další várky.
+    Vrací (pořadí, nové)."""
+    from app import preview_features
+    from app.home import energy_flow, taste_bridge
+
+    await preview_features.ensure([r for r in out if r in new_ids])
+    if mood not in (None, "prekvap") and new_ids:
+        global _feat_cache
+        _feat_cache = None  # právě rozebrané ukázky
+        audio = await asyncio.to_thread(_features_map)
+        out = [r for r in out if r not in new_ids or track_mood_fit(mood, *audio.get(r, (None, None))) > 0.3]
+    meta = await asyncio.to_thread(_rec_meta, out + ([anchor] if anchor else []))
+    artist_of = {r: a for r, (a, _t) in meta.items() if a}
+    styles = await taste_bridge.artist_styles(list(set(artist_of.values())))
+    ordered = await asyncio.to_thread(energy_flow.order, out, artist_of, anchor, styles)
+    news = [r for r in ordered if r in new_ids]
+    budget = int(len(news) * MAX_DEFERRED_SHARE)
+    deferred: list[str] = []
+    for _ in range(budget):
+        bad = await asyncio.to_thread(energy_flow.jumps, ordered, artist_of, styles, anchor)
+        culprit = None
+        for i, _e, _d in bad:
+            after = ordered[i + 1] if i + 1 < len(ordered) else None
+            before = ordered[i] if i >= 0 else None
+            culprit = after if after in new_ids else (before if before in new_ids else None)
+            if culprit:
+                break
+        if not culprit:
+            break
+        deferred.append(culprit)
+        ordered = await asyncio.to_thread(
+            energy_flow.order, [r for r in ordered if r != culprit], artist_of, anchor, styles
+        )
+    if deferred:
+        logger.info("pusť teď: %d nových odloženo kvůli skoku stylu/energie", len(deferred))
+    return ordered, {r for r in new_ids if r in ordered}
 
 
 def _rec_meta(recording_ids: list[str]) -> dict[str, tuple[str | None, str]]:
@@ -647,6 +744,10 @@ async def next_chunk(
         # Nový profil bez historie: nic nevnucovat (žádné žebříčky), jen říct proč.
         reason = "Zatím nevím, co posloucháš – pusť si něco z Hledat a příště navážu."
         return {"recordingIds": [], "reason": reason}
+    try:
+        out, new_ids = await _smooth(out, new_ids, seeds[-1] if seeds else None, mood)
+    except Exception:  # noqa: BLE001 -- plynulost je doplněk, várka musí přijít
+        logger.exception("pusť teď: plynulé řazení")
     available = await asyncio.to_thread(_available, out)
     out = _safe_start(out, available)
     missing = [r for r in out if r not in available]

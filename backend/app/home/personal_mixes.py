@@ -664,7 +664,11 @@ async def build_daily_mixes() -> int:
         # Plynulé navazování energie (P3) -- konec skladby k začátku další.
         from app.home import energy_flow
 
-        familiar = await asyncio.to_thread(energy_flow.order, familiar, taste.artist_of)
+        from app.home.taste_bridge import artist_styles
+
+        # + vzdálenost stylů (bod 4): v jedné skupině bývají i dost odlišné věci.
+        styles = await artist_styles(list({taste.artist_of[r] for r in familiar if r in taste.artist_of}))
+        familiar = await asyncio.to_thread(energy_flow.order, familiar, taste.artist_of, None, styles)
         # Poměr ~70/30 drží i u menších skupin -- málo známých skladeb se
         # nezaplácne novými (dřív tak vznikaly mixy s 85 % neznámé hudby).
         new_target = min(DAILY_MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))

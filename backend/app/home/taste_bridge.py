@@ -182,3 +182,30 @@ async def bridge(
             clean = [x for x in lst if not is_junk_version(x.get("title"))]
             out += rng.sample(clean, min(per_artist, len(clean)))
     return out
+
+
+async def artist_styles(artist_ids: list[str]) -> dict[str, dict[str, float]]:
+    """Interpret -> stylové štítky Last.fm s vahou 0-1 (pro vzdálenost stylů
+    v plynulém řazení, app/home/energy_flow.py). Vlastní interpreti (Kontrast)
+    ne -- Last.fm zná jen stejnojmennou cizí kapelu."""
+    from sqlmodel import Session, select
+
+    from app.catalog.identity import is_own_artist
+    from app.db import engine
+    from app.models import Artist
+    from app.tags import is_style
+
+    ids = [a for a in dict.fromkeys(artist_ids) if a and not is_own_artist(a)]
+    if not ids:
+        return {}
+    with Session(engine) as session:
+        names = dict(session.exec(select(Artist.id, Artist.name).where(Artist.id.in_(ids))).all())  # type: ignore[attr-defined]
+    sem = asyncio.Semaphore(6)
+    pairs = [(a, n) for a, n in names.items() if n]
+    tags = await asyncio.gather(*(_tags_of(n, sem) for _a, n in pairs))
+    out: dict[str, dict[str, float]] = {}
+    for (aid, _n), tlist in zip(pairs, tags):
+        vec = {t.strip().lower(): c / 100 for t, c in tlist if c and is_style(t)}
+        if vec:
+            out[aid] = vec
+    return out
