@@ -209,8 +209,8 @@ async def _resolve_tracks(items: list[dict[str, str]], limit: int) -> list[str]:
             return None
         if _normalize((found.get("artist") or {}).get("name", "")) != _normalize(item["artist"]):
             return None
-        # Deezer občas vrátí "(Slowed)" / "Sped Up" verzi místo původní.
-        if _JUNK_VERSION.search(found.get("title") or "") and not _JUNK_VERSION.search(item.get("title") or ""):
+        # "(Slowed)" / "Sped Up" verze do mixů ne (Last.fm je má i v žebříčcích).
+        if _JUNK_VERSION.search(found.get("title") or "") or _JUNK_VERSION.search(item.get("title") or ""):
             return None
         return found
 
@@ -227,6 +227,24 @@ _JUNK_VERSION = re.compile(r"(slowed|sped up|speed up|reverb|nightcore|8d audio
 
 def _profile_tag(tag: str) -> bool:
     return is_style(tag) or slug(tag) in _PROFILE_EXTRA
+
+
+# Styl, který je jen jiným jménem hlavního žánru ("rap" = rodina hiphop).
+_FAMILY_ALIAS = {"rap": "hiphop", "hip-hop": "hiphop", "hip hop": "hiphop"}
+
+
+def _family(t: str) -> list[str]:
+    """Podstyly stejné rodiny (rap -> jazz rap, conscious, český rap…)."""
+    group = _FAMILY_ALIAS.get(t) or (t if t in SUBGENRES else None)
+    if group:
+        return [x for x in SUBGENRES.get(group, ()) if x != t]
+    return [x for g in parent_genres(t) for x in SUBGENRES.get(g, ()) if x != t]
+
+
+def _plays_style(tags: list[tuple[str, int]], t: str, family: list[str]) -> bool:
+    return _strong(tags, t) or any(_strong(tags, f) for f in family) or (
+        t in _FAMILY_ALIAS and any(_strong(tags, a) for a in _FAMILY_ALIAS if a != t)
+    )
 
 
 def _strong(tags: list[tuple[str, int]], t: str) -> bool:
@@ -273,8 +291,14 @@ async def _taste_bridge(
     # Kandidáti: nejposlouchanější interpreti stylu a k tomu interpreti tvých
     # hlavních stylů, kteří ten styl zároveň výrazně hrají (folkař, co rapuje).
     mine = [k for k in sorted(profile, key=lambda k: -profile[k]) if is_style(k)][:3]
+    # ...a z podstylů rodiny (jazz rap, conscious hip hop, český rap) --
+    # žebříček samotného "rap" je skoro jen mainstream.
+    family = _family(t)
     lists = await asyncio.gather(
-        lastfm.tag_top_artists(t, 200), *(lastfm.tag_top_artists(k, 100) for k in mine), return_exceptions=True
+        lastfm.tag_top_artists(t, 200),
+        *(lastfm.tag_top_artists(k, 100) for k in mine),
+        *(lastfm.tag_top_artists(f, 50) for f in family),
+        return_exceptions=True,
     )
     candidates = [
         n for n in dict.fromkeys(n for lst in lists if isinstance(lst, list) for n in lst)
@@ -282,7 +306,7 @@ async def _taste_bridge(
     ]
     cand_tags = [
         (name, tags) for name, tags in zip(candidates, await asyncio.gather(*(tags_of(n) for n in candidates)))
-        if _strong(tags, t)
+        if _plays_style(tags, t, family)
     ]
     # Vzácnost štítku mezi kandidáty (IDF): co má skoro každý rapper (pop,
     # hip-hop) rozhoduje málo, co tě odlišuje (folk, akustické, jazz) hodně.
