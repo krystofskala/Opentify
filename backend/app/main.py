@@ -100,6 +100,13 @@ async def _public_guard(request, call_next):  # type: ignore[no-untyped-def]
             notify("⚠️ Zahlcení z internetu", f"Adresa {ip} přes limit {public_access.PUBLIC_RATE_PER_MIN} požadavků/min",
                    tags=["warning"], key=f"rate:{ip}", every_s=900)
             return JSONResponse(status_code=429, content={"detail": "Moc požadavků, zkus to za chvíli."})
+        response = await call_next(request)
+        if response.status_code == 404 and request.scope.get("route") is None:
+            # Žádná taková cesta v API -- nejspíš bot (app/probe_watch.py).
+            from app import probe_watch
+
+            probe_watch.record(ip, request.url.path)
+        return response
     return await call_next(request)
 
 
@@ -200,6 +207,9 @@ async def on_startup() -> None:
     asyncio.create_task(artwork_backfill_loop())
     asyncio.create_task(home_refresh_loop())
     asyncio.create_task(lb_submit_loop())
+    from app.probe_watch import probe_watch_loop
+
+    asyncio.create_task(probe_watch_loop())
 
 
 async def on_shutdown() -> None:

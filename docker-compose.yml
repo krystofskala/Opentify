@@ -68,6 +68,8 @@ services:
       SKTORRENT_PASSWORD: ${SKTORRENT_PASSWORD:-}
     volumes:
       - vault-db:/data/db
+      # Log neexistujících cest z webu (app/probe_watch.py).
+      - probe-log:/data/probe
       # Stažené skladby na velkém disku (MEDIA_DIR v .env, např. E:/opentify/media),
       # ne ve virtuálním disku Dockeru na systémovém C:.
       - ${MEDIA_DIR:-./media}:/data/media
@@ -292,6 +294,8 @@ services:
     volumes:
       - ./client/build/web:/usr/share/nginx/html:ro
       - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Neexistující cesty z internetu (boti) -- čte je API (app/probe_watch.py).
+      - probe-log:/var/log/nginx/probe
     ports:
       - "127.0.0.1:5000:80"
     networks: [edge]
@@ -337,6 +341,7 @@ services:
 
 volumes:
   vault-db:
+  probe-log:
   redis-data:
   slskd-data:
   qbittorrent-config:
