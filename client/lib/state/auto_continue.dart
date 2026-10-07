@@ -48,6 +48,21 @@ class AutoContinue {
   /// Profil bez dat: poslední `start` vrátil "zeptej se, z čeho začít".
   bool needsStart = false;
 
+  // Okamžitá změna směru (audit C, schváleno 8. 10.): dvě přeskočení po sobě
+  // v algoritmické frontě -> zbytek nachystané várky pryč a hned nová (server
+  // pozná "jiný směr" z přeskočení). Dřív se změna projevila až za 8-10 skladeb.
+  int? _lastIndex;
+  String? _lastId;
+  Duration _lastPos = Duration.zero;
+  Duration? _lastDur;
+  int _skipsInRow = 0;
+
+  bool _wasSkip(AudioPlayerState s) {
+    final dur = _lastDur;
+    if (_lastIndex == null || s.queueIndex != _lastIndex! + 1 || dur == null || dur <= Duration.zero) return false;
+    return _lastPos < dur * 0.5 && _lastPos < dur - const Duration(seconds: 10);
+  }
+
   /// Spustí "Pusť teď" -- první várku hned, další se doplňují samy.
   /// `startArtistId` / `startRecordingId`: "Z čeho mám začít?" (profil bez dat).
   Future<String?> start({String? mood, String? startArtistId, String? startRecordingId}) async {
@@ -65,16 +80,47 @@ class AutoContinue {
   }
 
   void _onPlayer(AudioPlayerState s) {
-    if (_loading || s.nowPlaying == null || s.queue.isEmpty) return;
-    if (_retryAfter != null && DateTime.now().isBefore(_retryAfter!)) return;
+    if (s.nowPlaying == null || s.queue.isEmpty) return;
     final playNow = s.queueSourceLabel == playNowLabel;
     final endless = s.repeatMode == RepeatMode.endless;
+    final id = s.nowPlaying!.recordingId;
+    if (id != _lastId) {
+      final skipped = (playNow || endless) && _wasSkip(s);
+      _skipsInRow = skipped ? _skipsInRow + 1 : 0;
+      _lastId = id;
+      _lastIndex = s.queueIndex;
+      _lastPos = Duration.zero;
+      _lastDur = s.duration;
+      if (_skipsInRow >= 2 && !_loading && !s.shuffleEnabled) {
+        _skipsInRow = 0;
+        unawaited(_turn(s, endless && !playNow));
+        return;
+      }
+    } else {
+      _lastPos = s.position;
+      _lastDur = s.duration ?? _lastDur;
+    }
+    if (_loading) return;
+    if (_retryAfter != null && DateTime.now().isBefore(_retryAfter!)) return;
     if (!playNow && !endless) return;
     final order = s.shuffleEnabled ? s.shuffleOrder : null;
     final remaining =
         order != null ? order.length - 1 - order.indexOf(s.queueIndex) : s.queue.length - 1 - s.queueIndex;
     if (remaining > 2) return;
     unawaited(_refill(s, endless && !playNow));
+  }
+
+  /// Jiný směr: nachystané skladby za právě hrající pryč a hned nová várka.
+  Future<void> _turn(AudioPlayerState s, bool fromSeeds) async {
+    final ctrl = _ref.read(audioPlayerControllerProvider.notifier);
+    // Chvíli počkat, ať server dostane obě přeskočení (PlayEvent).
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    final now = _ref.read(audioPlayerControllerProvider);
+    if (now.queueSourceLabel != s.queueSourceLabel || now.nowPlaying?.recordingId != s.nowPlaying?.recordingId) return;
+    for (var i = now.queue.length - 1; i > now.queueIndex; i--) {
+      ctrl.removeFromQueue(i);
+    }
+    await _refill(_ref.read(audioPlayerControllerProvider), fromSeeds);
   }
 
   Future<void> _refill(AudioPlayerState s, bool fromSeeds) async {

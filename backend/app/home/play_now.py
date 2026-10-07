@@ -100,6 +100,37 @@ def _activation(user_id: str) -> av.Activation:
     return act
 
 
+# Rotace jako v rádiu (rešerše C1, schváleno 8. 10.): skladba se vrátí až
+# po odstupu podle toho, jak se poslouchá -- "na opakování" (3+ za týden)
+# po dni, oblíbená (2+ za 60 dní) po 5 dnech, klasika po 3 týdnech. Dřív
+# jen tvrdé 3 h, pak zase naplno -- várky se opakovaly mezi dny.
+ROTATION_DAYS = {"repeat": 1.0, "favourite": 5.0, "classic": 21.0}
+ROTATION_FLOOR = 0.03
+
+
+def rotation_factors(act: av.Activation, small: bool = False) -> dict[str, float]:
+    """Skladba -> násobek skóre (1 = odstup splněný). Malý profil mírněji
+    (třetinové odstupy, nejméně 0,2) -- má málo co střídat."""
+    now = act.now
+    week, sixty = Counter(), Counter()
+    for t, r in act.timeline:
+        age = (now - t).total_seconds() / 86400
+        if age <= 7:
+            week[r] += 1
+        if age <= 60:
+            sixty[r] += 1
+    out: dict[str, float] = {}
+    for rid, last in act.last.items():
+        age_days = (now - last).total_seconds() / 86400
+        kind = "repeat" if week[rid] >= 3 else ("favourite" if sixty[rid] >= 2 else "classic")
+        gap = ROTATION_DAYS[kind] / (3 if small else 1)
+        if age_days >= gap:
+            continue
+        floor = 0.2 if small else ROTATION_FLOOR
+        out[rid] = max(floor, (max(age_days, 0.0) / gap) ** 2)
+    return out
+
+
 @functools.lru_cache(maxsize=200_000)
 def _title_key(title: str) -> str:
     """Čistá funkce názvu -- v cache: `score()` ji volal ~100 tisíc× na várku
@@ -417,6 +448,8 @@ def pick(
     if av.youngness(act.listening_days()) > 0:
         tentative = av.tentative_factors(act.artist_days(), av.explicit_artists(user_id), act.listening_days())
 
+    rotation = rotation_factors(act, small)
+
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
         if not artist or artist in banned or rid in exclude:
@@ -440,6 +473,7 @@ def pick(
             f *= SESSION_DECAY ** session_counts[artist]
         if rid in recent_batches:
             f *= RECENT_BATCH_PENALTY
+        f *= rotation.get(rid, 1.0)
         if rid in muted_offers:
             f *= 0.3  # nabídnutá a nepuštěná -- týden méně často
         if rid in paused_offers:
@@ -464,7 +498,8 @@ def pick(
     known_target = max(1, round(size * (1 - new_share)))
     from app.home import energy_flow
 
-    familiar = _spread(_cap_per_artist(ordered, act.artist_of, 1)[:known_target], act.artist_of)
+    capped = _cap_per_artist(ordered, act.artist_of, 1)
+    familiar = _spread(capped[:known_target], act.artist_of)
     if seed_artists and familiar and not any(act.artist_of.get(r) in seed_artists for r in familiar):
         # Nekonečné hraní drží směr (návrh 2): aspoň jedna skladba od
         # interpreta semínka, i když ho strop relace ztlumil.
@@ -493,6 +528,8 @@ def pick(
             titles=(played_titles | {_song_key(act.artist_of.get(r), act.title_of.get(r, "")) for r in familiar}) - {""},
             session_counts=session_counts,
             paused=paused_offers,
+            # Záloha známých, když nové nevyjdou (audit G) -- várka se nezkrátí.
+            spare_familiar=[r for r in capped[known_target:] if r not in familiar][: size],
             weak_mood=bool(
                 moods is not None and mood != "prekvap" and sum(1 for m in moods.values() if m >= 0.3) < 3
             ),
@@ -688,6 +725,27 @@ def _available(recording_ids: list[str]) -> set[str]:
         )
 
 
+def _familiar_first(out: list[str], new_ids: set[str], first: int = 2) -> list[str]:
+    """Začátek várky = jistota (rešerše C7): první `first` míst známé, nové
+    až od dalšího; jinak pořadí beze změny."""
+    head = [r for r in out if r not in new_ids][:first]
+    return head + [r for r in out if r not in head]
+
+
+def _last_outcome(user_id: str) -> str | None:
+    """Jak dopadla poslední skladba, kterou pustil algoritmus (40 min):
+    "skipped" / "completed" / None."""
+    since = (utcnow() - timedelta(minutes=40)).replace(tzinfo=None)
+    with Session(engine) as session:
+        row = session.exec(
+            select(PlayEvent.end_reason)
+            .where(PlayEvent.user_id == user_id, PlayEvent.ended_at >= since, PlayEvent.algorithmic == True)  # noqa: E712
+            .order_by(PlayEvent.ended_at.desc())  # type: ignore[union-attr]
+            .limit(1)
+        ).first()
+    return row if row in ("skipped", "completed") else None
+
+
 def _safe_start(out: list[str], available: set[str], first: int = 2) -> list[str]:
     """Prvních `first` míst jen stažené (návrh 3) -- jistý start bez čekání;
     nestažené se posunou za ně, pořadí ostatních zůstane."""
@@ -767,6 +825,12 @@ async def next_chunk(
     new_share = 0.5 if mood == "prekvap" else (0.6 if weak_mood else NEW_SHARE)
     if mood != "prekvap" and len((await asyncio.to_thread(_activation, user_id)).total) < SMALL_PROFILE:
         new_share = max(new_share, SMALL_NEW_SHARE)  # čistý start: není co opakovat
+    # Po přeskočení bezpečněji, po dohrání víc riskovat (rešerše C2).
+    last = await asyncio.to_thread(_last_outcome, user_id)
+    if mood != "prekvap" and last == "skipped":
+        new_share *= 0.5
+    elif mood != "prekvap" and last == "completed":
+        new_share = min(0.6, new_share * 1.25)
     session_counts = await session_artist_counts(played)
     ctx: dict[str, Any] = {}
     familiar, new_seeds, reason = await asyncio.to_thread(
@@ -831,6 +895,20 @@ async def next_chunk(
         spare_new = pool[:3]
     else:
         spare_new = []
+    if len(familiar) + len(new) < size:
+        # Nové nevyšly (výpadek Last.fm, vše vyfiltrované): doplnit známými.
+        spare_fam = ctx.get("spare_familiar") or []
+        meta_all = await asyncio.to_thread(_rec_meta, familiar + new + spare_fam)
+        used = {meta_all.get(r, (None, ""))[0] for r in familiar + new}
+        extra_meta = meta_all
+        for rid in spare_fam:
+            if len(familiar) + len(new) >= size:
+                break
+            a = extra_meta.get(rid, (None, ""))[0]
+            if rid in familiar or a in used:
+                continue
+            used.add(a)
+            familiar.append(rid)
     new_ids = set(new)
     # Nové proložit mezi známé (ne všechny na konec).
     out: list[str] = []
@@ -855,6 +933,7 @@ async def next_chunk(
         _remember_deferred(user_id, deferred, set(out))
     except Exception:  # noqa: BLE001 -- plynulost je doplněk, várka musí přijít
         logger.exception("pusť teď: plynulé řazení")
+    out = _familiar_first(out, new_ids)
     available = await asyncio.to_thread(_available, out)
     out = _safe_start(out, available)
     missing = [r for r in out if r not in available]
