@@ -436,6 +436,9 @@ async def artwork_backfill_loop(idle_interval_s: float = 300.0, pause_s: float =
     """Na pozadí po celou dobu běhu API: postupně (jedna položka naráz, s
     pauzou) doplní obrázky všem albům a interpretům, co je nemají -- knihovna
     přednostně. Střídá alba a interprety, ať se obojí plní souběžně."""
+    from app.catalog.rate_limit import mark_background
+
+    mark_background()
     await asyncio.sleep(5)
     try:
         artwork_progress["embedded"] = await asyncio.to_thread(_embedded_pass)

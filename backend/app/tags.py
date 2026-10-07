@@ -87,7 +87,13 @@ def _background(key: str, coro) -> None:
     if key in _running and not _running[key].done():
         coro.close()
         return
-    _running[key] = asyncio.create_task(coro)
+    async def run() -> Any:
+        from app.catalog.rate_limit import mark_background
+
+        mark_background()  # dopočítání na pozadí -- uživatel má přednost
+        return await coro
+
+    _running[key] = asyncio.create_task(run())
 
 
 async def _cached_only(key: str) -> Any:

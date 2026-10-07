@@ -196,6 +196,9 @@ async def run_generators(*, force: bool = False) -> dict[str, Any]:
 
 
 async def home_refresh_loop(check_every_s: float = 15 * 60) -> None:
+    from app.catalog.rate_limit import mark_background
+
+    mark_background()  # dotazy ven až po tom, co právě otevřel uživatel
     await asyncio.sleep(20)  # nezdržovat start API
     while True:
         try:

@@ -137,6 +137,9 @@ async def cached_json_swr(
             _refreshing.add(key)
 
             async def refresh() -> None:
+                from app.catalog.rate_limit import mark_background
+
+                mark_background()  # uživatel má přednost (app/catalog/rate_limit.py)
                 try:
                     await store(await fetch())
                 except Exception:  # noqa: BLE001 - obnova na pozadí, stará hodnota platí dál
