@@ -282,6 +282,9 @@ final spokenPersonProvider =
 typedef SpokenLocalSearch = ({List<SpokenBook> books, List<({String name, String role, int books, String? image})> people});
 
 final spokenLocalSearchProvider = FutureProvider.autoDispose.family<SpokenLocalSearch, String>((ref, q) async {
+  // Jen naše databáze (rychlé, nic venku) -> stav stahování živě; jinak
+  // "Na serveru" ukazovalo "Stahuje se · 12 %" u dávno hotové knihy.
+  ref.watch(spokenEventsProvider);
   final json = await ref.watch(apiClientProvider).getJson('/spoken/search/local', query: {'q': q});
   return (
     books: [for (final b in json['books'] as List<dynamic>? ?? const []) SpokenBook.fromJson(b as Map<String, dynamic>)],
