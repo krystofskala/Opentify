@@ -176,6 +176,10 @@ def load_taste(user_id: str) -> Taste:
                 )
             ).all()
         )
+        # + přeskočené ve Spotify / Apple v kontextu algoritmu (180 dní).
+        from app.home.repetition import imported_skips
+
+        taste.skipped |= imported_skips(user_id)
         from app.models import Playlist, PlaylistKind, PlaylistMember
 
         member_of = set(

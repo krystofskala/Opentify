@@ -111,7 +111,14 @@ def _recent_batch_ids(user_id: str) -> set[str]:
     now = time.time()
     keep = [(t, ids) for t, ids in _batches.get(user_id, []) if now - t < _BATCH_TTL_S]
     _batches[user_id] = keep
-    return set().union(*(ids for _t, ids in keep)) if keep else set()
+    mem = set().union(*(ids for _t, ids in keep)) if keep else set()
+    # + z databáze (RecBatchItem): paměť přežije restart / nasazení.
+    from app.home.repetition import recent_batch_ids
+
+    try:
+        return mem | recent_batch_ids(user_id, _BATCH_TTL_S / 3600, _BATCH_MEMORY)
+    except Exception:  # noqa: BLE001
+        return mem
 
 
 def _remember_batch(user_id: str, ids: list[str]) -> None:
@@ -339,6 +346,10 @@ def pick(
                 )
             ).all()
         )
+        from app.home import repetition
+
+        skipped_tracks |= repetition.imported_skips(user_id)  # přeskočené ve Spotify (algoritmus, 180 dní)
+        paused_offers, muted_offers = repetition.ignored_offers(user_id)
         small = len(act.total) < SMALL_PROFILE
         chosen: list[str] = _chosen_tracks(session, user_id) if small else []
         seed_artists = {r.artist_id for r in (session.get(Recording, s) for s in seeds) if r and r.artist_id}
@@ -433,6 +444,10 @@ def pick(
             f *= SESSION_DECAY ** session_counts[artist]
         if rid in recent_batches:
             f *= RECENT_BATCH_PENALTY
+        if rid in muted_offers:
+            f *= 0.3  # nabídnutá a nepuštěná -- týden méně často
+        if rid in paused_offers:
+            return 0.0
         if audio and rid in audio:
             f *= track_mood_fit(mood, *audio[rid])  # nálada i podle zvuku skladby
         if artist in tentative and not session_counts.get(artist) and not done_artists.get(artist):
@@ -481,6 +496,7 @@ def pick(
             skipped_artists={a for a, n in skipped_artists.items() if n},
             titles=(played_titles | {_title_key(act.title_of.get(r, "")) for r in familiar}) - {""},
             session_counts=session_counts,
+            paused=paused_offers,
             weak_mood=bool(
                 moods is not None and mood != "prekvap" and sum(1 for m in moods.values() if m >= 0.3) < 3
             ),
@@ -715,7 +731,7 @@ async def next_chunk(
     new: list[str] = []
     if want_new > 0 and (new_seeds or weak_mood):
         act = _activation(user_id)
-        exclude = set(act.total) | set(played) | set(familiar) | set(seeds)
+        exclude = set(act.total) | set(played) | set(familiar) | set(seeds) | set(ctx.get("paused") or ())
         cands: list[str] = []
         if weak_mood and mood:
             try:
