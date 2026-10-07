@@ -147,16 +147,21 @@ class DeezerClient:
             {"q": query, "limit": limit, "index": offset},
         )
 
-    async def find_track(self, artist: str, title: str) -> dict[str, Any] | None:
+    async def find_track(
+        self, artist: str, title: str, *, loose: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any] | None:
         """Přesnější párování "interpret + název" (Apple žebříčky, budoucí
-        generované playlisty) přes Deezer advanced search syntaxi."""
+        generované playlisty) přes Deezer advanced search syntaxi.
+        `loose`: výsledky volného hledání "interpret název", když je volající
+        už má -- druhý dotaz se pak neposílá."""
         query = f'artist:"{artist}" track:"{title}"'
         tracks = await self._cached_data(f"dz:find_track5:{query}", LOOKUP_TTL_SECONDS, "/search/track", {"q": query, "limit": 5})
         best = _same_version(tracks or [], artist, title)
         if best is None:
-            loose = await self._cached_data(
-                f"dz:find_track_loose5:{artist} {title}", LOOKUP_TTL_SECONDS, "/search/track", {"q": f"{artist} {title}", "limit": 5}
-            )
+            if loose is None:
+                loose = await self._cached_data(
+                    f"dz:find_track_loose5:{artist} {title}", LOOKUP_TTL_SECONDS, "/search/track", {"q": f"{artist} {title}", "limit": 5}
+                )
             best = _same_version(loose or [], artist, title)
         return best
 

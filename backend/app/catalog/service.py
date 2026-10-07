@@ -1151,14 +1151,30 @@ class CatalogService:
                     return None
             return next((h for h in hits if norm(h.get("name") or "") == norm(name)), None)
 
-        dz_hits = await asyncio.gather(*(look(item["name"]) for item in found))
+        # Kdo už je v katalogu (podle MBID), Deezer nepotřebuje. Zbytek se
+        # hledá jen pro prvních ~15 (víc se jich na stránku stejně nevejde);
+        # další až když jich nevyjde dost. Dřív 24 hledání za globálním
+        # limitem Deezeru a brzdila se i ostatní část stránky interpreta.
+        known: list[Artist | None] = [
+            self._session.exec(select(Artist).where(Artist.mbid == item["mbid"])).first() if item.get("mbid") else None
+            for item in found
+        ]
+        hits: dict[int, dict[str, Any] | None] = {}
+
+        async def fetch(indexes: list[int]) -> None:
+            results = await asyncio.gather(*(look(found[i]["name"]) for i in indexes))
+            hits.update(zip(indexes, results))
+
+        first_wave = self._SIMILAR_LIMIT + 3
+        await fetch([i for i in range(min(first_wave, len(found))) if known[i] is None])
         out: list[Artist] = []
         seen: set[str] = {artist.id}
-        for item, hit in zip(found, dz_hits):
-            row: Artist | None = None
-            if item.get("mbid"):
-                row = self._session.exec(select(Artist).where(Artist.mbid == item["mbid"])).first()
+        for i, item in enumerate(found):
+            row = known[i]
             if row is None:
+                if i not in hits:
+                    await fetch([j for j in range(i, len(found)) if known[j] is None])
+                hit = hits.get(i)
                 # Přes Deezer (fotka, diskografie), jen přesná shoda jména.
                 if hit is not None:
                     row = ingest_artist(self._session, hit)

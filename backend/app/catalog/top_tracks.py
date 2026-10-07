@@ -244,16 +244,21 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
                         return track
                 # Přesně stejný název skladby od toho interpreta (ne "(Live in ...)").
                 found = await dz.search(f"{artist_q} {title}", 10)
+                loose = (found or {}).get("data") or []
                 track = next(
                     (
                         t
-                        for t in (found or {}).get("data") or []
+                        for t in loose
                         if _exact(t.get("title") or "") == _exact(title)
                         and _exact((t.get("artist") or {}).get("name") or "") == _exact(artist_q)
                     ),
                     None,
                 )
-                return track or await dz.find_track(artist_q, title)
+                if track:
+                    return track
+                # Jako `dz.find_track`, ale volné hledání ("interpret název")
+                # už máme výš -- o dotaz na skladbu méně za limitem Deezeru.
+                return await dz.find_track(artist_q, title, loose=loose)
 
         async def resolve(entry: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
             """Každá skladba sama: album z Last.fm -> místní katalog -> Deezer.

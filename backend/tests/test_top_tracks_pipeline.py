@@ -32,7 +32,7 @@ class FakeDeezer:
              "album": {"id": 3, "title": ALBUMS[title]}},
         ]}
 
-    async def find_track(self, artist, title):
+    async def find_track(self, artist, title, loose=None):
         return None
 
     async def search_artist(self, name, trust_name=True):
