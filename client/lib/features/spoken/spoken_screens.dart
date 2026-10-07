@@ -490,7 +490,13 @@ class _Results extends ConsumerWidget {
         if (czech.isLoading)
           const Padding(padding: EdgeInsets.all(AppSpacing.sm), child: LinearProgressIndicator(minHeight: 2))
         else if (czech.hasError)
-          Text('České hledání se nepovedlo.', style: muted)
+          // Stejně jako detail knihy: důvod a Zkusit znovu (UX audit 7. 10.).
+          ErrorState(
+            message: 'České hledání se nepovedlo.',
+            error: czech.error,
+            compact: true,
+            onRetry: () => ref.invalidate(spokenSearchProvider(query)),
+          )
         else if (cz!.releases.isEmpty)
           Text('Česká verze se nenašla.', style: muted)
         else ...[
