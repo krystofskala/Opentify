@@ -109,7 +109,7 @@ Future<void> editLaterNote(BuildContext context, ListenLaterController controlle
         controller: text,
         autofocus: true,
         maxLength: 120,
-        decoration: const InputDecoration(hintText: 'Třeba „doporučil Honza" nebo „na roadtrip"'),
+        decoration: const InputDecoration(hintText: 'Třeba „doporučil Honza“ nebo „na roadtrip“'),
         onSubmitted: (value) => Navigator.of(context).pop(value),
       ),
       actions: [

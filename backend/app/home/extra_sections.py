@@ -211,7 +211,7 @@ async def build_now_mix(user_id: str) -> int:
         ids += similar[:1]
         similar = similar[1:]
     ids = list(dict.fromkeys(ids))[:40]
-    what = f"{style} -- " if style else ""
+    what = f"{style} – " if style else ""
     pid = _save_playlist(user_id, "personal:now-mix", band, f"{band}: {what}co v tuhle dobu posloucháš a podobné", ids, timedelta(hours=8))
     _save(user_id, "now_mix", {"title": f"Mix na teď · {band}", "kind": "tracks", "ids": ids[:20], "playlistId": pid, "stamp": stamp})
     return len(ids)
@@ -245,7 +245,7 @@ async def build_year_ago(user_id: str) -> int:
     for years, label in ((1, "Tento týden před rokem"), (2, "Tento týden před dvěma lety"), (3, "Tento týden před třemi lety")):
         ids = await asyncio.to_thread(collect, years)
         if len(ids) >= 8:
-            pid = _save_playlist(user_id, "personal:year-ago", label, f"{label} -- co ti tehdy hrálo nejvíc", ids, timedelta(hours=12))
+            pid = _save_playlist(user_id, "personal:year-ago", label, f"{label} – co ti tehdy hrálo nejvíc", ids, timedelta(hours=12))
             _save(user_id, "year_ago", {"title": label, "kind": "tracks", "ids": ids[:20], "playlistId": pid})
             return len(ids)
     _clear(user_id, "year_ago")

@@ -670,7 +670,7 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
               ? _waitingText
               : books == 1
                   ? 'Kniha se stahuje – najdeš ji na Domů'
-                  : 'Stahuje se $books knih – najdeš je na Domů',
+                  : '${czPlural(books, 'Stahuje', 'Stahují', 'Stahuje')} se ${czCount(books, 'kniha', 'knihy', 'knih')} – najdeš je na Domů',
         );
       }
     } catch (e) {

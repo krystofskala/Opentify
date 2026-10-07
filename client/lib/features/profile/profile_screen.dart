@@ -37,6 +37,7 @@ import '../../widgets/toast.dart';
 import '../artist/artist_support.dart' show openExternal;
 import '../../core/app_update.dart';
 import '../../widgets/app_update_sheet.dart';
+import '../../core/cz_plural.dart';
 
 /// `POST /library/scan` jen odstartuje sken na pozadí (MusicBrainz limituje
 /// na 1 request/s, tisíce souborů by se v jednom HTTP requestu nestihly) --
@@ -205,7 +206,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           icon: Symbols.cloud_upload_rounded,
                           title: 'Import ze Spotify, Apple Music a YouTube Music',
                           description: 'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
-                              'YourLibrary.json z oficiálního exportu -- Liked Songs pro denní mix, '
+                              'YourLibrary.json z oficiálního exportu – Liked Songs pro denní mix, '
                               'ostatní playlisty pod svým jménem. ZIP s historií poslechů (Extended '
                               'streaming history) nahraje poslechy pro Wrapped a mixy.\n'
                               'YouTube Music: Google Takeout › YouTube a YouTube Music › historie, '
@@ -319,9 +320,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           messenger,
           [
             if (imported.historyListens! > 0)
-              '$name: ${imported.historyListens} poslechů nahráno – Wrapped a mixy se přepočítají',
+              '$name: nahráno ${czCount(imported.historyListens!, 'poslech', 'poslechy', 'poslechů')} – Wrapped a mixy se přepočítají',
             if ((imported.libraryTracks ?? 0) > 0)
-              'knihovna $name (${imported.libraryTracks} skladeb) je v playlistu „$name · Knihovna“',
+              'knihovna $name (${czCount(imported.libraryTracks!, 'skladba', 'skladby', 'skladeb')}) je v playlistu „$name · Knihovna“',
           ].join('; '),
         );
         return;
@@ -394,12 +395,12 @@ class _ScanStatusCard extends StatelessWidget {
             LinearProgressIndicator(value: progress),
             const SizedBox(height: 6),
             Text(
-              '${status.scanned}/${status.totalFiles} souborů · '
+              '${status.scanned}/${czCount(status.totalFiles, 'soubor', 'soubory', 'souborů')} · '
               '${status.matchedMusicbrainz} přes MusicBrainz · '
               '${status.matchedLocal} jen lokálně · '
               '${status.alreadyScanned} už dřív naskenováno · '
               '${status.skippedNoTags} bez tagů · '
-              '${status.errors} chyb',
+              '${czCount(status.errors, 'chyba', 'chyby', 'chyb')}',
               style: theme.textTheme.bodySmall,
             ),
           ],
@@ -468,7 +469,7 @@ class _AppearanceSettings extends ConsumerWidget {
           const SizedBox(height: 12),
           _SwitchRow(
             title: 'Systémové sklo (iOS 26)',
-            subtitle: 'Tab bar a mini přehrávač ze skutečného Liquid Glass jako v Apple Music – '
+            subtitle: 'Lišta karet a mini přehrávač ze skutečného Liquid Glass jako v Apple Music – '
                 'lom, lesk a barevný okraj kreslí iOS. Test, porovnej s naším sklem.',
             value: ref.watch(systemGlassProvider),
             onChanged: ref.read(systemGlassProvider.notifier).set,

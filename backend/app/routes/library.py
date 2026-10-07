@@ -917,7 +917,7 @@ async def import_spotify(
             return {"kind": "history", **{k: v for k, v in account_history.items() if isinstance(v, (int, str, float, bool))}}
         raise HTTPException(
             status_code=400,
-            detail="Nepodařilo se rozpoznat formát -- očekává se Spotify export (ZIP, Playlist1.json nebo YourLibrary.json).",
+            detail="Nepodařilo se rozpoznat formát – očekává se Spotify export (ZIP, Playlist1.json nebo YourLibrary.json).",
         ) from exc
     return {
         "totalInFile": result.total_in_file,
@@ -1054,7 +1054,7 @@ async def like_song(
     místo hromadného importu. Idempotentní -- opakované volání nic nezdvojí."""
     user_id, _device_id = current
     if session.get(Recording, recording_id) is None:
-        raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
+        raise HTTPException(status_code=404, detail="Skladba není v katalogu.")
 
     playlist = get_or_create_liked_songs_playlist(session, user_id)
     existing = session.exec(
@@ -1104,7 +1104,7 @@ async def dislike_song(
     """Zlomené srdce: vyřadí z Oblíbených i ze všech výběrů, LB "hate"."""
     user_id, _device_id = current
     if session.get(Recording, recording_id) is None:
-        raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
+        raise HTTPException(status_code=404, detail="Skladba není v katalogu.")
     if recording_id not in disliked_ids(session, user_id):
         session.add(RecordingDislike(user_id=user_id, recording_id=recording_id))
     purge_from_snapshots(session, recording_id, current[0])
@@ -1222,7 +1222,7 @@ async def verify_now(recording_id: str, _current: tuple[str, str] = Depends(requ
     try:
         entry = await check_recording(recording_id, manual=True)
     except RecognizeError as exc:
-        raise HTTPException(status_code=502, detail=f"Shazam teď neodpovídá: {exc}")
+        raise HTTPException(status_code=502, detail="Shazam teď neodpovídá, zkus to za chvíli.")
     if entry is None:
         raise HTTPException(status_code=404, detail="Skladba ještě není stažená na serveru.")
     path = entry.get("path")
@@ -1265,7 +1265,7 @@ async def verify_redownload(
             asset = session.get(MediaAsset, recording_id)
             path = Path(asset.storage_path) if asset and asset.storage_path else None
             if path is None or not path.resolve().is_relative_to(MEDIA_ROOT.resolve()):
-                raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby -- ten appka nemaže.")
+                raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby – ten appka nemaže.")
             rec = session.get(Recording, recording_id)
             if rec is not None:
                 # Stejně jako "Špatné audio": přesný zdroj i otisk zvuku zakázat
@@ -1481,7 +1481,7 @@ async def wrong_version(recording_id: str, current: tuple[str, str] = Depends(ge
         if is_own_id(rec.mbid) or (artist is not None and is_own_id(artist.mbid)):
             raise HTTPException(status_code=400, detail="Vlastní hudba se znovu nestahuje.")
         if not Path(asset.storage_path).resolve().is_relative_to(MEDIA_ROOT.resolve()):
-            raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby -- ten appka nemaže.")
+            raise HTTPException(status_code=400, detail="Tohle je soubor z tvé vlastní hudby – ten appka nemaže.")
         refs = dict(rec.external_refs or {})
         key = refs.get("sourceKey")
         if not key and asset.source_provider == "youtube" and refs.get("youtubeUrl"):
@@ -1530,7 +1530,7 @@ async def verify_relabel(recording_id: str, _current: tuple[str, str] = Depends(
             raise HTTPException(status_code=400, detail="chráněná skladba se nemění")
         got_title, got_artist = entry.get("gotTitle"), entry.get("gotArtist")
         if not got_title or not got_artist:
-            raise HTTPException(status_code=400, detail="Shazam skladbu nepoznal -- není k čemu přeřadit.")
+            raise HTTPException(status_code=400, detail="Shazam skladbu nepoznal – není k čemu přeřadit.")
         with Session(engine) as session:
             asset = session.get(MediaAsset, recording_id)
             if asset is None or not asset.storage_path:

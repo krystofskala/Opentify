@@ -378,7 +378,7 @@ async def connect_listenbrainz(body: ListenBrainzIn, request: Request):
     # Z mobilu se token kopíruje i s mezerami/zalomením -- pryč (token je hex).
     token = "".join(body.token.split())
     if not token.isascii():
-        raise HTTPException(status_code=400, detail="Tohle nevypadá jako token -- zkopíruj jen „User token“.")
+        raise HTTPException(status_code=400, detail="Tohle nevypadá jako token – zkopíruj jen „User token“.")
     try:
         async with httpx.AsyncClient(timeout=40) as client:
             r = await client.get(f"{LB_API}/1/validate-token", headers={"Authorization": f"Token {token}"})
@@ -419,7 +419,7 @@ async def lastfm_start(request: Request):
     try:
         return await start_connect()
     except LastfmError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail="Last.fm teď neodpovídá, zkus to za chvíli.") from exc
 
 
 @auth_router.post("/me/lastfm/finish")
@@ -433,7 +433,7 @@ async def lastfm_finish(body: LastfmFinishIn, request: Request):
     try:
         name = await finish_connect(acting.id, body.token.strip())
     except LastfmError as exc:
-        raise HTTPException(status_code=400, detail=f"Last.fm: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Připojení k Last.fm se nepovedlo – povolil jsi přístup na stránce Last.fm?") from exc
     return {"lastfmUser": name}
 
 

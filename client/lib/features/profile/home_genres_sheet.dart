@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
+import '../../widgets/state_views.dart';
 
 /// Profil › Domů › "Žánry na Domů": vybrané žánry dostanou na Domů vlastní
 /// řadu hned pod Rychlým výběrem (táta: bluegrass, country). Nic vybraného =
@@ -79,7 +80,7 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
             (json['selected'] as List<dynamic>? ?? const []).cast<String>();
       });
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = humanError(e));
     }
   }
 
@@ -95,7 +96,7 @@ class _HomeGenresSheetState extends ConsumerState<_HomeGenresSheet> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = '$e';
+          _error = humanError(e);
         });
       }
     }

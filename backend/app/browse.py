@@ -465,7 +465,7 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
         return snap.payload.get("playlistId") if snap is not None else None
     playlist_id = g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:genre:{c.id}", title=c.title,
-        description=f"{c.title} -- populární, klasika i tipy komunity", kind=PlaylistKind.GENRE,
+        description=f"{c.title} – populární, klasika i tipy komunity", kind=PlaylistKind.GENRE,
         section="genres", recording_ids=combined, cover_urls=g._covers_for(combined[:4]), ttl=g.DAILY_TTL,
     )
     with Session(engine) as session:
@@ -592,7 +592,7 @@ async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
         return snap.payload.get("playlistId") if snap is not None else None
     playlist_id = g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:new:{c.id}", title=f"Novinky: {c.title}",
-        description=f"Co vyšlo za poslední rok -- {c.title.lower()} od klasiků po mladé", kind=PlaylistKind.EDITORIAL,
+        description=f"Co vyšlo za poslední rok – {c.title.lower()} od klasiků po mladé", kind=PlaylistKind.EDITORIAL,
         section="browse", recording_ids=ids[:RAIL_SIZE], cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
     )
     with Session(engine) as session:

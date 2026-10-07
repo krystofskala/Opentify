@@ -16,6 +16,7 @@ import '../../widgets/toast.dart';
 import 'podcast_data.dart';
 import '../../state/offline_controller.dart';
 import 'spoken_data.dart' show formatHours;
+import '../../core/cz_plural.dart';
 
 /// Podcasty v režimu mluveného slova: pořad s epizodami, výsledky hledání,
 /// odebírané pořady a sekce na Domů. Epizoda hraje sama (jako skladba
@@ -200,7 +201,7 @@ class MyPodcastsList extends ConsumerWidget {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Symbols.history_rounded),
             title: const Text('Poslouchal jsi na Spotify'),
-            subtitle: Text('${fromSpotify.length} pořadů – vyber, co odebírat', style: muted),
+            subtitle: Text('${czCount(fromSpotify.length, 'pořad', 'pořady', 'pořadů')} – vyber, co odebírat', style: muted),
             trailing: const Icon(Symbols.chevron_right_rounded),
             onTap: () => context.push('/podcasts/history'),
           );
@@ -308,7 +309,7 @@ class PodcastHistoryScreen extends ConsumerWidget {
                                       try {
                                         final marked = await subscribeFromHistory(ref, i);
                                         if (context.mounted) {
-                                          toast(context, marked > 0 ? 'Odebíráš · $marked epizod označeno jako přehrané' : 'Odebíráš');
+                                          toast(context, marked > 0 ? 'Odebíráš · ${czCount(marked, 'epizoda označena', 'epizody označeny', 'epizod označeno')} jako přehrané' : 'Odebíráš');
                                         }
                                       } catch (_) {
                                         if (context.mounted) toast(context, 'Odběr se nepodařil');

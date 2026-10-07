@@ -128,7 +128,7 @@ Future<void> showCharitySheet(BuildContext context, String artistName) {
               const SizedBox(height: 6),
               Text(
                 'Vyber charitu – otevře se její stránka pro dary. Věnování „$dedication“ se '
-                'zkopíruje, vlož ho do poznámky k daru (pole "na počest / věnování"). Dar je '
+                'zkopíruje, vlož ho do poznámky k daru (pole „na počest / věnování“). Dar je '
                 'oficiálně od tebe, jméno interpreta je v jeho věnování.',
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),

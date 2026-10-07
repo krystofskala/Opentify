@@ -20,6 +20,7 @@ import '../../widgets/track_actions.dart' show nowPlayingInfoFor;
 import '../../widgets/track_tile.dart';
 import 'open_shazam_badge.dart';
 import 'recorder_bridge.dart';
+import '../../widgets/state_views.dart';
 
 final recognizeRepositoryProvider =
     Provider<RecognizeRepository>((ref) => RecognizeRepository(ref.watch(apiClientProvider)));
@@ -135,7 +136,7 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
         }
       } catch (e) {
         await stopRecording();
-        return _fail(session, 'Rozpoznávání teď nejde (${_short(e)}). Zkus to za chvíli.');
+        return _fail(session, 'Rozpoznávání teď nejde (${humanError(e)}). Zkus to za chvíli.');
       }
     }
     if (session != _session) return;
@@ -143,10 +144,6 @@ class _ShazamScreenState extends ConsumerState<ShazamScreen> with WidgetsBinding
     if (mounted) setState(() => _phase = _Phase.notFound);
   }
 
-  String _short(Object e) {
-    final text = e.toString();
-    return text.length > 80 ? '${text.substring(0, 80)}…' : text;
-  }
 
   void _fail(int session, String message) {
     if (session != _session || !mounted) return;

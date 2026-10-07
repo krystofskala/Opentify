@@ -19,7 +19,7 @@ lyrics_router = APIRouter(prefix="/lyrics", tags=["lyrics"])
 async def get_lyrics(recording_id: str, session: Session = Depends(get_session)):
     recording = session.get(Recording, recording_id)
     if recording is None:
-        raise HTTPException(status_code=404, detail="recording nenalezen")
+        raise HTTPException(status_code=404, detail="Skladba není v katalogu.")
 
     artist_name = None
     aliases: list[str] = []

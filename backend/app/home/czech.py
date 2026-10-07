@@ -87,7 +87,7 @@ async def _seed_mix(genre_id: str, user_id: str) -> tuple[str | None, list[str]]
         owner=user_id,
         source=f"czech-seed:{genre_id}",
         title=title,
-        description=f"{title} -- výběr z české scény, každý den jinak",
+        description=f"{title} – výběr z české scény, každý den jinak",
         kind=PlaylistKind.PERSONAL_MIX,
         section="czech",
         recording_ids=ids[:40],

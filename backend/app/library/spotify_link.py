@@ -88,7 +88,7 @@ async def fetch_spotify_link(text: str) -> tuple[str, str, str, str | None, list
         kind, sid = parsed
         resp = await client.get(f"https://open.spotify.com/embed/{kind}/{sid}")
         if resp.status_code == 404:
-            raise SpotifyLinkError("Spotify tenhle obsah nenašel -- možná je soukromý nebo smazaný.")
+            raise SpotifyLinkError("Spotify tenhle obsah nenašel – možná je soukromý nebo smazaný.")
         resp.raise_for_status()
         cover: bytes | None = None
         cover_match = re.search(r'"coverArt":\{"sources":\[\{[^}]*"url":"([^"]+)"', resp.text)

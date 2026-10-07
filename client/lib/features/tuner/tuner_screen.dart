@@ -436,7 +436,7 @@ class _Readout extends StatelessWidget {
             'Povol mikrofon v Nastavení › Safari › Mikrofon (na počítači u zámečku v adresním řádku) a zkus to znovu.',
           'unavailable' => 'Nepoužívá ho jiná aplikace? Zkus to znovu.',
           'unsupported' => 'Chybí přístup k mikrofonu (Web Audio).',
-          _ => error?.detail,
+          _ => 'Ladičku se nepodařilo spustit.',
         },
       _Phase.idle => 'iPhone se na mikrofon zeptá při každém spuštění appky.',
       _ => null,
@@ -479,7 +479,7 @@ class _Readout extends StatelessWidget {
           height: 22,
           child: off || (active && out.inTune)
               ? Text(
-                  '${out.cents >= 0 ? '+' : '−'}${out.cents.abs().toStringAsFixed(out.cents.abs() < 10 ? 1 : 0)} centů · ${out.hz.toStringAsFixed(2)} Hz',
+                  '${out.cents >= 0 ? '+' : '−'}${out.cents.abs().toStringAsFixed(out.cents.abs() < 10 ? 1 : 0).replaceAll('.', ',')} ${out.cents.abs() < 10 ? 'centu' : 'centů'} · ${out.hz.toStringAsFixed(2).replaceAll('.', ',')} Hz',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: scheme.onSurfaceVariant,
                     fontFeatures: const [FontFeature.tabularFigures()],

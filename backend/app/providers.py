@@ -323,7 +323,7 @@ class NoDownloadProvider:
     knihovna (MUSIC_DIR). Chybějící skladba skončí jako nedostupná."""
 
     async def resolve(self, track: TrackMetadata, *, interactive: bool = False) -> ProviderCandidate | None:
-        raise RuntimeError("Stahování je vypnuté (MEDIA_PROVIDER=none) -- skladba není ve vlastní knihovně.")
+        raise RuntimeError("Stahování je vypnuté (MEDIA_PROVIDER=none) – skladba není ve vlastní knihovně.")
 
     async def fetch(self, track: TrackMetadata, candidate: ProviderCandidate, on_progress: Any = None) -> Any:
         raise RuntimeError("Stahování je vypnuté (MEDIA_PROVIDER=none).")
@@ -1213,7 +1213,7 @@ async def _rotate_vpn_server() -> None:
     if not await get_redis().set(_VPN_ROTATION_KEY, "1", nx=True, ex=_VPN_ROTATION_COOLDOWN_S):
         await asyncio.sleep(10)
         return
-    logger.warning("YouTube blokuje aktuální VPN IP -- přepínám Mullvad server")
+    logger.warning("YouTube blokuje aktuální VPN IP – přepínám Mullvad server")
     async with httpx.AsyncClient(timeout=10, headers={"X-API-Key": key}) as client:
 
         async def public_ip() -> str | None:

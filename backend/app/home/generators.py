@@ -115,7 +115,7 @@ def _chart_specs() -> list[DeezerPlaylistSpec]:
             playlist("3155776842"), preprovision=True,
         ),
         DeezerPlaylistSpec(
-            "deezer:playlist:1313621735", "Top USA", "100 nejhranějších v USA -- nejblíž Billboard Hot 100", PlaylistKind.CHART,
+            "deezer:playlist:1313621735", "Top USA", "100 nejhranějších v USA – nejblíž Billboard Hot 100", PlaylistKind.CHART,
             "charts", playlist("1313621735"), preprovision=True,
         ),
         DeezerPlaylistSpec(

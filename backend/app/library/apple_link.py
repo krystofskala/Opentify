@@ -89,7 +89,7 @@ async def fetch_apple_link(
                 params={"l": lang.group(1)} if lang else {"l": cc},
             )
             if resp.status_code == 404:
-                raise ValueError("Apple Music tenhle playlist nenašel -- možná je soukromý.")
+                raise ValueError("Apple Music tenhle playlist nenašel – možná je soukromý.")
             resp.raise_for_status()
             name, owner, rows, cover_url = _parse_playlist_page(resp.text)
         cover: bytes | None = None

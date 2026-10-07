@@ -119,7 +119,7 @@ async def provision_track(
     try:
         ready, job, created, status = await asyncio.to_thread(_provision_sync, recording_id, user_id, device_id)
     except LookupError:
-        raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
+        raise HTTPException(status_code=404, detail="Skladba není v katalogu.")
 
     if job is None:
         # MediaAsset už AVAILABLE -> žádný job, rovnou stream (HTTP 200)
@@ -215,7 +215,7 @@ async def stream_track(recording_id: str, session: Session = Depends(get_session
     if asset is None or not asset.storage_path:
         raise HTTPException(
             status_code=409,
-            detail="skladba zatím není k dispozici, zavolej nejdřív POST /provision",
+            detail="Skladba ještě není připravená, zkus to za chvíli.",
         )
     path = Path(asset.storage_path)
     media_type = _MEDIA_TYPES.get(path.suffix.lower())
@@ -230,8 +230,8 @@ async def stream_track(recording_id: str, session: Session = Depends(get_session
             healed = heal_missing_file(session, asset)
             raise HTTPException(
                 status_code=409,
-                detail="soubor chybí na disku, zavolej znovu POST /provision" if healed
-                else "soubor chybí na disku i přes AVAILABLE stav",
+                detail="Soubor skladby chybí, stahuje se znovu – zkus to za chvíli." if healed
+                else "Soubor skladby na serveru chybí.",
             )
         return FileResponse(path, media_type=media_type)
 
@@ -259,7 +259,7 @@ async def stream_track(recording_id: str, session: Session = Depends(get_session
 
     raise HTTPException(
         status_code=409,
-        detail="skladba zatím není k dispozici, zavolej nejdřív POST /provision",
+        detail="Skladba ještě není připravená, zkus to za chvíli.",
     )
 
 

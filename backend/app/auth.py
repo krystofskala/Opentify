@@ -187,7 +187,7 @@ def get_current_user(request: Request) -> tuple[str, str]:
     """(user_id, device_id) -- user_id je profil, za který se jedná."""
     _user, acting = resolve_user(request)
     if acting is None:
-        raise HTTPException(status_code=401, detail="Tohle zařízení není přihlášené -- otevři pozvánku.")
+        raise HTTPException(status_code=401, detail="Tohle zařízení není přihlášené – otevři pozvánku.")
     device_id = request.headers.get("x-device-id") or "device"
     return acting.id, device_id
 

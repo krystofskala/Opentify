@@ -531,7 +531,7 @@ def add_item(
     user_id, _device_id = current
     playlist = _editable_playlist_or_404(session, playlist_id, user_id)
     if session.get(Recording, body.recording_id) is None:
-        raise HTTPException(status_code=404, detail="recording nenalezen v katalogu")
+        raise HTTPException(status_code=404, detail="Skladba není v katalogu.")
 
     # Souběžná přidání do téhož (společného) playlistu dřív dostala stejnou
     # pozici -- pořadí pak bylo náhodné. Čtení maxima + zápis pod zámkem.

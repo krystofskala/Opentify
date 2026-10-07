@@ -252,7 +252,7 @@ class _PlaybackTestScreenState extends ConsumerState<PlaybackTestScreen> {
             Text(_status!, style: theme.textTheme.titleSmall),
           ],
           if (median != null)
-            Text('Medián startu ${(median / 1000).toStringAsFixed(1)} s · '
+            Text('Medián startu ${(median / 1000).toStringAsFixed(1).replaceAll('.', ',')} s · '
                 '${_steps.where((s) => !s.ok && s.ms == null && s.error != null).length} selhání', style: muted),
           const SizedBox(height: AppSpacing.sm),
           for (final s in _steps)
@@ -270,7 +270,7 @@ class _PlaybackTestScreenState extends ConsumerState<PlaybackTestScreen> {
               title: Text(s.title, maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text('${s.label} · ${s.source}${s.error != null ? ' · ${s.error}' : ''}',
                   style: muted, maxLines: 2, overflow: TextOverflow.ellipsis),
-              trailing: s.ms == null ? null : Text('${(s.ms! / 1000).toStringAsFixed(1)} s'),
+              trailing: s.ms == null ? null : Text('${(s.ms! / 1000).toStringAsFixed(1).replaceAll('.', ',')} s'),
             ),
         ],
       ),

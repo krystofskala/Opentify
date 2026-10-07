@@ -523,7 +523,7 @@ class _SleepCountdownState extends State<_SleepCountdown> {
   }
 
   @override
-  Widget build(BuildContext context) => Text(_isFading ? 'Ztlumuje se...' : 'Zbývá $_remaining');
+  Widget build(BuildContext context) => Text(_isFading ? 'Ztišuje se…' : 'Zbývá $_remaining');
 }
 
 /// Nadpis sekce v menu přehrávače (Skladba / Přehrávání).

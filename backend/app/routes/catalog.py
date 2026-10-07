@@ -423,7 +423,7 @@ async def get_release(
 ):
     release = await service.get_release(release_id)
     if release is None:
-        raise HTTPException(status_code=404, detail="album nenalezen")
+        raise HTTPException(status_code=404, detail="Album nenalezeno.")
     return release.model_dump(by_alias=True)
 
 
@@ -442,7 +442,7 @@ async def get_release_cover(release_id: str, _current=Depends(get_current_user))
     with Session(engine) as session:
         release = session.get(Release, release_id)
         if release is None:
-            raise HTTPException(status_code=404, detail="album nenalezen")
+            raise HTTPException(status_code=404, detail="Album nenalezeno.")
         images = list(release.images or [])
     if not images and await fill_release(release_id, force=True):
         with Session(engine) as session:
@@ -459,7 +459,7 @@ async def get_release_tracks(
 ):
     tracks = await service.get_release_tracks(release_id)
     if tracks is None:
-        raise HTTPException(status_code=404, detail="album nenalezen")
+        raise HTTPException(status_code=404, detail="Album nenalezeno.")
     return [t.model_dump(by_alias=True) for t in tracks]
 
 
@@ -480,7 +480,7 @@ async def get_release_credits(
     """Obsazení alba: hudebníci (nástroj/zpěv), autoři, produkce -- z MB."""
     out = await service.get_release_credits(release_id)
     if out is None:
-        raise HTTPException(status_code=404, detail="album nenalezen")
+        raise HTTPException(status_code=404, detail="Album nenalezeno.")
     return out
 
 
@@ -495,7 +495,7 @@ async def get_release_other_editions(
     poznámky MusicBrainz; najdou se tak, i když je tracklist neukazuje."""
     release = service._session.get(Release, release_id)
     if release is None:
-        raise HTTPException(status_code=404, detail="album nenalezen")
+        raise HTTPException(status_code=404, detail="Album nenalezeno.")
     canonical = set((release.external_refs or {}).get("tracklistIds") or [])
     if not canonical:
         await service.get_release_tracks(release_id)  # doplní tracklistIds

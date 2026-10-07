@@ -56,7 +56,7 @@ class MusicBrainzClient:
         # jedna náhodná 503 uprostřed skenu tak dokázala rozbít album-level
         # match na per-track fallback pro celou složku (živě ověřeno).
         if "own:" in path or any("own:" in str(v) for v in params.values()):  # vlastní interpret/album (app/catalog/identity.py)
-            raise MusicBrainzError("vlastní záznam -- na MusicBrainz není")
+            raise MusicBrainzError("vlastní záznam – na MusicBrainz není")
         last_exc: MusicBrainzError | None = None
         for attempt in range(3):
             if attempt > 0:
@@ -64,7 +64,7 @@ class MusicBrainzClient:
             try:
                 await _rate_limiter.wait()
             except RateLimitBusy as exc:
-                raise MusicBrainzError("MusicBrainz fronta je plná -- zkus to za chvíli znovu") from exc
+                raise MusicBrainzError("MusicBrainz fronta je plná – zkus to za chvíli znovu") from exc
             try:
                 # Sloučené MBID vrací 301 na nové -- dřív `raise_for_status`
                 # a z toho 502 (audit výkonu 7. 10.).

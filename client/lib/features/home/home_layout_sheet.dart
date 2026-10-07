@@ -7,6 +7,7 @@ import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/toast.dart';
 import '../profile/home_genres_sheet.dart';
+import '../../widgets/state_views.dart';
 
 /// Domů › Upravit: pořadí sekcí (přetažením) a které se ukazují. Ukládá se
 /// k profilu (`PUT /home/layout`), platí na všech zařízeních.
@@ -49,7 +50,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
         ];
       });
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = humanError(e));
     }
   }
 
@@ -76,7 +77,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = '$e';
+          _error = humanError(e);
         });
       }
     }

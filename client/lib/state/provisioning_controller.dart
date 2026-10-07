@@ -158,7 +158,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
             case 'SUCCEEDED':
               _update(id, (_) => TrackProvisioningState(status: 'AVAILABLE', streamUrl: '/api/v1/tracks/$id/stream'));
             case 'FAILED' || 'CANCELLED':
-              _update(id, (s) => TrackProvisioningState(status: 'FAILED', jobId: jobId, error: job.errorMessage ?? 'Stažení se nepodařilo'));
+              _update(id, (s) => TrackProvisioningState(status: 'FAILED', jobId: jobId, error: friendlyJobError(job.errorMessage)));
             default:
               _lastChange[id] = now; // pořád běží -- další kontrola za lhůtu
           }
@@ -303,10 +303,10 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
             // Konečné selhání: starý progresivní `streamUrl` pryč, jinak by
             // přehrávač zkoušel mrtvý stream dokola a chyba by se neukázala.
             if (event.status == 'FAILED' || event.status == 'CANCELLED') {
-              return TrackProvisioningState(status: 'FAILED', jobId: s.jobId, error: event.error ?? 'Stažení se nepodařilo');
+              return TrackProvisioningState(status: 'FAILED', jobId: s.jobId, error: friendlyJobError(event.error));
             }
             final keepStreaming = s.status == 'STREAMING' && event.status == 'RUNNING';
-            return s.copyWith(status: keepStreaming ? null : event.status, pct: event.pct, error: event.error);
+            return s.copyWith(status: keepStreaming ? null : event.status, pct: event.pct, error: event.error == null ? null : friendlyJobError(event.error));
           },
         );
       case PlaybackStateEvent():
@@ -349,3 +349,16 @@ final provisioningControllerProvider =
     StateNotifierProvider<ProvisioningController, Map<String, TrackProvisioningState>>((ref) {
   return ProvisioningController(ref.watch(provisioningRepositoryProvider), ref);
 });
+
+/// Chyba stahování z workeru pro člověka: česká věta projde, technika
+/// (yt-dlp, slskd, cesty, slovníky z Pythonu) ne -- dřív se v přehrávači
+/// ukázalo třeba „yt-dlp nevytvořil očekávaný soubor /data/…“ (audit textů 7. 10.).
+String friendlyJobError(String? raw) {
+  const fallback = 'Skladbu se nepodařilo stáhnout';
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return fallback;
+  final technical = RegExp(r"yt-dlp|slskd|ffmpeg|peer|Traceback|Exception|Error|[{}\[\]]|/data/|/tmp/|https?://|\.py", caseSensitive: false);
+  if (technical.hasMatch(text) || text.length > 140) return fallback;
+  return text;
+}
+

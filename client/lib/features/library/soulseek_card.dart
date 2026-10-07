@@ -6,6 +6,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
+import '../../core/cz_plural.dart';
 
 /// `GET /library/soulseek` (admin) -- co sdílíme a kdo si co stáhl.
 final soulseekProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
@@ -41,8 +42,8 @@ class SoulseekCard extends ConsumerWidget {
                   children: [
                     Text('Soulseek', style: theme.textTheme.titleSmall),
                     Text(
-                      '${connected ? 'Sdílíš' : 'Odpojeno · sdílíš'} $files souborů · '
-                      '${downloads == 0 ? 'zatím si nikdo nic nestáhl' : 'staženo $downloads× ($users lidí)'}',
+                      '${connected ? 'Sdílíš' : 'Odpojeno · sdílíš'} ${czCount(files, 'soubor', 'soubory', 'souborů')} · '
+                      '${downloads == 0 ? 'zatím si nikdo nic nestáhl' : 'staženo $downloads× (${czCount(users, 'člověk', 'lidé', 'lidí')})'}',
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],

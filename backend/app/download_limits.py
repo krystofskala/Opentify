@@ -64,7 +64,7 @@ async def check_music(user_id: str) -> None:
                tags=["package"], key=f"dl-limit:{user_id}", every_s=3600)
         raise HTTPException(
             status_code=429,
-            detail="Dnes už jsi stáhl hodně nových skladeb. Už stažené hrají dál, nové zkus později.",
+            detail="Teď už jsi stáhl hodně nových skladeb. Už stažené hrají dál, nové zkus později.",
         )
 
 
