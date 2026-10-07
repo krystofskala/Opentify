@@ -33,7 +33,7 @@ String _readableError(Object? e) {
   }
   final raw = e.toString();
   if (raw.contains('ClientException') || raw.contains('XMLHttpRequest') || raw.contains('SocketException')) {
-    return 'Nejde se spojit se serverem – je zapnutý Tailscale?';
+    return 'Nejde se spojit se serverem – zkontroluj připojení k internetu.';
   }
   return '';
 }

@@ -151,3 +151,21 @@ def test_rapid_skipping_is_browsing_not_dislike(monkeypatch):
     with Session(engine) as s:
         counted = [s.get(SkipStreak, (user, r)) for r in recs]
     assert sum(1 for c in counted if c) <= 2  # třetí a další už je proklikávání
+
+
+def test_play_now_queue_counts_as_algorithmic(monkeypatch):
+    """Fronta Pusť teď není playlist, ale je to doporučení -- přeskočení se
+    má počítat (audit 7. 10.)."""
+    from app.models import PlayEvent
+
+    user = "cl-user9-" + _RUN
+    t = [9_000_000.0]
+    monkeypatch.setattr(cl.time, "time", lambda: t[0])
+    tr = cl.ConnectListens()
+    a, b = _rec("PN1", 200_000), _rec("PN2", 200_000)
+    tr.update(user, "dev", {**_state(a, 0, dur=200_000), "sourceLabel": "Pusť teď"})
+    t[0] += 5
+    tr.update(user, "dev", {**_state(b, 0, dur=200_000), "sourceLabel": "Pusť teď"})
+    with Session(engine) as s:
+        ev = s.exec(select(PlayEvent).where(PlayEvent.user_id == user, PlayEvent.recording_id == a)).one()
+    assert ev.end_reason == "skipped" and ev.algorithmic and ev.playlist_id is None

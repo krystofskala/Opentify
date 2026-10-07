@@ -83,52 +83,14 @@ class ProfilesSection extends ConsumerWidget {
     showToast(ScaffoldMessenger.maybeOf(context), e is ApiException ? (e.detail ?? 'Nepodařilo se.') : 'Nepodařilo se.');
   }
 
-  /// Co poslat novému člověku: adresa, jméno, a že si heslo vytvoří sám.
-  Future<void> _showLoginInfo(BuildContext context, String name, String username) async {
-    final text = 'Opentify: $_sharedOrigin\n'
-        'Přihlašovací jméno: $username\n'
-        'Heslo si vytvoříš při prvním přihlášení.';
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Přihlášení pro $name'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Pošli mu tohle. Heslo nikdo nezná – vytvoří si ho při prvním přihlášení.'),
-            const SizedBox(height: AppSpacing.sm),
-            SelectableText(text, style: const TextStyle(fontWeight: FontWeight.w700)),
-          ],
-        ),
-        actions: [
-          GlassButton(
-            label: 'Zavřít',
-            style: GlassButtonStyle.plain,
-            compact: true,
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          GlassButton(
-            label: 'Kopírovat',
-            icon: Symbols.content_copy_rounded,
-            style: GlassButtonStyle.prominent,
-            compact: true,
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: text));
-              Navigator.of(context).pop();
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
   /// Pozvánka: člověk si přes ni sám vybere přihlašovací jméno a heslo.
   Future<void> _showInvite(BuildContext context, String name, String code) async {
     final link = '$_sharedOrigin/?join=$code';
     final text = 'Pozvánka do Opentify: $link\n'
-        'Otevři ji se zapnutým Tailscale a vyber si jméno a heslo. '
-        'V Android appce ji vlož na přihlašovací obrazovce (Mám pozvánku od správce).';
+        'Na webu: otevři odkaz a vyber si jméno a heslo. '
+        'V appce (iPhone, Android): odkaz neotvírej – zkopíruj ho a vlož na přihlašovací obrazovce '
+        '(Mám pozvánku od správce). '
+        'Pozvánka platí 14 dní a jen jednou.';
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -334,10 +296,11 @@ class ProfilesSection extends ConsumerWidget {
       // Nové zařízení se přihlásí jménem, heslem a tímhle kódem.
       if (p.hasPassword || p.role == 'admin')
         (Symbols.devices_rounded, 'Kód pro nové zařízení', () => _newPairCode(context, ref, p)),
-      if (p.username == null && p.role != 'admin')
+      // Bez hesla (nový profil, nebo po vynulování hesla): nová pozvánka --
+      // přes ni si nastaví heslo (jméno mu zůstane). Dřív po vynulování
+      // zbyly jen "Údaje k přihlášení" a přihlásit se nešlo (audit 7. 10.).
+      if (!p.hasPassword && p.role != 'admin')
         (Symbols.mail_rounded, 'Nová pozvánka', () => _newInvite(context, ref, p)),
-      if (p.username != null && !p.hasPassword && p.role != 'admin')
-        (Symbols.key_rounded, 'Údaje k přihlášení', () => _showLoginInfo(context, p.name, p.username!)),
       if (p.hasPassword && p.role != 'admin')
         (Symbols.lock_reset_rounded, 'Vynulovat heslo', () => _resetPassword(context, ref, p)),
       // Ne na profil, za který zrovna jednáš (nejdřív se přepni zpátky).

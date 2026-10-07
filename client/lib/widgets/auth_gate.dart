@@ -106,7 +106,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
       if (mounted) {
         setState(() => _error = e is ApiException
             ? (e.detail ?? 'Přihlášení se nepovedlo.')
-            : 'Server není dostupný (zapnutý Tailscale?).');
+            : 'Server není dostupný, zkus to za chvíli.');
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -261,7 +261,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
                     decoration: const InputDecoration(
                       labelText: 'Kód zařízení',
                       hintText: 'ABCD-EFGH',
-                      helperText: 'Od správce, nebo z Profilu na zařízení, kde už jsi přihlášený.',
+                      helperText: 'Kód ti pošle správce.',
                       helperMaxLines: 2,
                     ),
                     onSubmitted: (_) => _submit(),
@@ -344,7 +344,7 @@ class _ClaimFormState extends ConsumerState<_ClaimForm> {
       if (!mounted) return;
       setState(() {
         _invalid = true;
-        _error = e is ApiException ? e.detail : 'Server není dostupný (zapnutý Tailscale?).';
+        _error = e is ApiException ? e.detail : 'Server není dostupný, zkus to za chvíli.';
       });
     } finally {
       if (mounted) setState(() => _busy = false);

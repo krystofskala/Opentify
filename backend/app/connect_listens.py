@@ -158,6 +158,10 @@ class ConnectListens:
                     self._finish(key)
 
 
+# Název fronty Pusť teď v klientu (client/lib/state/auto_continue.dart).
+PLAY_NOW_LABEL = "Pusť teď"
+
+
 def _record(user_id: str, recording_id: str, played_at: datetime, played_ms: int, source: str | None) -> None:
     from app.listens import record_listen
 
@@ -198,7 +202,7 @@ def _play_event(
             algorithmic = bool(
                 playlist
                 and playlist.kind in (PlaylistKind.PERSONAL_MIX, PlaylistKind.GENERATED_RECOMMENDATION, PlaylistKind.RADIO)
-            )
+            ) or source == PLAY_NOW_LABEL  # fronta Pusť teď není playlist (audit 7. 10.)
             session.add(
                 PlayEvent(
                     user_id=user_id,

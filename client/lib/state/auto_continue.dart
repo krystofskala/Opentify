@@ -33,9 +33,23 @@ class AutoContinue {
   String? mood;
   bool _loading = false;
 
+  /// Po prázdné / neúspěšné várce se znovu ptá až po pauze (30 s, 2 min,
+  /// 5 min) -- dřív šel další dotaz při každém posunu přehrávání a nový
+  /// profil nebo výpadek Last.fm zahltil server (audit Pusť teď 7. 10.).
+  DateTime? _retryAfter;
+  int _failures = 0;
+  static const _backoff = [Duration(seconds: 30), Duration(minutes: 2), Duration(minutes: 5)];
+
+  void _failed() {
+    _retryAfter = DateTime.now().add(_backoff[_failures.clamp(0, _backoff.length - 1)]);
+    _failures++;
+  }
+
   /// Spustí "Pusť teď" -- první várku hned, další se doplňují samy.
   Future<String?> start({String? mood}) async {
     this.mood = mood;
+    _retryAfter = null;
+    _failures = 0;
     final chunk = await _ref.read(playNowRepositoryProvider).next(size: 10, mood: mood);
     if (chunk.tracks.isEmpty) return chunk.reason;
     final infos = [for (final r in chunk.tracks) nowPlayingInfoFor(r)];
@@ -45,6 +59,7 @@ class AutoContinue {
 
   void _onPlayer(AudioPlayerState s) {
     if (_loading || s.nowPlaying == null || s.queue.isEmpty) return;
+    if (_retryAfter != null && DateTime.now().isBefore(_retryAfter!)) return;
     final playNow = s.queueSourceLabel == playNowLabel;
     final endless = s.repeatMode == RepeatMode.endless;
     if (!playNow && !endless) return;
@@ -66,7 +81,12 @@ class AutoContinue {
             size: 8,
             mood: fromSeeds ? null : mood,
           );
-      if (chunk.tracks.isEmpty) return;
+      if (chunk.tracks.isEmpty) {
+        _failed();
+        return;
+      }
+      _retryAfter = null;
+      _failures = 0;
       final current = _ref.read(audioPlayerControllerProvider);
       // Mezitím jiná hudba / vypnuté nekonečno -> nic nepřidávat.
       if (current.queueSourceLabel != s.queueSourceLabel ||
@@ -77,6 +97,7 @@ class AutoContinue {
           .read(audioPlayerControllerProvider.notifier)
           .addAllToQueue([for (final r in chunk.tracks) nowPlayingInfoFor(r)], sourceLabel: s.queueSourceLabel);
     } catch (e) {
+      _failed();
       debugPrint('AutoContinue: doplnění fronty selhalo: $e');
     } finally {
       _loading = false;

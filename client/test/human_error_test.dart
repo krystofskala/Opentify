@@ -8,7 +8,7 @@ import 'package:opentify_client/widgets/state_views.dart';
 void main() {
   test('chyby serveru a sítě jsou lidsky', () {
     expect(humanError(TimeoutException('x')), 'Server neodpověděl včas.');
-    expect(humanError(Exception('ClientException: Failed to fetch')), contains('Tailscale'));
+    expect(humanError(Exception('ClientException: Failed to fetch')), contains('internetu'));
     expect(humanError(Exception('něco divného')), 'Zkus to prosím znovu.');
     expect(humanError(null), 'Zkus to prosím znovu.');
   });
