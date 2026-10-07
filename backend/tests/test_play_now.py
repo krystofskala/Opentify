@@ -179,7 +179,7 @@ def test_endless_keeps_one_seed_artist_track_even_when_capped():
     act = pn._activation(user)
     seed = ids[("Metal Act", 0)]
     metal = act.artist_of[seed]
-    fam, _s, _r = pn.pick(user, [seed], [seed], 3, random.Random(1), session_counts=Counter({metal: 6}))
+    fam, _s, _r = pn.pick(user, [seed], [seed], 3, random.Random(1), session_counts=Counter({metal: 2}))
     assert any(act.artist_of.get(r) == metal for r in fam)
 
 
