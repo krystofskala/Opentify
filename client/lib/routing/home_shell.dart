@@ -174,8 +174,12 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
     setState(() => _pillDragging = false);
   }
 
+  // Prst je na kapsli (Listener) -- zrušené gesto tah neukončí, dokončí ho
+  // až zvednutí prstu (na iPhonu se gesto po rozbalení lišty rušilo).
+  bool _pillPointerDown = false;
+
   void _pillDragCancel() {
-    if (!_pillDragging) return;
+    if (!_pillDragging || _pillPointerDown) return;
     _tabBar.currentState?.cancelExternalDrag();
     setState(() => _pillDragging = false);
   }
@@ -322,6 +326,15 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
                               onDragUpdate: _pillDragUpdate,
                               onDragEnd: _pillDragEnd,
                               onDragCancel: _pillDragCancel,
+                              // Záloha za rozpoznávače gest (viz _TabPill).
+                              onPointerDown: () => _pillPointerDown = true,
+                              onPointerMove: (p) {
+                                if (_pillDragging) _pillDragUpdate(p);
+                              },
+                              onPointerUp: () {
+                                _pillPointerDown = false;
+                                _pillDragEnd(0);
+                              },
                             ),
                           ),
                         ),
@@ -443,6 +456,9 @@ class _TabPill extends StatelessWidget {
     required this.onDragUpdate,
     required this.onDragEnd,
     required this.onDragCancel,
+    this.onPointerDown,
+    this.onPointerMove,
+    this.onPointerUp,
   });
 
   final GlassTabItem item;
@@ -451,6 +467,9 @@ class _TabPill extends StatelessWidget {
   final ValueChanged<Offset> onDragUpdate;
   final ValueChanged<double> onDragEnd;
   final VoidCallback onDragCancel;
+  final VoidCallback? onPointerDown;
+  final ValueChanged<Offset>? onPointerMove;
+  final VoidCallback? onPointerUp;
 
   @override
   Widget build(BuildContext context) {
@@ -460,7 +479,16 @@ class _TabPill extends StatelessWidget {
       button: true,
       label: 'Zobrazit navigaci (${item.label})',
       excludeSemantics: true,
-      child: RawGestureDetector(
+      // Pohyb prstu i mimo rozpoznávače gest: na iPhonu se po rozbalení
+      // lišty tah ztrácel (gesto zrušené -- lupička stála, #40c, živě 7. 10.).
+      // Listener do soutěže gest nevstupuje, takže ho zrušit nejde; tah
+      // posouvá, dokud prst drží (HomeShell hlídá, ať se konec zavolá jednou).
+      child: Listener(
+        onPointerDown: (_) => onPointerDown?.call(),
+        onPointerMove: (e) => onPointerMove?.call(e.position),
+        onPointerUp: (_) => onPointerUp?.call(),
+        onPointerCancel: (_) => onPointerUp?.call(),
+        child: RawGestureDetector(
         behavior: HitTestBehavior.opaque,
         gestures: {
           TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
@@ -503,6 +531,7 @@ class _TabPill extends StatelessWidget {
             child: Icon(item.icon, size: 26, fill: 1, color: Theme.of(context).colorScheme.primary),
           ),
         ),
+      ),
       ),
     );
   }

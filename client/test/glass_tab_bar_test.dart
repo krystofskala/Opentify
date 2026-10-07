@@ -32,4 +32,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(selected, 0);
   });
+
+  testWidgets('external drag follows the finger to another tab', (tester) async {
+    final key = GlobalKey<GlassTabBarState>();
+    int? selected;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        bottomNavigationBar: GlassTabBar(key: key, items: _items, selectedIndex: 0, onSelected: (i) => selected = i),
+      ),
+    ));
+    final bar = tester.getRect(find.byType(GlassTabBar));
+    final y = bar.bottom - 40;
+    key.currentState!.beginExternalDrag(Offset(bar.left + 30, y));
+    await tester.pump(const Duration(milliseconds: 16));
+    for (var x = bar.left + 30; x < bar.right - 30; x += 20) {
+      key.currentState!.updateExternalDrag(Offset(x, y));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    key.currentState!.endExternalDrag(0);
+    await tester.pumpAndSettle();
+    expect(selected, 3);
+  });
 }
