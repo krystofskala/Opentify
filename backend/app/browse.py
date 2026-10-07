@@ -911,25 +911,29 @@ async def _recent_albums(artist_ids: list[str], limit: int) -> list[str]:
     ids: list[str] = []
     checked = 0
     with Session(engine) as session:
-        for _released, album, aid in found:
-            if checked < 30:
-                # Deezer dává reedicím datum digitálního vydání (Rubber Soul jako
-                # novinka) -- MusicBrainz zná datum PRVNÍHO vydání.
-                checked += 1
-                artist = session.get(Artist, aid)
-                first = await _first_release_year(artist.name if artist else "", album.get("title") or "")
-                if first is not None and first < date.today().year - 1:
-                    continue
+        names = {aid: (a.name if (a := session.get(Artist, aid)) else "") for aid in {x[2] for x in found}}
+    # MusicBrainz (1 dotaz/s, čeká i sekundy) MIMO DB session -- dřív se
+    # spojení drželo přes všechna čekání (audit výkonu 7. 10.).
+    for _released, album, aid in found:
+        if checked < 30:
+            # Deezer dává reedicím datum digitálního vydání (Rubber Soul jako
+            # novinka) -- MusicBrainz zná datum PRVNÍHO vydání.
+            checked += 1
+            first = await _first_release_year(names.get(aid, ""), album.get("title") or "")
+            if first is not None and first < date.today().year - 1:
+                continue
+        with Session(engine) as session:
             release = ingest_album(session, album, session.get(Artist, aid))
+            session.commit()
+            release_id = release.id if release is not None else None
             # Vydání, které už známe se starým datem (MusicBrainz), není novinka.
             known_year = (release.release_date or "")[:4] if release is not None else ""
-            if known_year.isdigit() and int(known_year) < date.today().year - 1:
-                continue
-            if release is not None and release.id not in ids:
-                ids.append(release.id)
-            if len(ids) >= limit:
-                break
-        session.commit()
+        if known_year.isdigit() and int(known_year) < date.today().year - 1:
+            continue
+        if release_id is not None and release_id not in ids:
+            ids.append(release_id)
+        if len(ids) >= limit:
+            break
     return ids
 
 
