@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api_client.dart' show ApiException;
 import '../../core/config.dart';
 import '../../core/device_token.dart' show withDeviceToken;
 import '../../core/realtime_event.dart' show UnknownEvent;
@@ -233,7 +234,9 @@ final spokenBookProvider = FutureProvider.autoDispose.family<SpokenBook, String>
 typedef SpokenSearchResult = ({List<SpokenRelease> releases, bool loginConfigured});
 
 final spokenSearchProvider = FutureProvider.autoDispose.family<SpokenSearchResult, String>((ref, q) async {
-  ref.watch(spokenEventsProvider);
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
   final json = await ref.watch(apiClientProvider).getJson('/spoken/search', query: {'q': q});
   return (
     releases: [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)],
@@ -256,7 +259,9 @@ typedef SpokenPerson = ({
 /// ke stažení. `role`: author | narrator.
 final spokenPersonProvider =
     FutureProvider.autoDispose.family<SpokenPerson, ({String name, String role})>((ref, who) async {
-  ref.watch(spokenEventsProvider);
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
   final json =
       await ref.watch(apiClientProvider).getJson('/spoken/person', query: {'name': who.name, 'role': who.role});
   return (
@@ -305,6 +310,68 @@ final spokenBookDescriptionProvider = FutureProvider.autoDispose.family<String?,
   final json = await ref.watch(apiClientProvider).getJson('/spoken/books/$id/description');
   return json['description'] as String?;
 });
+
+/// Vydání knihy na stránce knihy: kopie na serveru (`bookId`) nebo vydání
+/// ze SkTorrentu; `why` = proč je tak vysoko (doporučené první).
+class SpokenEdition {
+  SpokenEdition(this.json)
+      : bookId = json['bookId'] as String?,
+        status = json['status'] as String?,
+        title = json['releaseTitle'] as String? ?? json['title'] as String? ?? '',
+        narrator = json['narrator'] as String?,
+        coverUrl = spokenCoverUrl(json['coverUrl'] as String?),
+        why = [for (final w in json['why'] as List<dynamic>? ?? const []) w as String];
+
+  final Map<String, dynamic> json;
+  final String? bookId;
+  final String? status;
+  final String title;
+  final String? narrator;
+  final String? coverUrl;
+  final List<String> why;
+
+  bool get onServer => bookId != null;
+  SpokenRelease get release => SpokenRelease.fromJson(json);
+}
+
+typedef SpokenWork = ({
+  String title,
+  String? author,
+  String? year,
+  String? seriesName,
+  int? seriesNumber,
+  String? summary,
+  List<SpokenEdition> editions,
+});
+
+/// Stránka knihy (Knihovny.cz + všechna vydání). `null` = kniha v katalogu není.
+final spokenWorkProvider =
+    FutureProvider.autoDispose.family<SpokenWork?, ({String title, String author})>((ref, who) async {
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
+  try {
+    final json = await ref.watch(apiClientProvider).getJson('/spoken/work', query: {'title': who.title, 'author': who.author});
+    final work = json['work'] as Map<String, dynamic>? ?? const {};
+    final series = work['series'] as Map<String, dynamic>?;
+    return (
+      title: work['title'] as String? ?? who.title,
+      author: work['author'] as String? ?? who.author,
+      year: work['year'] as String?,
+      seriesName: series?['name'] as String?,
+      seriesNumber: (series?['number'] as num?)?.toInt(),
+      summary: work['summary'] as String?,
+      editions: [for (final e in json['editions'] as List<dynamic>? ?? const []) SpokenEdition(e as Map<String, dynamic>)],
+    );
+  } on ApiException catch (e) {
+    if (e.statusCode == 404) return null;
+    rethrow;
+  }
+});
+
+/// Cesta na stránku knihy.
+String spokenWorkPath(String title, String author) =>
+    Uri(path: '/spoken/work', queryParameters: {'title': title, 'author': author}).toString();
 
 /// Cesta na stránku autora / interpreta.
 String spokenPersonPath(String name, {bool narrator = false}) =>
@@ -358,7 +425,9 @@ final spokenSearchRequestProvider = StateProvider<String?>((ref) => null);
 /// Záloha za českou verzi: Soulseek (typicky anglické originály) -- zvlášť,
 /// je pomalejší (~10 s).
 final spokenForeignSearchProvider = FutureProvider.autoDispose.family<List<SpokenRelease>, String>((ref, q) async {
-  ref.watch(spokenEventsProvider);
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
   final json = await ref.watch(apiClientProvider).getJson('/spoken/search/foreign', query: {'q': q});
   return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
 });

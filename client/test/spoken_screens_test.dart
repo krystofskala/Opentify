@@ -136,6 +136,36 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('Stránka knihy: doporučené vydání a další vydání', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1800 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(const SpokenWorkScreen(title: 'Saturnin', author: 'Zdeněk Jirotka'), [
+      spokenWorkProvider.overrideWith((ref, who) async => (
+            title: 'Saturnin',
+            author: 'Zdeněk Jirotka',
+            year: '1942',
+            seriesName: null,
+            seriesNumber: null,
+            summary: 'Humoristický román o sluhovi Saturninovi.',
+            editions: [
+              SpokenEdition({'bookId': 'b1', 'status': 'ready', 'releaseTitle': 'Saturnin (čte Svatopluk Beneš)', 'why': ['na serveru, pustíš hned', 'celé']}),
+              SpokenEdition({'infohash': 'h', 'title': 'Saturnin - Zdeněk Jirotka (2010) čte Oldřich Vízner', 'seeders': 10, 'why': ['celé', 'čte Oldřich Vízner', '10 zdrojů']}),
+            ],
+          )),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Doporučené vydání'), findsOneWidget);
+    expect(find.text('Další vydání'), findsOneWidget);
+    expect(find.text('Otevřít'), findsOneWidget);
+    expect(find.text('Stáhnout'), findsOneWidget);
+    expect(find.text('poprvé vyšlo 1942'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('Hledání audioknih: výsledky se Stáhnout bez přetečení', (tester) async {
     tester.view.physicalSize = const Size(375 * 3, 700 * 3);
     tester.view.devicePixelRatio = 3;
