@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Artist, Listen, Recording
+from app.models import Artist, Listen, PlayEvent, Recording
 from app.utils import utcnow
 
 # Nastaveno offline testem na 119 tis. poslechů vlastníka (app/tools/taste_replay,
@@ -127,7 +127,11 @@ def artist_day_stats(rows) -> dict[str, tuple[float, float]]:
 # Odkud poslech je: fronty, které skládá algoritmus nebo cizí výběr (mixy,
 # rádio, Pusť teď, žebříčky, žánrové a redakční playlisty). Stejné druhy
 # jako PlayEvent.algorithmic (app/connect_listens.py) + žebříčky.
-_ALGO_KINDS = ("PERSONAL_MIX", "GENERATED_RECOMMENDATION", "RADIO", "CHART", "GENRE", "EDITORIAL")
+# JEDNA definice pro přehrání (PlayEvent, app/connect_listens.py) i poslech
+# (audit 7. 10. po změnách, chyba 10).
+ALGO_KINDS = ("PERSONAL_MIX", "GENERATED_RECOMMENDATION", "RADIO", "CHART", "GENRE", "EDITORIAL")
+_ALGO_KINDS = ALGO_KINDS
+ALGO_MATCH_S = 20 * 60
 _ALGO_PREFIXES = ("Pusť teď", "Rádio · ")
 TASTE_SOURCES = ("spotify-history", "applemusic-history", "ytmusic-history")
 
@@ -242,16 +246,25 @@ class TasteState:
 
 
 def explicit_artists(user_id: str) -> set[str]:
-    """Výslovné volby: interpreti srdíček a knihovny, oblíbení, "víc takových"."""
+    """JEDNA definice výslovné volby pro všechny plochy (audit 7. 10. po
+    změnách, chyba 4 -- dřív tři různé): interpreti srdíček, knihovny a
+    VLASTNÍCH playlistů (sdílené ne -- skladby tam přidal i někdo jiný),
+    sledovaní interpreti a "víc takových". Bez limitů."""
     from app.home.feedback import deltas
-    from app.home.play_now import _chosen_tracks, _rec_meta
     from app.models import FavoriteArtist
 
     with Session(engine) as session:
-        chosen = _chosen_tracks(session, user_id, 500)
+        tracks = collection_tracks(session, user_id)
         favorites = set(session.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all())
-    out = {aid for aid, _t in _rec_meta(chosen).values() if aid} | favorites
-    return out | {a for a, d in deltas(user_id).items() if d > 0}
+        ids = list(tracks)
+        artists: set[str] = set()
+        for i in range(0, len(ids), 500):
+            artists |= {
+                a for a in session.exec(
+                    select(Recording.artist_id).where(Recording.id.in_(ids[i : i + 500]))  # type: ignore[attr-defined]
+                ).all() if a
+            }
+    return artists | favorites | {a for a, d in deltas(user_id).items() if d > 0}
 
 
 def cached(user_id: str) -> "Activation":
@@ -398,6 +411,25 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
                 imported.append((played_at, rid, context))
             elif is_algorithmic(source, labels):
                 algo_of[(rid, played_at)] = True
+        # Poslech z várky Pusť teď / nekonečného hraní = algoritmus, i když
+        # nese název původní fronty (klient doplňuje várky pod názvem alba --
+        # audit 7. 10. po změnách, chyba 1): přehrání (PlayEvent), které pustil
+        # algoritmus nebo patří do várky, do 20 minut od poslechu.
+        algo_plays: dict[str, list[datetime]] = defaultdict(list)
+        for rid, ended in session.exec(
+            select(PlayEvent.recording_id, PlayEvent.ended_at).where(
+                PlayEvent.user_id == user_id,
+                PlayEvent.origin == "connect",
+                (PlayEvent.algorithmic == True) | (PlayEvent.rec_batch_id.is_not(None)),  # type: ignore[union-attr] # noqa: E712
+            )
+        ).all():
+            algo_plays[rid].append(ended)
+        if algo_plays:
+            for rid, played_at, _ms in rows:
+                for ended in algo_plays.get(rid, ()):
+                    if abs((ended - played_at).total_seconds()) <= ALGO_MATCH_S:
+                        algo_of[(rid, played_at)] = True
+                        break
         if imported:
             imported.sort()
             meta: dict[str, tuple[str | None, str | None]] = {}

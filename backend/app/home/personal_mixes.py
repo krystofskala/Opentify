@@ -127,7 +127,7 @@ def taste_v2() -> bool:
     řádkem v .env: TASTE_MODEL=v2 / v1."""
     import os
 
-    return os.environ.get("TASTE_MODEL", "v1").lower() == "v2"
+    return os.environ.get("TASTE_MODEL", "v2").lower() == "v2"
 
 
 def load_taste(user_id: str) -> Taste:
@@ -315,10 +315,7 @@ def _load_taste(user_id: str) -> Taste:
         taste.listen_days = len({_aware(listen.played_at).date() for listen in listens})
         if taste.activation is not None:
             taste.listen_days = max(taste.listen_days, taste.activation.listening_days())
-        deliberate = liked_set | taste.library | taste.playlisted
-        confirmed = {taste.artist_of[r] for r in deliberate if r in taste.artist_of} | {
-            a for a, d in manual.items() if d > 0
-        }
+        confirmed = av.explicit_artists(user_id)  # jedna definice výslovné volby
         if taste.activation is not None:
             day_stats = taste.activation.artist_days()  # ví i o algoritmu
         else:
@@ -404,7 +401,7 @@ class Cluster:
 
 
 async def build_clusters(taste: Taste) -> list[Cluster]:
-    top = [a for a, _ in taste.artist_weight.most_common(_TOP_ARTISTS * 2)]
+    top = [a for a, w in taste.artist_weight.most_common(_TOP_ARTISTS * 2) if w > 0]  # "míň" může vynulovat
     related: dict[str, set[str]] = {}
     for artist_id in top:
         if len(related) >= _TOP_ARTISTS:
@@ -452,7 +449,7 @@ async def build_clusters(taste: Taste) -> list[Cluster]:
     # jejich Deezer id -- jen 1 dotaz na interpreta, výsledky hledání se
     # cachují den.
     assigned = {a for c in clusters for a in c.artists}
-    extra = [a for a, _ in taste.artist_weight.most_common(_TOP_ARTISTS * 2 + _EXTRA_ARTISTS) if a not in assigned]
+    extra = [a for a, w in taste.artist_weight.most_common(_TOP_ARTISTS * 2 + _EXTRA_ARTISTS) if a not in assigned and w > 0]
     for artist_id in extra:
         dz = await _deezer_id(taste, artist_id)
         if dz is None:
@@ -658,6 +655,14 @@ async def build_daily_mixes() -> int:
     known = taste.known
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
     later = await asyncio.to_thread(_listen_later_candidates, g.home_user())
+    # "Víc / míň takových" i při výběru skladeb ze skupiny (dřív jen váha
+    # interpreta při tvorbě skupin -- audit 7. 10. po změnách, chyba 3).
+    from app.home.feedback import deltas, fit_multiplier
+
+    manual = deltas(g.home_user())
+
+    def mood_mult(artist_id: str | None) -> float:
+        return fit_multiplier(manual[artist_id]) if artist_id in manual else 1.0
     later_used: set[str] = set()
     used_today: set[str] = set()
     results: list[tuple[int, Cluster, list[str], str]] = []
@@ -670,7 +675,11 @@ async def build_daily_mixes() -> int:
             # v2: známé podle toho, jak moc teď "žijí" (vážené losování --
             # oblíbené častěji, ale každý den jinak; jednou puštěné z 2014
             # skoro nikdy). Lajk bez poslechu dostane malou základní váhu.
-            preferred = _weighted_order(preferred, lambda r: taste.track_score(r) + (0.05 if r in set(taste.liked) else 0.0), rng)
+            preferred = _weighted_order(
+                preferred,
+                lambda r: (taste.track_score(r) + (0.05 if r in set(taste.liked) else 0.0)) * mood_mult(taste.artist_of.get(r)),
+                rng,
+            )
         else:
             rng.shuffle(preferred)
         rng.shuffle(fallback)
@@ -699,6 +708,9 @@ async def build_daily_mixes() -> int:
             r for r in await _new_tracks_from(cluster.radio_seeds, known | set(from_lastfm), rng, new_target)
             if r not in from_lastfm
         ][: new_target - len(from_lastfm)]
+        from app.home import novelty
+
+        new = await asyncio.to_thread(novelty.filter_new, g.home_user(), new, taste.activation)
         tracks = _interleave(familiar, new)
         if len(tracks) < MIN_MIX_SIZE:
             continue
@@ -827,7 +839,7 @@ def _transient_seeds(taste: Taste, n: int) -> list[str]:
     (srdíčko, "víc takových") a trvalý vkus jako menší příměs."""
     act = taste.activation
     if act is None:
-        return [a for a, _w in taste.artist_weight.most_common(n)]
+        return [a for a, w in taste.artist_weight.most_common(n) if w > 0]
     from app.home.activation import ARTIST_BLEND
 
     now = act.blend({"short": 0.75, "medium": 0.25})
@@ -840,7 +852,10 @@ def _transient_seeds(taste: Taste, n: int) -> list[str]:
         score[a] += 0.2 * v
     for a, w in taste.artist_weight.items():
         score[a] += 0.1 * w / total_w
-    return [a for a, _s in score.most_common(n * 2) if a in taste.artist_weight][:n]
+    from app.home.feedback import deltas, fit_multiplier
+
+    muted = {a for a, d in deltas(g.home_user()).items() if fit_multiplier(d) < 1}
+    return [a for a, _s in score.most_common(n * 2) if taste.artist_weight.get(a, 0) > 0 and a not in muted][:n]
 
 
 async def build_discover_weekly() -> int:
@@ -904,10 +919,11 @@ async def build_discover_weekly() -> int:
             continue
         top = [t for t in top if not _is_junk(t)]
         ids = [r for r in await asyncio.to_thread(g._ingest_tracks, top) if r not in exclude and r not in picked]
-        if taste.activation is not None:
-            # Objevy = opravdu neslyšené: i když tutéž skladbu zná import pod
-            # jiným id (Spotify historie, jiné vydání).
-            ids = await asyncio.to_thread(_drop_heard, taste, ids)
+        # Objevy = opravdu neslyšené (i pod jiným id) a bez nelíbí / míň /
+        # přeskočených / pauzy -- společný filtr všech mixů (app/home/novelty.py).
+        from app.home import novelty
+
+        ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
         picked.extend(ids[: 2 if len(ranked) < 20 else 1])
         await asyncio.sleep(0.05)
     if len(picked) < 15:

@@ -399,7 +399,7 @@ def pick(
     max_med = max(act.medium.values(), default=0) or 1.0
     # Tatáž píseň v jiné verzi ("Salt Creek" od Blake & Rice a pak od Rice
     # sólo) se v jedné session nevrací.
-    played_titles = {_title_key(act.title_of.get(r, "")) for r in exclude} - {""}
+    played_titles = {_song_key(act.artist_of.get(r), act.title_of.get(r, "")) for r in exclude} - {""}
 
     shrink_all = len(act.timeline) / (len(act.timeline) + TIME_SHRINK_K)
     default_time_fit = (1 - shrink_all) + shrink_all * 0.05
@@ -415,19 +415,13 @@ def pick(
     # někoho) má malý vliv, dokud se nevrátí jiný den nebo nedostane srdíčko.
     tentative: dict[str, float] = {}
     if av.youngness(act.listening_days()) > 0:
-        with Session(engine) as session:
-            chosen_artists = {
-                a for a in (act.artist_of.get(r) for r in (chosen or _chosen_tracks(session, user_id))) if a
-            }
-        tentative = av.tentative_factors(
-            act.artist_days(), chosen_artists | {a for a, d in manual.items() if d > 0}, act.listening_days()
-        )
+        tentative = av.tentative_factors(act.artist_days(), av.explicit_artists(user_id), act.listening_days())
 
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
         if not artist or artist in banned or rid in exclude:
             return 0.0
-        if _title_key(act.title_of.get(rid, "")) in played_titles:
+        if _song_key(artist, act.title_of.get(rid, "")) in played_titles:
             return 0.0
         base = act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
         if rid in chosen_set:
@@ -462,7 +456,7 @@ def pick(
     seen_titles: set[str] = set()
     unique: list[str] = []
     for r in ordered:
-        key = _title_key(act.title_of.get(r, ""))
+        key = _song_key(act.artist_of.get(r), act.title_of.get(r, ""))
         if score(r) > 0 and (not key or key not in seen_titles):
             seen_titles.add(key)
             unique.append(r)
@@ -482,7 +476,7 @@ def pick(
                 return 0.0
             if rid in exclude or rid in familiar:
                 return 0.0
-            if _title_key(act.title_of.get(rid, "")) in played_titles:
+            if _song_key(artist, act.title_of.get(rid, "")) in played_titles:
                 return 0.0
             return act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
 
@@ -496,7 +490,7 @@ def pick(
             banned=set(banned),
             muted={a for a, d in manual.items() if fit_multiplier(d) < 1},
             skipped_artists={a for a, n in skipped_artists.items() if n},
-            titles=(played_titles | {_title_key(act.title_of.get(r, "")) for r in familiar}) - {""},
+            titles=(played_titles | {_song_key(act.artist_of.get(r), act.title_of.get(r, "")) for r in familiar}) - {""},
             session_counts=session_counts,
             paused=paused_offers,
             weak_mood=bool(
@@ -623,6 +617,17 @@ async def _smooth(
     if deferred:
         logger.info("pusť teď: %d nových odloženo kvůli skoku stylu/energie", len(deferred))
     return ordered, {r for r in new_ids if r in ordered}
+
+
+def _song_key(artist_id: str | None, title: str) -> str:
+    """Klíč "tatáž píseň" v relaci: víceslovný název stačí sám (Salt Creek od
+    Blake & Rice a pak od Tonyho Rice = tatáž píseň), jednoslovný obecný
+    ("Intro", "Home") jen s interpretem -- jinak se různé písně navzájem
+    vyřazovaly (audit 7. 10. po změnách, chyba 11)."""
+    key = _title_key(title)
+    if not key:
+        return ""
+    return key if len(key.split()) >= 2 else f"{artist_id or ''}|{key}"
 
 
 def _rec_meta(recording_ids: list[str]) -> dict[str, tuple[str | None, str]]:
@@ -771,7 +776,7 @@ async def next_chunk(
         kept = []
         for rid in new:
             a, title = meta.get(rid, (None, ""))
-            key = _title_key(title)
+            key = _song_key(a, title)
             if not a or a in used or a in blocked or counts.get(a, 0) >= 2:
                 continue
             if key and key in titles:

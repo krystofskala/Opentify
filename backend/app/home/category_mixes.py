@@ -218,9 +218,18 @@ def _familiar(taste: pm.Taste, artists: dict[str, float], rng: random.Random) ->
     preferred = [r for r in liked_or_played if taste.artist_of.get(r) in artists]
     fallback = [r for r in taste.library if taste.artist_of.get(r) in artists and r not in liked_or_played]
     if taste.activation is not None:
-        # v2: podle toho, jak moc skladba teď "žije" (jako Denní mixy).
+        # v2: podle toho, jak moc skladba teď "žije" (jako Denní mixy), a
+        # "víc / míň takových" (audit 7. 10. po změnách, chyba 3).
+        from app.home.feedback import deltas, fit_multiplier
+
         liked = set(taste.liked)
-        preferred = pm._weighted_order(preferred, lambda r: taste.track_score(r) + (0.05 if r in liked else 0.0), rng)
+        manual = deltas(g.home_user())
+
+        def weight(r: str) -> float:
+            a = taste.artist_of.get(r)
+            return (taste.track_score(r) + (0.05 if r in liked else 0.0)) * (fit_multiplier(manual[a]) if a in manual else 1.0)
+
+        preferred = pm._weighted_order(preferred, weight, rng)
     else:
         rng.shuffle(preferred)
     rng.shuffle(fallback)
@@ -259,6 +268,9 @@ async def _genre_mix(c: Category, taste: pm.Taste, shares: dict[str, dict[str, f
     new: list[str] = []
     for i in range(max(len(radio), len(near))):
         new += [x for x in (radio[i : i + 1] + near[i : i + 1]) if x not in new]
+    from app.home import novelty
+
+    new = await asyncio.to_thread(novelty.filter_new, g.home_user(), new, taste.activation)  # společný filtr
     top_artists = sorted(members, key=lambda a: -taste.artist_weight[a])
     return familiar, new[:want], top_artists
 
@@ -316,6 +328,9 @@ async def _mood_mix(
     rng.shuffle(rest)
     ids = [r for r in await asyncio.to_thread(g._ingest_tracks, (close + rest)[: want * 3]) if r not in taste.known]
     artist_of = await asyncio.to_thread(pm._artists_of, ids)
+    from app.home import novelty
+
+    ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)  # společný filtr
     new = pm._cap_per_artist(ids, artist_of, 2)[:want]
     top_artists = sorted(members, key=lambda a: (-members[a], -taste.artist_weight[a]))
     return familiar, new, top_artists

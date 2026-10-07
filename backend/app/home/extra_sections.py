@@ -93,13 +93,17 @@ def _artist_weights(user_id: str, days: int = 365, half_life: float = 60.0) -> t
     now = utcnow()
     weights: Counter = Counter()
     with Session(engine) as s:
+        from app.home.activation import excluded_sources
+        from app.home.feedback import deltas, fit_multiplier
+
+        off = excluded_sources(user_id)  # zdroje vypnuté ze vkusu (Profil › Hudba)
         rows = s.exec(
-            select(Recording.artist_id, Listen.played_at)
+            select(Recording.artist_id, Listen.played_at, Listen.source)
             .join(Recording, Recording.id == Listen.recording_id)
             .where(Listen.user_id == user_id, Listen.played_at >= now - timedelta(days=days))
         ).all()
-        for artist_id, played in rows:
-            if artist_id:
+        for artist_id, played, source in rows:
+            if artist_id and source not in off:
                 weights[artist_id] += 0.5 ** ((now - _aware(played)).total_seconds() / 86400 / half_life)
         for fav in s.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all():
             weights[fav] += 3.0
@@ -107,6 +111,9 @@ def _artist_weights(user_id: str, days: int = 365, half_life: float = 60.0) -> t
 
         for banned in disliked_artist_ids(s, user_id):
             weights.pop(banned, None)  # nelíbení interpreti nic nedoporučují
+        for artist_id, d in deltas(user_id).items():  # "víc / míň takových"
+            if artist_id in weights:
+                weights[artist_id] *= fit_multiplier(d)
         names = {a.id: a.name for a in s.exec(select(Artist).where(Artist.id.in_(list(weights)))).all()}  # type: ignore[attr-defined]
     return weights, names
 
@@ -203,6 +210,9 @@ async def build_now_mix(user_id: str) -> int:
     rng.shuffle(own)
     own = own[:24]
     similar = await lt.similar_track_ids(in_style[:6], set(top), rng, 32 if style else 16)
+    from app.home import novelty
+
+    similar = await asyncio.to_thread(novelty.filter_new, user_id, similar)  # společný filtr nových
     if style:
         similar = [r for r in similar if await _has_style(r, style)][:16]
     ids: list[str] = []

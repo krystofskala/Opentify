@@ -66,11 +66,18 @@ def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter, Coun
     local_now = now.astimezone(_TZ)
     hour_now = local_now.hour + local_now.minute / 60
     weekend_now = local_now.weekday() >= 5
-    rows = session.exec(
-        select(Listen.recording_id, Listen.played_at, Listen.context).where(
-            Listen.user_id == user_id, Listen.played_at >= now - timedelta(days=90)
-        )
-    ).all()
+    from app.home.activation import excluded_sources
+
+    off = excluded_sources(user_id)  # zdroje vypnuté ze vkusu (Profil › Hudba)
+    rows = [
+        (rid, played_at, context)
+        for rid, played_at, context, source in session.exec(
+            select(Listen.recording_id, Listen.played_at, Listen.context, Listen.source).where(
+                Listen.user_id == user_id, Listen.played_at >= now - timedelta(days=90)
+            )
+        ).all()
+        if source not in off
+    ]
     ctx: Counter = Counter()
     rec_w: Counter = Counter()
     for rid, played_at, context in rows:

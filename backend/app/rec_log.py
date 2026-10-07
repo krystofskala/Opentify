@@ -41,8 +41,8 @@ def log_batch(user_id: str, recording_ids: list[str], new_ids: set[str], mode: s
     return batch_id
 
 
-def match(session: Session, user_id: str, recording_id: str) -> RecBatchItem | None:
-    since = (utcnow() - timedelta(hours=MATCH_HOURS)).replace(tzinfo=None)
+def match(session: Session, user_id: str, recording_id: str, hours: float = MATCH_HOURS) -> RecBatchItem | None:
+    since = (utcnow() - timedelta(hours=hours)).replace(tzinfo=None)
     return session.exec(
         select(RecBatchItem)
         .where(

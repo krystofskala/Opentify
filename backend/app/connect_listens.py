@@ -186,7 +186,7 @@ def _play_event(
     from sqlmodel import Session, select
 
     from app.db import engine
-    from app.models import GLOBAL_PLAYLIST_OWNER, PlayEvent, Playlist, PlaylistKind
+    from app.models import GLOBAL_PLAYLIST_OWNER, PlayEvent, Playlist
     from app.utils import utcnow
 
     try:
@@ -199,15 +199,25 @@ def _play_event(
                         Playlist.owner_user_id.in_([user_id, GLOBAL_PLAYLIST_OWNER]),  # type: ignore[attr-defined]
                     )
                 ).first()
+            from app.home.activation import ALGO_KINDS
+
+            # Stejná definice jako u poslechů (app/home/activation.py): mixy,
+            # rádio, doporučení, žebříčky, žánrové a redakční playlisty.
             algorithmic = bool(
-                playlist
-                and playlist.kind in (PlaylistKind.PERSONAL_MIX, PlaylistKind.GENERATED_RECOMMENDATION, PlaylistKind.RADIO)
-            ) or source == PLAY_NOW_LABEL  # fronta Pusť teď není playlist (audit 7. 10.)
+                playlist and getattr(playlist.kind, "value", playlist.kind) in ALGO_KINDS
+            ) or source == PLAY_NOW_LABEL or (source or "").startswith("Rádio · ")
             # Skladba z várky Pusť teď / nekonečného hraní (app/rec_log.py) --
             # i když fronta nese název alba či playlistu, ze kterého se navázalo.
             from app import rec_log
 
-            offered = rec_log.match(session, user_id, recording_id) if not playlist or algorithmic else None
+            # Napojit na várku: v algoritmické frontě vždy (12 h), jinak (fronta
+            # nese název alba -- nekonečné hraní) jen do 3 h, ať se vlastní
+            # album se skladbou z dávné várky nebere jako algoritmus.
+            offered = (
+                rec_log.match(session, user_id, recording_id)
+                if algorithmic
+                else rec_log.match(session, user_id, recording_id, hours=3) if not playlist else None
+            )
             if offered is not None:
                 algorithmic = True
             session.add(

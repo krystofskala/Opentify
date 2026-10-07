@@ -55,7 +55,7 @@ services:
       LASTFM_API_KEY: ${LASTFM_API_KEY:-}
       # Model vkusu: v2 = celá historie ve třech profilech (app/home/activation.py),
       # v1 = posledních 365 dní. Vrácení jedním řádkem v .env.
-      TASTE_MODEL: ${TASTE_MODEL:-v1}
+      TASTE_MODEL: ${TASTE_MODEL:-v2}
       LASTFM_API_SECRET: ${LASTFM_API_SECRET:-}
       # Tailscale účet admina (profil podle Tailscale, viz app/auth.py).
       TAILSCALE_ADMIN_LOGIN: ${TAILSCALE_ADMIN_LOGIN:-}
@@ -117,7 +117,7 @@ services:
       # composite = zkusí slskd, při prázdném hledání/chybě padá na yt-dlp
       # (viz app/providers.py). "placeholder" pro dev bez slskd/yt-dlp.
       MEDIA_PROVIDER: ${MEDIA_PROVIDER:-composite}
-      TASTE_MODEL: ${TASTE_MODEL:-v1}
+      TASTE_MODEL: ${TASTE_MODEL:-v2}
       # `slskd` sdílí síťový stack s `gluetun` (viz níž) -- na Dockeru se pod
       # svým vlastním jménem už neresolvuje, port 5030 je ale dosažitelný
       # přes IP/jméno toho, kdo tu síť vlastní.
