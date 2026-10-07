@@ -73,6 +73,19 @@ class ArtistScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final discography = ref.watch(discographyProvider(artistId));
+    // Ostatní části stránky načítat HNED a souběžně s diskografií -- dřív
+    // se populární skladby, bio a statistiky začaly načítat až po ní a
+    // čekání se sčítalo (UX audit 7. 10.: 10-18 s místo ~5-8 s). `listen`
+    // provider jen nastartuje a drží, překreslení řeší sekce samy.
+    for (final provider in [
+      artistTopTracksProvider(artistId),
+      artistBioProvider(artistId),
+      artistStatsProvider(artistId),
+      artistRaritiesProvider(artistId),
+      artistSoundcloudProvider(artistId),
+    ]) {
+      ref.listen(provider, (_, __) {});
+    }
 
     return discography.when(
       data: (data) => _ArtistBody(discography: data),
