@@ -2619,8 +2619,28 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// (úspěch odjinud, nebo definitivní `FAILED`, až selžou všichni).
   /// Selhání finálního `track.available` (ne `isProgressive`) je naopak
   /// opravdu konec -- tam už není na co čekat.
+  /// Server ohlásil plánovaný restart (state/server_notice.dart): výpadky
+  /// streamu se chvíli jen tiše zkouší znovu, bez chybové hlášky.
+  DateTime? _serverRestartUntil;
+
+  void serverRestarting() => _serverRestartUntil = DateTime.now().add(const Duration(seconds: 90));
+
   void _handleStreamFailure(NowPlayingInfo info, Object error, {required bool isProgressive}) {
     if (state.nowPlaying?.recordingId != info.recordingId) return;
+    final until = _serverRestartUntil;
+    if (until != null && DateTime.now().isBefore(until) && !_currentLocal && !isProgressive && !_radioActive) {
+      // Restart serveru: za 3 s znovu od stejného místa, žádné "Nepodařilo se".
+      _startPausedWhenReady = _startPausedWhenReady || !_player.playing;
+      _resumeAt = state.position;
+      _resumeFor = info.recordingId;
+      state = state.copyWith(isBuffering: true);
+      final gen = _sourceGen;
+      Timer(const Duration(seconds: 3), () {
+        if (gen != _sourceGen || state.nowPlaying?.recordingId != info.recordingId) return;
+        unawaited(_startStream(info, _streamUrlFor(info.recordingId), isProgressive: false));
+      });
+      return;
+    }
     // Každé selhání na server (log) -- "občas se nepustí" jinak nejde dohledat.
     diagReport(
       'playback-error',

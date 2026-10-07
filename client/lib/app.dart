@@ -23,6 +23,7 @@ import 'widgets/top_fade_scroll_behavior.dart';
 import 'widgets/toast.dart';
 import 'state/connect_controller.dart';
 import 'state/auto_continue.dart';
+import 'state/server_notice.dart';
 
 const _defaultSeed = Colors.deepPurple;
 
@@ -49,6 +50,8 @@ class OpentifyApp extends ConsumerWidget {
     ref.watch(connectProvider);
     // Pusť teď / nekonečné hraní: doplňuje frontu, když dochází.
     ref.watch(autoContinueProvider);
+    // Plánovaný restart serveru: hláška místo „chyby“ (state/server_notice.dart).
+    ref.watch(serverRestartNoticeProvider);
     ref.listen<String?>(playerNoticeProvider, (_, message) {
       if (message == null) return;
       showToast(appMessengerKey.currentState, message);
