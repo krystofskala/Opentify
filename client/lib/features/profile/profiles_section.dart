@@ -387,8 +387,21 @@ class ProfilesSection extends ConsumerWidget {
     if (auth?.user?.role != 'admin') return const SizedBox.shrink();
     final theme = Theme.of(context);
     final actingId = auth!.acting?.id ?? auth.user!.id;
-    final profiles = ref.watch(profilesProvider).valueOrNull ?? const [];
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    // Z internetu (ne přes Tailscale) server správu profilů odmítne a pošle
+    // poplach "Admin z internetu" -- vlastní telefon mimo domov ho spouštěl
+    // při každém otevření Profilu (7. 10.). Radši vysvětlit.
+    if (auth.fromInternet) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Profily', style: theme.textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.xs),
+          Text('Správa profilů jde jen přes Tailscale – zapni ho v telefonu, nebo to udělej doma.', style: muted),
+        ],
+      );
+    }
+    final profiles = ref.watch(profilesProvider).valueOrNull ?? const [];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

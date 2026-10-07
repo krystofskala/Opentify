@@ -132,7 +132,10 @@ def me(request: Request, response: Response):
         # Web: cookie; nativní appka si klíč vezme z těla a posílá ho jako Bearer.
         _set_cookie(response, TOKEN_COOKIE, issued)
     return {"user": _user_out(user), "acting": _user_out(acting), "mode": auth_mode(), "token": issued,
-            "tailscaleLogin": request.headers.get("tailscale-user-login"), "deviceCode": pair_code_required()}
+            "tailscaleLogin": request.headers.get("tailscale-user-login"), "deviceCode": pair_code_required(),
+            # Veřejná adresa (Funnel): appka pak správu profilů ani nezkouší
+            # (jinak poplach "Admin z internetu" při každém otevření Profilu).
+            "fromInternet": is_public(request)}
 
 
 class JoinIn(BaseModel):

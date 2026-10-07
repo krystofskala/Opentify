@@ -29,6 +29,7 @@ typedef AuthInfo = ({
   String? listenbrainzUser,
   String? lastfmUser,
   String? inviteCode,
+  bool fromInternet,
 });
 
 /// Kdo je přihlášený (`GET /auth/me`). Režim `login`: jméno + heslo, klíč si
@@ -72,6 +73,8 @@ final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) asy
     listenbrainzUser: (json['acting'] as Map<String, dynamic>?)?['listenbrainzUser'] as String?,
     lastfmUser: (json['acting'] as Map<String, dynamic>?)?['lastfmUser'] as String?,
     inviteCode: user == null && mode == 'login' ? code : null,
+    // Připojeno přes veřejnou adresu (ne Tailscale) -- správa profilů tu nejde.
+    fromInternet: json['fromInternet'] as bool? ?? false,
   );
 });
 
