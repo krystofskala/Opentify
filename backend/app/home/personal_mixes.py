@@ -748,6 +748,14 @@ async def build_daily_mixes() -> int:
     g._save_snapshot("personal:daily-mixes", {"stamp": day, "count": built})
     g._save_snapshot("personal:daily-mix-groups", {"groups": groups})
     _mark_used(day, used_today)
+    try:  # měření opakování mezi dny (7m) -- jen zápis
+        from app.home import mix_log
+
+        await asyncio.to_thread(
+            mix_log.record, g.home_user(), day, {str(n): tr for n, (_i, _c, tr, _d) in enumerate(results, start=1)}
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("záznam Denních mixů")
     return built
 
 
