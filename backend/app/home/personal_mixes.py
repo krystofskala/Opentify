@@ -868,6 +868,10 @@ async def build_discover_weekly() -> int:
     if done is not None:
         return done
     taste = await asyncio.to_thread(load_taste, g.home_user())
+    if not any(w > 0 for w in taste.artist_weight.values()):
+        # Profil bez poslechů -- Objevy nemají z čeho vzniknout. Dřív to
+        # v logu hlásilo "selhal" u každého nového profilu (7. 10.: 4×).
+        return 0
     rng = random.Random(f"discover:{week}")
     recent = {r for r, t in taste.last_played.items() if utcnow() - t <= timedelta(days=60)}
     exclude = taste.known | recent
