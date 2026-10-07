@@ -264,3 +264,34 @@ def test_new_tracks_obey_filters_and_title_key(monkeypatch):
     assert cand[0] in out["recordingIds"]
     assert cand[1] not in out["recordingIds"]  # neoblíbený
     assert cand[2] not in out["recordingIds"]  # tatáž píseň (semínko) jinde
+
+
+def test_clean_start_uses_likes_and_diverse_seeds(monkeypatch):
+    """Čistý start: 1 poslech + srdíčka od jiných interpretů -> srdíčka jako
+    známé, semínka pro nové z různých interpretů, víc nového."""
+    from app.library.spotify_import import get_or_create_liked_songs_playlist
+    from app.models import PlaylistItem
+
+    user = "pn-clean-" + _RUN
+    now = utcnow().replace(tzinfo=None)
+    with Session(engine) as s:
+        artists = [Artist(name=f"Clean {i} {_RUN}") for i in range(4)]
+        s.add_all(artists)
+        s.flush()
+        recs = [Recording(title=f"clean song {i}", artist_id=artists[i].id, duration_ms=200_000) for i in range(4)]
+        s.add_all(recs)
+        s.flush()
+        s.add(Listen(user_id=user, recording_id=recs[0].id, played_at=now - timedelta(minutes=5), duration_played_ms=200_000))
+        liked = get_or_create_liked_songs_playlist(s, user)
+        for pos, r in enumerate(recs[1:]):
+            s.add(PlaylistItem(playlist_id=liked.id, recording_id=r.id, position=pos))
+        s.commit()
+        ids = [r.id for r in recs]
+    pn._cache.clear()
+    pn._batches.clear()
+    fam, new_seeds, _reason = pn.pick(user, [], [], 8, random.Random(3))
+    assert set(fam) <= set(ids[1:]) and fam  # srdíčka jako známé (poslech z poslední hodiny ne)
+    assert len(new_seeds) >= 2
+    with Session(engine) as s:
+        seed_artists = {s.get(Recording, r).artist_id for r in new_seeds}
+    assert len(seed_artists) == len(new_seeds)  # každé semínko od jiného interpreta

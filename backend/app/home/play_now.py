@@ -39,6 +39,12 @@ SESSION_DECAY = 0.3
 _BATCH_MEMORY = 3
 _BATCH_TTL_S = 6 * 3600
 RECENT_BATCH_PENALTY = 0.15
+# Čistý start (kamarádi bez importu historie): pod tolik slyšených skladeb
+# je profil "malý" -- známé i ze srdíček a knihovny, víc nového, semínka z
+# různých interpretů, denní doba skoro nehraje roli, relace učí rychleji.
+SMALL_PROFILE = 30
+SMALL_NEW_SHARE = 0.5
+TIME_SHRINK_K = 40  # poslechů, při kterých má denní doba poloviční váhu
 _batches: dict[str, list[tuple[float, set[str]]]] = {}
 
 # Čipy nálad (plán P2): nálada -> (kategorie z app/tags.SUBGENRES, štítky
@@ -208,6 +214,49 @@ def _session_signals(session: Session, user_id: str) -> tuple[Counter, Counter, 
     return skipped, done, len(last_two) == 2 and all(r == "skipped" for r in last_two)
 
 
+def _chosen_tracks(session: Session, user_id: str, limit: int = 200) -> list[str]:
+    """Srdíčka a knihovna (nejnovější první) -- co si člověk sám vybral."""
+    from app.library.spotify_import import LIKED_SONGS_SOURCE
+    from app.models import LibraryEntry, Playlist, PlaylistItem
+
+    out: list[str] = []
+    liked = session.exec(
+        select(Playlist.id).where(Playlist.owner_user_id == user_id, Playlist.source == LIKED_SONGS_SOURCE)
+    ).first()
+    if liked:
+        out += session.exec(
+            select(PlaylistItem.recording_id)
+            .where(PlaylistItem.playlist_id == liked)
+            .order_by(PlaylistItem.position.desc())  # type: ignore[attr-defined]
+            .limit(limit)
+        ).all()
+    try:
+        out += session.exec(
+            select(LibraryEntry.recording_id)
+            .where(LibraryEntry.user_id == user_id, LibraryEntry.recording_id.is_not(None))  # type: ignore[union-attr]
+            .limit(limit)
+        ).all()
+    except Exception:  # noqa: BLE001 -- knihovna jen jako doplněk
+        pass
+    return list(dict.fromkeys(r for r in out if r))
+
+
+def _distinct_artist_seeds(pool: list[str], artist_of: dict[str, str], n: int) -> list[str]:
+    missing = [r for r in pool if r not in artist_of]
+    meta = _rec_meta(missing) if missing else {}
+    out: list[str] = []
+    seen: set[str] = set()
+    for rid in pool:
+        a = artist_of.get(rid) or (meta.get(rid) or (None, ""))[0]
+        if not a or a in seen:
+            continue
+        seen.add(a)
+        out.append(rid)
+        if len(out) >= n:
+            break
+    return out
+
+
 def pick(
     user_id: str, seeds: list[str], played: list[str], size: int, rng: random.Random,
     mood: str | None = None, moods: dict[str, float] | None = None, new_share: float = NEW_SHARE,
@@ -261,6 +310,8 @@ def pick(
                 )
             ).all()
         )
+        small = len(act.total) < SMALL_PROFILE
+        chosen: list[str] = _chosen_tracks(session, user_id) if small else []
         seed_artists = {r.artist_id for r in (session.get(Recording, s) for s in seeds) if r and r.artist_id}
         seed_title = None
         if seeds:
@@ -280,8 +331,11 @@ def pick(
         reason = f"Navazuje na {seed_title}" if seed_title else "Navazuje na to, co hrálo"
     else:
         top = max(time_artists.values(), default=0) or 1.0
-        fit = {a: 0.15 + w / top for a, w in time_artists.items()}
-        reason = "Podle toho, co posloucháš v tuhle dobu"
+        # Denní doba podle množství dat: z pár poslechů se nedá poznat, co kdo
+        # poslouchá ráno -- u malého profilu skoro neutrální (váha n/(n+K)).
+        shrink = len(act.timeline) / (len(act.timeline) + TIME_SHRINK_K)
+        fit = {a: (1 - shrink) + shrink * (0.15 + w / top) for a, w in time_artists.items()}
+        reason = "Podle toho, co posloucháš v tuhle dobu" if shrink >= 0.5 else "Podle toho, co posloucháš"
     if mood == "prekvap":
         fit, time_artists = {}, Counter()  # bez denní doby -- celý vkus
         reason = "Překvap mě – víc nového"
@@ -305,6 +359,16 @@ def pick(
     # sólo) se v jedné session nevrací.
     played_titles = {_title_key(act.title_of.get(r, "")) for r in exclude} - {""}
 
+    shrink_all = len(act.timeline) / (len(act.timeline) + TIME_SHRINK_K)
+    default_time_fit = (1 - shrink_all) + shrink_all * 0.05
+    # Malý profil: srdíčka a knihovna jako známé, i když je ještě neslyšel.
+    chosen_meta = _rec_meta([r for r in chosen if r not in act.artist_of]) if chosen else {}
+    for rid, (aid, title) in chosen_meta.items():
+        if aid:
+            act.artist_of.setdefault(rid, aid)
+            act.title_of.setdefault(rid, title)
+    chosen_set = set(chosen)
+
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
         if not artist or artist in banned or rid in exclude:
@@ -312,14 +376,16 @@ def pick(
         if _title_key(act.title_of.get(rid, "")) in played_titles:
             return 0.0
         base = act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
+        if rid in chosen_set:
+            base = max(base, 0.6)  # srdíčko / knihovna = "mám rád", i neslyšené
         if seed_artists:
             base = base ** 0.5  # navazování: podobnost víc než oblíbenost (návrh 2)
         f = fit.get(artist, 0.01 if moods is not None and mood != "prekvap" else
-                    (0.05 if (seed_artists or time_artists) else 1.0))
+                    (0.05 if seed_artists else (default_time_fit if time_artists else 1.0)))
         if skipped_artists.get(artist):
-            f *= 0.1 if turn else 0.4
+            f *= 0.1 if turn else (0.3 if small else 0.4)
         if done_artists.get(artist):
-            f *= 1.3
+            f *= 1.6 if small else 1.3  # malý profil: první relace učí rychleji
         if artist in manual:
             f *= fit_multiplier(manual[artist])  # "víc / míň takových"
         if session_counts.get(artist):
@@ -330,7 +396,7 @@ def pick(
 
     from app.home.personal_mixes import _cap_per_artist, _spread, _weighted_order
 
-    ordered = _weighted_order(list(act.total), score, rng)
+    ordered = _weighted_order(list(dict.fromkeys([*act.total, *chosen])), score, rng)
     seen_titles: set[str] = set()
     unique: list[str] = []
     for r in ordered:
@@ -376,6 +442,15 @@ def pick(
         )
     # Semínka pro nové: semínka nekonečného hraní, jinak první známé.
     new_seeds = (seeds[-2:] if seeds else []) + familiar[:2]
+    if small and not seeds:
+        # Malý profil: z RŮZNÝCH interpretů všeho, co slyšel a co má rád --
+        # jinak by po jedné písničce uvízl v jedné škatulce.
+        pool = list(dict.fromkeys([*recent_order, *sorted(act.total, key=lambda r: -act.total[r]), *chosen, *familiar]))
+        new_seeds = _distinct_artist_seeds(pool, act.artist_of, 4) or new_seeds
+        if not familiar and new_seeds:
+            meta = _rec_meta(new_seeds[:1])
+            if meta.get(new_seeds[0], (None, ""))[1]:
+                reason = f"Navazuje na {meta[new_seeds[0]][1]}"
     if not new_seeds and fallback_seeds:
         new_seeds = fallback_seeds
         with Session(engine) as session:
@@ -487,6 +562,8 @@ async def next_chunk(
         moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
     weak_mood = bool(moods is not None and sum(1 for m in moods.values() if m >= 0.3) < 3)
     new_share = 0.5 if mood == "prekvap" else (0.6 if weak_mood else NEW_SHARE)
+    if mood != "prekvap" and len((await asyncio.to_thread(_activation, user_id)).total) < SMALL_PROFILE:
+        new_share = max(new_share, SMALL_NEW_SHARE)  # čistý start: není co opakovat
     session_counts = await session_artist_counts(played)
     ctx: dict[str, Any] = {}
     familiar, new_seeds, reason = await asyncio.to_thread(
