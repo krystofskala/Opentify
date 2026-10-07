@@ -19,7 +19,7 @@ from app.utils import utcnow
 def reason(user_id: str, recording_id: str) -> str:
     from sqlmodel import select
 
-    act = av.compute(user_id)
+    act = av.cached(user_id)
     with Session(engine) as session:
         rec = session.get(Recording, recording_id)
         if rec is None:

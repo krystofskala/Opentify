@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from app.db import engine
 from app.home import play_now as pn
+from app.home import taste_cache
 from app.models import Artist, Listen, Recording
 from app.utils import utcnow
 
@@ -46,7 +47,7 @@ def _setup(user):
 def test_endless_follows_seed_and_skips_played(monkeypatch):
     user = "pn-u1-" + _RUN
     ids = _setup(user)
-    pn._cache.clear()
+    taste_cache.invalidate()
     seed = ids[("Bluegrass Band", 0)]
     played = [ids[("Bluegrass Band", 1)]]
     familiar, _new_seeds, reason = pn.pick(user, [seed], played, 2, random.Random(1))
@@ -75,7 +76,7 @@ def test_same_song_in_another_version_does_not_repeat():
                          duration_played_ms=200_000))
         s.commit()
         twin_id = twin.id
-    pn._cache.clear()
+    taste_cache.invalidate()
     familiar, _s, _r = pn.pick(user, [ids[("Bluegrass Band", 0)]], [ids[("Bluegrass Band", 1)]], 6, random.Random(3))
     assert twin_id not in familiar
 
@@ -83,7 +84,7 @@ def test_same_song_in_another_version_does_not_repeat():
 def test_mood_prefers_fitting_artists():
     user = "pn-u4-" + _RUN
     ids = _setup(user)
-    pn._cache.clear()
+    taste_cache.invalidate()
     act = pn._activation(user)
     metal = act.artist_of[ids[("Metal Act", 0)]]
     others = {a for a in act.artist_of.values() if a != metal}
@@ -97,7 +98,7 @@ def test_next_chunk_without_network(monkeypatch):
     _no_prefetch(monkeypatch)
     user = "pn-u2-" + _RUN
     _setup(user)
-    pn._cache.clear()
+    taste_cache.invalidate()
 
     async def no_similar(*_a, **_k):
         return []
@@ -130,7 +131,7 @@ def test_new_profile_continues_from_first_listens(monkeypatch):
         s.add(Listen(user_id=user, recording_id=heard.id, played_at=now - timedelta(minutes=10), duration_played_ms=200_000))
         s.commit()
         heard_id, fresh_ids = heard.id, [r.id for r in fresh]
-    pn._cache.clear()
+    taste_cache.invalidate()
     asked: list = []
 
     async def similar(seeds, exclude, rng, n):
@@ -161,7 +162,7 @@ def _artist_of(rid):
 def test_session_cap_mutes_artist_played_a_lot():
     user = "pn-cap-" + _RUN
     ids = _setup(user)
-    pn._cache.clear()
+    taste_cache.invalidate()
     pn._batches.clear()
     act = pn._activation(user)
     blue = act.artist_of[ids[("Bluegrass Band", 0)]]
@@ -175,7 +176,7 @@ def test_session_cap_mutes_artist_played_a_lot():
 def test_endless_keeps_one_seed_artist_track_even_when_capped():
     user = "pn-seed-" + _RUN
     ids = _setup(user)
-    pn._cache.clear()
+    taste_cache.invalidate()
     act = pn._activation(user)
     seed = ids[("Metal Act", 0)]
     metal = act.artist_of[seed]
@@ -186,7 +187,7 @@ def test_endless_keeps_one_seed_artist_track_even_when_capped():
 def test_second_tap_gives_a_different_batch():
     user = "pn-mem-" + _RUN
     _setup(user)
-    pn._cache.clear()
+    taste_cache.invalidate()
     pn._batches.clear()
     first, _s, _r = pn.pick(user, [], [], 4, random.Random(7))
     pn._remember_batch(user, first)
@@ -248,7 +249,7 @@ def test_new_tracks_obey_filters_and_title_key(monkeypatch):
         s.commit()
         cand = [ok.id, bad.id, cover.id]
         bad_aid = bad_artist.id
-    pn._cache.clear()
+    taste_cache.invalidate()
     pn._batches.clear()
 
     async def similar(seeds, exclude, rng, n):
@@ -287,7 +288,7 @@ def test_clean_start_uses_likes_and_diverse_seeds(monkeypatch):
             s.add(PlaylistItem(playlist_id=liked.id, recording_id=r.id, position=pos))
         s.commit()
         ids = [r.id for r in recs]
-    pn._cache.clear()
+    taste_cache.invalidate()
     pn._batches.clear()
     fam, new_seeds, _reason = pn.pick(user, [], [], 8, random.Random(3))
     assert set(fam) <= set(ids[1:]) and fam  # srdíčka jako známé (poslech z poslední hodiny ne)

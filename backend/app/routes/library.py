@@ -1330,7 +1330,7 @@ def taste_sources(current: tuple[str, str] = Depends(get_current_user)):
 async def set_taste_source(body: TasteSourceIn, current: tuple[str, str] = Depends(get_current_user)):
     """Vypnout / zapnout zdroj ve vkusu. Wrapped, roky a historie ho počítají
     dál -- jde jen o doporučování."""
-    from app.home import play_now
+    from app.home import taste_cache
     from app.home.service import invalidate_home_cache_for
     from app.models import HomeSnapshot
     from app.utils import utcnow
@@ -1347,7 +1347,7 @@ async def set_taste_source(body: TasteSourceIn, current: tuple[str, str] = Depen
         row.generated_at = utcnow()
         session.add(row)
         session.commit()
-    play_now._cache.pop(current[0], None)
+    taste_cache.invalidate(current[0])
     await invalidate_home_cache_for(current[0])
     return taste_sources(current)
 

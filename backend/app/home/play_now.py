@@ -90,11 +90,13 @@ _cache: dict[str, tuple[float, av.Activation]] = {}
 
 
 def _activation(user_id: str) -> av.Activation:
-    hit = _cache.get(user_id)
-    if hit and time.time() - hit[0] < _CACHE_SECONDS:
-        return hit[1]
-    act = av.compute(user_id)
-    _cache[user_id] = (time.time(), act)
+    """Sdílená aktivace (app/home/taste_cache.py) -- vlastní kopie slovníků,
+    do kterých `pick` dopisuje (srdíčka, která profil ještě neslyšel)."""
+    import copy
+
+    act = copy.copy(av.cached(user_id))
+    act.artist_of = dict(act.artist_of)
+    act.title_of = dict(act.title_of)
     return act
 
 

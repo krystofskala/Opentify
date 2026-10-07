@@ -254,8 +254,16 @@ def explicit_artists(user_id: str) -> set[str]:
     return out | {a for a, d in deltas(user_id).items() if d > 0}
 
 
+def cached(user_id: str) -> "Activation":
+    """`compute` přes sdílenou mezipaměť (app/home/taste_cache.py, 15 min,
+    zahodí se při výslovné volbě). Volající do výsledku nesmí zapisovat."""
+    from app.home import taste_cache
+
+    return taste_cache.get("activation", user_id, lambda: compute(user_id))
+
+
 def taste_state(user_id: str, act: "Activation | None" = None) -> TasteState:
-    act = act or compute(user_id)
+    act = act or cached(user_id)
     stats = act.artist_days()
     explicit = explicit_artists(user_id)
     confirmed = explicit | {a for a, (d, span) in stats.items() if persistence_weight(d, span) >= CONFIRMED_AT}

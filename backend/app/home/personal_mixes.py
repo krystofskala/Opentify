@@ -131,6 +131,18 @@ def taste_v2() -> bool:
 
 
 def load_taste(user_id: str) -> Taste:
+    """Vkus profilu přes sdílenou mezipaměť (app/home/taste_cache.py). Každý
+    volající dostane vlastní kopie slovníků, do kterých se dopisuje (jména,
+    Deezer id interpretů) -- sdílený objekt se tak nemění pod rukama."""
+    from dataclasses import replace
+
+    from app.home import taste_cache
+
+    taste = taste_cache.get("taste", user_id, lambda: _load_taste(user_id))
+    return replace(taste, artist_name=dict(taste.artist_name), artist_deezer=dict(taste.artist_deezer))
+
+
+def _load_taste(user_id: str) -> Taste:
     taste = Taste()
     now = utcnow()
     with Session(engine) as session:
@@ -219,7 +231,7 @@ def load_taste(user_id: str) -> Taste:
             from app.home import activation as av
 
             # Celá historie: "známé" a "naposledy" ze všech poslechů, ne z roku.
-            act = av.compute(user_id, now=now)
+            act = av.cached(user_id)
             taste.activation = act
             taste.listen_counts = Counter(act.total)
             taste.last_played = dict(act.last)
