@@ -511,7 +511,7 @@ class _AppearanceSettings extends ConsumerWidget {
         _SwitchRow(
           title: 'Omezit animace',
           subtitle: 'Méně pohybu: bez pružin, plynutí a samostatného posouvání. Platí jen pro toto zařízení '
-              '(zapne se i samo, když máš omezení pohybu v systému).',
+              '(zapne se i samo, když máš omezení pohybu v systému; na webu v telefonu je zapnuté výchozí, ať se nic nesekne).',
           value: ref.watch(reducedMotionProvider),
           onChanged: ref.read(reducedMotionProvider.notifier).set,
         ),

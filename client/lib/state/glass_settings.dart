@@ -32,8 +32,8 @@ class GlassSliderController extends StateNotifier<double> {
 
 /// Profil › Vzhled › "Mléčnost skla": síla rozmazání obsahu pod sklem
 /// (0 = čiré, 1 = dvojnásobné proti původnímu; výchozí 0.1 -- schváleno).
-final glassFrostProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_frost', 0.28));
+final glassFrostProvider = StateNotifierProvider<GlassSliderController, double>(
+    (ref) => GlassSliderController('appearance.glass_frost', 0.28));
 
 /// Profil › Vzhled › "Síla tónu": síla výplně skla (0 = bez tónu, 1 =
 /// dvojnásobná proti původnímu; výchozí 0.7 -- schváleno).
@@ -43,8 +43,8 @@ final glassTintProvider =
 /// Profil › Vzhled › "Tmavost tónu": jak tmavá je výplň skla (výchozí 0.5 =
 /// dosavadní vzhled). Odděleně od barevnosti -- tmavé sklo nemusí být sytě
 /// barevné (živě: hodně barevné tmavé sklo vypadalo divně).
-final glassDarknessProvider =
-    StateNotifierProvider<GlassSliderController, double>((ref) => GlassSliderController('appearance.glass_darkness', 0.77));
+final glassDarknessProvider = StateNotifierProvider<GlassSliderController, double>(
+    (ref) => GlassSliderController('appearance.glass_darkness', 0.77));
 
 /// Profil › Vzhled › "Barevnost tónu": kolik barvy skladby sklo nese
 /// (0 = neutrální šedá, výchozí 0.7 = dosavadní vzhled).
@@ -323,11 +323,18 @@ class GlassOffController extends StateNotifier<bool> {
 
 final glassOffProvider = StateNotifierProvider<GlassOffController, bool>((ref) => GlassOffController());
 
+/// Web v prohlížeči telefonu (iPhone / Android) -- nejpomalejší prostředí
+/// appky (CanvasKit bez nativního vykreslování).
+bool get isMobileWeb =>
+    kIsWeb && (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android);
+
 /// "Omezit animace" na tomhle zařízení (pro lidi, kterým pohyb vadí) --
 /// navíc k systémovému nastavení; zapnuté = celá appka jako se systémovým
-/// omezením pohybu (`MediaQuery.disableAnimations`, viz app.dart).
+/// omezením pohybu (`MediaQuery.disableAnimations`, viz app.dart). Na webu
+/// v telefonu výchozí zapnuté, i s pozadím, které stojí (uživatel 7. 10.:
+/// „hodně se to tam sekalo“); kdo si ho přepnul, má svou volbu.
 class ReducedMotionController extends StateNotifier<bool> {
-  ReducedMotionController() : super(false) {
+  ReducedMotionController() : super(isMobileWeb) {
     _load();
   }
 
@@ -422,7 +429,6 @@ class GlassSettings extends InheritedWidget {
       child: child,
     );
   }
-
 
   static int? _coarse(Color? c) =>
       c == null ? null : ((c.r * 31).round() << 10) | ((c.g * 31).round() << 5) | (c.b * 31).round();
