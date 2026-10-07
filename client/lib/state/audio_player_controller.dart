@@ -349,6 +349,17 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _onRadioPosition(position, measured: true);
         return;
       }
+      // Těsně po skoku přehrávač ještě chvíli hlásí starou pozici -- lišta
+      // skákala zpátky a další "+30 s" počítalo od staré (živě 8. 10.).
+      final target = _seekTarget;
+      if (target != null) {
+        final settled = (position - target).abs() < const Duration(seconds: 3);
+        if (settled || DateTime.now().difference(_seekAt) > const Duration(seconds: 3)) {
+          _seekTarget = null;
+        } else {
+          return;
+        }
+      }
       state = state.copyWith(position: position);
       _maybeReleaseAutoRetry(position);
       _maybeWarmUpNext(position);
@@ -2397,6 +2408,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _priming = false;
     _awaitingProvisioning = false;
     _warmedUpAfter = null;
+    _seekTarget = null; // skok v předchozí skladbě/kapitole už neplatí
     // Chyby/dokončení staršího `setUrl` (přerušené tímhle) se k tomuhle
     // zdroji nevztahují -- viz `_sourceGen`.
     final gen = ++_sourceGen;
@@ -3008,7 +3020,28 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
   }
 
+  /// Cíl posledního skoku, dokud ho přehrávač nedožene (viz positionStream).
+  Duration? _seekTarget;
+  DateTime _seekAt = DateTime.now();
+
+  /// Posun o kus (audiokniha +-30 s): od cíle předchozího skoku, když ho
+  /// přehrávač ještě nedohnal -- dvě rychlá klepnutí = 60 s, ne 30.
+  Future<void> seekBy(Duration delta) {
+    final base = _seekTarget ?? state.position;
+    var to = base + delta;
+    if (to < Duration.zero) to = Duration.zero;
+    final d = state.duration;
+    if (d != null && d > Duration.zero && to > d) to = d;
+    return seek(to);
+  }
+
   Future<void> seek(Duration position) async {
+    if (!_radioActive) {
+      // Lišta a čas hned na novém místě, ne až po hlášení přehrávače.
+      _seekTarget = position;
+      _seekAt = DateTime.now();
+      state = state.copyWith(position: position);
+    }
     if (_radioActive) {
       // Živý stream převíjet nejde -- nový stream od dané pozice skladby.
       _restartRadio(position);

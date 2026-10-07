@@ -1181,14 +1181,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           fixedSize: const Size.square(44),
         ),
         icon: Icon(back ? Symbols.replay_30_rounded : Symbols.forward_30_rounded, size: 24, semanticLabel: back ? 'O 30 s zpět' : 'O 30 s dopředu'),
-        onPressed: () {
-          final s = ref.read(audioPlayerControllerProvider);
-          var to = s.position + Duration(seconds: back ? -30 : 30);
-          if (to < Duration.zero) to = Duration.zero;
-          final d = s.duration;
-          if (d != null && to > d) to = d;
-          controller.seek(to);
-        },
+        onPressed: () => controller.seekBy(Duration(seconds: back ? -30 : 30)),
       );
     }
     if (button == PlayerButton.shuffle) {
