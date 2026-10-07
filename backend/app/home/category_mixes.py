@@ -95,7 +95,7 @@ _CLASSIFY_BUDGET_BACKGROUND = 250
 _CLASSIFY_BUDGET_PAGE = 25
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_VERSION = 4  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
+_VERSION = 5  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
 
 
 def _source(category_id: str) -> str:
