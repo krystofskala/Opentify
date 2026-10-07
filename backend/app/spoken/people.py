@@ -57,7 +57,9 @@ ACTORS = {"Q33999", "Q2405480", "Q2259451", "Q10800557", "Q10798782", "Q13590141
 
 
 def fold(text: str | None) -> str:
-    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().casefold()
+    from app.spoken.catalog import _SPECIAL  # "Nesbø" -> "nesbo", polské ł
+
+    text = unicodedata.normalize("NFKD", (text or "").translate(_SPECIAL)).encode("ascii", "ignore").decode().casefold()
     return " ".join(text.replace(",", " , ").split()).replace(" , ", ", ")
 
 
