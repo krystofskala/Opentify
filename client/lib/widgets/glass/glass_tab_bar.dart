@@ -148,9 +148,15 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
     return box == null || !box.hasSize ? Offset.zero : box.globalToLocal(global);
   }
 
+  // Kapka začne rovnou POD PRSTEM (#40c) -- dřív k němu jela pružinou od
+  // aktuální záložky (podržení kapsle na Profilu -> kapka vyskočila nad
+  // Profil a teprve pak dojela doleva).
   void beginExternalDrag(Offset global) {
     _lastDragAt = DateTime.now().microsecondsSinceEpoch;
-    _onDragStart(DragStartDetails(globalPosition: global, localPosition: _toLocal(global)));
+    _dragging = true;
+    _dragVelocity = 0;
+    _pos.value = _slotAt(_toLocal(global).dx);
+    _springLift(1);
   }
 
   void updateExternalDrag(Offset global) {
@@ -216,9 +222,15 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
                         // Pod zvednutou kapkou se šedý tab schová -- jinak
                         // prosvítal vedle zvětšené barevné kopie dvakrát
                         // (iPhone: zvětšení pozadí tam nesedí, živě nahlášeno).
+                        // Dřív se šedé taby pod kapkou jen zprůhledňovaly podle
+                        // vzdálenosti -- mezi dvěma taby prosvítaly oba napůl
+                        // vedle zvětšené kopie (ghosting, #40b). Teď je z lišty
+                        // vyříznutý přesně tvar kapky.
                         child: AnimatedBuilder(
                           animation: Listenable.merge([_pos, _lift]),
-                          builder: (context, _) => _row(theme, accent: null),
+                          builder: (context, _) => _lift.value > 0.01
+                              ? ClipPath(clipper: _OutsideDrop(_dropRect()), child: _row(theme, accent: null))
+                              : _row(theme, accent: null),
                         ),
                       ),
                     ),
@@ -252,44 +264,38 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
   /// Řádek tabů. `accent == null` = běžné barvy (lišta), jinak barevná,
   /// vyplněná verze pro to, co je pod kapkou.
   Widget _row(ThemeData theme, {required Color? accent}) {
-    final lift = _lift.value.clamp(0.0, 1.0);
-    double visible(int i) =>
-        accent != null || lift < 0.01 ? 1 : 1 - lift * (1 - (i - _pos.value).abs()).clamp(0.0, 1.0);
     return Row(
       children: [
         for (var i = 0; i < widget.items.length; i++)
           Expanded(
-            child: Opacity(
-              opacity: visible(i),
-              child: Semantics(
-                button: true,
-                selected: i == widget.selectedIndex,
-                label: widget.items[i].label,
-                onTap: accent == null ? () => _select(i) : null,
-                excludeSemantics: true,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      widget.items[i].icon,
-                      size: 24,
-                      fill: accent == null ? 0 : 1,
+            child: Semantics(
+              button: true,
+              selected: i == widget.selectedIndex,
+              label: widget.items[i].label,
+              onTap: accent == null ? () => _select(i) : null,
+              excludeSemantics: true,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    widget.items[i].icon,
+                    size: 24,
+                    fill: accent == null ? 0 : 1,
+                    color: accent ?? theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.items[i].label,
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: AppFontSize.tiny,
+                      fontWeight: accent == null ? FontWeight.w500 : FontWeight.w700,
                       color: accent ?? theme.colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      widget.items[i].label,
-                      maxLines: 1,
-                      overflow: TextOverflow.fade,
-                      softWrap: false,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontSize: AppFontSize.tiny,
-                        fontWeight: accent == null ? FontWeight.w500 : FontWeight.w700,
-                        color: accent ?? theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -297,20 +303,28 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
     );
   }
 
-  Widget _drop(ThemeData theme, Color accent, bool isDark, double width) {
+  /// Obdélník kapky v souřadnicích lišty (natažení ve směru pohybu podle
+  /// rychlosti, zvednutá povyroste).
+  Rect _dropRect() {
     const h = GlassTokens.tabBarHeight;
-    final solid = GlassSettings.solidOf(context);
     const pad = 5.0;
     final lift = _lift.value;
-    // Natažení ve směru pohybu podle rychlosti (jako kapka).
     final v = _dragging ? _dragVelocity : _pos.velocity;
     final speed = (v.abs() * 0.05).clamp(0.0, 0.28);
     final baseW = _itemWidth - 2 * pad, baseH = h - 2 * pad;
     final w = baseW * (1 + 0.28 * lift) * (1 + speed);
     final hh = baseH * (1 + 0.42 * lift) * (1 - speed * 0.45);
-    final cx = (_pos.value + 0.5) * _itemWidth;
-    const cy = h / 2;
-    final left = cx - w / 2, top = cy - hh / 2;
+    return Rect.fromCenter(center: Offset((_pos.value + 0.5) * _itemWidth, h / 2), width: w, height: hh);
+  }
+
+  Widget _drop(ThemeData theme, Color accent, bool isDark, double width) {
+    const h = GlassTokens.tabBarHeight;
+    final solid = GlassSettings.solidOf(context);
+    final lift = _lift.value;
+    final r = _dropRect();
+    final w = r.width, hh = r.height;
+    final cx = r.center.dx, cy = r.center.dy;
+    final left = r.left, top = r.top;
     // Obsah pod kapkou: barevná kopie řádku, zvětšená kolem středu kapky.
     final magnify = 1 + 0.22 * lift.clamp(0.0, 1.5);
     final radius = BorderRadius.circular(hh / 2);
@@ -393,6 +407,22 @@ class GlassTabBarState extends State<GlassTabBar> with TickerProviderStateMixin 
       ),
     );
   }
+}
+
+/// Lišta bez místa pod kapkou.
+class _OutsideDrop extends CustomClipper<Path> {
+  const _OutsideDrop(this.drop);
+
+  final Rect drop;
+
+  @override
+  Path getClip(Size size) => Path()
+    ..fillType = PathFillType.evenOdd
+    ..addRect(Offset.zero & size)
+    ..addRRect(RRect.fromRectAndRadius(drop, Radius.circular(drop.height / 2)));
+
+  @override
+  bool shouldReclip(_OutsideDrop old) => old.drop != drop;
 }
 
 /// Zvětšení toho, co je pod kapkou, kolem jejího středu (`BackdropFilter`
