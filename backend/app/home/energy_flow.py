@@ -1,9 +1,11 @@
 """Pořadí skladeb podle plynulosti energie (plán P3).
 
 Konec jedné skladby má navazovat na začátek další -- po tichém dozvuku ne
-hned řev. Energie okraje = celková hlasitost skladby (integrovaná, z korekce
-`MediaAsset.loudness_gain_db`) + tvar začátku / konce z obrysu hlasitosti
-(`MediaAsset.waveform`, 120 úseků, relativně ke špičkám skladby).
+hned řev. Okraje z rozboru zvuku (`TrackFeatures`, app/audio_features.py):
+energie prvních / posledních 10 s skutečné hudby + jejich hlasitost vůči
+špičce skladby; spolehlivě změřené tempo bez velkých skoků (půl / dvojnásobek
+= stejné). Skladby bez rozboru: starý odhad z hlasitosti masteringu a obrysu
+(ten řadil spíš podle éry nahrávky -- audit 7. 10.).
 
 Skladby bez rozboru (ještě nestažené) dostanou průměr -- nevadí nikde.
 Řazení: hladově "nejbližší další" + pár průchodů 2-opt; stejný interpret
@@ -37,13 +39,51 @@ def _edges(session: Session, ids: list[str]) -> dict[str, tuple[float, float]]:
     return out
 
 
+def _feature_edges(session: Session, ids: list[str]) -> tuple[dict[str, tuple[float, float]], dict[str, float]]:
+    """Okraje z rozboru zvuku (app/audio_features.py): energie začátku/konce
+    + jejich hlasitost vůči špičce skladby (tichý nástup / dozvuk). Vrátí
+    (okraje, spolehlivé tempo)."""
+    from app.models import TrackFeatures
+
+    edges: dict[str, tuple[float, float]] = {}
+    tempo: dict[str, float] = {}
+
+    def level(db: float | None) -> float:
+        return min(1.0, max(0.0, ((db if db is not None else -12.0) + 30.0) / 27.0))  # -30..-3 dB -> 0..1
+
+    for i in range(0, len(ids), 500):
+        for f in session.exec(select(TrackFeatures).where(TrackFeatures.recording_id.in_(ids[i : i + 500]))).all():  # type: ignore[attr-defined]
+            if f.intro_energy is None or f.outro_energy is None:
+                continue
+            edges[f.recording_id] = (
+                0.6 * f.intro_energy + 0.4 * level(f.intro_level_db),
+                0.6 * f.outro_energy + 0.4 * level(f.outro_level_db),
+            )
+            if f.bpm and (f.bpm_confidence or 0) >= TEMPO_MIN_CONFIDENCE:
+                tempo[f.recording_id] = f.bpm
+    return edges, tempo
+
+
+TEMPO_MIN_CONFIDENCE = 0.5
+TEMPO_WEIGHT = 0.3
+
+
+def _tempo_gap(a: float, b: float) -> float:
+    """Relativní rozdíl temp, půl/dvojnásobek se bere jako stejné (0..1)."""
+    gap = min(abs(a - b), abs(a - 2 * b), abs(2 * a - b)) / max(a, b)
+    return min(1.0, gap / 0.15)
+
+
 def order(ids: list[str], artist_of: dict[str, str]) -> list[str]:
     """Stejné skladby, plynulejší pořadí. První skladba zůstává první (mix
     začíná tím, čím začínal)."""
     if len(ids) < 3:
         return list(ids)
     with Session(engine) as session:
+        # Nový rozbor má přednost, starý obrys jen pro skladby bez něj.
         edges = _edges(session, ids)
+        new_edges, tempo = _feature_edges(session, ids)
+        edges.update(new_edges)
     if len(edges) < 3:
         return list(ids)  # skoro nic není rozebrané -- neměnit
     mean_in = sum(e[0] for e in edges.values()) / len(edges)
@@ -54,6 +94,8 @@ def order(ids: list[str], artist_of: dict[str, str]) -> list[str]:
 
     def cost(a: str, b: str) -> float:
         c = abs(edge(a)[1] - edge(b)[0])
+        if a in tempo and b in tempo:
+            c += TEMPO_WEIGHT * _tempo_gap(tempo[a], tempo[b])
         if artist_of.get(a) and artist_of.get(a) == artist_of.get(b):
             c += SAME_ARTIST_PENALTY
         return c

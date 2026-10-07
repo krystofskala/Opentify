@@ -177,6 +177,14 @@ def analyze_and_store(recording_id: str) -> float | None:
         path = asset.storage_path
 
     lufs, pcm = measure(path)
+    features = None
+    if pcm:
+        from app import audio_features
+
+        try:
+            features = audio_features.compute(pcm)
+        except Exception:  # noqa: BLE001 -- rozbor nesmí shodit hlasitost
+            logger.exception("rozbor zvuku selhal: %s", recording_id)
     gain = gain_for_lufs(lufs) if lufs is not None else _UNMEASURABLE
     buckets = envelope_from_pcm(pcm) if pcm else None
     duration_ms = round(len(pcm) / 2 / WAVEFORM_SAMPLE_RATE * 1000) if pcm else None
@@ -191,20 +199,43 @@ def analyze_and_store(recording_id: str) -> float | None:
         asset.waveform = encode_waveform(buckets) if buckets else _WAVEFORM_UNMEASURABLE
         asset.waveform_duration_ms = duration_ms if buckets else None
         session.add(asset)
+        _store_features(session, recording_id, features)
         session.commit()
     return gain_for_client(gain)
 
 
+def _store_features(session: Session, recording_id: str, features: dict | None) -> None:
+    """Rozbor zvuku do `TrackFeatures`; nejde-li změřit, aspoň verze (ať se
+    nezkouší pořád dokola)."""
+    from app import audio_features
+    from app.models import TrackFeatures
+    from app.utils import utcnow
+
+    row = session.get(TrackFeatures, recording_id) or TrackFeatures(recording_id=recording_id)
+    for key, value in (features or {}).items():
+        setattr(row, key, value)
+    row.version = audio_features.VERSION
+    row.updated_at = utcnow()
+    session.add(row)
+
+
 def _pending_ids(limit: int) -> list[str]:
+    from app import audio_features
+    from app.models import TrackFeatures
+
     with Session(engine) as session:
         return list(
             session.exec(
                 select(MediaAsset.recording_id)
+                .outerjoin(TrackFeatures, TrackFeatures.recording_id == MediaAsset.recording_id)  # type: ignore[arg-type]
                 .where(
                     MediaAsset.status == MediaAssetStatus.AVAILABLE,
                     or_(
                         MediaAsset.loudness_gain_db.is_(None),  # type: ignore[union-attr]
                         MediaAsset.waveform.is_(None),  # type: ignore[union-attr]
+                        # Rozbor zvuku chybí nebo je ze starší verze výpočtu.
+                        TrackFeatures.recording_id.is_(None),  # type: ignore[union-attr]
+                        TrackFeatures.version < audio_features.VERSION,  # type: ignore[operator]
                     ),
                 )
                 .limit(limit)

@@ -291,6 +291,28 @@ class RecordingDislike(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class TrackFeatures(SQLModel, table=True):
+    """Rozbor zvuku skladby (app/audio_features.py) -- energie, tempo, okraje.
+    Počítá se ze stejného dekódování jako hlasitost (app/loudness.py);
+    `version` = verze výpočtu, starší se přepočítají."""
+
+    recording_id: str = Field(primary_key=True, foreign_key="recording.id")
+    version: int = 0
+    energy: float | None = None
+    intro_energy: float | None = None
+    outro_energy: float | None = None
+    intro_level_db: float | None = None
+    outro_level_db: float | None = None
+    bpm: float | None = None
+    bpm_confidence: float | None = None
+    flatness: float | None = None
+    high_ratio: float | None = None
+    centroid_hz: float | None = None
+    head_silence_s: float | None = None
+    tail_silence_s: float | None = None
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class SkipStreak(SQLModel, table=True):
     """Kolikrát po sobě profil skladbu přeskočil (přehrání s odehranými
     pár vteřinami a přechodem na jinou skladbu). Dohrání / poslech řádek smaže.
