@@ -211,7 +211,23 @@ async def _resolve_tracks(items: list[dict[str, str]], limit: int) -> list[str]:
     return (await asyncio.to_thread(g._ingest_tracks, found[:limit])) if found else []
 
 
+_for_you_inflight: dict[tuple[str, str], asyncio.Task] = {}
+
+
 async def tag_for_you(tag: str, user_id: str) -> str | None:
+    """Souběžná volání (stránka stylu spustí výpočet na pozadí a klient se
+    hned ptá `/browse/tag-for-you`) sdílí jeden výpočet -- dřív se vkus
+    profilu načítal dvakrát naráz (audit výkonu 7. 10.)."""
+    key = (slug(tag), user_id)
+    task = _for_you_inflight.get(key)
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = asyncio.ensure_future(_tag_for_you(tag, user_id))
+        _for_you_inflight[key] = task
+        task.add_done_callback(lambda t, k=key: _for_you_inflight.pop(k, None) if _for_you_inflight.get(k) is t else None)
+    return await asyncio.shield(task)
+
+
+async def _tag_for_you(tag: str, user_id: str) -> str | None:
     """"Pro tebe · X": skladby stylu podle profilu -- tvoje (poslouchané,
     oblíbené, z knihovny) od interpretů, kteří ten styl hrají, doplněné
     nejposlouchanějšími skladbami stylu od jim podobných interpretů. Jednou
