@@ -663,16 +663,19 @@ async def stations(game: Game) -> list[str]:
         hit = await cached_json(f"games:station-pl:v1:{game.slug}:{station}", DAY, lambda: _wrap(one(station)), is_empty=lambda v: not v.get("id"))
         return hit.get("id")
 
-    out = []
-    for station in game.stations:
-        try:
-            pid = await cached(station)
-        except Exception:  # noqa: BLE001
-            logger.exception("rádio %s %s", game.slug, station)
-            pid = None
-        if pid:
-            out.append(pid)
-    return out
+    # Souběžně (pořadí zachované) -- dřív jedno rádio po druhém, série GTA
+    # studená ~12 s; Deezer limit hlídá rate limiter.
+    sem = asyncio.Semaphore(4)
+
+    async def safe(station: str) -> str | None:
+        async with sem:
+            try:
+                return await cached(station)
+            except Exception:  # noqa: BLE001
+                logger.exception("rádio %s %s", game.slug, station)
+                return None
+
+    return [pid for pid in await asyncio.gather(*(safe(st) for st in game.stations)) if pid]
 
 
 async def _wrap(coro) -> dict[str, Any]:
@@ -723,10 +726,19 @@ async def _series_playlist(
     from app.home import generators as g
     from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
 
-    tracks: list[dict[str, Any]] = []
-    for card in cards:
-        for album in card.get("albums") or ([{"id": card["albumId"]}] if card.get("albumId") else []):
-            tracks += await _album_tracks(album["id"])
+    album_ids = [
+        album["id"]
+        for card in cards
+        for album in card.get("albums") or ([{"id": card["albumId"]}] if card.get("albumId") else [])
+    ]
+    sem = asyncio.Semaphore(4)
+
+    async def one(album_id: str) -> list[dict[str, Any]]:
+        async with sem:
+            return await _album_tracks(album_id)
+
+    # Souběžně, pořadí (chronologicky) zachované.
+    tracks: list[dict[str, Any]] = [t for chunk in await asyncio.gather(*(one(a) for a in album_ids)) for t in chunk]
     ids = await asyncio.to_thread(g._ingest_tracks, tracks[:400]) if tracks else []
     if station_ids:
         # GTA: hudba série = rádia všech dílů (soundtrack jako album nevyšel).
