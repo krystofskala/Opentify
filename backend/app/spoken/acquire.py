@@ -48,6 +48,8 @@ def book_out(book: SpokenBook) -> dict:
         "durationMs": book.duration_ms,
         "createdAt": book.created_at.isoformat() if book.created_at else None,
         "kind": book.kind or guess_kind(book.release_title or book.title),
+        "seriesName": book.series_name or None,
+        "seriesNumber": book.series_number,
     }
 
 
@@ -441,5 +443,8 @@ async def tick(r) -> None:
                 logger.warning("kniha %s: %s", book.id, e)
                 await _save(book.id, error=str(e)[:300])
         await enrich(r)
+        from app.spoken import series_link
+
+        await series_link.tick(r)
     finally:
         await r.delete("spoken:tick")

@@ -64,7 +64,9 @@ String _statusLine(SpokenBook b) => switch (b.status) {
           '${b.playableFiles > 0 ? ' · už jde poslouchat' : ''}',
       'importing' => 'Připravuje se…',
       'failed' => 'Nepodařilo se: ${b.error ?? 'neznámá chyba'}',
-      _ => [formatHours(b.durationMs), if (b.byline.isNotEmpty) b.byline].where((s) => s.isNotEmpty).join(' · '),
+      _ => [formatHours(b.durationMs), if (b.byline.isNotEmpty) b.byline, if (b.seriesLine != null) b.seriesLine!]
+          .where((s) => s.isNotEmpty)
+          .join(' · '),
     };
 
 class _Cover extends StatelessWidget {
@@ -1011,7 +1013,14 @@ class _BooksLibraryState extends ConsumerState<_BooksLibrary> {
       case _BookSort.title:
         books.sort((a, b) => byText(a.title, b.title));
       case _BookSort.author:
-        books.sort((a, b) => byText(a.author ?? '~', b.author ?? '~'));
+        // U autora řady pohromadě a podle dílů (Zaklínač 1, 2, 3…).
+        books.sort((a, b) {
+          final byAuthor = byText(a.author ?? '~', b.author ?? '~');
+          if (byAuthor != 0) return byAuthor;
+          final bySeries = byText(a.seriesName ?? '~', b.seriesName ?? '~');
+          if (bySeries != 0) return bySeries;
+          return (a.seriesNumber ?? 999).compareTo(b.seriesNumber ?? 999);
+        });
       case _BookSort.length:
         books.sort((a, b) => (b.durationMs ?? 0).compareTo(a.durationMs ?? 0));
     }

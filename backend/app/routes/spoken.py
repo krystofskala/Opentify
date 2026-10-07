@@ -781,6 +781,10 @@ async def book_description(book_id: str, session: Session = Depends(get_session)
 def book_cover(book_id: str, session: Session = Depends(get_session)):
     """Obal uložený u knihy (náhled videa z YouTube)."""
     book = session.get(SpokenBook, book_id)
+    # Vlastní obal knihy (díl z kompletu, `series_link`) má přednost.
+    own = SPOKEN_ROOT / "covers" / f"{book_id}.jpg"
+    if book is not None and own.is_file():
+        return FileResponse(own, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
     path = Path(book.storage_dir) / "cover.jpg" if book is not None and book.storage_dir else None
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="obal nenalezen")

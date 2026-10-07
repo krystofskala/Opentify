@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -79,3 +80,42 @@ async def describe(title: str, author: str | None) -> str | None:
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("google books %s: %s", title, exc)
         return None
+
+
+def pick_cover(items: list[dict[str, Any]], title: str, author: str) -> str | None:
+    """Obal prvního českého vydání se stejným názvem a autorem (největší
+    dostupná velikost); přísně jako `pick`, jen popis není potřeba."""
+    want_title, want_author = _clean_title(title), _surname(author)
+    if not want_title or not want_author:
+        return None
+    for item in items:
+        info = item.get("volumeInfo") or {}
+        links = info.get("imageLinks") or {}
+        if info.get("language") != "cs" or not links:
+            continue
+        if _clean_title(info.get("title") or "") != want_title:
+            continue
+        if not any(want_author in fold(a).split() for a in info.get("authors") or []):
+            continue
+        url = next((links[k] for k in ("extraLarge", "large", "medium", "small", "thumbnail") if links.get(k)), None)
+        if url:
+            return url.replace("http://", "https://").replace("&edge=curl", "")
+    return None
+
+
+async def cover_image(title: str, author: str, dest: Path) -> bool:
+    """Obal knihy z Google Books do `dest` (jen jistá shoda). Bez klíče nic."""
+    key = _key()
+    if not key or not author or not title:
+        return False
+    resp = await _http.get(URL, params={"q": f"{_clean_title(title)} {_surname(author)}", "maxResults": 10, "key": key})
+    resp.raise_for_status()
+    url = pick_cover(resp.json().get("items") or [], title, author)
+    if not url:
+        return False
+    img = await _http.get(url, follow_redirects=True)
+    if img.status_code != 200 or len(img.content) < 2000 or not img.headers.get("content-type", "").startswith("image/"):
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(img.content)
+    return True

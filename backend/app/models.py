@@ -568,6 +568,10 @@ class SpokenBook(SQLModel, table=True):
     kind: str | None = None
     # Popis vydání (u YouTube popis videa: obsazení, režie, rok).
     description: str | None = None
+    # Řada a díl z Wikidat (`spoken/series_link.py`): None = nezkoušeno,
+    # "" = kniha do žádné řady nepatří.
+    series_name: str | None = None
+    series_number: float | None = None
     requested_by_user_id: str
     created_at: datetime = Field(default_factory=utcnow, index=True)
     finished_at: datetime | None = None

@@ -137,6 +137,8 @@ class SpokenBook {
     this.mine = true,
     this.createdAt,
     this.kind = 'book',
+    this.seriesName,
+    this.seriesNumber,
   });
 
   factory SpokenBook.fromJson(Map<String, dynamic> j) {
@@ -159,6 +161,8 @@ class SpokenBook {
       mine: j['mine'] as bool? ?? true,
       createdAt: DateTime.tryParse(j['createdAt'] as String? ?? ''),
       kind: j['kind'] as String? ?? 'book',
+      seriesName: j['seriesName'] as String?,
+      seriesNumber: j['seriesNumber'] as num?,
     );
   }
 
@@ -191,6 +195,18 @@ class SpokenBook {
   /// book | drama -- rozhlasová hra má na Domů a v Knihovně vlastní místo.
   final String kind;
   bool get isDrama => kind == 'drama';
+
+  /// Řada a díl (Wikidata, doplňuje server postupně) -- "Sága o zaklínači · díl 3".
+  final String? seriesName;
+  final num? seriesNumber;
+
+  String? get seriesLine {
+    final n = seriesNumber;
+    if (seriesName == null || seriesName!.isEmpty) return null;
+    if (n == null) return seriesName;
+    final num = n == n.roundToDouble() ? '${n.toInt()}' : '$n'.replaceAll('.', ',');
+    return '$seriesName · díl $num';
+  }
 
   bool get isReady => status == 'ready';
 
