@@ -332,6 +332,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (_priming) return;
       _maybeRecordStart(position);
       if (_radioActive) {
+        // Safari u rostoucího HLS seznamu občas ignoruje EXT-X-START a začne
+        // pár úseků před koncem -- skladbě chyběly úvodní vteřiny (živě 7. 10.,
+        // kamarád v Safari). Nový proud začíná v čase 0 přesně tam, kam se
+        // klepnulo, takže první hlášená pozice nad 2,5 s = přeskok -> zpět na 0.
+        if (!_radioStartChecked && position > Duration.zero) {
+          _radioStartChecked = true;
+          if (_nativeHls && position > const Duration(milliseconds: 2500)) {
+            debugPrint('AudioPlayerController: rádio začalo na $position, vracím na začátek');
+            unawaited(_player.seek(Duration.zero).catchError((Object _) {}));
+            return;
+          }
+        }
         _radioLastRaw = position;
         _radioLastRawAt = DateTime.now();
         _onRadioPosition(position, measured: true);
@@ -823,6 +835,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Timer? _radioTick;
   Duration _radioLastRaw = Duration.zero;
   DateTime _radioLastRawAt = DateTime.now();
+  // První pozice nového proudu už zkontrolovaná (přeskok začátku v Safari).
+  bool _radioStartChecked = false;
 
   bool get _radioActive => _radioSession != null;
   final bool _nativeHls = supportsNativeHls();
@@ -882,6 +896,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // na vlnovce skákala (živě nahlášeno) -- mezi hlášeními dopočítat.
     _radioLastRaw = Duration.zero;
     _radioLastRawAt = DateTime.now();
+    _radioStartChecked = false;
     _radioTick?.cancel();
     _radioTick = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (!_radioActive || !_player.playing || _loadingTrack) return;
