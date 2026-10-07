@@ -292,11 +292,13 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                                         : ExpressiveLoadingIndicator(size: 24, color: fg),
                                   )
                                 : hasError
-                                    ? Icon(Symbols.refresh_rounded, color: Theme.of(context).colorScheme.error, size: 32)
+                                    ? Icon(Symbols.refresh_rounded,
+                                        color: Theme.of(context).colorScheme.error, size: 32, semanticLabel: 'Zkusit znovu')
                                     : Icon(
                                         playback.isPlaying ? Symbols.pause_circle_rounded : Symbols.play_circle_rounded,
                                         color: fg,
                                         size: 38,
+                                        semanticLabel: playback.isPlaying ? 'Pozastavit' : 'Přehrát',
                                       ),
                             // Popisek i pro čtečku obrazovky (dřív jen u chyby).
                             tooltip: hasError
@@ -316,7 +318,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                           // přeskočení tlačítkem. Mobil má swipe, tam ne.
                           if (MediaQuery.sizeOf(context).width >= 600)
                             IconButton(
-                              icon: Icon(Symbols.skip_next_rounded, color: fg, size: 26),
+                              icon: Icon(Symbols.skip_next_rounded, color: fg, size: 26, semanticLabel: 'Další skladba'),
                               tooltip: 'Další skladba',
                               onPressed: playback.nextIndex == null
                                   ? null

@@ -112,7 +112,7 @@ class _Locked extends StatelessWidget {
                 IconButton(
                   tooltip: 'Zavřít',
                   onPressed: () => context.pop(),
-                  icon: const Icon(Symbols.close_rounded, color: Colors.white),
+                  icon: const Icon(Symbols.close_rounded, color: Colors.white, semanticLabel: 'Zavřít'),
                 ),
                 const Spacer(),
                 const Icon(Symbols.lock_rounded, color: Colors.white, size: 40),
@@ -553,12 +553,13 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
                                 icon: Icon(
                                   _muted ? Symbols.volume_off_rounded : Symbols.volume_up_rounded,
                                   color: Colors.white,
+                                  semanticLabel: _muted ? 'Zapnout zvuk' : 'Ztlumit',
                                 ),
                               ),
                               IconButton(
                                 tooltip: 'Zavřít',
                                 onPressed: _close,
-                                icon: const Icon(Symbols.close_rounded, color: Colors.white),
+                                icon: const Icon(Symbols.close_rounded, color: Colors.white, semanticLabel: 'Zavřít'),
                               ),
                             ],
                           ),

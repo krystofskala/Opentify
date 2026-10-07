@@ -310,7 +310,7 @@ class _GroupHeader extends StatelessWidget {
               Icon(expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded, color: _fg(context).withValues(alpha: 0.7)),
               IconButton(
                 tooltip: 'Odebrat celý blok z fronty',
-                icon: Icon(Symbols.playlist_remove_rounded, color: _fg(context)),
+                icon: Icon(Symbols.playlist_remove_rounded, color: _fg(context), semanticLabel: 'Odebrat celý blok z fronty'),
                 onPressed: onRemove,
               ),
               if (dragIndex != null)

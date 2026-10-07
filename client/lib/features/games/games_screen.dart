@@ -187,7 +187,7 @@ class _HeroCarouselState extends State<_HeroCarousel> {
       child: Row(
         children: [
           if (context.canPop())
-            IconButton(tooltip: 'Zpět', icon: const Icon(Symbols.arrow_back_rounded), onPressed: () => context.pop())
+            IconButton(tooltip: 'Zpět', icon: const Icon(Symbols.arrow_back_rounded, semanticLabel: 'Zpět'), onPressed: () => context.pop())
           else
             const SizedBox(width: AppSpacing.sm),
           Text(widget.title, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),

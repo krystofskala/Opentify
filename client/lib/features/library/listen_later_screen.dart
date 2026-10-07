@@ -269,7 +269,7 @@ class _LaterRow extends ConsumerWidget {
       onLongPress: () => _showActions(context, notifier, listened),
       trailing: IconButton(
         tooltip: 'Další možnosti',
-        icon: const Icon(Symbols.more_horiz_rounded),
+        icon: const Icon(Symbols.more_horiz_rounded, semanticLabel: 'Další možnosti'),
         onPressed: () => _showActions(context, notifier, listened),
       ),
     );
@@ -380,7 +380,7 @@ class ListenLaterReminder extends ConsumerWidget {
                 if (track != null)
                   IconButton(
                     tooltip: 'Přehrát',
-                    icon: Icon(Symbols.play_arrow_rounded, fill: 1, size: 32, color: scheme.onSecondaryContainer),
+                    icon: Icon(Symbols.play_arrow_rounded, fill: 1, size: 32, color: scheme.onSecondaryContainer, semanticLabel: 'Přehrát'),
                     onPressed: () => ref
                         .read(audioPlayerControllerProvider.notifier)
                         .playTrack(nowPlayingInfoFor(track), sourceLabel: _sourceLabel),

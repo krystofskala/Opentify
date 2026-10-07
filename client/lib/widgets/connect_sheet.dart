@@ -108,12 +108,12 @@ class _ConnectSheet extends ConsumerWidget {
                               children: [
                                 IconButton(
                                   tooltip: d.isPlaying ? 'Pozastavit' : 'Přehrát',
-                                  icon: Icon(d.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded),
+                                  icon: Icon(d.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded, semanticLabel: d.isPlaying ? 'Pozastavit' : 'Přehrát'),
                                   onPressed: () => connect.command(d.id, 'toggle'),
                                 ),
                                 IconButton(
                                   tooltip: 'Další',
-                                  icon: const Icon(Symbols.skip_next_rounded),
+                                  icon: const Icon(Symbols.skip_next_rounded, semanticLabel: 'Další'),
                                   onPressed: () => connect.command(d.id, 'next'),
                                 ),
                               ],
@@ -221,7 +221,7 @@ class RemotePlayingBar extends ConsumerWidget {
                 ),
                 IconButton(
                   tooltip: d.isPlaying ? 'Pozastavit tam' : 'Přehrát tam',
-                  icon: Icon(d.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded),
+                  icon: Icon(d.isPlaying ? Symbols.pause_rounded : Symbols.play_arrow_rounded, semanticLabel: d.isPlaying ? 'Pozastavit tam' : 'Přehrát tam'),
                   onPressed: () => connect.command(d.id, 'toggle'),
                 ),
                 GlassButton(

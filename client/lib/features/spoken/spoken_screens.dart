@@ -716,7 +716,7 @@ class CollectionPickSheetState extends ConsumerState<CollectionPickSheet> {
                     subtitle: Text('${formatSize(g.size)} · ${g.files.length} částí', style: muted),
                     secondary: IconButton(
                       tooltip: _expanded.contains(g.folder) ? 'Skrýt části' : 'Vybrat jednotlivé části',
-                      icon: Icon(_expanded.contains(g.folder) ? Symbols.expand_less_rounded : Symbols.expand_more_rounded),
+                      icon: Icon(_expanded.contains(g.folder) ? Symbols.expand_less_rounded : Symbols.expand_more_rounded, semanticLabel: _expanded.contains(g.folder) ? 'Skrýt části' : 'Vybrat jednotlivé části'),
                       onPressed: () => setState(
                         () => _expanded.contains(g.folder) ? _expanded.remove(g.folder) : _expanded.add(g.folder),
                       ),

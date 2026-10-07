@@ -202,14 +202,14 @@ class _ShareCardScreenState extends ConsumerState<ShareCardScreen> {
                 IconButton(
                   tooltip: 'Dřívější řádky',
                   color: Colors.white,
-                  icon: const Icon(Symbols.keyboard_arrow_up_rounded),
+                  icon: const Icon(Symbols.keyboard_arrow_up_rounded, semanticLabel: 'Dřívější řádky'),
                   onPressed: start <= 0 ? null : () => setState(() => _lineStart = math.max(0, start - 1)),
                 ),
                 const Text('Vyber řádky', style: TextStyle(color: Colors.white70)),
                 IconButton(
                   tooltip: 'Další řádky',
                   color: Colors.white,
-                  icon: const Icon(Symbols.keyboard_arrow_down_rounded),
+                  icon: const Icon(Symbols.keyboard_arrow_down_rounded, semanticLabel: 'Další řádky'),
                   onPressed: start >= all.length - 1 ? null : () => setState(() => _lineStart = start + 1),
                 ),
               ],

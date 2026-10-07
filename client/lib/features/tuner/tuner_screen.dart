@@ -210,7 +210,7 @@ class _TunerScreenState extends ConsumerState<TunerScreen> with SingleTickerProv
         actions: [
           IconButton(
             tooltip: 'Ladění a kalibrace',
-            icon: const Icon(Symbols.tune_rounded),
+            icon: const Icon(Symbols.tune_rounded, semanticLabel: 'Ladění a kalibrace'),
             onPressed: _openSettings,
           ),
           const SizedBox(width: AppSpacing.xs),
@@ -832,7 +832,7 @@ class _TunerSettingsSheetState extends State<_TunerSettingsSheet> {
                 ),
                 IconButton(
                   tooltip: 'Níž',
-                  icon: const Icon(Symbols.remove_rounded),
+                  icon: const Icon(Symbols.remove_rounded, semanticLabel: 'Níž'),
                   onPressed: f.a4 <= 430 ? null : () => _update(() => f.a4 -= 1),
                 ),
                 SizedBox(
@@ -848,7 +848,7 @@ class _TunerSettingsSheetState extends State<_TunerSettingsSheet> {
                 ),
                 IconButton(
                   tooltip: 'Výš',
-                  icon: const Icon(Symbols.add_rounded),
+                  icon: const Icon(Symbols.add_rounded, semanticLabel: 'Výš'),
                   onPressed: f.a4 >= 450 ? null : () => _update(() => f.a4 += 1),
                 ),
               ],

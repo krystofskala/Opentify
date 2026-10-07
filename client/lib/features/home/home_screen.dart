@@ -794,7 +794,7 @@ class _PlayAllButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) => IconButton(
         tooltip: 'Přehrát',
-        icon: const Icon(Symbols.play_circle_rounded, fill: 1),
+        icon: const Icon(Symbols.play_circle_rounded, fill: 1, semanticLabel: 'Přehrát'),
         onPressed: recordings.isEmpty
             ? null
             : () => ref

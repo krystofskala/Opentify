@@ -122,6 +122,7 @@ class _DownloadButton extends ConsumerWidget {
             ? Symbols.mobile_off_rounded
             : (pending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded),
         size: 22,
+        semanticLabel: saved ? 'Smazat ze zařízení' : (pending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení'),
       ),
       onPressed: () {
         final ctrl = ref.read(offlineControllerProvider.notifier);

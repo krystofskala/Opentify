@@ -487,7 +487,7 @@ class _RowTileState extends State<_RowTile> {
                         // ⋯ i na telefonu (audit UI: menu šlo otevřít jen
                         // dlouhým stiskem, který nikdo nehledá).
                         IconButton(
-                          icon: const Icon(Symbols.more_horiz_rounded),
+                          icon: const Icon(Symbols.more_horiz_rounded, semanticLabel: 'Další možnosti'),
                           tooltip: 'Další možnosti',
                           visualDensity: wide ? null : VisualDensity.compact,
                           onPressed: w.onLongPress,
@@ -693,7 +693,7 @@ class _Trailing extends StatelessWidget {
     // Dostupná skladba: bez ikony (klepnutí na řádek přehraje), jen místo.
     if (isAvailable) return const SizedBox(width: 48, height: 48);
     return IconButton(
-      icon: Icon(isFailed ? Symbols.refresh_rounded : Symbols.download_rounded),
+      icon: Icon(isFailed ? Symbols.refresh_rounded : Symbols.download_rounded, semanticLabel: isFailed ? 'Zkusit znovu' : 'Obstarat a přehrát'),
       tooltip: isFailed ? 'Zkusit znovu' : 'Obstarat a přehrát',
       onPressed: onRetry,
     );

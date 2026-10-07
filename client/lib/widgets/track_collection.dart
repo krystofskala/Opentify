@@ -366,7 +366,7 @@ class _TrackCollectionToolbarState extends ConsumerState<TrackCollectionToolbar>
               const SizedBox(width: AppSpacing.xs),
               SortButton<TrackSort>(value: c.sort, labels: _sortLabels, onChanged: (value) => c.sort = value),
               IconButton(
-                icon: const Icon(Symbols.checklist_rounded),
+                icon: const Icon(Symbols.checklist_rounded, semanticLabel: 'Vybrat více'),
                 tooltip: 'Vybrat více',
                 onPressed: widget.allTracks.isEmpty ? null : () => c.setSelecting(true),
               ),

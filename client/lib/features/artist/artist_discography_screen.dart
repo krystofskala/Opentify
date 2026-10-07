@@ -67,7 +67,7 @@ class _ArtistDiscographyScreenState extends ConsumerState<ArtistDiscographyScree
         actions: [
           IconButton(
             tooltip: _oldestFirst ? 'Od nejnovějších' : 'Od nejstarších',
-            icon: Icon(_oldestFirst ? Symbols.arrow_downward_rounded : Symbols.arrow_upward_rounded),
+            icon: Icon(_oldestFirst ? Symbols.arrow_downward_rounded : Symbols.arrow_upward_rounded, semanticLabel: _oldestFirst ? 'Od nejnovějších' : 'Od nejstarších'),
             onPressed: () => setState(() => _oldestFirst = !_oldestFirst),
           ),
         ],

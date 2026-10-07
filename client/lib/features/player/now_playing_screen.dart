@@ -728,7 +728,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           child: Align(
             alignment: Alignment.centerLeft,
             child: IconButton(
-              icon: Icon(Symbols.keyboard_arrow_down_rounded, color: playerFg(context), size: 32),
+              icon: Icon(Symbols.keyboard_arrow_down_rounded, color: playerFg(context), size: 32, semanticLabel: 'Zasunout'),
               tooltip: 'Zasunout',
               onPressed: () => _sheet?.close(),
             ),
@@ -782,7 +782,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               // Mobil: srdíčko je v řádku pod ovládáním -- lišta by jinak
               // titulek "Přehrává se" zmáčkla do dvou řádků (živě nahlášeno).
               IconButton(
-                icon: Icon(Symbols.more_horiz_rounded, color: playerFg(context), size: 24),
+                icon: Icon(Symbols.more_horiz_rounded, color: playerFg(context), size: 24, semanticLabel: 'Další možnosti'),
                 tooltip: 'Další možnosti',
                 onPressed: () => showPlayerMoreSheet(context),
               ),
@@ -1004,7 +1004,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               children: [
                 IconButton(
                   tooltip: 'Předchozí',
-                  icon: Icon(Symbols.skip_previous_rounded, color: playerFg(context), size: 34),
+                  icon: Icon(Symbols.skip_previous_rounded, color: playerFg(context), size: 34, semanticLabel: 'Předchozí'),
                   // Bez předchozí skladby `previous()` přetočí na začátek.
                   onPressed: () => _skip(forward: false),
                 ),
@@ -1050,7 +1050,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 ),
                 IconButton(
                   tooltip: 'Další',
-                  icon: Icon(Symbols.skip_next_rounded, color: playerFg(context), size: 34),
+                  icon: Icon(Symbols.skip_next_rounded, color: playerFg(context), size: 34, semanticLabel: 'Další'),
                   onPressed: playback.hasNext ? () => _skip(forward: true) : null,
                 ),
               ],
@@ -1156,7 +1156,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           foregroundColor: playerFg(context).withValues(alpha: 0.85),
           fixedSize: const Size.square(44),
         ),
-        icon: Icon(back ? Symbols.replay_30_rounded : Symbols.forward_30_rounded, size: 24),
+        icon: Icon(back ? Symbols.replay_30_rounded : Symbols.forward_30_rounded, size: 24, semanticLabel: back ? 'O 30 s zpět' : 'O 30 s dopředu'),
         onPressed: () {
           final s = ref.read(audioPlayerControllerProvider);
           var to = s.position + Duration(seconds: back ? -30 : 30);

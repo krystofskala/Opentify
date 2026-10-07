@@ -413,7 +413,7 @@ class ProfilesSection extends ConsumerWidget {
                                 minHeight: GlassTokens.minHitTarget,
                               ),
                               onPressed: () => _revokeDevice(context, ref, d),
-                              icon: Icon(Symbols.close_rounded, size: 16, color: theme.colorScheme.onSurfaceVariant),
+                              icon: Icon(Symbols.close_rounded, size: 16, color: theme.colorScheme.onSurfaceVariant, semanticLabel: 'Odhlásit zařízení'),
                             ),
                           ],
                         ),
@@ -430,7 +430,7 @@ class ProfilesSection extends ConsumerWidget {
                   ),
                 IconButton(
                   tooltip: 'Další možnosti',
-                  icon: const Icon(Symbols.more_horiz_rounded),
+                  icon: const Icon(Symbols.more_horiz_rounded, semanticLabel: 'Další možnosti'),
                   onPressed: () => _profileMenu(context, ref, p),
                 ),
               ],
