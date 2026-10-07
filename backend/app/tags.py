@@ -233,12 +233,16 @@ def _profile_tag(tag: str) -> bool:
 _FAMILY_ALIAS = {"rap": "hiphop", "hip-hop": "hiphop", "hip hop": "hiphop"}
 
 
+# Podstyly, které na Last.fm znamenají i něco jiného ("lo-fi" = hlavně
+# lo-fi indie: s ním se do rapu dostal Bill Callahan a Mountain Goats).
+_AMBIGUOUS_FAMILY = {"lo-fi"}
+
+
 def _family(t: str) -> list[str]:
     """Podstyly stejné rodiny (rap -> jazz rap, conscious, český rap…)."""
     group = _FAMILY_ALIAS.get(t) or (t if t in SUBGENRES else None)
-    if group:
-        return [x for x in SUBGENRES.get(group, ()) if x != t]
-    return [x for g in parent_genres(t) for x in SUBGENRES.get(g, ()) if x != t]
+    subs = SUBGENRES.get(group, ()) if group else tuple(x for g in parent_genres(t) for x in SUBGENRES.get(g, ()))
+    return [x for x in subs if x != t and x not in _AMBIGUOUS_FAMILY]
 
 
 def _plays_style(tags: list[tuple[str, int]], t: str, family: list[str]) -> bool:
