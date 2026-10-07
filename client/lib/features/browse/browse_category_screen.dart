@@ -137,7 +137,7 @@ class _BrowseCategoryScreenState extends ConsumerState<BrowseCategoryScreen> {
           ),
         ),
         // 1. Hlavní mix žánru (stejný jako na Domů) -- velká karta nahoře.
-        if (data.mixes.isNotEmpty) SliverToBoxAdapter(child: _HeroMix(card: data.mixes.first, accent: c.color)),
+        if (data.mixes.isNotEmpty) SliverToBoxAdapter(child: _HeroMix(card: data.mixes.first, accent: c.color, mood: c.group == 'mood')),
         // Podžánry -- každý má vlastní stránku (mix, interpreti, alba).
         if (data.subgenres.isNotEmpty) ...[
           SliverToBoxAdapter(child: SectionHeader(c.group == 'mood' ? 'Styly k náladě' : 'Podžánry')),
@@ -473,9 +473,12 @@ Widget _artistCard(BuildContext context, BrowseArtist a) => MediaCard(
 
 /// Hlavní mix žánru nahoře stránky: velký obal, název, popis a Přehrát.
 class _HeroMix extends ConsumerStatefulWidget {
-  const _HeroMix({required this.card, required this.accent});
+  const _HeroMix({required this.card, required this.accent, this.mood = false});
   final HomePlaylistCard card;
   final Color accent;
+
+  /// Nálada (Chill, Párty…) není žánr.
+  final bool mood;
 
   @override
   ConsumerState<_HeroMix> createState() => _HeroMixState();
@@ -535,7 +538,7 @@ class _HeroMixState extends ConsumerState<_HeroMix> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('MIX ŽÁNRU', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, color: theme.colorScheme.primary)),
+                  Text(widget.mood ? 'MIX NÁLADY' : 'MIX ŽÁNRU', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, color: theme.colorScheme.primary)),
                   const SizedBox(height: 2),
                   Text(card.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleLarge),
                   if (card.description != null)
