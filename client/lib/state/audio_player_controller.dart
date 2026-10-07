@@ -2623,13 +2623,25 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// streamu se chvíli jen tiše zkouší znovu, bez chybové hlášky.
   DateTime? _serverRestartUntil;
 
-  void serverRestarting() => _serverRestartUntil = DateTime.now().add(const Duration(seconds: 90));
+  void serverRestarting() {
+    _serverRestartUntil = DateTime.now().add(const Duration(seconds: 90));
+    restartInterrupted = false;
+  }
+
+  /// Restart přehrávání opravdu přerušil (jen pak hláška -- většinou hudba
+  /// hraje dál z načtené části a není co hlásit).
+  bool restartInterrupted = false;
 
   void _handleStreamFailure(NowPlayingInfo info, Object error, {required bool isProgressive}) {
     if (state.nowPlaying?.recordingId != info.recordingId) return;
     final until = _serverRestartUntil;
     if (until != null && DateTime.now().isBefore(until) && !_currentLocal && !isProgressive && !_radioActive) {
       // Restart serveru: za 3 s znovu od stejného místa, žádné "Nepodařilo se".
+      if (!restartInterrupted) {
+        restartInterrupted = true;
+        _ref.read(playerNoticeProvider.notifier).state =
+            'Opentify se teď na chvilku aktualizuje – hudba za pár sekund sama naváže.';
+      }
       _startPausedWhenReady = _startPausedWhenReady || !_player.playing;
       _resumeAt = state.position;
       _resumeFor = info.recordingId;
