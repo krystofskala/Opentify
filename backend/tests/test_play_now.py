@@ -106,3 +106,38 @@ def test_next_chunk_without_network(monkeypatch):
     out = asyncio.run(pn.next_chunk(user, [], [], 5))
     assert 1 <= len(out["recordingIds"]) <= 5
     assert len(set(out["recordingIds"])) == len(out["recordingIds"])
+
+
+def test_new_profile_continues_from_first_listens(monkeypatch):
+    """Nový profil: poslechy jen z poslední hodiny (ty se ze známých
+    vynechávají) -> nové navážou na ně, ne prázdná várka."""
+    user = "pn-new-" + _RUN
+    now = utcnow().replace(tzinfo=None)
+    with Session(engine) as s:
+        heard_artist = Artist(name="Heard " + _RUN)
+        fresh_artist = Artist(name="Fresh " + _RUN)
+        s.add(heard_artist)
+        s.add(fresh_artist)
+        s.flush()
+        heard = Recording(title="First song", artist_id=heard_artist.id, duration_ms=200_000)
+        fresh = [Recording(title=f"Fresh {n}", artist_id=fresh_artist.id, duration_ms=200_000) for n in range(3)]
+        s.add(heard)
+        s.add_all(fresh)
+        s.flush()
+        s.add(Listen(user_id=user, recording_id=heard.id, played_at=now - timedelta(minutes=10), duration_played_ms=200_000))
+        s.commit()
+        heard_id, fresh_ids = heard.id, [r.id for r in fresh]
+    pn._cache.clear()
+    asked: list = []
+
+    async def similar(seeds, exclude, rng, n):
+        asked.append(list(seeds))
+        return fresh_ids
+
+    from app.home import lastfm_taste as lt
+
+    monkeypatch.setattr(lt, "similar_track_ids", similar)
+    out = asyncio.run(pn.next_chunk(user, [], [], 8))
+    assert asked and asked[0] == [heard_id]
+    assert out["recordingIds"] and set(out["recordingIds"]) <= set(fresh_ids)
+    assert out["reason"] == "Navazuje na First song"

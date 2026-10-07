@@ -120,13 +120,34 @@ def pick(
         banned = disliked_artist_ids(session, user_id)
         skipped_artists, done_artists, turn = _session_signals(session, user_id)
         _ctx, time_artists, _recs = time_profile(session, user_id)
-        recent = set(
+        recent_order = list(
             session.exec(
-                select(Listen.recording_id).where(
-                    Listen.user_id == user_id, Listen.played_at >= (utcnow() - timedelta(hours=3)).replace(tzinfo=None)
-                )
+                select(Listen.recording_id)
+                .where(Listen.user_id == user_id, Listen.played_at >= (utcnow() - timedelta(hours=3)).replace(tzinfo=None))
+                .order_by(Listen.played_at.desc())  # type: ignore[attr-defined]
             ).all()
         )
+        recent = set(recent_order)
+        # Nový profil: všechno, co slyšel, je z posledních 3 h (a ta se
+        # vynechávají) -- nové pak naváže aspoň na to a na lajky. Dřív
+        # zůstalo Pusť teď prázdné i po prvních poslechech (UX audit 7. 10.).
+        fallback_seeds = list(dict.fromkeys(recent_order))[:3]
+        if not fallback_seeds:
+            from app.library.spotify_import import LIKED_SONGS_SOURCE
+            from app.models import Playlist, PlaylistItem
+
+            liked = session.exec(
+                select(Playlist.id).where(Playlist.owner_user_id == user_id, Playlist.source == LIKED_SONGS_SOURCE)
+            ).first()
+            if liked:
+                fallback_seeds = list(
+                    session.exec(
+                        select(PlaylistItem.recording_id)
+                        .where(PlaylistItem.playlist_id == liked)
+                        .order_by(PlaylistItem.position.desc())  # type: ignore[attr-defined]
+                        .limit(3)
+                    ).all()
+                )
         ninety = (utcnow() - timedelta(days=90)).replace(tzinfo=None)
         skipped_tracks = set(
             session.exec(
@@ -209,6 +230,11 @@ def pick(
     familiar = energy_flow.order(familiar, act.artist_of)  # plynulé navazování (P3)
     # Semínka pro nové: semínka nekonečného hraní, jinak první známé.
     new_seeds = (seeds[-2:] if seeds else []) + familiar[:2]
+    if not new_seeds and fallback_seeds:
+        new_seeds = fallback_seeds
+        with Session(engine) as session:
+            first = session.get(Recording, fallback_seeds[0])
+        reason = f"Navazuje na {first.title}" if first else reason
     return familiar, new_seeds, reason
 
 
