@@ -36,6 +36,9 @@ class PlayNowIn(BaseModel):
     size: int = 8
     # Čip nálady (klid / energie / soustredeni / melancholie / party / prekvap).
     mood: str | None = None
+    # „Z čeho mám začít?“ (profil bez poslechů): interpret nebo skladba.
+    startArtistId: str | None = None
+    startRecordingId: str | None = None
 
 
 @home_router.get("/play-now/moods")
@@ -53,14 +56,25 @@ async def play_now(body: PlayNowIn, current: tuple[str, str] = Depends(get_curre
     from app.home.service import _recording_out
 
     size = max(1, min(body.size, 20))
-    chunk = await pn.next_chunk(current[0], body.seedIds[-5:], body.playedIds[-300:], size, body.mood)
+    if body.startArtistId or body.startRecordingId:
+        # „Z čeho mám začít?“ (profil bez dat): navázat na zadaného interpreta
+        # nebo skladbu -- jeho top skladby napřed, pak podobné.
+        chunk = await pn.start_from(current[0], body.startArtistId, body.startRecordingId, size)
+    else:
+        chunk = await pn.next_chunk(current[0], body.seedIds[-5:], body.playedIds[-300:], size, body.mood)
     with Session(engine) as session:
         tracks = [
             _recording_out(session, rec).model_dump(mode="json", by_alias=True)
             for rec in (session.get(Recording, rid) for rid in chunk["recordingIds"])
             if rec is not None
         ]
-    return {"tracks": tracks, "reason": chunk["reason"]}
+    needs_start = False
+    if not tracks and not body.seedIds:
+        from app.home.service import has_taste_data
+
+        with Session(engine) as session:
+            needs_start = not has_taste_data(session, current[0])
+    return {"tracks": tracks, "reason": chunk["reason"], "needsStart": needs_start}
 
 
 @home_router.get("/rec-report")
@@ -495,6 +509,37 @@ class HomeLayoutIn(BaseModel):
     hidden: list[str] = []
 
 
+class NewcomerDismissIn(BaseModel):
+    card: str  # import | customize
+    undo: bool = False
+
+
+@home_router.post("/newcomer/dismiss")
+async def newcomer_dismiss(body: NewcomerDismissIn, current: tuple[str, str] = Depends(get_current_user)):
+    """„Teď ne“ u karet nováčka na Domů (a „Vrátit“ = undo)."""
+    from app.home.service import invalidate_home_cache_for, layout_key
+    from app.models import HomeSnapshot
+    from app.utils import utcnow
+
+    if body.card not in ("import", "customize"):
+        raise HTTPException(status_code=400, detail="Neznámá karta.")
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, layout_key(current[0])) or HomeSnapshot(key=layout_key(current[0]), payload={})
+        payload = dict(row.payload or {})
+        dismissed = set(payload.get("dismissed") or [])
+        if body.undo:
+            dismissed.discard(body.card)
+        else:
+            dismissed.add(body.card)
+        payload["dismissed"] = sorted(dismissed)
+        row.payload = payload
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    await invalidate_home_cache_for(current[0])
+    return {"dismissed": sorted(dismissed)}
+
+
 @home_router.get("/layout")
 def home_layout(current: tuple[str, str] = Depends(get_current_user)):
     """Sekce Domů v pořadí profilu, i se skrytými (Domů › Upravit)."""
@@ -517,7 +562,8 @@ async def set_home_layout(body: HomeLayoutIn, current: tuple[str, str] = Depends
     visible = {sid: sid not in hidden for sid in known} if order else {}
     with Session(engine) as session:
         row = session.get(HomeSnapshot, layout_key(current[0])) or HomeSnapshot(key=layout_key(current[0]))
-        row.payload = {"order": order, "visible": visible}
+        # Zavřené karty nováčka (Import / Uprav Domů) se úpravou nesmažou.
+        row.payload = {"order": order, "visible": visible, "dismissed": list((row.payload or {}).get("dismissed") or [])}
         row.generated_at = utcnow()
         session.add(row)
         session.commit()

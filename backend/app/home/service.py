@@ -155,6 +155,44 @@ def _last_success(name: str) -> datetime | None:
         return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
 
 
+# Domů nového profilu (opentify-notes/domu-novacek-struktura-2026-10-07.md):
+# dokud profil nemá Denní mixy, je "nováček" -- Rychlý výběr jen Pusť teď,
+# Album na celý poslech, Žánry, Nová vydání, Žebříčky, Česká hudba a na konci
+# karty Import + Uprav Domů. Mění se samo podle dat, bez oznámení.
+NEWCOMER_ORDER = [
+    "continue", "quick_picks", "album_spotlight", "genres", "new_releases", "charts", "czech",
+]
+
+
+def is_newcomer(session: Session, user_id: str) -> bool:
+    return session.exec(
+        select(Playlist.id).where(
+            Playlist.owner_user_id == user_id,
+            Playlist.source.like("personal:daily-mix:%"),  # type: ignore[union-attr]
+        )
+    ).first() is None
+
+
+def has_taste_data(session: Session, user_id: str) -> bool:
+    """Aspoň jeden poslech nebo srdíčko -- jinak se Pusť teď ptá, z čeho začít."""
+    from app.home.play_now import _chosen_tracks
+    from app.models import Listen
+
+    if session.exec(select(Listen.id).where(Listen.user_id == user_id)).first() is not None:
+        return True
+    return bool(_chosen_tracks(session, user_id, 1))
+
+
+def _newcomer_dismissed(layout: dict[str, Any]) -> set[str]:
+    return set(layout.get("dismissed") or [])
+
+
+async def invalidate_home_cache_for(user_id: str) -> None:
+    redis = get_redis()
+    for k in (f"{CACHE_PREFIX}home:{user_id}", f"{CACHE_PREFIX}swr:home:{user_id}"):
+        await redis.delete(k)
+
+
 async def invalidate_home_cache() -> None:
     redis = get_redis()
     for pattern in (f"{CACHE_PREFIX}home:*", f"{CACHE_PREFIX}swr:home:*"):
@@ -391,7 +429,7 @@ def _style_mix_cards(session: Session, user_id: str, shown_categories: set[str])
     return cards
 
 
-def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, other_mixes, daily) -> list:
+def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, other_mixes, daily, allow_wide: bool = True) -> list:
     """Rychlý výběr: připnuté napřed (max 6), zbytek podle denní doby
     (app/home/quick_picks.py); bez historie původní pořadí."""
     from app.home import quick_picks as qp
@@ -416,7 +454,7 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
     # Žebříčky a nálady soutěží taky, ale mají jen `qp.WIDE_SLOTS` míst.
     # Dočasně jako dřív: jedno místo pro žebříček / náladu vždy (bez něj má
     # nováček prázdné Domů, uživatel 7. 10.).
-    wide_keys = ["charts", "editorial"]
+    wide_keys = ["charts", "editorial"] if allow_wide else []  # nováček: jen Pusť teď (varianta B)
     wide = {p.id for key in wide_keys for p in by_section.get(key, [])}
     candidates += [p for key in wide_keys for p in by_section.get(key, [])]
     candidates = [p for p in {p.id: p for p in candidates}.values() if p.id not in taken]
@@ -506,7 +544,8 @@ def build_home(user_id: str) -> dict[str, Any]:
         mixes = cards_by_section["mixes"]
         other_mixes = [c for c in mixes if not (c.source or "").startswith("personal:daily-mix:")]
         daily = [c for c in mixes if (c.source or "").startswith("personal:daily-mix:")]
-        quick = _quick_picks(session, user_id, by_section, cards_by_section, other_mixes, daily)
+        newcomer = not daily
+        quick = _quick_picks(session, user_id, by_section, cards_by_section, other_mixes, daily, allow_wide=not newcomer)
         if quick:
             sections.append({"id": "quick_picks", "title": "Rychlý výběr", "type": "quick_picks", "items": [c.model_dump(mode="json", by_alias=True) for c in quick]})
 
@@ -649,6 +688,31 @@ def build_home(user_id: str) -> dict[str, Any]:
         if picks_section:
             sections.append(picks_section)
 
+        if newcomer:
+            from app.home import album_spotlight
+
+            spot = album_spotlight.current(session, user_id)
+            release = session.get(Release, spot["releaseId"]) if spot and spot.get("releaseId") else None
+            if release is not None:
+                artist = session.get(Artist, release.artist_id)
+                card = AlbumCardOut(
+                    id=release.id, title=release.title, artist_id=release.artist_id,
+                    artist_name=artist.name if artist else None, release_date=release.release_date,
+                    release_type=release.release_type, images=release.images or [],
+                ).model_dump(mode="json", by_alias=True)
+                sections.append({
+                    "id": "album_spotlight", "title": "Album na celý poslech", "type": "album_spotlight",
+                    "items": [{**card, "reason": spot.get("reason") or ""}],
+                })
+            layout_now = get_layout(session, user_id)
+            dismissed = _newcomer_dismissed(layout_now)
+            setup = [k for k in ("import", "customize") if k not in dismissed]
+            if layout_now.get("order") and "customize" in setup:
+                setup.remove("customize")  # Domů už si upravil
+            if setup:
+                sections.append({"id": "newcomer_setup", "title": "Nastav si Opentify", "type": "newcomer_setup",
+                                 "items": [{"kind": k} for k in setup]})
+
         # "Pokračovat v poslechu" skládá klient (`/home/recent`) -- tady jen
         # zástupce, ať jde řadit a skrýt jako ostatní sekce.
         sections.insert(0, {"id": "continue", "title": "Pokračovat v poslechu", "type": "continue", "items": []})
@@ -678,7 +742,7 @@ def get_layout(session: Session, user_id: str) -> dict[str, Any]:
     visible = dict(payload.get("visible") or {})
     for sid in payload.get("hidden") or []:  # starší tvar (jen skryté)
         visible.setdefault(sid, False)
-    return {"order": list(payload.get("order") or []), "visible": visible}
+    return {"order": list(payload.get("order") or []), "visible": visible, "dismissed": list(payload.get("dismissed") or [])}
 
 
 def is_visible(layout: dict[str, Any], section_id: str) -> bool:
@@ -717,6 +781,7 @@ def default_entries(user_id: str, include_rails: bool = False) -> list[tuple[str
     out: list[tuple[str, str]] = [
         ("continue", "Pokračovat v poslechu"),
         ("quick_picks", "Rychlý výběr"),
+        ("album_spotlight", "Album na celý poslech"),
         ("track_mixes", TRACK_MIXES_TITLE),
     ]
     if "now_mix" in extra:
@@ -758,8 +823,27 @@ def effective_order(user_id: str, layout: dict[str, Any], include_rails: bool = 
 def apply_layout(session: Session, user_id: str, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pořadí a skrytí sekcí podle profilu (Profil › Domů)."""
     layout = get_layout(session, user_id)
-    pos = {sid: i for i, sid in enumerate(effective_order(user_id, layout))}
-    visible = [s for s in sections if is_visible(layout, _layout_id(s["id"]))]
+    order = effective_order(user_id, layout)
+    ids = {s["id"] for s in sections}
+    newcomer = "newcomer_setup" in ids or "album_spotlight" in ids or (
+        not layout["order"] and is_newcomer(session, user_id)
+    )
+    if newcomer:
+        # Nováček: Žánry k prozkoumání zapnuté, dokud nemá osobní mixy žánrů
+        # (pokud si je sám nevypnul) -- a pevné pořadí, když si žádné neuložil.
+        layout = {**layout, "visible": dict(layout["visible"])}
+        if "genres" not in layout["visible"] and "category_mixes" not in ids:
+            layout["visible"]["genres"] = True
+        if not layout["order"]:
+            order = NEWCOMER_ORDER + [sid for sid in order if sid not in NEWCOMER_ORDER]
+    order = [sid for sid in order if sid != "newcomer_setup"] + ["newcomer_setup"]  # karty vždy na konci
+    pos = {sid: i for i, sid in enumerate(order)}
+    visible = [
+        s for s in sections
+        if s["id"] == "newcomer_setup"
+        or (s["id"] == "album_spotlight" and layout["visible"].get("album_spotlight", True))
+        or (s["id"] != "album_spotlight" and is_visible(layout, _layout_id(s["id"])))
+    ]
     ordered = [s for _p, _i, s in sorted(((pos.get(_layout_id(s["id"]), 10_000), i, s) for i, s in enumerate(visible)), key=lambda k: (k[0], k[1]))]
     return _collapse_track_rails(session, user_id, ordered)
 
@@ -901,6 +985,21 @@ async def get_home(user_id: str) -> dict[str, Any]:
         finally:
             g.reset_home_user(token)
 
+    # Album na celý poslech (nováček): dnešní sestavit na pozadí, Domů ho
+    # ukáže hned, jak bude (a cache Domů se pak zneplatní).
+    def _needs_spotlight() -> bool:
+        from app.home import album_spotlight
+
+        with Session(engine) as session:
+            return is_newcomer(session, user_id) and not album_spotlight.fresh(album_spotlight.current(session, user_id))
+
+    try:
+        if await asyncio.to_thread(_needs_spotlight):
+            from app.home import album_spotlight
+
+            album_spotlight.ensure(user_id)
+    except Exception:  # noqa: BLE001 -- Domů nesmí spadnout kvůli doplňku
+        logger.exception("album na celý poslech")
     # Hned z uložené verze, starší než 5 min se obnoví na pozadí (dřív se
     # při prvním načtení čekalo na sestavení -- s víc lidmi naráz až 10 s).
     return await cached_json_swr(f"home:{user_id}", HOME_CACHE_TTL_S, build, keep_seconds=HOME_KEEP_S)

@@ -692,3 +692,60 @@ async def warm_mood_tags_loop(hour: int = 4, top: int = 80) -> None:
             import logging
 
             logging.getLogger(__name__).exception("předehřátí štítků nálad selhalo")
+
+
+async def start_from(user_id: str, artist_id: str | None, recording_id: str | None, size: int = 10) -> dict[str, Any]:
+    """Start Pusť teď u profilu bez dat: zadaný interpret (2 jeho
+    nejposlouchanější skladby napřed) nebo skladba, pak navazující nové."""
+    from app.catalog.top_tracks import artist_top_tracks
+    from app.home import lastfm_taste as lt
+
+    head: list[str] = []
+    title = ""
+    if recording_id:
+        head = [recording_id]
+        meta = await asyncio.to_thread(_rec_meta, [recording_id])
+        title = (meta.get(recording_id) or (None, ""))[1]
+    elif artist_id:
+        try:
+            top = await artist_top_tracks(artist_id)
+        except Exception:  # noqa: BLE001
+            top = []
+        head = [t["id"] for t in top[:2] if t.get("id")]
+        from app.models import Artist
+
+        with Session(engine) as session:
+            artist = session.get(Artist, artist_id)
+            title = artist.name if artist else ""
+    if not head:
+        return {"recordingIds": [], "reason": "Tohle se nepodařilo najít – zkus jiného interpreta."}
+    rng = random.Random(f"{user_id}:start:{int(time.time() // 60)}")
+    seeds = head[:2]
+    try:
+        cands = await asyncio.wait_for(lt.similar_track_ids(seeds, set(head), rng, size * 2), timeout=12)
+    except Exception:  # noqa: BLE001
+        cands = []
+    meta = await asyncio.to_thread(_rec_meta, cands)
+    per_artist: Counter = Counter()
+    head_artists = {a for a, _t in (await asyncio.to_thread(_rec_meta, head)).values() if a}
+    new: list[str] = []
+    for rid in cands:
+        a = meta.get(rid, (None, ""))[0]
+        if not a or a in head_artists or per_artist[a] >= 1:
+            continue
+        per_artist[a] += 1
+        new.append(rid)
+    out = (head + new)[:size]
+    available = await asyncio.to_thread(_available, out)
+    missing = [r for r in out if r not in available]
+    if missing:
+        task = asyncio.get_running_loop().create_task(_prefetch(user_id, missing))
+        _prefetching.add(task)
+        task.add_done_callback(_prefetching.discard)
+    try:
+        from app import rec_log
+
+        await asyncio.to_thread(rec_log.log_batch, user_id, out, set(new), "start")
+    except Exception:  # noqa: BLE001
+        pass
+    return {"recordingIds": out, "reason": f"Začínám od {title} a navážu podobným" if title else "Začínám"}
