@@ -56,5 +56,24 @@ def get_redis() -> redis.Redis:
     return _redis
 
 
+_ratelimit_redis: redis.Redis | None = None
+_ratelimit_loop: asyncio.AbstractEventLoop | None = None
+
+
+def get_ratelimit_redis() -> redis.Redis:
+    """Redis pro omezovače dotazů ven (Deezer, Last.fm, MusicBrainz).
+    Testovací instance (`RATE_LIMIT_REDIS_URL`) sdílí frontu s ostrou --
+    limity platí na IP serveru, ne na instanci."""
+    global _ratelimit_redis, _ratelimit_loop
+    url = os.environ.get("RATE_LIMIT_REDIS_URL") or ""
+    if not url:
+        return get_redis()
+    loop = asyncio.get_running_loop()
+    if _ratelimit_redis is None or _ratelimit_loop is not loop:
+        _ratelimit_redis = redis.from_url(url, decode_responses=True)
+        _ratelimit_loop = loop
+    return _ratelimit_redis
+
+
 def user_events_channel(user_id: str) -> str:
     return f"vault:events:user:{user_id}"

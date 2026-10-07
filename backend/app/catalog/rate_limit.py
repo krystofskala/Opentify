@@ -89,7 +89,7 @@ class AsyncRateLimiter:
 
     async def _backlog(self) -> float:
         if self._key is not None and time.monotonic() - self._redis_failed_at > 30:
-            from app.redis_bus import get_redis
+            from app.redis_bus import get_ratelimit_redis as get_redis
 
             try:
                 return float(await get_redis().eval(_PEEK, 1, self._key))
@@ -106,7 +106,7 @@ class AsyncRateLimiter:
             await asyncio.sleep(min(backlog, 2.0))
 
     async def _wait_shared(self) -> None:
-        from app.redis_bus import get_redis
+        from app.redis_bus import get_ratelimit_redis as get_redis
 
         # Stejná hranice jako místní `max_waiters`: víc než N intervalů čekání
         # = uživatel to nepočká, selhat hned.

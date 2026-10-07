@@ -211,6 +211,13 @@ async def on_startup() -> None:
     except Exception:  # noqa: BLE001 -- bez Redisu se startuje i tak
         logging.getLogger(__name__).warning("zámky cache se nepodařilo uklidit")
     asyncio.create_task(redis_listener())
+    if os.environ.get("OPENTIFY_TEST_INSTANCE") == "1":
+        # Testovací kopie (vedle ostré): nic neposílá ven (poslechy na
+        # ListenBrainz / Last.fm by byly dvakrát), nehlídá boty a nerozebírá
+        # knihovnu znovu -- jen Domů se přegenerovává, ať jde zkoušet.
+        logging.getLogger(__name__).warning("TESTOVACÍ INSTANCE: bez odesílání poslechů a rozborů na pozadí")
+        asyncio.create_task(home_refresh_loop())
+        return
     asyncio.create_task(backfill_loop())
     asyncio.create_task(artwork_backfill_loop())
     asyncio.create_task(home_refresh_loop())
