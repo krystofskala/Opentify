@@ -542,6 +542,49 @@ async def newcomer_dismiss(body: NewcomerDismissIn, current: tuple[str, str] = D
     return {"dismissed": sorted(dismissed)}
 
 
+class TasteExclusionIn(BaseModel):
+    kind: str  # recording | playlist
+    id: str
+    excluded: bool
+
+
+@home_router.get("/taste-exclusions")
+def taste_exclusions(current: tuple[str, str] = Depends(get_current_user)):
+    """Co je vyjmuté ze vkusu ("Nepočítat do vkusu" v menu ⋯)."""
+    from app.home.activation import taste_exclusions as get
+
+    recs, playlists = get(current[0])
+    return {"recordings": sorted(recs), "playlists": sorted(playlists)}
+
+
+@home_router.post("/taste-exclusions")
+async def set_taste_exclusion(body: TasteExclusionIn, current: tuple[str, str] = Depends(get_current_user)):
+    """Skladba nebo playlist se (ne)počítá do vkusu. Poslechy zůstávají
+    (Wrapped, historie), jen doporučování je nebere."""
+    from app.home import taste_cache
+    from app.home.service import invalidate_home_cache_for
+    from app.models import HomeSnapshot
+    from app.utils import utcnow
+
+    field = {"recording": "recordings", "playlist": "playlists"}.get(body.kind)
+    if field is None or not body.id:
+        raise HTTPException(status_code=400, detail="Neznámý druh.")
+    key = f"taste_excluded:{current[0]}"
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, key) or HomeSnapshot(key=key, payload={})
+        payload = dict(row.payload or {})
+        items = set(payload.get(field) or [])
+        (items.add if body.excluded else items.discard)(body.id)
+        payload[field] = sorted(items)
+        row.payload = payload
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    taste_cache.invalidate(current[0])
+    await invalidate_home_cache_for(current[0])
+    return taste_exclusions(current)
+
+
 @home_router.get("/layout")
 def home_layout(current: tuple[str, str] = Depends(get_current_user)):
     """Sekce Domů v pořadí profilu, i se skrytými (Domů › Upravit)."""

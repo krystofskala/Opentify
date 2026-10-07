@@ -3,7 +3,7 @@ poslechu z každého zdroje, max 3 poslechy skladby za den, "bývalé lásky".""
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.db import engine
 from app.home import activation as av
@@ -39,6 +39,11 @@ def test_track_key_ignores_versions_and_feat():
 def test_sources_weigh_the_same_and_daily_cap():
     user = "act-u1-" + _RUN
     ids = _setup(user, [("Spotify", 30, "spotify-history"), ("App", 30, None)] + [("Binge", 30, None)] * 10)
+    with Session(engine) as s:  # vybral si ji sám (Spotify reason_start clickrow) = vlastní volba
+        for x in s.exec(select(Listen).where(Listen.user_id == user, Listen.recording_id == ids["Spotify"])).all():
+            x.context = "spotify:clickrow"
+            s.add(x)
+        s.commit()
     act = av.compute(user, now=NOW)
     assert abs(act.long[ids["Spotify"]] - act.long[ids["App"]]) < 1e-9
     assert act.total[ids["Binge"]] == 3  # 10 poslechů v jeden den -> počítají se 3

@@ -28,6 +28,7 @@ import '../data/listen_later_repository.dart' show LaterKind;
 import 'report_problem.dart';
 import 'toast.dart';
 import '../state/library_scope.dart' show libraryIdsProvider;
+import '../state/taste_exclusions.dart';
 
 /// Je celé album v knihovně (všechny jeho skladby)? Pro menu otevřená
 /// odjinud než z Knihovny -- volající to většinou neví a menu pak vždy
@@ -125,6 +126,26 @@ class _CollectionActionsSheet extends ConsumerWidget {
           toast(e.detail ?? 'Nepodařilo se připnout');
         } catch (_) {
           toast('Nepodařilo se připnout');
+        }
+      },
+    );
+  }
+
+  /// "Nepočítat do vkusu" pro playlist (puštěný pro někoho, na usínání).
+  Widget _tasteRow(BuildContext context, WidgetRef ref, void Function(String) toast) {
+    final ex = ref.watch(tasteExclusionsProvider).valueOrNull;
+    if (ex == null) return const SizedBox.shrink();
+    final excluded = ex.playlists.contains(id);
+    return _Row(
+      icon: excluded ? Symbols.visibility_rounded : Symbols.visibility_off_rounded,
+      label: excluded ? 'Počítat do vkusu' : 'Nepočítat do vkusu',
+      onTap: () async {
+        Navigator.of(context).pop();
+        try {
+          await setTasteExclusion(ref, kind: 'playlist', id: id, excluded: !excluded);
+          toast(!excluded ? 'Poslech z tohoto playlistu se nebude počítat do vkusu' : 'Playlist se zase počítá do vkusu');
+        } catch (_) {
+          toast('Nepovedlo se');
         }
       },
     );
@@ -328,6 +349,7 @@ class _CollectionActionsSheet extends ConsumerWidget {
                 },
               ),
             _quickPinRow(context, ref, toast),
+            if (kind == CollectionKind.playlist && !isRadio) _tasteRow(context, ref, toast),
             if (onSaveCopy != null)
               _Row(
                 icon: Symbols.library_add_rounded,

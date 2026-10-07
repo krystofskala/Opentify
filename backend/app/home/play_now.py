@@ -561,12 +561,37 @@ def _features_map() -> dict[str, tuple[float | None, float | None]]:
 
 
 MAX_DEFERRED_SHARE = 0.5  # nanejvýš polovinu nových odložit do další várky
+# Odložené nové (skok stylu/energie) počkají na další várku (audit bod 15):
+# profil -> {skladba: (kdy, kolikrát už odložená)}.
+_deferred: dict[str, dict[str, tuple[float, int]]] = {}
+DEFER_TTL_S = 2 * 3600
+DEFER_MAX = 2
+
+
+def _take_deferred(user_id: str) -> list[str]:
+    now = time.time()
+    keep = {r: v for r, v in (_deferred.get(user_id) or {}).items() if now - v[0] < DEFER_TTL_S}
+    _deferred[user_id] = keep
+    return list(keep)
+
+
+def _remember_deferred(user_id: str, ids: list[str], offered: set[str]) -> None:
+    now = time.time()
+    keep = _deferred.setdefault(user_id, {})
+    for r in offered:  # nabídnuté v téhle várce už nečekají
+        keep.pop(r, None)
+    for r in ids:
+        n = keep.get(r, (now, 0))[1] + 1
+        if n <= DEFER_MAX:
+            keep[r] = (now, n)
+        else:
+            keep.pop(r, None)
 SMOOTH_TIMEOUT_S = 3.0
 
 
 async def _smooth(
-    out: list[str], new_ids: set[str], anchor: str | None, mood: str | None
-) -> tuple[list[str], set[str]]:
+    out: list[str], new_ids: set[str], anchor: str | None, mood: str | None, spare: list[str] | None = None
+) -> tuple[list[str], set[str], list[str]]:
     """Plynulé přechody v celé várce (bod 4 + nahlášený skok YUNGBLUD ->
     Tenório Jr., 7. 10.):
     1. nové skladby bez rozboru -> rozbor z 30s ukázky Deezeru (nejvýš 4 s);
@@ -578,14 +603,15 @@ async def _smooth(
     from app import preview_features
     from app.home import energy_flow, taste_bridge
 
-    meta = await asyncio.to_thread(_rec_meta, out + ([anchor] if anchor else []))
+    spare = [r for r in (spare or []) if r not in out]
+    meta = await asyncio.to_thread(_rec_meta, out + spare + ([anchor] if anchor else []))
     artist_of = {r: a for r, (a, _t) in meta.items() if a}
     # Rozbor ukázek a štítky stylů souběžně, dohromady nejvýš ~3 s (dřív až
     # 10 s při studené cache); co nestihne, doběhne a pomůže příští várce.
     styles_task = asyncio.ensure_future(taste_bridge.artist_styles(list(set(artist_of.values()))))
     _prefetching.add(styles_task)  # držet odkaz, ať doběhne i po limitu
     styles_task.add_done_callback(_prefetching.discard)
-    await preview_features.ensure([r for r in out if r in new_ids], timeout_s=SMOOTH_TIMEOUT_S)
+    await preview_features.ensure([r for r in out if r in new_ids] + spare, timeout_s=SMOOTH_TIMEOUT_S)
     try:
         styles = await asyncio.wait_for(asyncio.shield(styles_task), timeout=1.0)
     except asyncio.TimeoutError:
@@ -611,12 +637,16 @@ async def _smooth(
         if not culprit:
             break
         deferred.append(culprit)
-        ordered = await asyncio.to_thread(
-            energy_flow.order, [r for r in ordered if r != culprit], artist_of, anchor, styles
-        )
+        rest = [r for r in ordered if r != culprit]
+        # Várka se nezkracuje: místo odložené jiná nová ze zbylých kandidátů.
+        if spare:
+            fill = spare.pop(0)
+            rest.append(fill)
+            new_ids = new_ids | {fill}
+        ordered = await asyncio.to_thread(energy_flow.order, rest, artist_of, anchor, styles)
     if deferred:
         logger.info("pusť teď: %d nových odloženo kvůli skoku stylu/energie", len(deferred))
-    return ordered, {r for r in new_ids if r in ordered}
+    return ordered, {r for r in new_ids if r in ordered}, deferred
 
 
 def _song_key(artist_id: str | None, title: str) -> str:
@@ -759,7 +789,8 @@ async def next_chunk(
                 cands += await asyncio.wait_for(lt.similar_track_ids(new_seeds, exclude, rng, want_new * 2), timeout=12)
             except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
                 pass
-        cands = list(dict.fromkeys(cands))
+        # Odložené z minulé várky napřed (projdou znovu filtry i plynulostí).
+        cands = list(dict.fromkeys([r for r in _take_deferred(user_id) if r not in exclude] + cands))
 
         class _T:  # _drop_heard čte jen .activation
             activation = act
@@ -784,7 +815,10 @@ async def next_chunk(
             used.add(a)
             titles.add(key)
             kept.append(rid)
+        spare_new = kept[want_new : want_new + 3]
         new = kept[:want_new]
+    else:
+        spare_new = []
     new_ids = set(new)
     # Nové proložit mezi známé (ne všechny na konec).
     out: list[str] = []
@@ -805,7 +839,8 @@ async def next_chunk(
         reason = "Zatím nevím, co posloucháš – pusť si něco z Hledat a příště navážu."
         return {"recordingIds": [], "reason": reason}
     try:
-        out, new_ids = await _smooth(out, new_ids, seeds[-1] if seeds else None, mood)
+        out, new_ids, deferred = await _smooth(out, new_ids, seeds[-1] if seeds else None, mood, spare_new)
+        _remember_deferred(user_id, deferred, set(out))
     except Exception:  # noqa: BLE001 -- plynulost je doplněk, várka musí přijít
         logger.exception("pusť teď: plynulé řazení")
     available = await asyncio.to_thread(_available, out)

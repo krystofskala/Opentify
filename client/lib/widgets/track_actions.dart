@@ -26,6 +26,7 @@ import 'report_problem.dart';
 import 'toast.dart';
 import 'state_views.dart' show humanError;
 import '../state/auto_continue.dart' show playNowRepositoryProvider;
+import '../state/taste_exclusions.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -282,6 +283,22 @@ class _TrackActionsSheet extends ConsumerWidget {
                 label: 'Míň takových',
                 onTap: () => run(() => _feedback(ref, recording.id, toast, more: false)),
               ),
+              // Puštěno pro někoho / na usínání: poslech zůstane v historii,
+              // jen doporučování ho nebere.
+              if (ref.watch(tasteExclusionsProvider).valueOrNull case final ex?)
+                _Item(
+                  icon: ex.recordings.contains(recording.id) ? Symbols.visibility_rounded : Symbols.visibility_off_rounded,
+                  label: ex.recordings.contains(recording.id) ? 'Počítat do vkusu' : 'Nepočítat do vkusu',
+                  onTap: () => run(() async {
+                    final exclude = !ex.recordings.contains(recording.id);
+                    try {
+                      await setTasteExclusion(ref, kind: 'recording', id: recording.id, excluded: exclude);
+                      toast(exclude ? 'Skladba se nebude počítat do vkusu' : 'Skladba se zase počítá do vkusu');
+                    } catch (e) {
+                      toast('Nepovedlo se: ${humanError(e)}');
+                    }
+                  }),
+                ),
               // Důvod jen na vyžádání, nikdy u každé skladby.
               _Item(
                 icon: Symbols.help_rounded,

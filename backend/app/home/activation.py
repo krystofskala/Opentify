@@ -214,6 +214,18 @@ def collection_tracks(session: Session, user_id: str) -> set[str]:
     return out
 
 
+def taste_exclusions(user_id: str) -> tuple[set[str], set[str]]:
+    """(skladby, playlisty) vyjmuté ze vkusu volbou "Nepočítat do vkusu" v
+    menu ⋯ (puštěno pro někoho, na usínání...). Poslech takové skladby /
+    z takového playlistu se do vkusu nepočítá; Wrapped a historie ano."""
+    from app.models import HomeSnapshot
+
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, f"taste_excluded:{user_id}")
+    payload = (row.payload or {}) if row else {}
+    return set(payload.get("recordings") or []), set(payload.get("playlists") or [])
+
+
 def excluded_sources(user_id: str) -> set[str]:
     """Zdroje importu, které si profil vypnul ze vkusu (Profil › Hudba)."""
     from app.models import HomeSnapshot
@@ -399,13 +411,15 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
         if before is not None:
             query = query.where(Listen.played_at < before.replace(tzinfo=None))
         excluded = excluded_sources(user_id)
+        ex_recs, ex_playlists = taste_exclusions(user_id)
+        ex_paths = {f"/playlists/{p}" for p in ex_playlists}
         labels = algorithmic_labels(session, user_id)
         algo_of: dict[tuple[str, datetime], bool] = {}
         rows = []
         imported = []
         for rid, played_at, ms, source, context in session.exec(query).all():
-            if source in excluded:
-                continue  # zdroj vypnutý ze vkusu (Wrapped a roky ho počítají dál)
+            if source in excluded or rid in ex_recs or (context or "").split("?")[0] in ex_paths:
+                continue  # zdroj / skladba / playlist vyjmuté ze vkusu (Wrapped a roky je počítají dál)
             rows.append((rid, played_at, ms))
             if source in TASTE_SOURCES:
                 imported.append((played_at, rid, context))
@@ -482,9 +496,13 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
         if ms is not None and dur and ms < min(dur / 2, 240_000):
             heard = 0.5  # 30 s – polovina: slyšel, ale ne celou
         age = max((now - played).total_seconds() / 86400, 0.5)
+        is_algo = algo_of.get((rid, played_at), False)
         act.short[rid] += heard * math.exp(-ln2 * age / SHORT_HALF_LIFE)
         act.medium[rid] += heard * math.exp(-ln2 * age / MEDIUM_HALF_LIFE)
-        act.long[rid] += heard * age ** -LONG_DECAY
+        # Dlouhý (trvalý) profil: co pustil algoritmus, jen třetinou -- i u
+        # zaběhlého profilu, ať si Pusť teď nepotvrzuje samo sebe (uživatel
+        # 7. 10., audit bod 9). Krátký a střední (co posloucháš teď) plně.
+        act.long[rid] += heard * (ALGO_DAY if is_algo else 1.0) * age ** -LONG_DECAY
         act.total[rid] += 1
         act.first.setdefault(rid, played)
         act.last[rid] = played

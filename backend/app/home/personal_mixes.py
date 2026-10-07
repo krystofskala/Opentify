@@ -215,10 +215,14 @@ def _load_taste(user_id: str) -> Taste:
         since = now - timedelta(days=365)
         from app.home.activation import excluded_sources
 
+        from app.home.activation import taste_exclusions
+
         off = excluded_sources(user_id)  # zdroje vypnuté ze vkusu (Profil › Hudba)
+        ex_recs, ex_playlists = taste_exclusions(user_id)  # "Nepočítat do vkusu"
+        ex_paths = {f"/playlists/{p}" for p in ex_playlists}
         listens = [
             x for x in session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
-            if x.source not in off
+            if x.source not in off and x.recording_id not in ex_recs and (x.context or "").split("?")[0] not in ex_paths
         ]
         for listen in listens:
             played = _aware(listen.played_at)

@@ -57,8 +57,10 @@ def fingerprint(user_id: str) -> tuple:
             for m in (LibraryEntry, FavoriteArtist, RecordingDislike, ArtistDislike)
         )
         sources = s.get(HomeSnapshot, f"taste_sources:{user_id}")
+        excl = s.get(HomeSnapshot, f"taste_excluded:{user_id}")
     return (tuple(items), tuple(str(x) for x in fb), tuple(str(x) for x in skips), counts,
-            tuple((sources.payload or {}).get("excluded") or []) if sources else ())
+            tuple((sources.payload or {}).get("excluded") or []) if sources else (),
+            str(excl.generated_at) if excl else "")
 
 
 def get(kind: str, user_id: str, build: Callable[[], Any]) -> Any:

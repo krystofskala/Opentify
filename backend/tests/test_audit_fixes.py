@@ -83,3 +83,62 @@ def test_common_new_filter_drops_heard_under_other_id_and_muted() -> None:
 def test_song_key_generic_titles_need_artist() -> None:
     assert _song_key("a1", "Salt Creek") == _song_key("a2", "Salt Creek")  # tatáž píseň, jiná verze
     assert _song_key("a1", "Intro") != _song_key("a2", "Intro")  # různé písně
+
+
+def test_algorithm_counts_a_third_in_long_profile_for_any_profile() -> None:
+    user = "af-long-" + uuid.uuid4().hex[:8]
+    own, _a = _rec("Own pick")
+    algo, _b = _rec("Algo pick")
+    t = (utcnow() - timedelta(days=10)).replace(tzinfo=None)
+    with Session(engine) as s:
+        s.add(Listen(user_id=user, recording_id=own, played_at=t, source="Výsledky hledání"))
+        s.add(Listen(user_id=user, recording_id=algo, played_at=t, source="Pusť teď"))
+        s.commit()
+    act = av.compute(user)
+    assert abs(act.long[algo] - act.long[own] * av.ALGO_DAY) < 1e-9
+    assert abs(act.short[algo] - act.short[own]) < 1e-9  # co posloucháš teď: plně
+
+
+def test_not_counted_in_taste_track_and_playlist() -> None:
+    import asyncio
+
+    from app.routes import home as routes
+
+    async def nothing(_u):
+        return None
+
+    import app.home.service as svc
+
+    orig = svc.invalidate_home_cache_for
+    svc.invalidate_home_cache_for = nothing
+    try:
+        user = "af-ex-" + uuid.uuid4().hex[:8]
+        a, _x = _rec("For a friend")
+        b, _y = _rec("Lullaby")
+        c, _z = _rec("Mine")
+        t = (utcnow() - timedelta(days=2)).replace(tzinfo=None)
+        with Session(engine) as s:
+            s.add(Listen(user_id=user, recording_id=a, played_at=t))
+            s.add(Listen(user_id=user, recording_id=b, played_at=t, context="/playlists/pl-sleep"))
+            s.add(Listen(user_id=user, recording_id=c, played_at=t))
+            s.commit()
+        asyncio.run(routes.set_taste_exclusion(routes.TasteExclusionIn(kind="recording", id=a, excluded=True), current=(user, "d")))
+        out = asyncio.run(routes.set_taste_exclusion(routes.TasteExclusionIn(kind="playlist", id="pl-sleep", excluded=True), current=(user, "d")))
+        assert out == {"recordings": [a], "playlists": ["pl-sleep"]}
+        assert set(av.compute(user).total) == {c}
+    finally:
+        svc.invalidate_home_cache_for = orig
+
+
+def test_deferred_new_track_waits_for_next_batch() -> None:
+    from app.home import play_now as pn
+
+    user = "af-def-" + uuid.uuid4().hex[:8]
+    pn._remember_deferred(user, ["x"], set())
+    assert pn._take_deferred(user) == ["x"]
+    pn._remember_deferred(user, ["x"], set())
+    pn._remember_deferred(user, ["x"], set())  # potřetí odložená -> už nečeká
+    assert pn._take_deferred(user) == []
+    pn._remember_deferred(user, ["y"], set())
+    pn._remember_deferred(user, [], {"y"})  # nabídnutá -> nečeká
+    assert pn._take_deferred(user) == []
