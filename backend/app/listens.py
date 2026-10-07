@@ -68,8 +68,13 @@ def record_listen(
     duration_played_ms: int | None = None,
     source: str | None = None,
     context: str | None = None,
+    short: bool = False,
 ) -> str | None:
-    """Sync -- vrátí id poslechu, `None` když nahrávka neexistuje."""
+    """Sync -- vrátí id poslechu, `None` když nahrávka neexistuje.
+
+    `short`: poslech od 30 s do poloviny / 4 min (jako Spotify) -- do vkusu a
+    Wrapped ano, do ListenBrainz / Last.fm ne (jejich pravidlo), a přeskakování
+    skladby nenuluje (nedohrál ji)."""
     with Session(engine) as session:
         if session.get(Recording, recording_id) is None:
             return None
@@ -96,16 +101,23 @@ def record_listen(
             source=source,
             context=context,
         )
+        if short:
+            now = utcnow()
+            listen.lb_submitted_at = now  # krátký: neodesílat (pravidlo ListenBrainz)
+            listen.lb_error = "kratší než polovina skladby – jen do vkusu a Wrapped"
+            listen.lastfm_submitted_at = now  # ani na Last.fm
         session.add(listen)
         # Dohráno / poslechnuto -> přeskakování té skladby se nuluje.
         from app.models import SkipStreak
 
-        streak = session.get(SkipStreak, (user_id, recording_id))
+        streak = session.get(SkipStreak, (user_id, recording_id)) if not short else None
         if streak is not None:
             session.delete(streak)
         session.commit()
         listen_id = listen.id
     _wakeup.set()
+    if short:
+        return listen_id  # 30 s ještě není "poslechnuto" (Poslechnout později)
     try:
         from app.listen_later import on_listen
 

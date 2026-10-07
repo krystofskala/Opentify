@@ -142,3 +142,46 @@ def test_deferred_new_track_waits_for_next_batch() -> None:
     pn._remember_deferred(user, ["y"], set())
     pn._remember_deferred(user, [], {"y"})  # nabídnutá -> nečeká
     assert pn._take_deferred(user) == []
+
+
+def test_short_listen_counts_for_taste_but_is_not_scrobbled() -> None:
+    from app.listens import record_listen
+
+    user = "af-short-" + uuid.uuid4().hex[:8]
+    rid, _a = _rec("Short one")
+    t = utcnow() - timedelta(minutes=5)
+    lid = record_listen(user, rid, played_at=t, duration_played_ms=45_000, short=True)
+    with Session(engine) as s:
+        x = s.get(Listen, lid)
+        assert x.lb_submitted_at is not None and x.lastfm_submitted_at is not None  # neodesílá se
+    assert rid in av.compute(user).total
+
+
+def test_ignored_chart_leaves_quick_picks() -> None:
+    from app.home import quick_picks as qp
+    from app.models import HomeImpression
+
+    user = "af-qp-" + uuid.uuid4().hex[:8]
+    today = utcnow().date()
+    with Session(engine) as s:
+        for d in range(6):
+            day = (today - timedelta(days=d)).isoformat()
+            s.add(HomeImpression(user_id=user, day=day, item_id="chart-a", section="quick_picks"))
+            s.add(HomeImpression(user_id=user, day=day, item_id="chart-b", section="quick_picks"))
+        s.add(PlayEvent(user_id=user, recording_id="x", started_at=utcnow().replace(tzinfo=None),
+                        ended_at=utcnow().replace(tzinfo=None), end_reason="completed", playlist_id="chart-b"))
+        s.commit()
+        assert qp.ignored_wide(s, user, {"chart-a", "chart-b"}) == {"chart-a"}
+
+
+def test_explore_slot_is_logged() -> None:
+    from app import rec_log
+    from app.models import RecBatchItem
+
+    user = "af-exp-" + uuid.uuid4().hex[:8]
+    bid = rec_log.log_batch(user, ["k", "n", "e"], {"n", "e"}, "fresh", {"e"})
+    with Session(engine) as s:
+        from sqlmodel import select
+
+        slots = {i.recording_id: i.slot for i in s.exec(select(RecBatchItem).where(RecBatchItem.batch_id == bid)).all()}
+    assert slots == {"k": "familiar", "n": "new", "e": "explore"}

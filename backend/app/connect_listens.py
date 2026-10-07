@@ -128,9 +128,14 @@ class ConnectListens:
             skipped and not browsing,
         )
         threshold = min(duration / 2, 240) if duration else 240
-        if s.played_s < threshold:
-            return
         played_at = datetime.fromtimestamp(s.started_wall, tz=timezone.utc)
+        if s.played_s < threshold:
+            # Poslech od 30 s jako ve Spotify (uživatel 7. 10., bod 12: ať je
+            # import i appka stejně) -- do vkusu polovinou, ve Wrapped ano;
+            # ListenBrainz / Last.fm ho nedostanou (jejich pravidlo: ½ / 4 min).
+            if s.played_s >= SHORT_LISTEN_S and not skipped:
+                self._run(_record, s.user_id, s.recording_id, played_at, int(s.played_s * 1000), s.source, True)
+            return
         self._run(_record, s.user_id, s.recording_id, played_at, int(s.played_s * 1000), s.source)
 
     @staticmethod
@@ -162,11 +167,18 @@ class ConnectListens:
 PLAY_NOW_LABEL = "Pusť teď"
 
 
-def _record(user_id: str, recording_id: str, played_at: datetime, played_ms: int, source: str | None) -> None:
+SHORT_LISTEN_S = 30
+
+
+def _record(
+    user_id: str, recording_id: str, played_at: datetime, played_ms: int, source: str | None, short: bool = False
+) -> None:
     from app.listens import record_listen
 
     try:
-        listen_id = record_listen(user_id, recording_id, played_at=played_at, duration_played_ms=played_ms, source=source)
+        listen_id = record_listen(
+            user_id, recording_id, played_at=played_at, duration_played_ms=played_ms, source=source, short=short
+        )
         if listen_id:
             logger.info("connect %s: poslech zapsán serverem %s (%d s)", user_id[:8], recording_id[:8], played_ms // 1000)
     except Exception:  # noqa: BLE001 -- záloha nesmí shodit Connect

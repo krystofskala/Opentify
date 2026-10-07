@@ -25,7 +25,11 @@ from app.utils import utcnow
 MATCH_HOURS = 12
 
 
-def log_batch(user_id: str, recording_ids: list[str], new_ids: set[str], mode: str) -> str | None:
+def log_batch(
+    user_id: str, recording_ids: list[str], new_ids: set[str], mode: str, explore_ids: set[str] | None = None
+) -> str | None:
+    """`explore_ids`: nové vybrané NÁHODNĚ z širšího okruhu (slot "explore",
+    ~10 % nových) -- srovnání s běžnými novými ukáže, jestli výběr pomáhá."""
     if not recording_ids:
         return None
     batch_id = new_uuid()
@@ -34,7 +38,8 @@ def log_batch(user_id: str, recording_ids: list[str], new_ids: set[str], mode: s
             session.add(
                 RecBatchItem(
                     batch_id=batch_id, user_id=user_id, recording_id=rid, position=pos,
-                    slot="new" if rid in new_ids else "familiar", mode=mode,
+                    slot="explore" if rid in (explore_ids or ()) else ("new" if rid in new_ids else "familiar"),
+                    mode=mode,
                 )
             )
         session.commit()
@@ -82,18 +87,25 @@ def report(days: int = 7) -> list[dict[str, Any]]:
             ps = sorted(by_user_play.get(user_id, []), key=lambda p: p.started_at)
             reasons = Counter(p.end_reason for p in ps)
             new_plays = [p for p in ps if p.rec_slot == "new"]
-            accepted = 0
-            for p in new_plays:
-                later = session.exec(
-                    select(Listen.id).where(
-                        Listen.user_id == user_id,
-                        Listen.recording_id == p.recording_id,
-                        Listen.played_at > p.ended_at,
-                        Listen.played_at <= p.ended_at + timedelta(days=14),
-                    )
-                ).first()
-                if later:
-                    accepted += 1
+            explore_plays = [p for p in ps if p.rec_slot == "explore"]
+
+            def accepted_of(group: list[PlayEvent]) -> int:
+                n_ok = 0
+                for p in group:
+                    later = session.exec(
+                        select(Listen.id).where(
+                            Listen.user_id == user_id,
+                            Listen.recording_id == p.recording_id,
+                            Listen.played_at > p.ended_at,
+                            Listen.played_at <= p.ended_at + timedelta(days=14),
+                        )
+                    ).first()
+                    if later:
+                        n_ok += 1
+                return n_ok
+
+            accepted = accepted_of(new_plays)
+            explore_accepted = accepted_of(explore_plays)
             # Různorodost: různí interpreti na 20 algoritmických přehrání.
             windows = [ps[i : i + 20] for i in range(0, len(ps) - 19, 20)] or ([ps] if ps else [])
             diversity = (
@@ -112,6 +124,11 @@ def report(days: int = 7) -> list[dict[str, Any]]:
                 "newPlayed": len(new_plays),
                 "newCompletedPct": round(100 * sum(1 for p in new_plays if p.end_reason == "completed") / (len(new_plays) or 1)),
                 "newAccepted": accepted,
+                # Náhodný průzkum (~10 % nových): když se ujímá skoro stejně
+                # jako běžné nové, výběr nových moc nepomáhá.
+                "explorePlayed": len(explore_plays),
+                "exploreCompletedPct": round(100 * sum(1 for p in explore_plays if p.end_reason == "completed") / (len(explore_plays) or 1)),
+                "exploreAccepted": explore_accepted,
                 "artistsPer20": diversity,
             })
     return out

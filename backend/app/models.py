@@ -241,7 +241,7 @@ class PlayEvent(SQLModel, table=True):
     # Skladba z várky doporučení (Pusť teď / nekonečné hraní) -- měření,
     # jestli doporučování pomáhá (app/rec_log.py).
     rec_batch_id: str | None = Field(default=None, index=True)
-    rec_slot: str | None = None  # familiar | new
+    rec_slot: str | None = None  # familiar | new | explore (náhodný průzkum)
 
 
 class PendingImportPlay(SQLModel, table=True):
@@ -305,7 +305,7 @@ class RecBatchItem(SQLModel, table=True):
     user_id: str = Field(index=True)
     recording_id: str = Field(index=True)
     position: int = 0
-    slot: str = "familiar"  # familiar | new
+    slot: str = "familiar"  # familiar | new | explore (náhodný průzkum, ~10 % nových)
     mode: str = "fresh"  # fresh (ťuknutí) | endless | mood:<nálada>
     created_at: datetime = Field(default_factory=utcnow, index=True)
 

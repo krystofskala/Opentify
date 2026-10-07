@@ -104,6 +104,54 @@ def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter, Coun
     return ctx, artists, rec_w
 
 
+IGNORE_WINDOW_DAYS = 14
+IGNORE_SHOWN_DAYS = 5
+
+
+def ignored_wide(session: Session, user_id: str, ids: set[str]) -> set[str]:
+    """Žebříčky / nálady, které Domů ukázalo aspoň 5 dní za 2 týdny a profil
+    z nich nic nepustil -- místo nich něco jeho (uživatel 7. 10., bod 11).
+    Jakmile se přestanou ukazovat, za pár týdnů se zkusí znovu."""
+    from app.models import HomeImpression, Listen, PlayEvent
+
+    if not ids:
+        return set()
+    since = utcnow() - timedelta(days=IGNORE_WINDOW_DAYS)
+    shown: dict[str, set[str]] = {}
+    for item_id, day in session.exec(
+        select(HomeImpression.item_id, HomeImpression.day).where(
+            HomeImpression.user_id == user_id,
+            HomeImpression.item_id.in_(list(ids)),  # type: ignore[attr-defined]
+            HomeImpression.day >= since.date().isoformat(),
+        )
+    ).all():
+        shown.setdefault(item_id, set()).add(day)
+    often = {i for i, days in shown.items() if len(days) >= IGNORE_SHOWN_DAYS}
+    if not often:
+        return set()
+    played = set(
+        session.exec(
+            select(PlayEvent.playlist_id).where(
+                PlayEvent.user_id == user_id,
+                PlayEvent.ended_at >= since.replace(tzinfo=None),
+                PlayEvent.playlist_id.in_(list(often)),  # type: ignore[union-attr]
+            )
+        ).all()
+    )
+    played |= {
+        (ctx or "").split("/")[2].split("?")[0]
+        for ctx in session.exec(
+            select(Listen.context).where(
+                Listen.user_id == user_id,
+                Listen.played_at >= since.replace(tzinfo=None),
+                Listen.context.in_([f"/playlists/{i}" for i in often]),  # type: ignore[union-attr]
+            )
+        ).all()
+        if ctx and ctx.count("/") >= 2
+    }
+    return often - played
+
+
 def rank(session: Session, user_id: str, candidates: list[Playlist], liked_id: str | None) -> list[Playlist]:
     """Kandidáti seřazení podle toho, jak sedí na tuhle denní dobu."""
     return [p for p, _score in rank_scored(session, user_id, candidates, liked_id)]

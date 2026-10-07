@@ -468,36 +468,41 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
     # Dočasně jako dřív: jedno místo pro žebříček / náladu vždy (bez něj má
     # nováček prázdné Domů, uživatel 7. 10.).
     wide_keys = ["charts", "editorial"] if allow_wide else []  # nováček: jen Pusť teď (varianta B)
-    wide = {p.id for key in wide_keys for p in by_section.get(key, [])}
-    candidates += [p for key in wide_keys for p in by_section.get(key, [])]
+    # Kdo žebříček / náladu z Rychlého výběru dva týdny nepouští, dostane
+    # místo něj něco svého (uživatel 7. 10., bod 11).
+    all_wide = {p.id for key in wide_keys for p in by_section.get(key, [])}
+    ignored = qp.ignored_wide(session, user_id, all_wide)
+    wide = all_wide - ignored
+    candidates += [p for key in wide_keys for p in by_section.get(key, []) if p.id not in ignored]
     candidates = [p for p in {p.id: p for p in candidates}.values() if p.id not in taken]
+    wide_slots = qp.WIDE_SLOTS if wide else 0  # vynechaný žebříček -> místo pro tvoje
     ranked = qp.rank(session, user_id, candidates, liked.id)
     auto: list = []
     wide_used = 0
     best_wide = None
     for p in ranked:
         if p.id in wide:
-            if wide_used >= qp.WIDE_SLOTS:
+            if wide_used >= wide_slots:
                 continue
             card = _card(session, p)
             if card.item_count == 0:
                 continue
             if best_wide is None:
                 best_wide = card
-            if len(auto) >= room - qp.WIDE_SLOTS + wide_used:
+            if len(auto) >= room - wide_slots + wide_used:
                 continue  # místo pro něj se drží až na konci
             auto.append(card)
             taken.add(card.id)
             wide_used += 1
             continue
-        if len(auto) >= room - (qp.WIDE_SLOTS - wide_used):
+        if len(auto) >= room - (wide_slots - wide_used):
             continue
         card = _card(session, p)
         if card.item_count > 0 and card.id not in taken:
             auto.append(card)
             taken.add(card.id)
     # Jedno místo mimo vlastní vkus: nejlépe sedící žebříček / nálada.
-    if wide_used < qp.WIDE_SLOTS and best_wide is not None and best_wide.id not in taken:
+    if wide_used < wide_slots and best_wide is not None and best_wide.id not in taken:
         auto.append(best_wide)
         taken.add(best_wide.id)
     for card in fallback:

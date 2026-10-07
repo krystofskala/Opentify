@@ -561,6 +561,7 @@ def _features_map() -> dict[str, tuple[float | None, float | None]]:
 
 
 MAX_DEFERRED_SHARE = 0.5  # nanejvýš polovinu nových odložit do další várky
+EXPLORE_P = 0.1  # podíl nových vybraných náhodně (měření, rec_log "explore")
 # Odložené nové (skok stylu/energie) počkají na další várku (audit bod 15):
 # profil -> {skladba: (kdy, kolikrát už odložená)}.
 _deferred: dict[str, dict[str, tuple[float, int]]] = {}
@@ -775,6 +776,7 @@ async def next_chunk(
         reason = f"{MOODS[mood][2]} – u tebe toho na tohle moc není, zkouším i nové"
     want_new = size - len(familiar)
     new: list[str] = []
+    explore_ids: set[str] = set()
     if want_new > 0 and (new_seeds or weak_mood):
         act = _activation(user_id)
         exclude = set(act.total) | set(played) | set(familiar) | set(seeds) | set(ctx.get("paused") or ())
@@ -815,8 +817,18 @@ async def next_chunk(
             used.add(a)
             titles.add(key)
             kept.append(rid)
-        spare_new = kept[want_new : want_new + 3]
         new = kept[:want_new]
+        pool = kept[want_new:]
+        # Náhodné sloty pro poctivé měření (~10 % nových, uživatel 7. 10.):
+        # místo nejlepšího tipu náhodný z širšího okruhu (prošel stejnými
+        # filtry), zapsaný jako "explore".
+        for i in range(len(new)):
+            if pool and rng.random() < EXPLORE_P:
+                rand_pick = pool.pop(rng.randrange(len(pool)))
+                pool.append(new[i])
+                new[i] = rand_pick
+                explore_ids.add(rand_pick)
+        spare_new = pool[:3]
     else:
         spare_new = []
     new_ids = set(new)
@@ -855,7 +867,7 @@ async def next_chunk(
         from app import rec_log
 
         mode = f"mood:{mood}" if mood else ("endless" if seeds else "fresh")
-        await asyncio.to_thread(rec_log.log_batch, user_id, out, new_ids, mode)
+        await asyncio.to_thread(rec_log.log_batch, user_id, out, new_ids, mode, explore_ids & set(out))
     except Exception:  # noqa: BLE001 -- měření nesmí shodit várku
         pass
     return {"recordingIds": out, "reason": reason}

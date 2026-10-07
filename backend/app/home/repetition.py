@@ -91,8 +91,8 @@ def _ignored_offers(user_id: str) -> tuple[set[str], set[str]]:
     for rid, hits in ignored.items():
         if rid in listened:
             continue  # mezitím si ji pustil -- žádná pauza
-        news = [t for t, slot in hits if slot == "new"]
-        known = [t for t, slot in hits if slot != "new"]
+        news = [t for t, slot in hits if slot in ("new", "explore")]
+        known = [t for t, slot in hits if slot not in ("new", "explore")]
         if len(news) >= NEW_OFFERS and (now.replace(tzinfo=None) - max(news)).days < NEW_PAUSE_DAYS and (
             max(news) - min(news)
         ).days <= NEW_WINDOW_DAYS:
