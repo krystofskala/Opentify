@@ -214,8 +214,15 @@ async def _resolve_tracks(items: list[dict[str, str]], limit: int) -> list[str]:
     return (await asyncio.to_thread(g._ingest_tracks, found[:limit])) if found else []
 
 
-# Štítky, které o hudbě nic neříkají (pro profil vkusu se nepočítají).
-_NOISE_TAGS = {"seen-live", "favorites", "favourites", "favorite", "male-vocalists", "female-vocalists", "awesome", "love"}
+# Do profilu vkusu jen styly (is_style) a jazyk/země posluchače -- "český"
+# u Čecha vybere český rap. Popisné nálepky ("female vocalists") ne: táhly
+# výběr k čemukoli se zpěvačkou.
+_PROFILE_EXTRA = {"czech", "slovak"}
+_JUNK_VERSION = re.compile(r"(slowed|sped up|speed up|reverb|nightcore|8d audio|instrumental)", re.I)
+
+
+def _profile_tag(tag: str) -> bool:
+    return is_style(tag) or slug(tag) in _PROFILE_EXTRA
 
 
 def _strong(tags: list[tuple[str, int]], t: str) -> bool:
@@ -253,22 +260,27 @@ async def _taste_bridge(
     for (name, w), tags in zip(top, await asyncio.gather(*(tags_of(n) for n, _w in top))):
         for tag, count in tags:
             k = slug(tag)
-            if k != t and k not in _NOISE_TAGS and count:
+            if k != t and count and _profile_tag(k):
                 profile[k] = profile.get(k, 0.0) + w * count / 100
     if not profile:
         return []
     total = sum(profile.values())
     profile = {k: v / total for k, v in profile.items()}
-    try:
-        ranked = await lastfm.tag_top_artists(t, 200)
-    except Exception:  # noqa: BLE001
-        return []
-    candidates = [n for n in dict.fromkeys(ranked) if _normalize(n) not in skip_names]
+    # Kandidáti: nejposlouchanější interpreti stylu a k tomu interpreti tvých
+    # hlavních stylů, kteří ten styl zároveň výrazně hrají (folkař, co rapuje).
+    mine = [k for k in sorted(profile, key=lambda k: -profile[k]) if is_style(k)][:3]
+    lists = await asyncio.gather(
+        lastfm.tag_top_artists(t, 200), *(lastfm.tag_top_artists(k, 100) for k in mine), return_exceptions=True
+    )
+    candidates = [
+        n for n in dict.fromkeys(n for lst in lists if isinstance(lst, list) for n in lst)
+        if _normalize(n) not in skip_names
+    ]
     scored: list[tuple[float, str]] = []
     for name, tags in zip(candidates, await asyncio.gather(*(tags_of(n) for n in candidates))):
         if not _strong(tags, t):
             continue
-        fit = sum(profile.get(slug(tag), 0.0) * count / 100 for tag, count in tags if slug(tag) != t)
+        fit = sum(profile.get(slug(tag), 0.0) * count / 100 for tag, count in tags if slug(tag) != t and _profile_tag(tag))
         if fit > 0:
             scored.append((fit * (0.8 + 0.4 * rng.random()), name))
     scored.sort(reverse=True)
@@ -276,8 +288,9 @@ async def _taste_bridge(
     tracks = await asyncio.gather(*(lastfm.artist_top_tracks(n, 10) for n in picked), return_exceptions=True)
     out: list[dict[str, str]] = []
     for lst in tracks:
-        if isinstance(lst, list) and lst:
-            out += rng.sample(lst, min(2, len(lst)))
+        if isinstance(lst, list):
+            clean = [x for x in lst if not _JUNK_VERSION.search(x.get("title") or "")]
+            out += rng.sample(clean, min(2, len(clean)))
     return out
 
 
