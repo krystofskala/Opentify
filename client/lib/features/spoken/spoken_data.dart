@@ -233,7 +233,9 @@ final spokenBookProvider = FutureProvider.autoDispose.family<SpokenBook, String>
 typedef SpokenSearchResult = ({List<SpokenRelease> releases, bool loginConfigured});
 
 final spokenSearchProvider = FutureProvider.autoDispose.family<SpokenSearchResult, String>((ref, q) async {
-  ref.watch(spokenEventsProvider);
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
   final json = await ref.watch(apiClientProvider).getJson('/spoken/search', query: {'q': q});
   return (
     releases: [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)],
@@ -256,7 +258,9 @@ typedef SpokenPerson = ({
 /// ke stažení. `role`: author | narrator.
 final spokenPersonProvider =
     FutureProvider.autoDispose.family<SpokenPerson, ({String name, String role})>((ref, who) async {
-  ref.watch(spokenEventsProvider);
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
   final json =
       await ref.watch(apiClientProvider).getJson('/spoken/person', query: {'name': who.name, 'role': who.role});
   return (
@@ -358,7 +362,9 @@ final spokenSearchRequestProvider = StateProvider<String?>((ref) => null);
 /// Záloha za českou verzi: Soulseek (typicky anglické originály) -- zvlášť,
 /// je pomalejší (~10 s).
 final spokenForeignSearchProvider = FutureProvider.autoDispose.family<List<SpokenRelease>, String>((ref, q) async {
-  ref.watch(spokenEventsProvider);
+  // Bez sledování událostí stahování: každá zpráva o průběhu (každých pár
+  // sekund) by hledání venku spustila znovu a zrušila -- výsledky se pořád
+  // načítaly a ze Soulseeku nedorazily nikdy (7. 10.).
   final json = await ref.watch(apiClientProvider).getJson('/spoken/search/foreign', query: {'q': q});
   return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
 });
