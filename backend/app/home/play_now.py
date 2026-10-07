@@ -565,6 +565,7 @@ def _features_map() -> dict[str, tuple[float | None, float | None]]:
 
 
 MAX_DEFERRED_SHARE = 0.5  # nanejvýš polovinu nových odložit do další várky
+SMOOTH_TIMEOUT_S = 3.0
 
 
 async def _smooth(
@@ -581,15 +582,23 @@ async def _smooth(
     from app import preview_features
     from app.home import energy_flow, taste_bridge
 
-    await preview_features.ensure([r for r in out if r in new_ids])
+    meta = await asyncio.to_thread(_rec_meta, out + ([anchor] if anchor else []))
+    artist_of = {r: a for r, (a, _t) in meta.items() if a}
+    # Rozbor ukázek a štítky stylů souběžně, dohromady nejvýš ~3 s (dřív až
+    # 10 s při studené cache); co nestihne, doběhne a pomůže příští várce.
+    styles_task = asyncio.ensure_future(taste_bridge.artist_styles(list(set(artist_of.values()))))
+    _prefetching.add(styles_task)  # držet odkaz, ať doběhne i po limitu
+    styles_task.add_done_callback(_prefetching.discard)
+    await preview_features.ensure([r for r in out if r in new_ids], timeout_s=SMOOTH_TIMEOUT_S)
+    try:
+        styles = await asyncio.wait_for(asyncio.shield(styles_task), timeout=1.0)
+    except asyncio.TimeoutError:
+        styles = {}  # štítky se dotáhnou do cache na pozadí
     if mood not in (None, "prekvap") and new_ids:
         global _feat_cache
         _feat_cache = None  # právě rozebrané ukázky
         audio = await asyncio.to_thread(_features_map)
         out = [r for r in out if r not in new_ids or track_mood_fit(mood, *audio.get(r, (None, None))) > 0.3]
-    meta = await asyncio.to_thread(_rec_meta, out + ([anchor] if anchor else []))
-    artist_of = {r: a for r, (a, _t) in meta.items() if a}
-    styles = await taste_bridge.artist_styles(list(set(artist_of.values())))
     ordered = await asyncio.to_thread(energy_flow.order, out, artist_of, anchor, styles)
     news = [r for r in ordered if r in new_ids]
     budget = max(1, round(len(news) * MAX_DEFERRED_SHARE)) if news else 0
