@@ -794,6 +794,28 @@ async def _resolve_artists(names: list[str], limit: int, skip: set[str]) -> list
     return ids
 
 
+_ODD_EDITION = re.compile(r"\b(live|demo|demos|karaoke|instrumental|remix|remixes|acoustic|sessions|in concert)\b", re.I)
+
+
+def _best_edition(matches: list[dict[str, Any]], wanted: str) -> dict[str, Any] | None:
+    """Ze shod podle názvu (závorky se při porovnání zahazují) vybrat edici,
+    která sedí i verzí: přesný název napřed, pak bez "Live / Demo / Remix..."
+    (pokud je hledaný název nemá) -- dřív "Born In The USA" našlo živé
+    album (Celá alba, 7. 10.)."""
+    from app.catalog.deezer_ingest import version_key
+
+    if not matches:
+        return None
+    exact = [h for h in matches if version_key(h.get("title")) == version_key(wanted)]
+    if exact:
+        return exact[0]
+    if not _ODD_EDITION.search(wanted or ""):
+        plain = [h for h in matches if not _ODD_EDITION.search(h.get("title") or "")]
+        if plain:
+            return plain[0]
+    return matches[0]
+
+
 async def _resolve_albums(items: list[dict[str, str]], limit: int) -> list[str]:
     """(interpret, album) z Last.fm -> naše vydání přes Deezer (přesný název).
     Hledání souběžně, pořadí podle vstupu."""
@@ -809,15 +831,13 @@ async def _resolve_albums(items: list[dict[str, str]], limit: int) -> list[str]:
                 hits = await dz.search_album(item["artist"], item["title"])
             except Exception:  # noqa: BLE001
                 return None
-        return next(
-            (
-                h
-                for h in hits
-                if _normalize(h.get("title") or "") == _normalize(item["title"])
-                and _normalize((h.get("artist") or {}).get("name") or "") == _normalize(item["artist"])
-            ),
-            None,
-        )
+        matches = [
+            h
+            for h in hits
+            if _normalize(h.get("title") or "") == _normalize(item["title"])
+            and _normalize((h.get("artist") or {}).get("name") or "") == _normalize(item["artist"])
+        ]
+        return _best_edition(matches, item["title"])
 
     hits = await asyncio.gather(*(look(i) for i in items[: limit * 2]))
     ids: list[str] = []
