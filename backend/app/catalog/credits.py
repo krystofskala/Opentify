@@ -38,7 +38,72 @@ _INSTRUMENTS = {
     "tin whistle": "píšťalka", "whistle": "pískání", "mellotron": "mellotron", "sampler": "sampler",
     "guitar synthesizer": "kytarový syntezátor", "twelve-string guitar": "dvanáctistrunná kytara",
     "bowed bass": "kontrabas (smyčcem)", "sousaphone": "suzafon", "cornet": "kornet", "celesta": "celesta",
+    "bass synthesizer": "basový syntezátor", "keyboard bass": "klávesová basa", "fretless bass guitar":
+    "bezpražcová baskytara", "fretless bass": "bezpražcová basa", "baritone guitar": "barytonová kytara",
+    "tenor guitar": "tenorová kytara", "upright bass": "kontrabas", "electric upright bass": "elektrický kontrabas",
+    "contrabass": "kontrabas", "electric organ": "elektrické varhany", "pipe organ": "píšťalové varhany",
+    "pump organ": "harmonium", "harmonium": "harmonium", "grand piano": "koncertní křídlo",
+    "upright piano": "pianino", "toy piano": "dětské piano", "prepared piano": "preparovaný klavír",
+    "clavinet": "clavinet", "wurlitzer electric piano": "elektrické piano Wurlitzer", "synth": "syntezátor",
+    "modular synthesizer": "modulární syntezátor", "analog synthesizer": "analogový syntezátor",
+    "string synthesizer": "smyčcový syntezátor", "drum programming": "programování bicích",
+    "electronic drum set": "elektronické bicí", "snare drum": "malý buben", "bass drum": "velký buben",
+    "hi-hat": "hi-hat", "cowbell": "kravský zvonec", "triangle": "triangl", "claves": "claves",
+    "cabasa": "cabasa", "güiro": "guiro", "steelpan": "steel drum", "tabla": "tabla", "djembe": "djembe",
+    "cajón": "cajón", "bells": "zvony", "tubular bells": "trubicové zvony", "chimes": "zvonkohra",
+    "wind chimes": "zvonkohra", "gong": "gong", "electric violin": "elektrické housle",
+    "electric cello": "elektrické violoncello", "electric mandolin": "elektrická mandolína",
+    "mandola": "mandola", "lute": "loutna", "zither": "citera", "concertina": "koncertina",
+    "bandoneon": "bandoneon", "button accordion": "knoflíkový akordeon", "piano accordion": "klávesový akordeon",
+    "pan flute": "panova flétna", "alto flute": "altová flétna", "bass flute": "basová flétna",
+    "english horn": "anglický roh", "contrabassoon": "kontrafagot", "bass trombone": "basový trombon",
+    "valve trombone": "ventilový trombon", "euphonium": "eufonium", "piccolo trumpet": "pikolová trubka",
+    "bass saxophone": "bassaxofon", "wind instrument": "dechový nástroj", "keyboard instrument": "klávesy",
+    "string instruments": "smyčce", "turntables": "gramofony", "electronic instruments": "elektronika",
+    "fender rhodes": "Rhodes", "rhodes": "Rhodes", "talk box": "talkbox", "vocoder": "vokodér", "loops": "smyčky", "effects": "efekty",
+    "tape": "magnetofon", "samples": "samply", "field recordings": "terénní nahrávky",
 }
+
+# Přívlastek před známým nástrojem ("bass synthesizer" -> basový syntezátor).
+_ADJECTIVES = {
+    "bass": "basový", "electric": "elektrický", "acoustic": "akustický", "analog": "analogový",
+    "digital": "digitální", "modular": "modulární", "string": "smyčcový", "fretless": "bezpražcový",
+    "electronic": "elektronický", "baritone": "barytonový", "tenor": "tenorový", "alto": "altový",
+    "soprano": "sopránový", "prepared": "preparovaný",
+}
+
+
+def _instrument(name: str) -> str:
+    """Česky: přesná shoda, jinak známý konec názvu a zbytek jako přívlastek
+    nebo v závorce ("Moog synthesizer" -> "syntezátor (Moog)"). Úplně
+    neznámý zůstane, jak ho MusicBrainz pojmenuje (audit 7. 10.: "bass
+    synthesizer" anglicky v Obsazení)."""
+    key = name.lower().strip()
+    if key in _INSTRUMENTS:
+        return _INSTRUMENTS[key]
+    words = key.split()
+    for i in range(1, len(words)):
+        tail = " ".join(words[i:])
+        if tail not in _INSTRUMENTS:
+            continue
+        cz = _INSTRUMENTS[tail]
+        head = name.split()[:i]
+        if all(w.lower() in _ADJECTIVES for w in head):
+            noun = cz.split()[-1]
+            return " ".join(_adjective(_ADJECTIVES[w.lower()], noun) for w in head) + " " + cz
+        return f"{cz} ({' '.join(head)})"
+    return name
+
+
+def _adjective(masculine: str, noun: str) -> str:
+    """Rod přívlastku podle podstatného jména (kytara -> basová, piano -> basové)."""
+    if not masculine.endswith("ý"):
+        return masculine  # digitální, elektrický je mužský -- měkká přídavná jména se nemění
+    if noun.endswith("a"):
+        return masculine[:-1] + "á"
+    if noun.endswith(("o", "e", "í")):
+        return masculine[:-1] + "é"
+    return masculine
 
 _VOCALS = {
     "lead vocals": "zpěv", "background vocals": "doprovodný zpěv", "choir vocals": "sbor",
@@ -91,7 +156,7 @@ def _label(rel: dict[str, Any]) -> tuple[str, str] | None:
     if "assistant" in (rel.get("attributes") or []):
         return None  # asistenti zvuku -- šum v seznamu
     if kind == "instrument":
-        label = ", ".join(_INSTRUMENTS.get(a.lower(), a) for a in attrs) or "nástroje"
+        label = ", ".join(_instrument(a) for a in attrs) or "nástroje"
     elif kind == "vocal":
         label = ", ".join(_VOCALS.get(a.lower(), a) for a in attrs) or "zpěv"
     if "guest" in (rel.get("attributes") or []):

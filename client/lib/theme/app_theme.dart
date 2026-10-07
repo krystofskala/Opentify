@@ -103,9 +103,11 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       behavior: SnackBarBehavior.floating,
       // Odhodit prstem do strany (dolů nad plovoucí lištou skoro nešlo).
       dismissDirection: DismissDirection.horizontal,
+      // 97 % krytí: sklo zůstává, ale obaly pod hláškou už neprosvítají
+      // (audit 7. 10.: na pestré stránce se hláška špatně četla).
       backgroundColor: brightness == Brightness.dark
-          ? const Color(0xEB2A2A30)
-          : colorScheme.inverseSurface.withValues(alpha: 0.92),
+          ? const Color(0xF72A2A30)
+          : colorScheme.inverseSurface.withValues(alpha: 0.97),
       contentTextStyle: base.textTheme.bodyMedium?.copyWith(
         fontFamily: 'Nunito',
         fontWeight: FontWeight.w600,

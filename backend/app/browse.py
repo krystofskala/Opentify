@@ -539,6 +539,21 @@ _REISSUE = re.compile(
     r"|years|integral|\b(19|20)\d\d\s*[-–]\s*(19|20)?\d\d\b|\bvol(ume)?\.?\s*\d",
     re.I,
 )
+_TITLE_YEAR = re.compile(r"(?<!\d)(19\d\d|20\d\d)(?!\d)")
+_ARCHIVE_WORDS = re.compile(
+    r"\b(live|concert|session|sessions|recorded|recordings|broadcast|radio|festival|tapes|unreleased|lost)\b", re.I
+)
+
+
+def _archival(title: str | None) -> bool:
+    """Archivní nahrávka vydaná teď ("Live at Falkoner Theatre, Copenhagen,
+    6th February 1966", "Chet in Iceland (Live in Reykjavik 1985)") -- rok
+    v názvu starší než předloňský a slovo jako live / session. Do Novinek nepatří (audit 7. 10.: Jazz)."""
+    from datetime import date
+
+    # Jen se slovem "live", "session"... -- "1989 (Taylor's Version)" je nové album.
+    text = title or ""
+    return bool(_ARCHIVE_WORDS.search(text)) and any(int(y) < date.today().year - 2 for y in _TITLE_YEAR.findall(text))
 
 
 async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
@@ -567,7 +582,7 @@ async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
         if artist is None or not artist.get("id"):
             continue
         for album in await dz.artist_albums(str(artist["id"])) or []:
-            if album.get("record_type") == "compile" or _REISSUE.search(album.get("title") or ""):
+            if album.get("record_type") == "compile" or _REISSUE.search(album.get("title") or "") or _archival(album.get("title")):
                 continue
             try:
                 released = date.fromisoformat(album.get("release_date") or "")
@@ -919,7 +934,7 @@ async def _recent_albums(artist_ids: list[str], limit: int) -> list[str]:
         if not dzid:
             continue
         for album in await dz.artist_albums(dzid) or []:
-            if album.get("record_type") not in ("album", "ep") or _REISSUE.search(album.get("title") or ""):
+            if album.get("record_type") not in ("album", "ep") or _REISSUE.search(album.get("title") or "") or _archival(album.get("title")):
                 continue
             try:
                 released = date.fromisoformat(album.get("release_date") or "")

@@ -308,6 +308,13 @@ async def _ids_and_counts(artist_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def by_listens(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Seřazeno podle zobrazeného počtu přehrání jako ve Spotify. Last.fm
+    řadí podle posluchačů, ale appka ukazuje přehrání -- seznam pak vypadal
+    neseřazeně (audit 7. 10.: Maalouf). Bez počtu na konec, v pořadí zdroje."""
+    return sorted(items, key=lambda i: -(i.get("listens") or 0) if i.get("listens") else 1)
+
+
 async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
     """Seznam RecordingOut (dict) s `listenCount`."""
     from app.home.service import _recording_out
@@ -318,7 +325,7 @@ async def artist_top_tracks(artist_id: str) -> list[dict[str, Any]]:
     cached = await cached_json(f"artist-top:v5:{artist_id}", TOP_TTL_S, build, is_empty=lambda v: not v.get("items"))
     result = []
     with Session(engine) as session:
-        for item in cached.get("items", []):
+        for item in by_listens(cached.get("items", [])):
             rec = session.get(Recording, item["id"])
             if rec is None:
                 continue
