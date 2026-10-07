@@ -78,6 +78,9 @@ class RecordingOut(CamelModel):
     listen_count: int | None = None  # jen /recommendations/trending|community, viz RecommendationService
     # Odkud `listen_count` je ("lastfm" | "listenbrainz" | "opentify") -- klient to píše k číslu.
     listen_source: str | None = None
+    # Jen u alba s víc disky (stránka alba je odděluje): číslo a název disku.
+    disc_number: int | None = None
+    disc_title: str | None = None
 
 
 class DiscographyOut(CamelModel):

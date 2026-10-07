@@ -1499,7 +1499,9 @@ class CatalogService:
             self._session.rollback()
             logger.warning("album %s: zápis selhal (%s), tracklist jen z DB", release_id, type(exc).__name__)
             release = self._session.get(Release, release_id)
-            return self._stored_release_tracks(release) if release is not None else None
+            return _with_discs(release, self._stored_release_tracks(release)) if release is not None else None
+        if tracks:
+            tracks = _with_discs(self._session.get(Release, release_id), tracks)
         if tracks:
             # Kolik skladeb album má (různé názvy) -- Knihovna podle toho pozná
             # celá alba ("Jen celá alba").
@@ -1569,7 +1571,9 @@ class CatalogService:
         # Víc disků: čísla průběžně přes všechny disky (2CD Marsyas: 1..31),
         # jinak se disky prolínaly (1, 1, 2, 2...). Tak i vinylové strany "A1".
         position = 0
+        discs: list[dict[str, object]] = []
         for medium in media:
+            before = len(recordings)
             for track in medium.get("tracks", []):
                 position += 1
                 rec_json = track.get("recording", {})
@@ -1604,14 +1608,17 @@ class CatalogService:
                     # Dřív z jiné edice, teď v tracklistu tohohle alba.
                     recording.external_refs = {k: v for k, v in recording.external_refs.items() if k != "otherEdition"}
                 recordings.append(recording)
+            discs.append({"size": len(recordings) - before, "title": (medium.get("title") or "").strip() or None})
 
         await self._enrich_recording_previews(recordings)
         recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
         self._fix_release_type(release, recordings)
         refs = release.external_refs or {}
         ids = [r.id for r in recordings]
-        if refs.get("tracklistIds") != ids:
-            release.external_refs = {**refs, "tracklistIds": ids}
+        disc_info = discs if len(discs) > 1 else None
+        if refs.get("tracklistIds") != ids or refs.get("discs") != disc_info:
+            release.external_refs = {**{k: v for k, v in refs.items() if k != "discs"}, "tracklistIds": ids,
+                                     **({"discs": disc_info} if disc_info else {})}
             self._session.add(release)
         # Hned potvrdit: nepotvrzený zápis (flush) jinak držel zámek SQLite
         # až do konce požadavku a ostatní zápisy (i v jiných požadavcích)
@@ -1771,13 +1778,33 @@ class CatalogService:
             return []
         album_artist = self._session.get(Artist, release.artist_id)
         recordings: list[Recording] = []
+        # Víc disků: Deezer čísluje skladby na každém disku od 1
+        # (`track_position`, `disk_number`) a po seřazení podle čísla se disky
+        # prolínaly (Rubber Soul Super Deluxe: 1, 1, 1, 1, 2, 2...). Pořadí z
+        # Deezeru je už disk po disku -- číslo průběžně přes všechny disky jako
+        # u MusicBrainz (2CD Marsyas: 1..31) a pořadí se nepřeřazuje.
+        disc_sizes: dict[int, int] = {}
         for position, item in enumerate(tracks, start=1):
             track_artist = ingest_artist(self._session, item.get("artist") or {}) or album_artist
-            recording = ingest_track(self._session, {"track_position": position, **item}, artist=track_artist, release=release)
-            if recording is not None:
+            recording = ingest_track(self._session, {**item, "track_position": position}, artist=track_artist, release=release)
+            if recording is None:
+                continue
+            if recording not in recordings:
+                disc = int(item.get("disk_number") or 1)
+                disc_sizes[disc] = disc_sizes.get(disc, 0) + 1
+            if recording.release_id == release.id and recording.track_number != position:
+                recording.track_number = position  # i dřív uložené s číslem z disku
+                self._session.add(recording)
+            if recording not in recordings:
                 recordings.append(recording)
+        refs = release.external_refs or {}
+        ids = [r.id for r in recordings]
+        disc_info = [{"size": n, "title": None} for _d, n in sorted(disc_sizes.items())] if len(disc_sizes) > 1 else None
+        if refs.get("tracklistIds") != ids or refs.get("discs") != disc_info:
+            release.external_refs = {**{k: v for k, v in refs.items() if k != "discs"}, "tracklistIds": ids,
+                                     **({"discs": disc_info} if disc_info else {})}
+            self._session.add(release)
         self._session.commit()
-        recordings.sort(key=lambda r: (r.track_number is None, r.track_number or 0))
         self._fix_release_type(release, recordings)
         return [self._to_recording_out(r) for r in recordings]
 
@@ -1999,6 +2026,22 @@ class CatalogService:
 
         await asyncio.gather(*(enrich_one(r) for r in recordings))
         self._session.commit()
+
+
+def _with_discs(release: Release | None, tracks: list[RecordingOut]) -> list[RecordingOut]:
+    """Číslo a název disku ke skladbám alba s víc disky (`external_refs.discs`
+    = velikosti disků v pořadí tracklistu). Nesedí-li součet (jiná data),
+    nic se nepřidá -- stránka pak ukáže jeden seznam jako dřív."""
+    discs = ((release.external_refs or {}).get("discs") if release is not None else None) or []
+    if len(discs) < 2 or sum(int(d.get("size") or 0) for d in discs) != len(tracks):
+        return tracks
+    out: list[RecordingOut] = []
+    i = 0
+    for n, d in enumerate(discs, start=1):
+        for t in tracks[i : i + int(d.get("size") or 0)]:
+            out.append(t.model_copy(update={"disc_number": n, "disc_title": d.get("title")}))
+        i += int(d.get("size") or 0)
+    return out
 
 
 def _is_locked(exc: OperationalError) -> bool:

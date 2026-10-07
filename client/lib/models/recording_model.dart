@@ -18,6 +18,8 @@ class RecordingModel {
     this.previewUrl,
     this.listenCount,
     this.listenSource,
+    this.discNumber,
+    this.discTitle,
   });
 
   final String id;
@@ -44,6 +46,10 @@ class RecordingModel {
   /// Odkud je `listenCount`: "lastfm" | "listenbrainz" | "opentify".
   final String? listenSource;
 
+  /// Jen u alba s víc disky (stránka alba je odděluje): číslo a název disku.
+  final int? discNumber;
+  final String? discTitle;
+
   String get durationLabel {
     if (durationMs == null) return '--:--';
     final totalSeconds = (durationMs! / 1000).round();
@@ -66,6 +72,8 @@ class RecordingModel {
         previewUrl: json['previewUrl'] as String?,
         listenCount: json['listenCount'] as int?,
         listenSource: json['listenSource'] as String?,
+        discNumber: json['discNumber'] as int?,
+        discTitle: json['discTitle'] as String?,
       );
 
   RecordingModel copyWith({Availability? availability}) => RecordingModel(
@@ -82,5 +90,7 @@ class RecordingModel {
         previewUrl: previewUrl,
         listenCount: listenCount,
         listenSource: listenSource,
+        discNumber: discNumber,
+        discTitle: discTitle,
       );
 }

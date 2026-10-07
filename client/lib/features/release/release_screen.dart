@@ -348,15 +348,35 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
           if (visible.isEmpty) {
             return const SliverToBoxAdapter(child: EmptyState(compact: true, message: 'Filtru nic neodpovídá.'));
           }
+          // Víc disků: nadpis "Disk N" a čísla v rámci disku -- jen v pořadí
+          // alba (po seřazení jinak by se disky prolínaly).
+          final discs = {for (final r in visible) if (r.discNumber != null) r.discNumber};
+          var inOrder = discs.length > 1;
+          for (var i = 1; inOrder && i < visible.length; i++) {
+            if ((visible[i].discNumber ?? 0) < (visible[i - 1].discNumber ?? 0)) inOrder = false;
+          }
+          final discIndex = <String, int>{};
+          if (inOrder) {
+            final counters = <int, int>{};
+            for (final r in recordings) {
+              final d = r.discNumber;
+              if (d == null) continue;
+              counters[d] = (counters[d] ?? 0) + 1;
+              discIndex[r.id] = counters[d]!;
+            }
+          }
           return SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
             sliver: SliverList.builder(
               itemCount: visible.length,
               itemBuilder: (context, index) {
                 final r = visible[index];
+                final newDisc = inOrder &&
+                    r.discNumber != null &&
+                    (index == 0 || visible[index - 1].discNumber != r.discNumber);
                 final tile = TrackTile(
                   recording: r,
-                  leadingIndex: r.trackNumber ?? index + 1,
+                  leadingIndex: discIndex[r.id] ?? r.trackNumber ?? index + 1,
                   albumArtUrl: release.coverImageUrl,
                   artistName: artistName,
                   queueRecordings: visible,
@@ -366,8 +386,14 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                   selectionNumber: _collection.orderOf(r.id),
                   onSelectedChanged: (value) => _collection.toggle(r.id, value),
                 );
-                if (r.id != widget.highlightTrackId) return tile;
-                return AnimatedContainer(
+                Widget withDisc(Widget child) => newDisc
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [_DiscHeader(number: r.discNumber!, title: r.discTitle, first: index == 0), child],
+                      )
+                    : child;
+                if (r.id != widget.highlightTrackId) return withDisc(tile);
+                return withDisc(AnimatedContainer(
                   duration: const Duration(milliseconds: 500),
                   curve: Curves.easeOut,
                   decoration: BoxDecoration(
@@ -375,7 +401,7 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
                     borderRadius: BorderRadius.circular(AppRadii.lg),
                   ),
                   child: tile,
-                );
+                ));
               },
             ),
           );
@@ -391,6 +417,36 @@ class _ReleaseBodyState extends ConsumerState<_ReleaseBody> {
         ),
       ),
     ];
+  }
+}
+
+/// Nadpis disku u alba s víc disky ("Disk 2 · Bonus Tracks").
+class _DiscHeader extends StatelessWidget {
+  const _DiscHeader({required this.number, this.title, required this.first});
+  final int number;
+  final String? title;
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(AppSpacing.sm, first ? AppSpacing.xs : AppSpacing.lg, AppSpacing.sm, AppSpacing.xs),
+      child: Row(
+        children: [
+          Icon(Symbols.album_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              (title ?? '').isNotEmpty ? 'Disk $number · $title' : 'Disk $number',
+              style: theme.textTheme.titleSmall,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
