@@ -14,6 +14,7 @@ String? joinCodeFromUrl() {
 }
 
 void clearJoinFromUrl() => _joinUsed = true;
+void rememberLaunchJoinCode() {} // nativně je odkaz v `defaultRouteName` napořád
 void reloadPage() => restartApp();
 String appOrigin() {
   const origin = String.fromEnvironment('APP_ORIGIN');

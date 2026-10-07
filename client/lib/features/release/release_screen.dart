@@ -75,6 +75,15 @@ class ReleaseScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final release = ref.watch(releaseProvider(releaseId));
+    // Tracklist, obsazení a další edice hned souběžně s detailem alba --
+    // dřív startovaly až po něm (vodopád; audit výkonu 7. 10.).
+    for (final provider in [
+      releaseTracksProvider(releaseId),
+      releaseCreditsProvider(releaseId),
+      releaseOtherEditionsProvider(releaseId),
+    ]) {
+      ref.listen(provider, (_, __) {});
+    }
 
     return release.when(
       data: (releaseModel) => _ReleaseBody(release: releaseModel, highlightTrackId: highlightTrackId),

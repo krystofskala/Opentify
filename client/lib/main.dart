@@ -1,3 +1,4 @@
+import 'core/page_location.dart' show rememberLaunchJoinCode;
 import 'core/app_restart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +19,8 @@ import 'core/safe_area_insets.dart';
 /// potřebuje, veškerá závislost na backendu žije v `state/providers.dart`.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Kód pozvánky z adresy dřív, než ji router přepíše (#/join/KÓD -> #/).
+  rememberLaunchJoinCode();
   // Nativní appka: uložený klíč zařízení dřív, než odejde první požadavek.
   await loadDeviceToken();
   await NowPlayingActivity.loadSetting();

@@ -2,7 +2,22 @@ import 'config.dart';
 import 'join_route.dart';
 import 'package:web/web.dart' as web;
 
+/// Kód zachycený při startu (`rememberLaunchJoinCode` v `main`) -- router
+/// pak `#/join/KÓD` přesměruje na `#/` dřív, než se přihlášení na adresu
+/// podívá, a pozvánka přes o.html končila na obyčejném přihlášení.
+String? _launchCode;
+bool _used = false;
+
+void rememberLaunchJoinCode() {
+  _launchCode = _readJoinCode();
+}
+
 String? joinCodeFromUrl() {
+  if (_used) return null;
+  return _readJoinCode() ?? _launchCode;
+}
+
+String? _readJoinCode() {
   try {
     final uri = Uri.parse(web.window.location.href);
     final code = uri.queryParameters['join'];
@@ -15,6 +30,7 @@ String? joinCodeFromUrl() {
 }
 
 void clearJoinFromUrl() {
+  _used = true;
   try {
     final uri = Uri.parse(web.window.location.href);
     final params = Map<String, String>.from(uri.queryParameters)..remove('join');

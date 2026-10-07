@@ -3,6 +3,9 @@ import 'page_location_stub.dart' if (dart.library.js_interop) 'page_location_web
 /// Kód pozvánky z adresy (`/?join=KÓD`), nebo `null`.
 String? joinCodeFromUrl() => impl.joinCodeFromUrl();
 
+/// Zachytit kód pozvánky hned při startu (před routerem) -- volá `main`.
+void rememberLaunchJoinCode() => impl.rememberLaunchJoinCode();
+
 /// Odebrat `?join=` z adresy (po použití -- ať ho záložka na ploše nemá).
 void clearJoinFromUrl() => impl.clearJoinFromUrl();
 

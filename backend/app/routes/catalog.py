@@ -317,6 +317,13 @@ async def get_discography(
     data = await cached_json_swr(f"discography:v1:{artist_id}:{release_type}", 24 * 60 * 60, build)
     if data is None:
         raise HTTPException(status_code=404, detail="interpret nenalezen")
+    # Interpret (fotka, jméno) vždy čerstvě z DB -- diskografie je v cache
+    # den a nesla i opravenou cizí fotku (Karel Gott, 7. 10.).
+    with Session(engine) as session:
+        artist = session.get(Artist, data.get("artist", {}).get("id") or artist_id)
+        if artist is not None:
+            fresh = CatalogService(session, None, None)._to_artist_out(artist)  # type: ignore[arg-type]
+            data = {**data, "artist": fresh.model_dump(mode="json", by_alias=True)}
     return data
 
 

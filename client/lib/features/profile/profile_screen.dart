@@ -1202,7 +1202,7 @@ class _LogoutButton extends ConsumerWidget {
               context: context,
               builder: (dialog) => AlertDialog(
                 title: const Text('Odhlásit se?'),
-                content: const Text('Na tomhle zařízení se pak znovu přihlásíš jménem a heslem.'),
+                content: const Text('Pro nové přihlášení na tomhle zařízení budeš potřebovat jméno, heslo a nový kód zařízení od správce.'),
                 actions: [
                   GlassButton(
                     label: 'Zrušit',

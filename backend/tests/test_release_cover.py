@@ -74,3 +74,21 @@ def test_clear_stale_locks(monkeypatch):
     monkeypatch.setattr(bus, "get_redis", lambda: fake)
     assert asyncio.run(cache.clear_stale_locks()) == 2
     assert fake.keys == {"vault:catalog:cache:dz:x"}
+
+
+def test_discography_artist_is_fresh_from_db(eng, monkeypatch):
+    import app.routes.catalog as cat
+
+    async def stale(key, ttl, build):
+        return {"artist": {"id": "a", "name": "A", "images": ["https://img/cizi.jpg"]}, "releases": [{"id": "with"}]}
+
+    monkeypatch.setattr(cat, "cached_json_swr", stale)
+    monkeypatch.setattr(cat, "engine", eng)
+    with Session(eng) as s:
+        a = s.get(Artist, "a")
+        a.images = ["https://img/spravna.jpg"]
+        s.add(a)
+        s.commit()
+    out = asyncio.run(cat.get_discography("a", None, _current=None))
+    assert out["artist"]["images"] == ["https://img/spravna.jpg"]
+    assert out["releases"] == [{"id": "with"}]
