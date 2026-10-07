@@ -389,6 +389,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Timer? _stallWatch;
   Duration _stallPosition = Duration.zero;
   DateTime _stallSince = DateTime.now();
+  DateTime? _noSourceSince;
+  Duration _noSourceFrom = Duration.zero;
 
   void _checkStall() {
     final info = state.nowPlaying;
@@ -405,18 +407,30 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         processing != ProcessingState.completed &&
         processing != ProcessingState.idle;
     // Zdroj se vůbec nenačetl (502 při restartu serveru), ale web hlásí
-    // "hraje" a pozice běží dál podle hodin -- bez délky a bez jediného
-    // načteného kusu po 15 s nic nehraje (UX test 7. 10.).
-    if (watched &&
+    // "hraje" a pozice běží dál podle hodin (UX test 7. 10.). Jen u zdroje,
+    // který už doběhl načítání (`_readyGen`), a jen když je stav "bez délky
+    // a bez jediného načteného kusu" souvislých 15 s skutečného času --
+    // pomalé načítání s pozicí navázání (audiokniha na 35:00) tohle nesmí
+    // spustit; na načítání hlídá `_loadTimeout`.
+    final noSource = watched &&
+        _readyGen == _sourceGen &&
+        processing != ProcessingState.loading &&
         _player.duration == null &&
-        _player.bufferedPosition == Duration.zero &&
-        position > const Duration(seconds: 15)) {
+        _player.bufferedPosition == Duration.zero;
+    if (!noSource) {
+      _noSourceSince = null;
+    } else if (_noSourceSince == null) {
+      _noSourceSince = now;
+      _noSourceFrom = position;
+    } else if (now.difference(_noSourceSince!) >= const Duration(seconds: 15)) {
+      final from = _noSourceFrom;
+      _noSourceSince = null;
       _stallSince = now;
       _stallPosition = position;
       debugPrint('AudioPlayerController: hraje bez načteného zvuku, navazuji');
       _handleStreamFailure(info, 'zdroj se nenačetl', isProgressive: false);
-      // Nic se nepřehrálo -- znovu od začátku, ne od pozice podle hodin.
-      if (_resumeFor == info.recordingId) _resumeAt = Duration.zero;
+      // Navázat tam, kde to začalo (ne podle hodin běžící pozice).
+      if (_resumeFor == info.recordingId) _resumeAt = from;
       return;
     }
     if (!watched || position != _stallPosition) {

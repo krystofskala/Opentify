@@ -237,7 +237,9 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                       padding: const EdgeInsets.fromLTRB(22, 2, 22, 0),
                       child: SizedBox(
                         height: 26,
-                        child: duration.inMilliseconds == 0
+                        // Délka z katalogu ještě neznamená načtený zdroj -- při
+                        // obstarávání dál ukázat průběh stahování.
+                        child: duration.inMilliseconds == 0 || (playback.duration == null && playback.isBuffering)
                             ? (playback.isBuffering
                                 ? Center(
                                     child: ClipRRect(

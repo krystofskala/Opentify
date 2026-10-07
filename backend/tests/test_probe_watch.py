@@ -56,3 +56,23 @@ def test_api_unknown_path_from_internet_is_recorded(monkeypatch):
     assert client.get("/api/v1/phpmyadmin/index.php", headers=hdr).status_code == 404
     assert client.get("/health").status_code == 200  # z tailnetu, existuje
     assert pw._pending == {"6.6.6.6": {"/api/v1/phpmyadmin/index.php": 1}}
+
+
+def test_flood_is_capped(tmp_path, monkeypatch):
+    _reset(monkeypatch)
+    monkeypatch.setattr(pw, "MAX_READ_BYTES", 200)
+    log = tmp_path / "f.log"
+    log.write_text("", encoding="utf-8")
+    pw.read_new_lines(str(log))
+    with log.open("a", encoding="utf-8") as f:
+        for i in range(20):
+            f.write(f"t\t9.9.9.9\tGET\t/x{i}.php\tbot\n")
+    pw.read_new_lines(str(log))
+    first = sum(pw._pending["9.9.9.9"].values())
+    assert 0 < first < 20  # jen část za jeden tik, celé řádky
+    for _ in range(10):
+        pw.read_new_lines(str(log))
+    assert sum(pw._pending["9.9.9.9"].values()) == 20
+    for i in range(600):
+        pw.record(f"1.1.{i}.1", "/a")
+    assert len(pw._pending) <= pw.MAX_IPS + 1

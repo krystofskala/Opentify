@@ -114,3 +114,23 @@ def test_stats_ignore_lastfm_autocorrect_to_other_artist(eng, monkeypatch):
     monkeypatch.setattr(lf, "top_albums", top)
     assert asyncio.run(cat.get_artist_stats("rh", _current=None))["listeners"] is None
     assert asyncio.run(cat.get_artist_stats("beat", _current=None))["listeners"] == 8_500_000
+
+
+def test_stats_and_ampersand_is_same_artist(eng, monkeypatch):
+    import app.catalog.lastfm as lf
+    import app.routes.catalog as cat
+
+    monkeypatch.setattr(db, "engine", eng)
+    with Session(eng) as s:
+        s.add(Artist(id="sg", name="Simon and Garfunkel"))
+        s.commit()
+
+    async def info(name):
+        return {"name": "Simon & Garfunkel", "listeners": 5, "playcount": 1, "tags": []}
+
+    async def top(name, limit=40):
+        return []
+
+    monkeypatch.setattr(lf, "artist_info", info)
+    monkeypatch.setattr(lf, "top_albums", top)
+    assert asyncio.run(cat.get_artist_stats("sg", _current=None))["listeners"] == 5

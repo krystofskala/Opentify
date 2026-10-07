@@ -60,6 +60,9 @@ final FutureProvider<AuthInfo> authProvider = FutureProvider<AuthInfo>((ref) asy
   // Nativní appka: klíč vydaný serverem si uložit (web má cookie).
   if (json['token'] case final String token) await saveDeviceToken(token);
   final user = _profile(json['user']);
+  // Přihlášený: pozvánka z adresy už nemá po odhlášení vyskočit jako
+  // formulář pro nový účet.
+  if (user != null && code != null) clearJoinFromUrl();
   // Profilový stav v zařízení (fronta, historie hledání...) jen pro tenhle profil.
   if ((_profile(json['acting'])?.id ?? user?.id) case final String id) await claimProfilePrefs(id);
   return (

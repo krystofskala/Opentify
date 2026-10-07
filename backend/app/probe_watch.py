@@ -24,6 +24,9 @@ PROBE_LOG = os.environ.get("PROBE_LOG", "/data/probe/funnel-unknown.log")
 EVERY_S = 3600
 MIN_HITS = 3
 MAX_LOG_BYTES = 1_000_000
+MAX_READ_BYTES = 256_000  # na jeden tik -- zbytek příště (zahlcení nesmí nafouknout paměť)
+MAX_IPS = 500
+MAX_PATHS_PER_IP = 50
 
 _pending: dict[str, Counter[str]] = {}
 _offset: int | None = None
@@ -31,7 +34,14 @@ _last_sent = 0.0
 
 
 def record(ip: str, path: str) -> None:
-    _pending.setdefault(ip or "?", Counter())[path[:120]] += 1
+    ip = ip or "?"
+    if ip not in _pending and len(_pending) >= MAX_IPS:
+        ip = "další"
+    paths = _pending.setdefault(ip, Counter())
+    key = path[:120]
+    if key not in paths and len(paths) >= MAX_PATHS_PER_IP:
+        key = "…další cesty"
+    paths[key] += 1
 
 
 def read_new_lines(path: str = PROBE_LOG) -> None:
@@ -46,11 +56,13 @@ def read_new_lines(path: str = PROBE_LOG) -> None:
         _offset = size if _offset is None else 0
     if size == _offset:
         return
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with open(path, "rb") as f:
         f.seek(_offset)
-        chunk = f.read()
-        _offset = f.tell()
-    for line in chunk.splitlines():
+        raw = f.read(MAX_READ_BYTES)
+    if len(raw) == MAX_READ_BYTES and b"\n" in raw:
+        raw = raw[: raw.rindex(b"\n") + 1]  # jen celé řádky, zbytek příští tik
+    _offset += len(raw)
+    for line in raw.decode("utf-8", errors="replace").splitlines():
         parts = line.split("\t")
         if len(parts) >= 4:
             ip = parts[1].split(",")[-1].strip()

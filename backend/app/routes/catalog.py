@@ -140,13 +140,16 @@ async def get_artist_stats(artist_id: str, _current=Depends(get_current_user)):
 
     def words(text: str) -> str:
         # Po slovech (ne bez mezer): "Radio Head" != "Radiohead".
-        return re.sub(r"^the ", "", re.sub(r"[^\w]+", " ", _exact(text)).strip())
+        text = re.sub(r"[^\w&]+", " ", _exact(text)).replace("&", " and ")
+        return re.sub(r"^the ", "", re.sub(r"\s+", " ", text).strip())
 
-    if info and info.get("name") and words(info["name"]) != words(name):
+    other_artist = bool(info and info.get("name") and words(info["name"]) != words(name))
+    if other_artist:
         # Last.fm jméno "opravil" na jiného interpreta ("Radio Head" ->
-        # Radiohead): posluchači a štítky by patřili jemu, ne tomuhle.
+        # Radiohead): posluchači, štítky i alba by patřili jemu.
         info = None
-    albums = await lastfm.top_albums(name, limit=40) if info is not None else []
+    # Výpadek Last.fm (info None) alba nezastaví -- jen cizí interpret ano.
+    albums = [] if other_artist else await lastfm.top_albums(name, limit=40)
     popular: list[str] = []
     for album in albums:
         # Stejný přesný název víckrát (duplicitní záznam) -- nejstarší.

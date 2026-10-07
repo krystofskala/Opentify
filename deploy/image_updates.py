@@ -159,15 +159,36 @@ def cmd_check() -> None:
         print("chyba:", e, file=sys.stderr)
 
 
-def _healthy(svc: str, wait_s: int = 60) -> bool:
-    deadline = time.time() + wait_s
-    while time.time() < deadline:
-        out = _compose("ps", "--format", "json", svc)
+def _ps_rows(svc: str) -> list[dict]:
+    """`docker compose ps --format json`: novější Compose dává řádek na
+    kontejner (NDJSON), starší jedno pole -- obojí."""
+    out = _compose("ps", "--format", "json", svc).stdout.strip()
+    rows: list = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
-            rows = [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+            value = json.loads(line)
         except ValueError:
-            rows = []
-        if rows and all(r.get("State") == "running" and r.get("Health") in ("", "healthy") for r in rows):
+            continue
+        rows += value if isinstance(value, list) else [value]
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _healthy(svc: str, wait_s: int = 90, stable_s: int = 25) -> bool:
+    """Běží (a je zdravý, má-li healthcheck) souvisle `stable_s` sekund --
+    kontejner, který spadne po pár sekundách, neprojde."""
+    deadline = time.time() + wait_s
+    ok_since: float | None = None
+    while time.time() < deadline:
+        rows = _ps_rows(svc)
+        ok = bool(rows) and all(r.get("State") == "running" and r.get("Health") in ("", None, "healthy") for r in rows)
+        if not ok:
+            ok_since = None
+        elif ok_since is None:
+            ok_since = time.time()
+        elif time.time() - ok_since >= stable_s:
             return True
         time.sleep(5)
     return False
@@ -193,16 +214,21 @@ def cmd_update(names: list[str], force: bool) -> None:
             continue
         backup = OVERRIDE.with_suffix(".yml.pred-aktualizaci")
         shutil.copy2(OVERRIDE, backup)
-        _set_pin(svc, ref, new)
-        _compose("up", "-d")
-        if _healthy(svc):
+        healthy = False
+        try:
+            _set_pin(svc, ref, new)
+            _compose("up", "-d")
+            healthy = _healthy(svc)
+        finally:
+            # Cokoli selže (i sám skript) -> zpět na předchozí verzi.
+            if not healthy:
+                shutil.copy2(backup, OVERRIDE)
+                _compose("up", "-d")
+                print(f"{svc}: nová verze nenaběhla, VRÁCENO zpět")
+                _notify("⚠️ Aktualizace vrácena", f"{svc}: nová verze nenaběhla, běží zase ta předchozí.", priority=4)
+        if healthy:
             print(f"{svc}: aktualizováno {old[:19]}… -> {new[:19]}…")
             _notify("📦 Aktualizováno", f"{svc} běží v nové verzi.", priority=2)
-        else:
-            shutil.copy2(backup, OVERRIDE)
-            _compose("up", "-d")
-            print(f"{svc}: nová verze nenaběhla, VRÁCENO zpět")
-            _notify("⚠️ Aktualizace vrácena", f"{svc}: nová verze nenaběhla, běží zase ta předchozí.", priority=4)
 
 
 if __name__ == "__main__":
