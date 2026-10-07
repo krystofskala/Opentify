@@ -500,11 +500,16 @@ async def build_deep_cuts(user_id: str) -> int:
 # Interpreti, které bys mohl znát / Celá alba pro tebe
 # ----------------------------------------------------------------------
 
-async def _similar_unknown(user_id: str, top_n: int = 15) -> tuple[list[str], set[str], list[str]]:
-    """(podobní interpreti, které neposloucháš -- seřazení, známá jména, top interpreti)."""
+async def _similar_unknown(
+    user_id: str, top_n: int = 15, only: set[str] | None = None
+) -> tuple[list[str], set[str], list[str]]:
+    """(podobní interpreti, které neposloucháš -- seřazení, známá jména, top interpreti).
+    `only`: jen tihle interpreti jako základ (mladý profil: potvrzený vkus)."""
     from app.home import lastfm_taste as lt
 
     weights, names = await asyncio.to_thread(_artist_weights, user_id, 365, 90.0)
+    if only is not None:
+        weights = Counter({a: w for a, w in weights.items() if a in only})
     with Session(engine) as s:
         all_known = {
             _normalize(n)
@@ -549,14 +554,102 @@ async def build_artist_discovery(user_id: str) -> int:
     return len(ids)
 
 
+# Celá alba napříč žánry pro nový / mladý profil: Last.fm štítek žánru.
+# Každý den jiné žánry (podle profilu jinak), z každého jedno uznávané album.
+ALBUM_GENRES = {
+    "rock": "rocku", "folk": "folku", "jazz": "jazzu", "electronic": "elektroniky", "hip-hop": "hip hopu",
+    "soul": "soulu", "indie": "indie", "blues": "blues", "bluegrass": "bluegrassu", "classical": "vážné hudby",
+    "pop": "popu", "metal": "metalu", "singer-songwriter": "písničkářů", "punk": "punku", "country": "country",
+    "ambient": "ambientu", "reggae": "reggae", "funk": "funku", "post-rock": "post-rocku", "czech": "české hudby",
+}
+ALBUM_PICKS_SIZE = 14
+# Podíl alb napříč žánry podle potvrzeného vkusu: bez dat celá řada, s
+# přibývajícími potvrzenými interprety klesá (12 -> jen čtvrtina) a u
+# zaběhlého profilu (activation.YOUNG_PROFILE) zmizí.
+EXPLORE_FULL_AT = 12
+EXPLORE_MIN = 0.25
+
+
+def _taste_confidence(user_id: str) -> tuple[bool, set[str]]:
+    """(mladý profil, potvrzení interpreti). Potvrzený = srdíčko, knihovna,
+    oblíbený interpret, nebo se k němu vrací opakovaně po delší době --
+    zkoušení ani puštění pro někoho sekci neurčí (activation.confirmation)."""
+    from app.home import activation as av
+    from app.home.play_now import _chosen_tracks, _rec_meta
+
+    act = av.compute(user_id)
+    with Session(engine) as s:
+        chosen = _chosen_tracks(s, user_id, 300)
+        favorites = set(s.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all())
+    confirmed = {aid for aid, _t in _rec_meta(chosen).values() if aid} | favorites
+    confirmed |= {a for a, (n, span) in act.artist_days().items() if av.confirmation(n, span) >= 1.0}
+    return len(act.timeline) < av.YOUNG_PROFILE, confirmed
+
+
+def explore_share(young: bool, confirmed: int) -> float:
+    if not young:
+        return 0.0
+    return max(EXPLORE_MIN, 1.0 - confirmed / EXPLORE_FULL_AT)
+
+
+def blend(canon: list, personal: list, share: float) -> list:
+    """Promíchat tak, aby v každém začátku řady byl podíl `share` napříč
+    žánry (a zbytek osobní); když jedna strana dojde, pokračuje druhá."""
+    out: list = []
+    ci, pi = list(canon), list(personal)
+    taken_canon = 0
+    while ci or pi:
+        want_canon = taken_canon < share * (len(out) + 1)
+        if ci and (want_canon or not pi):
+            out.append(ci.pop(0))
+            taken_canon += 1
+        else:
+            out.append(pi.pop(0))
+    return out
+
+
+async def _genre_canon(user_id: str, n: int, heard: set[str]) -> list[dict[str, str]]:
+    """Uznávaná alba z `n` různých žánrů (Last.fm nejposlouchanější alba
+    žánru), jednou denně jinak, bez už slyšených."""
+    from app.catalog import lastfm
+
+    if n <= 0:
+        return []
+    rng = random.Random(f"album-canon:{user_id}:{utcnow().date().isoformat()}")
+    genres = list(ALBUM_GENRES)
+    rng.shuffle(genres)
+    out: list[dict[str, str]] = []
+    seen_artists: set[str] = set()
+    for tag in genres:
+        if len(out) >= n:
+            break
+        try:
+            albums = await lastfm.tag_top_albums(tag, 20)
+        except Exception:  # noqa: BLE001
+            continue
+        fresh = [
+            a for a in albums[:12]
+            if _normalize(a["title"]) not in heard and _normalize(a["artist"]) not in seen_artists
+        ]
+        if fresh:
+            pick = rng.choice(fresh)
+            seen_artists.add(_normalize(pick["artist"]))
+            out.append({**pick, "reason": f"Klasika {ALBUM_GENRES[tag]}"})
+    return out
+
+
 async def build_album_picks(user_id: str) -> int:
     """Celá alba k poslechu od začátku do konce: nejlepší album podobných
     interpretů, které neznáš, střídavě s nejoblíbenějšími alby tvých
-    interpretů, která jsi ještě neslyšel."""
+    interpretů, která jsi ještě neslyšel. Nový / mladý profil k tomu (bez
+    dat jen) uznávaná alba napříč žánry -- a jak přibývá potvrzený vkus,
+    řada se pomalu přiklání k němu."""
     from app import browse
     from app.catalog import lastfm
 
-    ranked, _known, top = await _similar_unknown(user_id)
+    young, confirmed = await asyncio.to_thread(_taste_confidence, user_id)
+    share = explore_share(young, len(confirmed))
+    ranked, _known, top = await _similar_unknown(user_id, only=confirmed if young else None)
     with Session(engine) as s:
         heard_albums = {
             _normalize(t)
@@ -566,19 +659,39 @@ async def build_album_picks(user_id: str) -> int:
         }
     sem = asyncio.Semaphore(5)
 
-    async def best(name: str, n: int) -> list[dict[str, str]]:
+    async def best(name: str, n: int, reason: str) -> list[dict[str, str]]:
         async with sem:
             albums = await lastfm.top_albums(name, n)
-        return [{"artist": name, "title": a["title"]} for a in albums if _normalize(a["title"]) not in heard_albums and a.get("title")]
+        return [
+            {"artist": name, "title": a["title"], "reason": reason}
+            for a in albums if _normalize(a["title"]) not in heard_albums and a.get("title")
+        ]
 
-    new_artists = [a[:1] for a in await asyncio.gather(*(best(n, 2) for n in ranked[:10]))]
-    own_artists = [a[:1] for a in await asyncio.gather(*(best(n, 6) for n in top[:10]))]
-    items: list[dict[str, str]] = []
+    new_artists = [a[:1] for a in await asyncio.gather(*(best(n, 2, "Nový interpret pro tebe") for n in ranked[:10]))]
+    own_artists = [
+        a[:1] for a in await asyncio.gather(*(best(n, 6, f"Tohle od {n} jsi ještě neslyšel") for n in top[:10]))
+    ]
+    personal: list[dict[str, str]] = []
     for pair in zip(new_artists, own_artists):
         for group in pair:
-            items += group
-    ids = await browse._resolve_albums(items, 14)
-    _save(user_id, "album_picks", {"title": "Celá alba pro tebe", "kind": "albums", "ids": ids})
+            personal += group
+    explore_n = round(ALBUM_PICKS_SIZE * share)
+    # Rezerva na alba, která na Deezeru nenajdeme.
+    canon = await _genre_canon(user_id, explore_n + 4 if explore_n else 0, heard_albums)
+    items = blend(canon, personal, share)
+    ids = await browse._resolve_albums(items, ALBUM_PICKS_SIZE)
+    # Proč tohle album (štítek; ve variantě "Jedno album" pod názvem).
+    reason_of = {(_normalize(i["artist"]), _normalize(i["title"])): i.get("reason") or "" for i in items}
+    badges: dict[str, str] = {}
+    with Session(engine) as s:
+        for rid in ids:
+            rel = s.get(Release, rid)
+            artist = s.get(Artist, rel.artist_id) if rel else None
+            if rel and artist and (r := reason_of.get((_normalize(artist.name), _normalize(rel.title)))):
+                badges[rid] = r
+    # "pro tebe" až s nějakým potvrzeným vkusem -- bez dat by to nebyla pravda.
+    title = "Celá alba pro tebe" if confirmed or not young else "Celá alba k poslechu"
+    _save(user_id, "album_picks", {"title": title, "kind": "albums", "ids": ids, "badges": badges})
     return len(ids)
 
 

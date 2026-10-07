@@ -21,10 +21,10 @@ def _sections(*ids):
 
 def test_newcomer_order_genres_on_and_setup_last():
     user = "nc-" + _RUN
-    secs = _sections("continue", "charts", "new_releases", "genres", "quick_picks", "czech", "newcomer_setup", "album_spotlight")
+    secs = _sections("continue", "charts", "new_releases", "genres", "quick_picks", "czech", "newcomer_setup", "album_picks")
     with Session(engine) as s:
         out = [x["id"] for x in svc.apply_layout(s, user, secs)]
-    assert out[:3] == ["continue", "quick_picks", "album_spotlight"]
+    assert out[:3] == ["continue", "quick_picks", "album_picks"]
     assert out.index("genres") < out.index("new_releases") < out.index("charts")
     assert out[-1] == "newcomer_setup"
 
@@ -85,3 +85,28 @@ def test_start_from_artist_plays_their_top_then_similar(monkeypatch):
     assert out["recordingIds"][:2] == top_ids[:2]
     assert sim_ids[0] in out["recordingIds"] and sim_ids[1] not in out["recordingIds"]  # 1 na interpreta
     assert out["reason"].startswith("Začínám od Start")
+
+
+def test_album_picks_explore_share_shrinks_with_confirmed_taste():
+    from app.home.extra_sections import blend, explore_share
+
+    assert explore_share(True, 0) == 1.0
+    assert explore_share(True, 6) == 0.5
+    assert explore_share(True, 40) == 0.25  # mladý profil: aspoň čtvrtina napříč žánry
+    assert explore_share(False, 0) == 0.0  # zaběhlý profil: jen podle vkusu
+    row = blend(list("CCCCCCCC"), list("pppppppp"), 0.25)[:8]
+    assert row.count("C") == 2 and row[0] == "C"
+    assert blend(["C1"], [], 0.25) == ["C1"]
+
+
+def test_album_picks_display_mode_in_layout():
+    from app.models import HomeSnapshot
+
+    user = "nc-mode-" + _RUN
+    entry = next(e for e in svc.layout_entries(user) if e["id"] == "album_picks")
+    assert entry["mode"] == "row" and entry["visible"]  # nováček: řada, zapnutá
+    with Session(engine) as s:
+        s.add(HomeSnapshot(key=svc.layout_key(user), payload={"order": [], "visible": {}, "display": {"album_picks": "one"}}))
+        s.commit()
+    entry = next(e for e in svc.layout_entries(user) if e["id"] == "album_picks")
+    assert entry["mode"] == "one"

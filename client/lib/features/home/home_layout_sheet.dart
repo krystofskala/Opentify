@@ -15,10 +15,12 @@ Future<void> showHomeLayoutSheet(BuildContext context) =>
     showGlassSheet<void>(context, builder: (_) => const _HomeLayoutSheet());
 
 class _Entry {
-  _Entry(this.id, this.title, this.visible);
+  _Entry(this.id, this.title, this.visible, this.mode);
   final String id;
   final String title;
   bool visible;
+  // Podoba sekce, má-li volbu (Celá alba: "row" řada / "one" jedno album).
+  String? mode;
 }
 
 class _HomeLayoutSheet extends ConsumerStatefulWidget {
@@ -46,7 +48,12 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
       setState(() {
         _entries = [
           for (final s in (json['sections'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
-            _Entry(s['id'] as String, s['title'] as String? ?? '', s['visible'] as bool? ?? true),
+            _Entry(
+              s['id'] as String,
+              s['title'] as String? ?? '',
+              s['visible'] as bool? ?? true,
+              s['mode'] as String?,
+            ),
         ];
       });
     } catch (e) {
@@ -66,6 +73,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
             : {
                 'order': [for (final e in entries) e.id],
                 'hidden': [for (final e in entries) if (!e.visible) e.id],
+                'modes': {for (final e in entries) if (e.mode != null) e.id: e.mode},
               },
       );
       ref.invalidate(homeProvider);
@@ -176,6 +184,23 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
                                 ? null
                                 : TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6)),
                           ),
+                          // Celá alba: řada, nebo jedno album na celý poslech.
+                          subtitle: e.mode == null || !e.visible
+                              ? null
+                              : Padding(
+                                  padding: const EdgeInsets.only(top: AppSpacing.xxs),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: GlassSegmentedControl<String>(
+                                      segments: const [
+                                        GlassSegment(value: 'row', label: 'Řada'),
+                                        GlassSegment(value: 'one', label: 'Jedno album'),
+                                      ],
+                                      selected: e.mode!,
+                                      onChanged: (m) => setState(() => e.mode = m),
+                                    ),
+                                  ),
+                                ),
                           trailing: Switch(
                             value: e.visible,
                             onChanged: (on) => setState(() => e.visible = on),

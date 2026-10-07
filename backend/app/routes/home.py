@@ -507,6 +507,8 @@ async def unpin_quick(target_id: str, kind: str = "playlist", current: tuple[str
 class HomeLayoutIn(BaseModel):
     order: list[str]
     hidden: list[str] = []
+    # Podoba sekcí s volbou ({"album_picks": "row" | "one"}).
+    modes: dict[str, str] = {}
 
 
 class NewcomerDismissIn(BaseModel):
@@ -550,7 +552,7 @@ def home_layout(current: tuple[str, str] = Depends(get_current_user)):
 
 @home_router.put("/layout")
 async def set_home_layout(body: HomeLayoutIn, current: tuple[str, str] = Depends(get_current_user)):
-    from app.home.service import invalidate_home_cache, layout_entries, layout_key
+    from app.home.service import DISPLAY_MODES, invalidate_home_cache, layout_entries, layout_key
     from app.models import HomeSnapshot
     from app.utils import utcnow
 
@@ -563,7 +565,11 @@ async def set_home_layout(body: HomeLayoutIn, current: tuple[str, str] = Depends
     with Session(engine) as session:
         row = session.get(HomeSnapshot, layout_key(current[0])) or HomeSnapshot(key=layout_key(current[0]))
         # Zavřené karty nováčka (Import / Uprav Domů) se úpravou nesmažou.
-        row.payload = {"order": order, "visible": visible, "dismissed": list((row.payload or {}).get("dismissed") or [])}
+        display = {sid: m for sid, m in body.modes.items() if m in DISPLAY_MODES.get(sid, ())} if order else {}
+        row.payload = {
+            "order": order, "visible": visible, "display": display,
+            "dismissed": list((row.payload or {}).get("dismissed") or []),
+        }
         row.generated_at = utcnow()
         session.add(row)
         session.commit()

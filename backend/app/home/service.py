@@ -160,8 +160,19 @@ def _last_success(name: str) -> datetime | None:
 # Album na celý poslech, Žánry, Nová vydání, Žebříčky, Česká hudba a na konci
 # karty Import + Uprav Domů. Mění se samo podle dat, bez oznámení.
 NEWCOMER_ORDER = [
-    "continue", "quick_picks", "album_spotlight", "genres", "new_releases", "charts", "czech",
+    "continue", "quick_picks", "album_picks", "genres", "new_releases", "charts", "czech",
 ]
+# Nováčkovi zapnuté, dokud si je sám nevypne (jinak výchozí vypnuté).
+NEWCOMER_ON = ("genres", "album_picks")
+
+
+def newcomer_layout(layout: dict[str, Any]) -> dict[str, Any]:
+    """Rozložení nováčka: Žánry k prozkoumání a Celá alba zapnuté, pokud
+    o nich profil sám nerozhodl."""
+    visible = dict(layout["visible"])
+    for sid in NEWCOMER_ON:
+        visible.setdefault(sid, True)
+    return {**layout, "visible": visible}
 
 
 def is_newcomer(session: Session, user_id: str) -> bool:
@@ -677,10 +688,19 @@ def build_home(user_id: str) -> dict[str, Any]:
         from app.home.picks import RAILS
 
         layout = get_layout(session, user_id)
+        if newcomer:
+            layout = newcomer_layout(layout)
         for spec in xs.SPECS:
             if spec.id not in RAILS and is_visible(layout, spec.id):
                 try:
-                    sections += xs.render(session, user_id, spec.id)
+                    rendered = xs.render(session, user_id, spec.id)
+                    if spec.id == "album_picks" and layout["display"].get("album_picks") == "one":
+                        # Jedno album na celý poslech: první z doporučení.
+                        rendered = [
+                            {**sec, "title": "Album na celý poslech", "type": "album_spotlight", "items": sec["items"][:1]}
+                            for sec in rendered
+                        ]
+                    sections += rendered
                 except Exception:  # noqa: BLE001 - jedna sekce nesmí shodit Domů
                     logger.exception("sekce %s se nepodařilo vykreslit", spec.id)
 
@@ -689,21 +709,6 @@ def build_home(user_id: str) -> dict[str, Any]:
             sections.append(picks_section)
 
         if newcomer:
-            from app.home import album_spotlight
-
-            spot = album_spotlight.current(session, user_id)
-            release = session.get(Release, spot["releaseId"]) if spot and spot.get("releaseId") else None
-            if release is not None:
-                artist = session.get(Artist, release.artist_id)
-                card = AlbumCardOut(
-                    id=release.id, title=release.title, artist_id=release.artist_id,
-                    artist_name=artist.name if artist else None, release_date=release.release_date,
-                    release_type=release.release_type, images=release.images or [],
-                ).model_dump(mode="json", by_alias=True)
-                sections.append({
-                    "id": "album_spotlight", "title": "Album na celý poslech", "type": "album_spotlight",
-                    "items": [{**card, "reason": spot.get("reason") or ""}],
-                })
             layout_now = get_layout(session, user_id)
             dismissed = _newcomer_dismissed(layout_now)
             setup = [k for k in ("import", "customize") if k not in dismissed]
@@ -742,7 +747,17 @@ def get_layout(session: Session, user_id: str) -> dict[str, Any]:
     visible = dict(payload.get("visible") or {})
     for sid in payload.get("hidden") or []:  # starší tvar (jen skryté)
         visible.setdefault(sid, False)
-    return {"order": list(payload.get("order") or []), "visible": visible, "dismissed": list(payload.get("dismissed") or [])}
+    return {
+        "order": list(payload.get("order") or []),
+        "visible": visible,
+        "dismissed": list(payload.get("dismissed") or []),
+        "display": dict(payload.get("display") or {}),
+    }
+
+
+# Sekce s volbou podoby (Profil › Domů): Celá alba jako řada, nebo jedno album
+# na celý poslech (první z doporučení, velká karta).
+DISPLAY_MODES = {"album_picks": ("row", "one")}
 
 
 def is_visible(layout: dict[str, Any], section_id: str) -> bool:
@@ -756,7 +771,10 @@ def section_enabled(user_id: str, section_id: str) -> bool:
         # Chytrý seznam se generuje, když je připnutý v "Tvoje výběry".
         if section_id in picks.RAILS:
             return f"rail:{section_id}" in picks.get(session, user_id)
-        return is_visible(get_layout(session, user_id), section_id)
+        layout = get_layout(session, user_id)
+        if section_id in NEWCOMER_ON and section_id not in layout["visible"] and is_newcomer(session, user_id):
+            return True
+        return is_visible(layout, section_id)
 
 
 def _layout_id(section_id: str) -> str:
@@ -781,7 +799,6 @@ def default_entries(user_id: str, include_rails: bool = False) -> list[tuple[str
     out: list[tuple[str, str]] = [
         ("continue", "Pokračovat v poslechu"),
         ("quick_picks", "Rychlý výběr"),
-        ("album_spotlight", "Album na celý poslech"),
         ("track_mixes", TRACK_MIXES_TITLE),
     ]
     if "now_mix" in extra:
@@ -825,25 +842,17 @@ def apply_layout(session: Session, user_id: str, sections: list[dict[str, Any]])
     layout = get_layout(session, user_id)
     order = effective_order(user_id, layout)
     ids = {s["id"] for s in sections}
-    newcomer = "newcomer_setup" in ids or "album_spotlight" in ids or (
-        not layout["order"] and is_newcomer(session, user_id)
-    )
+    newcomer = "newcomer_setup" in ids or (not layout["order"] and is_newcomer(session, user_id))
     if newcomer:
-        # Nováček: Žánry k prozkoumání zapnuté, dokud nemá osobní mixy žánrů
-        # (pokud si je sám nevypnul) -- a pevné pořadí, když si žádné neuložil.
-        layout = {**layout, "visible": dict(layout["visible"])}
-        if "genres" not in layout["visible"] and "category_mixes" not in ids:
-            layout["visible"]["genres"] = True
+        # Nováček: Žánry k prozkoumání a Celá alba zapnuté, dokud nemá osobní
+        # mixy (pokud si je sám nevypnul) -- a pevné pořadí, když si žádné
+        # neuložil.
+        layout = newcomer_layout(layout)
         if not layout["order"]:
             order = NEWCOMER_ORDER + [sid for sid in order if sid not in NEWCOMER_ORDER]
     order = [sid for sid in order if sid != "newcomer_setup"] + ["newcomer_setup"]  # karty vždy na konci
     pos = {sid: i for i, sid in enumerate(order)}
-    visible = [
-        s for s in sections
-        if s["id"] == "newcomer_setup"
-        or (s["id"] == "album_spotlight" and layout["visible"].get("album_spotlight", True))
-        or (s["id"] != "album_spotlight" and is_visible(layout, _layout_id(s["id"])))
-    ]
+    visible = [s for s in sections if s["id"] == "newcomer_setup" or is_visible(layout, _layout_id(s["id"]))]
     ordered = [s for _p, _i, s in sorted(((pos.get(_layout_id(s["id"]), 10_000), i, s) for i, s in enumerate(visible)), key=lambda k: (k[0], k[1]))]
     return _collapse_track_rails(session, user_id, ordered)
 
@@ -970,10 +979,46 @@ def layout_entries(user_id: str) -> list[dict[str, Any]]:
     titles = dict(default_entries(user_id))
     with Session(engine) as session:
         layout = get_layout(session, user_id)
+        newcomer = is_newcomer(session, user_id)
+    order = effective_order(user_id, layout)
+    if newcomer:
+        # Ukázat to, co nováček na Domů opravdu vidí (zapnuté a pořadí).
+        layout = newcomer_layout(layout)
+        if not layout["order"]:
+            order = [sid for sid in NEWCOMER_ORDER if sid in order] + [sid for sid in order if sid not in NEWCOMER_ORDER]
     return [
-        {"id": sid, "title": titles.get(sid, sid), "visible": is_visible(layout, sid)}
-        for sid in effective_order(user_id, layout)
+        {
+            "id": sid, "title": titles.get(sid, sid), "visible": is_visible(layout, sid),
+            **({"mode": layout["display"].get(sid, DISPLAY_MODES[sid][0])} if sid in DISPLAY_MODES else {}),
+        }
+        for sid in order
     ]
+
+
+_album_tasks: dict[str, asyncio.Task] = {}
+
+
+def _newcomer_needs_albums(user_id: str) -> bool:
+    from app.home import extra_sections as xs
+
+    with Session(engine) as session:
+        if not is_newcomer(session, user_id) or get_layout(session, user_id)["visible"].get("album_picks") is False:
+            return False
+    return not xs._fresh(user_id, xs._BY_ID["album_picks"])
+
+
+def _ensure_newcomer_albums(user_id: str) -> None:
+    from app.home import extra_sections as xs
+
+    task = _album_tasks.get(user_id)
+    if task is not None and not task.done():
+        return
+
+    async def run() -> None:
+        await xs.build_now(user_id, ["album_picks"])
+        await invalidate_home_cache_for(user_id)
+
+    _album_tasks[user_id] = asyncio.get_running_loop().create_task(run())
 
 
 async def get_home(user_id: str) -> dict[str, Any]:
@@ -985,21 +1030,13 @@ async def get_home(user_id: str) -> dict[str, Any]:
         finally:
             g.reset_home_user(token)
 
-    # Album na celý poslech (nováček): dnešní sestavit na pozadí, Domů ho
-    # ukáže hned, jak bude (a cache Domů se pak zneplatní).
-    def _needs_spotlight() -> bool:
-        from app.home import album_spotlight
-
-        with Session(engine) as session:
-            return is_newcomer(session, user_id) and not album_spotlight.fresh(album_spotlight.current(session, user_id))
-
+    # Celá alba (nováček): nový profil nečeká na běh registru -- dnešní
+    # řadu sestavit hned na pozadí, Domů ji ukáže, jak bude hotová.
     try:
-        if await asyncio.to_thread(_needs_spotlight):
-            from app.home import album_spotlight
-
-            album_spotlight.ensure(user_id)
+        if await asyncio.to_thread(_newcomer_needs_albums, user_id):
+            _ensure_newcomer_albums(user_id)
     except Exception:  # noqa: BLE001 -- Domů nesmí spadnout kvůli doplňku
-        logger.exception("album na celý poslech")
+        logger.exception("celá alba pro nováčka")
     # Hned z uložené verze, starší než 5 min se obnoví na pozadí (dřív se
     # při prvním načtení čekalo na sestavení -- s víc lidmi naráz až 10 s).
     return await cached_json_swr(f"home:{user_id}", HOME_CACHE_TTL_S, build, keep_seconds=HOME_KEEP_S)
