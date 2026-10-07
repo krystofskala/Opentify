@@ -14,5 +14,15 @@ awk '{print} /^\[Preferences\]$/ {
   print "WebUI\\AuthSubnetWhitelist=172.28.0.0/16"
   print "WebUI\\HostHeaderValidation=false"
 }' "$tmp" > "$CONF"
+# Jen přes tunel VPN (tun0): po přepojení gluetun na jiný server se
+# qBittorrent sám převáže na novou adresu. Bez toho zůstal viset na starém
+# spojení -- trackery "timed out" / "Operation not permitted", 0 uzlů DHT,
+# české knihy se nestahovaly (7. 10.).
+grep -v -F -e 'Session\Interface=' -e 'Session\InterfaceName=' "$CONF" > "$tmp" || true
+if ! grep -q '^\[BitTorrent\]' "$tmp"; then printf '\n[BitTorrent]\n' >> "$tmp"; fi
+awk '{print} /^\[BitTorrent\]$/ {
+  print "Session\\Interface=tun0"
+  print "Session\\InterfaceName=tun0"
+}' "$tmp" > "$CONF"
 rm -f "$tmp"
 chown abc:abc "$CONF" 2>/dev/null || true

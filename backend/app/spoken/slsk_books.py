@@ -103,34 +103,58 @@ async def start(user: str, files: list[dict]) -> None:
             resp.raise_for_status()
 
 
-async def progress(user: str, files: list[dict]) -> tuple[float, str]:
-    """(podíl stažených bajtů, stav): downloading | done | failed."""
+# Kolikrát zkusit soubor znovu po přechodné chybě (uživatel chvíli offline,
+# nespojilo se, vypršelo). Dřív jedna taková chyba shodila celou knihu, i když
+# zbytek byl stažený nebo ve frontě (živě 7. 10.: Heir to the Empire 3/4).
+MAX_ATTEMPTS = 3
+
+
+def judge(transfers_by_file: dict[str, list[dict]], files: list[dict]) -> tuple[float, str, list[dict], str | None]:
+    """(podíl, stav, soubory ke znovuzařazení, důvod selhání).
+    Stav: downloading | done | retry | failed."""
+    total = sum(f["size"] for f in files) or 1
+    latest = {
+        name: max(entries, key=lambda t: str(t.get("requestedAt", "")))
+        for name, entries in transfers_by_file.items() if entries
+    }
+    if not latest:
+        return 0.0, "failed", [], "Soulseek: stažení se nepodařilo zařadit, zkus jinou verzi"
+    done = sum(int(t.get("bytesTransferred") or 0) for t in latest.values())
+    retry: list[dict] = []
+    for f in files:
+        t = latest.get(f["filename"])
+        state = str((t or {}).get("state") or "")
+        if t is None or "Succeeded" in state or "Completed" not in state:
+            continue
+        if "Rejected" in state:
+            return done / total, "failed", [], "Soulseek: uživatel tyhle soubory nesdílí, zkus jinou verzi"
+        if len(transfers_by_file.get(f["filename"]) or []) >= MAX_ATTEMPTS:
+            return done / total, "failed", [], "Soulseek: uživatel je nedostupný, zkus jinou verzi"
+        retry.append(f)
+    if retry:
+        return min(done / total, 0.99), "retry", retry, None
+    if len(latest) == len(files) and all("Succeeded" in str(t.get("state")) for t in latest.values()):
+        return 1.0, "done", [], None
+    return min(done / total, 0.99), "downloading", [], None
+
+
+async def progress(user: str, files: list[dict]) -> tuple[float, str, list[dict], str | None]:
+    """Viz `judge`; navíc 404 = slskd o stahování od uživatele neví."""
     slskd = SlskdProvider()
     wanted = {f["filename"] for f in files}
-    total = sum(f["size"] for f in files) or 1
     async with httpx.AsyncClient(base_url=slskd.base_url, headers=slskd._headers(), timeout=20) as c:
         resp = await c.get(f"/api/v0/transfers/downloads/{_seg(user)}")
         if resp.status_code == 404:
-            return 0.0, "failed"
+            return 0.0, "failed", [], "Soulseek: stažení od tohoto uživatele se ztratilo, zkus jinou verzi"
         resp.raise_for_status()
         data = resp.json()
-    # Nejnovější záznam každého souboru (starší pokusy v seznamu zůstávají).
-    latest: dict[str, dict] = {}
+    # Všechny pokusy o každý soubor (počet = kolikrát už se zkoušel).
+    by_file: dict[str, list[dict]] = defaultdict(list)
     for d in data.get("directories") or []:
         for t in d.get("files") or []:
-            name = t.get("filename")
-            if name in wanted and str(t.get("requestedAt", "")) >= str(latest.get(name, {}).get("requestedAt", "")):
-                latest[name] = t
-    transfers = list(latest.values())
-    if not transfers:
-        return 0.0, "failed"
-    done = sum(int(t.get("bytesTransferred") or 0) for t in transfers)
-    states = [str(t.get("state") or "") for t in transfers]
-    if any("Completed" in s and "Succeeded" not in s for s in states):
-        return done / total, "failed"
-    if len(transfers) == len(wanted) and all("Succeeded" in s for s in states):
-        return 1.0, "done"
-    return min(done / total, 0.99), "downloading"
+            if t.get("filename") in wanted:
+                by_file[t["filename"]].append(t)
+    return judge(by_file, files)
 
 
 async def collect(files: list[dict], dest: Path) -> int:
