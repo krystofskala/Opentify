@@ -383,6 +383,48 @@ final spokenWorkProvider =
 String spokenWorkPath(String title, String author) =>
     Uri(path: '/spoken/work', queryParameters: {'title': title, 'author': author}).toString();
 
+/// Srdíčka mluveného slova: celé knihy (id) a autoři / interpreti
+/// ("author:jméno" / "narrator:jméno", bez diakritiky -- skládá server).
+typedef SpokenFavorites = ({Set<String> books, Set<String> people});
+
+final spokenFavoritesProvider = FutureProvider.autoDispose<SpokenFavorites>((ref) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/favorites');
+  return _favoritesFrom(json);
+});
+
+SpokenFavorites _favoritesFrom(Map<String, dynamic> json) => (
+      books: {for (final b in json['books'] as List<dynamic>? ?? const []) b as String},
+      people: {
+        for (final p in (json['people'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>()) p['ref'] as String,
+      },
+    );
+
+/// Klíč osoby stejně jako server (`person_ref`): bez diakritiky, malá písmena.
+String spokenPersonRef(String name, {bool narrator = false}) {
+  const from = 'áäčďéěëíňóöřšťúůüýžÁÄČĎÉĚËÍŇÓÖŘŠŤÚŮÜÝŽøØłŁ';
+  const to = 'aacdeeeinoorstuuuyzaacdeeeinoorstuuuyzoOlL';
+  final buf = StringBuffer();
+  for (final ch in name.split('')) {
+    final i = from.indexOf(ch);
+    buf.write(i >= 0 ? to[i] : ch);
+  }
+  final folded = buf.toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
+  return '${narrator ? 'narrator' : 'author'}:$folded';
+}
+
+/// Srdíčko knihy / osoby zapnout nebo vypnout.
+Future<void> setSpokenFavorite(WidgetRef ref, {String? bookId, String? person, bool narrator = false, required bool on}) async {
+  await ref.read(apiClientProvider).putJson('/spoken/favorites', body: {
+    'kind': bookId != null ? 'book' : 'person',
+    if (bookId != null) 'ref': bookId,
+    if (person != null) 'name': person,
+    if (person != null) 'role': narrator ? 'narrator' : 'author',
+    'on': on,
+  });
+  ref.invalidate(spokenFavoritesProvider);
+  if (bookId != null) ref.invalidate(spokenBooksProvider);
+}
+
 /// Cesta na stránku autora / interpreta.
 String spokenPersonPath(String name, {bool narrator = false}) =>
     Uri(path: '/spoken/person', queryParameters: {'name': name, if (narrator) 'role': 'narrator'}).toString();

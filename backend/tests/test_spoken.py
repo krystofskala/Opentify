@@ -411,3 +411,28 @@ def test_tidy_tag_fixes_cp1250_and_all_caps():
     assert tidy_tag("ANDRZEJ SAPKOWSKI", "/x", person=True) == "Andrzej Sapkowski"
     assert tidy_tag("Crème brûlée", "/x/a.mp3") == "Crème brûlée"
     assert tidy_tag("Saturnin", "/x") == "Saturnin"
+
+
+def test_favorites_book_makes_it_mine_and_person_by_folded_name(eng, monkeypatch):
+    import app.routes.spoken as rs
+
+    monkeypatch.setattr("app.db.engine", eng)
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref=HASH_A, release_title="x", title="Saturnin", status="ready", requested_by_user_id="dad"))
+        s.commit()
+        assert routes.books(session=s, current=("me", "d"))["books"][0]["mine"] is False
+        rs.set_favorite(rs.FavoriteIn(kind="book", ref="b1"), session=s, current=("me", "d"))
+        item = routes.books(session=s, current=("me", "d"))["books"][0]
+        assert item["mine"] is True and item["favorite"] is True
+        out = rs.set_favorite(rs.FavoriteIn(kind="person", name="Zdeněk Jirotka"), session=s, current=("me", "d"))
+        assert out["people"] == [{"ref": "author:zdenek jirotka", "name": "Zdeněk Jirotka"}]
+        rs.set_favorite(rs.FavoriteIn(kind="person", name="Zdenek Jirotka", on=False), session=s, current=("me", "d"))
+        rs.set_favorite(rs.FavoriteIn(kind="book", ref="b1", on=False), session=s, current=("me", "d"))
+        assert rs.favorites(session=s, current=("me", "d")) == {"books": [], "people": []}
+
+
+def test_person_ref_matches_app_folding():
+    from app.routes.spoken import person_ref
+
+    assert person_ref("J. R. R. Tolkien", "author") == "author:j r r tolkien"
+    assert person_ref("Jo Nesbø", "narrator") == "narrator:jo nesbo"

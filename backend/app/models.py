@@ -612,6 +612,19 @@ class SpokenProgress(SQLModel, table=True):
     finished: bool = False
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
+class SpokenFavorite(SQLModel, table=True):
+    """Srdíčko u mluveného slova: celá kniha (`kind=book`, `ref` = id knihy)
+    nebo autor / interpret (`kind=person`, `ref` = "author:jméno" /
+    "narrator:jméno", jméno bez diakritiky). Kapitola srdíčko nemá."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    kind: str = Field(index=True)  # book | person
+    ref: str = Field(index=True)
+    name: str | None = None  # u osoby zobrazované jméno
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 # --- Podcasty (app/podcasts/) ------------------------------------------------
 # Stejně oddělené od hudby jako audioknihy.
 

@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../spoken/spoken_heart.dart';
+
 import '../../widgets/like_heart.dart';
 import '../spoken/chapters_sheet.dart';
 import '../../state/audio_player_controller.dart';
@@ -1100,9 +1102,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         }
         return _sideButton(_SidePanel.lyrics, Symbols.lyrics_rounded, 'Text', accent, playback, fg);
       case PlayerButton.queue:
+        // Kniha: fronta = její kapitoly, ty má tlačítko Kapitoly (dvě stejné
+        // funkce byly matoucí, živě 8. 10.).
+        if (np != null && AudioPlayerController.spokenParts(np.recordingId) != null) return null;
         return _sideButton(_SidePanel.queue, Symbols.queue_music_rounded, 'Fronta', accent, playback, fg);
       case PlayerButton.like:
-        if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) return null;
+        if (np != null && AudioPlayerController.isSpokenId(np.recordingId)) {
+          // Srdíčko celé knihy (kapitola ho nemá); podcast zatím nic.
+          final parts = AudioPlayerController.spokenParts(np.recordingId);
+          return parts == null ? null : SpokenHeart(bookId: parts.bookId, size: 22, color: idle);
+        }
         return _likeButton(playback, fg);
       case PlayerButton.later:
         final later = np != null &&

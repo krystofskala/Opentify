@@ -30,6 +30,7 @@ import '../../widgets/glass/glass_sheet.dart';
 import 'podcast_data.dart';
 import 'podcast_screens.dart';
 import 'spoken_data.dart';
+import 'spoken_heart.dart';
 
 /// Režim mluveného slova (audioknihy) -- Domů, Hledání, Knihovna a detail
 /// knihy. Přehrávač je společný s hudbou; poslech knih se nikam nepočítá.
@@ -1095,7 +1096,13 @@ class SpokenBookScreen extends ConsumerWidget {
             children: [
               Center(child: _Cover(url: book.coverUrl, size: 220)),
               const SizedBox(height: AppSpacing.md),
-              Text(book.title, style: theme.textTheme.headlineSmall, textAlign: TextAlign.center),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(child: Text(book.title, style: theme.textTheme.headlineSmall, textAlign: TextAlign.center)),
+                  SpokenHeart(bookId: book.id),
+                ],
+              ),
               // Autor a interpret (čte) -- klepnutím jejich stránka.
               if (book.author != null || book.narrator != null) ...[
                 const SizedBox(height: AppSpacing.xxs),
@@ -1425,7 +1432,12 @@ class SpokenPersonScreen extends ConsumerWidget {
                       _PersonAvatar(url: p.image, size: 140),
                       const SizedBox(height: AppSpacing.sm),
                     ],
-                    Text(p.name, style: theme.textTheme.headlineMedium),
+                    Row(
+                      children: [
+                        Flexible(child: Text(p.name, style: theme.textTheme.headlineMedium)),
+                        SpokenHeart(person: p.name, narrator: narrator),
+                      ],
+                    ),
                     if (p.description != null) Text(p.description!, style: muted),
                     Text(
                       [

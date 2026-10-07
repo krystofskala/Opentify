@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from app import download_limits, download_requests
 from app.auth import get_current_user
 from app.db import get_session
-from app.models import SpokenBook, SpokenFile, SpokenProgress
+from app.models import SpokenBook, SpokenFavorite, SpokenFile, SpokenProgress
 from app.public_access import deny_public, is_public
 from app.spoken import sktorrent, slsk_books
 from app.spoken.acquire import SPOKEN_ROOT, book_out
@@ -292,8 +292,18 @@ def books(session: Session = Depends(get_session), current: tuple[str, str] = De
     return {"books": _book_items(rows, progress, playable, current[0])}
 
 
+def _favorite_books(user_id: str) -> set[str]:
+    from app.db import engine
+
+    with Session(engine) as session:
+        return set(session.exec(
+            select(SpokenFavorite.ref).where(SpokenFavorite.user_id == user_id, SpokenFavorite.kind == "book")
+        ).all())
+
+
 def _book_items(rows, progress: dict, playable: dict[str, int], user_id: str) -> list[dict]:
     admin = download_limits.is_admin(user_id)
+    favorites = _favorite_books(user_id)
     out = []
     for b in rows:
         # Nepovedené stažení vidí jen ten, kdo o knihu žádal (a správce) --
@@ -307,7 +317,9 @@ def _book_items(rows, progress: dict, playable: dict[str, int], user_id: str) ->
         item["playableFiles"] = playable.get(b.id, 0)
         # Moje = o knihu jsem žádal, nebo ji poslouchám. Ostatní knihy na
         # serveru má Domů ve vlastní sekci (pustit hned, bez stahování).
-        item["mine"] = b.requested_by_user_id == user_id or p is not None
+        # + srdíčko: knihu si uložil do svých, i když ji ještě neposlouchá.
+        item["favorite"] = b.id in favorites
+        item["mine"] = b.requested_by_user_id == user_id or p is not None or item["favorite"]
         out.append(item)
     return out
 
@@ -355,6 +367,56 @@ async def work(title: str, author: str, current: tuple[str, str] = Depends(get_c
     if out.get("page") is None:
         raise HTTPException(status_code=404, detail="Knihu jsme v katalogu nenašli.")
     return out["page"]
+
+
+def person_ref(name: str, role: str) -> str:
+    """Bez diakritiky i interpunkce ("J. R. R. Tolkien" -> "j r r tolkien")
+    -- stejně skládá appka (`spokenPersonRef`)."""
+    from app.spoken.catalog import fold
+
+    return f"{'narrator' if role == 'narrator' else 'author'}:{fold(name)}"
+
+
+class FavoriteIn(BaseModel):
+    kind: str  # book | person
+    ref: str | None = None  # id knihy
+    name: str | None = None  # osoba
+    role: str = "author"
+    on: bool = True
+
+
+@spoken_router.get("/favorites")
+def favorites(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Srdíčka profilu: celé knihy a autoři / interpreti."""
+    rows = session.exec(select(SpokenFavorite).where(SpokenFavorite.user_id == current[0])).all()
+    return {
+        "books": [r.ref for r in rows if r.kind == "book"],
+        "people": [{"ref": r.ref, "name": r.name} for r in rows if r.kind == "person"],
+    }
+
+
+@spoken_router.put("/favorites")
+def set_favorite(body: FavoriteIn, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    if body.kind == "book":
+        if not body.ref or session.get(SpokenBook, body.ref) is None:
+            raise HTTPException(status_code=404, detail="kniha nenalezena")
+        ref, name = body.ref, None
+    elif body.kind == "person":
+        if not body.name or len(body.name.strip()) < 2:
+            raise HTTPException(status_code=400, detail="Chybí jméno.")
+        ref, name = person_ref(body.name, body.role), body.name.strip()
+    else:
+        raise HTTPException(status_code=400, detail="Neznámý druh.")
+    existing = session.exec(select(SpokenFavorite).where(
+        SpokenFavorite.user_id == current[0], SpokenFavorite.kind == body.kind, SpokenFavorite.ref == ref
+    )).all()
+    if body.on and not existing:
+        session.add(SpokenFavorite(user_id=current[0], kind=body.kind, ref=ref, name=name))
+    if not body.on:
+        for row in existing:
+            session.delete(row)
+    session.commit()
+    return favorites(session=session, current=current)
 
 
 @spoken_router.get("/search/local")
