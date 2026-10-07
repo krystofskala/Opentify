@@ -95,7 +95,7 @@ _CLASSIFY_BUDGET_BACKGROUND = 250
 _CLASSIFY_BUDGET_PAGE = 25
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_VERSION = 5  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
+_VERSION = 6  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
 
 
 def _source(category_id: str) -> str:
@@ -279,7 +279,7 @@ async def _genre_mix(c: Category, taste: pm.Taste, shares: dict[str, dict[str, f
     lasting = [(taste.artist_name.get(a) or "", w) for a, w in taste.artist_weight.most_common(300)]
     known_names = {taste_bridge._normalize(taste.artist_name.get(a) or "") for a in members}
     try:
-        items = await taste_bridge.bridge(styles, lasting, known_names, rng, n_artists=12)
+        items = await taste_bridge.bridge(styles, lasting, known_names, rng, n_artists=12, strict=True)
         near = [r for r in await tags._resolve_tracks(items, want) if r not in taste.known]
     except Exception:  # noqa: BLE001 -- objevy navíc, mix vznikne i bez nich
         logger.exception("most vkusu pro %s", c.id)

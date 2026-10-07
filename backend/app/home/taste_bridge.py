@@ -132,6 +132,7 @@ async def bridge(
     rng: random.Random,
     n_artists: int = 12,
     per_artist: int = 2,
+    strict: bool = False,
 ) -> list[dict[str, str]]:
     """(interpret, název) nejznámějších skladeb interpretů stylu, kteří
     nejvíc sedí k celému vkusu. `styles` = štítky Last.fm stylu / žánru,
@@ -157,9 +158,16 @@ async def bridge(
         n for n in dict.fromkeys(n for lst in lists if isinstance(lst, list) for n in lst)
         if _normalize(n) not in skip_names
     ]
+    def plays(tags: list[tuple[str, int]]) -> bool:
+        # `strict` = celý žánr (mixy kategorií): přísnější štítek (Frankie
+        # Valli má "jazz" 50 až na 4. místě).
+        if strict:
+            return any(strong_genre(tags, s) for s in names | set(fam))
+        return plays_style(tags, names, fam)
+
     cand_tags = [
         (n, tags) for n, tags in zip(candidates, await asyncio.gather(*(_tags_of(n, sem) for n in candidates)))
-        if plays_style(tags, names, fam)
+        if plays(tags)
     ]
     if not cand_tags:
         return []
@@ -242,9 +250,11 @@ async def not_playing(artist_ids: list[str], styles: list[str], limit: int = 120
     with Session(engine) as session:
         names = dict(session.exec(select(Artist.id, Artist.name).where(Artist.id.in_(ids))).all())  # type: ignore[attr-defined]
     sem = asyncio.Semaphore(6)
-    pairs = [(a, n) for a, n in names.items() if n]
+    # Kompilace ("Various Artists") štítky nemají a žánr podle nich nepoznáme.
+    various = {a for a, n in names.items() if n and "various artists" in n.lower()}
+    pairs = [(a, n) for a, n in names.items() if n and a not in various]
     tag_lists = await asyncio.gather(*(_tags_of(n, sem) for _a, n in pairs))
-    return {
+    return various | {
         a for (a, _n), tags in zip(pairs, tag_lists)
         if tags and not any(strong_genre(tags, s) for s in names_set | set(fam))
     }
