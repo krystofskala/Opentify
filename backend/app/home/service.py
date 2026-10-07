@@ -162,7 +162,7 @@ def _last_success(name: str) -> datetime | None:
 NEWCOMER_ORDER = [
     # "Vytvořeno pro tebe" (osobní mixy, jakmile vzniknou) hned pod Rychlý
     # výběr -- nové osobní sekce se vkládají nahoru, ostatní se jen posunou.
-    "continue", "quick_picks", "mixes", "album_picks", "genres", "new_releases", "charts", "czech",
+    "continue", "quick_picks", "mixes", "blends", "album_picks", "genres", "new_releases", "charts", "czech",
 ]
 # Nováčkovi zapnuté, dokud si je sám nevypne (jinak výchozí vypnuté).
 NEWCOMER_ON = ("genres", "album_picks")

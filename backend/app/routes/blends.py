@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -86,7 +85,7 @@ async def accept(blend_id: str, current: tuple[str, str] = Depends(get_current_u
         blend.status = "active"
         session.add(blend)
         session.commit()
-    await asyncio.to_thread(blends.build, blend_id)
+    await blends.build_async(blend_id)
     from app.home.service import invalidate_home_cache
 
     await invalidate_home_cache()
