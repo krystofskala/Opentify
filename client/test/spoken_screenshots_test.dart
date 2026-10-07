@@ -130,5 +130,22 @@ void main() {
           )),
       spokenForeignSearchProvider.overrideWith((ref, q) async => const <SpokenRelease>[]),
     ]);
+    await shoot(tester, '4_stranka_knihy', const SpokenWorkScreen(title: 'Saturnin', author: 'Zdeněk Jirotka'), [
+      spokenWorkProvider.overrideWith((ref, who) async => (
+            title: 'Saturnin',
+            author: 'Zdeněk Jirotka',
+            year: '1942',
+            seriesName: null,
+            seriesNumber: null,
+            summary: 'Humoristický román o tom, jak se do poklidného života vypravěče vloudí sluha Saturnin a s ním '
+                'nekonečná řada dobrodružství – povodeň, teta Kateřina, doktor Vlach a dědeček.',
+            editions: [
+              SpokenEdition({'bookId': 'b1', 'status': 'ready', 'releaseTitle': 'Saturnin', 'why': ['na serveru, pustíš hned', 'celé', 'nezkrácené', 'čte Svatopluk Beneš (posloucháš)']}),
+              SpokenEdition({'infohash': 'h1', 'title': 'Saturnin - Zdeněk Jirotka (2010) čte Oldřich Vízner', 'seeders': 10, 'why': ['celé', 'nezkrácené', 'čte Oldřich Vízner', '10 zdrojů']}),
+              SpokenEdition({'infohash': 'h2', 'title': 'Zdenek Jirotka - Saturnin (2011 CZ)', 'seeders': 1, 'why': ['celé', 'nezkrácené', '1 zdroj']}),
+              SpokenEdition({'infohash': 'h3', 'title': 'Zdenek Jirotka - Saturnin (2007)(CZ)', 'seeders': 0, 'why': ['celé', 'nezkrácené', 'teď nikdo nesdílí']}),
+            ],
+          )),
+    ]);
   });
 }

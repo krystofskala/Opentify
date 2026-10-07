@@ -32,3 +32,8 @@ def test_narrator_may_be_actor_author_must_write():
 def test_surname_first_and_alias():
     assert name_variants("Jirotka, Zdeněk") == {"jirotka, zdenek", "zdenek jirotka"}
     assert pick([entity("Q6", "Z. Jirotka", ["Q36180"], aliases=["Zdeněk Jirotka"])], "Jirotka, Zdeněk", "author")
+
+
+def test_special_letters_fold():
+    assert name_variants("Jo Nesbø") == {"jo nesbo"}
+    assert name_variants("Stanisław Lem") == {"stanislaw lem"}

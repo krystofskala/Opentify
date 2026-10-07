@@ -206,6 +206,13 @@ List<RouteBase> _detailRoutes() => [
         builder: (context, state) => SpokenBookScreen(bookId: state.pathParameters['bookId']!),
       ),
       GoRoute(
+        path: 'spoken/work',
+        builder: (context, state) => SpokenWorkScreen(
+          title: state.uri.queryParameters['title'] ?? '',
+          author: state.uri.queryParameters['author'] ?? '',
+        ),
+      ),
+      GoRoute(
         path: 'spoken/person',
         builder: (context, state) => SpokenPersonScreen(
           name: state.uri.queryParameters['name'] ?? '',

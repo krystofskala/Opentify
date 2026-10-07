@@ -335,6 +335,28 @@ def _names(field: str | None) -> list[str]:
     return out
 
 
+@spoken_router.get("/work")
+async def work(title: str, author: str, current: tuple[str, str] = Depends(get_current_user)):
+    """Stránka knihy: kniha z Knihovny.cz a všechna její vydání (SkTorrent
+    + kopie na serveru), doporučené nahoře s důvodem. Hodina v mezipaměti."""
+    from app.catalog.cache import cached_json
+    from app.spoken import works
+    from app.spoken.catalog import fold
+
+    title, author = title.strip(), author.strip()
+    if len(title) < 2 or len(author) < 2:
+        raise HTTPException(status_code=400, detail="Chybí název nebo autor.")
+
+    async def build() -> dict:
+        return {"page": await works.work_page(title, author, current[0])}
+
+    out = await cached_json(f"spoken:work:v1:{current[0]}:{fold(title)}:{fold(author)}", 3600, build,
+                            is_empty=lambda d: d.get("page") is None)
+    if out.get("page") is None:
+        raise HTTPException(status_code=404, detail="Knihu jsme v katalogu nenašli.")
+    return out["page"]
+
+
 @spoken_router.get("/search/local")
 async def search_local(
     q: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)
