@@ -549,7 +549,7 @@ async def _smooth(
     styles = await taste_bridge.artist_styles(list(set(artist_of.values())))
     ordered = await asyncio.to_thread(energy_flow.order, out, artist_of, anchor, styles)
     news = [r for r in ordered if r in new_ids]
-    budget = int(len(news) * MAX_DEFERRED_SHARE)
+    budget = max(1, round(len(news) * MAX_DEFERRED_SHARE)) if news else 0
     deferred: list[str] = []
     for _ in range(budget):
         bad = await asyncio.to_thread(energy_flow.jumps, ordered, artist_of, styles, anchor)

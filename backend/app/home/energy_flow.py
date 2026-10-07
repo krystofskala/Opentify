@@ -157,14 +157,27 @@ def order(
         return sum(cost(p[i], p[i + 1]) for i in range(len(p) - 1))
 
     best = total(path)
-    for _ in range(3):  # 2-opt, pár průchodů stačí
+    for _ in range(8):  # 2-opt (otočit úsek) + přesun jedné skladby jinam
         improved = False
-        for i in range(1, len(path) - 2):
-            for j in range(i + 1, len(path) - 1):
+        for i in range(1, len(path) - 1):
+            for j in range(i + 1, len(path)):
                 cand = path[:i] + path[i : j + 1][::-1] + path[j + 1 :]
                 t = total(cand)
                 if t + 1e-9 < best:
                     path, best, improved = cand, t, True
+        # Přesun: 2-opt sám nevytáhne jednu tichou skladbu z prostředku
+        # hlasitých (živě UDG -> Kim Chang Wan -> Haley Heynderickx).
+        for i in range(1, len(path)):
+            node = path[i]
+            rest_p = path[:i] + path[i + 1 :]
+            for j in range(1, len(rest_p) + 1):
+                if j == i:
+                    continue
+                cand = rest_p[:j] + [node] + rest_p[j:]
+                t = total(cand)
+                if t + 1e-9 < best:
+                    path, best, improved = cand, t, True
+                    break
         if not improved:
             break
 
