@@ -404,6 +404,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         !_currentLocal &&
         processing != ProcessingState.completed &&
         processing != ProcessingState.idle;
+    // Zdroj se vůbec nenačetl (502 při restartu serveru), ale web hlásí
+    // "hraje" a pozice běží dál podle hodin -- bez délky a bez jediného
+    // načteného kusu po 15 s nic nehraje (UX test 7. 10.).
+    if (watched &&
+        _player.duration == null &&
+        _player.bufferedPosition == Duration.zero &&
+        position > const Duration(seconds: 15)) {
+      _stallSince = now;
+      _stallPosition = position;
+      debugPrint('AudioPlayerController: hraje bez načteného zvuku, navazuji');
+      _handleStreamFailure(info, 'zdroj se nenačetl', isProgressive: false);
+      // Nic se nepřehrálo -- znovu od začátku, ne od pozice podle hodin.
+      if (_resumeFor == info.recordingId) _resumeAt = Duration.zero;
+      return;
+    }
     if (!watched || position != _stallPosition) {
       _stallPosition = position;
       _stallSince = now;
