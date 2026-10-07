@@ -55,7 +55,7 @@ void main() {
     expect(find.text('Doporučené knihy'), findsOneWidget);
     expect(find.text('Doporučené podcasty'), findsOneWidget);
     expect(find.text('Nové díly'), findsOneWidget);
-    expect(find.text('Tvoje knihy'), findsOneWidget);
+    expect(find.text('V knihovně'), findsOneWidget);
     expect(find.text('Stahuje se'), findsOneWidget);
     expect(find.text('Stahuje se · 40 %'), findsOneWidget);
     expect(tester.takeException(), isNull);
