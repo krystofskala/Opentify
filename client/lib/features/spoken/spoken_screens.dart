@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -55,6 +55,10 @@ void playBook(WidgetRef ref, SpokenBook book, {int? fileIndex, Duration? positio
     startPosition: start,
     rememberProgress: false,
     context: (route: '/spoken/book/${book.id}'),
+    // Náhodné pořadí / opakování z hudby do knihy nepatří (díly by hrály
+    // napřeskáčku a vypnout nešlo -- místo tlačítek je ±30 s; audit 8. 10.).
+    shuffle: false,
+    repeatMode: RepeatMode.off,
   ));
 }
 

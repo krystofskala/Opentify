@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -30,6 +30,8 @@ void playEpisode(WidgetRef ref, PodcastEpisodeItem ep, {String? showId}) {
         startPosition: ep.started ? Duration(milliseconds: ep.positionMs) : null,
         rememberProgress: false,
         context: (route: showId == null ? null : '/podcasts/show/$showId'),
+        shuffle: false,
+        repeatMode: RepeatMode.off,
       ));
 }
 
