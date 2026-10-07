@@ -102,7 +102,7 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { continueListening, quickPicks, playlistCards, albumCards, artistCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, unknown }
+enum HomeSectionType { continueListening, quickPicks, playlistCards, albumCards, artistCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, albumSpotlight, newcomerSetup, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'continue' => HomeSectionType.continueListening,
@@ -115,6 +115,8 @@ HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'genre_showcase' => HomeSectionType.genreShowcase,
       'tag_chips' => HomeSectionType.tagChips,
       'deezer_playlists' => HomeSectionType.deezerPlaylists,
+      'album_spotlight' => HomeSectionType.albumSpotlight,
+      'newcomer_setup' => HomeSectionType.newcomerSetup,
       _ => HomeSectionType.unknown,
     };
 
@@ -135,7 +137,11 @@ class HomeSection {
     this.tags = const [],
     this.deezerPlaylists = const [],
     this.artists = const [],
+    this.setupCards = const [],
   });
+
+  /// Karty nováčka na konci Domů: "import" / "customize".
+  final List<String> setupCards;
 
   /// "Interpreti, které bys mohl znát".
   final List<BrowseArtist> artists;
@@ -185,7 +191,11 @@ class HomeSection {
       playlists: type == HomeSectionType.playlistCards || type == HomeSectionType.quickPicks
           ? items.map(HomePlaylistCard.fromJson).toList()
           : const [],
-      albums: type == HomeSectionType.albumCards ? items.map(HomeAlbumCard.fromJson).toList() : const [],
+      // Album na celý poslech: `reason` jde do `badge` (proč tohle album).
+      albums: type == HomeSectionType.albumCards || type == HomeSectionType.albumSpotlight
+          ? [for (final i in items) HomeAlbumCard.fromJson({...i, if (i['reason'] != null) 'badge': i['reason']})]
+          : const [],
+      setupCards: type == HomeSectionType.newcomerSetup ? [for (final i in items) i['kind'] as String] : const [],
       tracks: type == HomeSectionType.trackRail ? items.map(RecordingModel.fromJson).toList() : const [],
       categories: type == HomeSectionType.categoryTiles ? items.map(BrowseCategory.fromJson).toList() : const [],
       deezerPlaylists:

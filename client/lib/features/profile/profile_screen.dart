@@ -726,6 +726,15 @@ class _OpenSections extends StateNotifier<Set<String>?> {
 
 final _openSectionsProvider = StateNotifierProvider<_OpenSections, Set<String>?>((ref) => _OpenSections());
 
+/// Otevřít Profil s rozbalenou skupinou (např. "music" = import z karty
+/// nováčka na Domů).
+void openProfileSection(BuildContext context, WidgetRef ref, String id) {
+  final notifier = ref.read(_openSectionsProvider.notifier);
+  final current = {...(ref.read(_openSectionsProvider) ?? _defaultOpen)};
+  if (!current.contains(id)) unawaited(notifier.toggle(id, _defaultOpen));
+  context.go('/profile');
+}
+
 /// Skupiny otevřené, dokud si uživatel nic nepřepnul.
 const _defaultOpen = {'appearance'};
 

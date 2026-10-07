@@ -35,6 +35,7 @@ import '../../widgets/track_actions.dart' show nowPlayingInfoFor, showTrackActio
 import '../../widgets/collection_actions.dart';
 import '../blend/blend_screen.dart' show BlendInviteBanner;
 import '../browse/browse_grid.dart' show BrowseTile;
+import 'newcomer_widgets.dart';
 
 /// Domů -- celá obrazovka z `GET /home` (žebříčky, mixy, nová a populární
 /// alba, žánry, nálady), sekce se vykreslují podle `type`. Prázdné sekce
@@ -568,6 +569,11 @@ class _HomeSectionView extends StatelessWidget {
             ),
           ],
         );
+      case HomeSectionType.albumSpotlight:
+        if (section.albums.isEmpty) return const SizedBox.shrink();
+        return AlbumSpotlightCard(title: section.title, album: section.albums.first);
+      case HomeSectionType.newcomerSetup:
+        return NewcomerSetupCards(cards: section.setupCards);
       case HomeSectionType.continueListening: // vykresluje HomeScreen (data z /home/recent)
       case HomeSectionType.unknown:
         return const SizedBox.shrink();
@@ -680,7 +686,13 @@ class _PlayNowTileState extends ConsumerState<_PlayNowTile> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() => _loading = true);
     try {
-      final reason = await ref.read(autoContinueProvider).start(mood: mood);
+      final auto = ref.read(autoContinueProvider);
+      final reason = await auto.start(mood: mood);
+      if (auto.needsStart && mounted) {
+        // Profil bez dat: zeptat se, z čeho začít (místo hlášky).
+        await showPlayNowStartSheet(context, ref);
+        return;
+      }
       if (reason != null && reason.isNotEmpty) showToast(messenger, reason);
     } catch (e) {
       showToast(messenger, 'Pusť teď se nepovedlo: ${humanError(e)}');

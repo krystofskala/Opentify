@@ -368,6 +368,17 @@ def pick(
             act.artist_of.setdefault(rid, aid)
             act.title_of.setdefault(rid, title)
     chosen_set = set(chosen)
+    # Mladý profil: interpret jen z jednoho dne (zkoušení, puštěné pro
+    # někoho) má malý vliv, dokud se nevrátí jiný den nebo nedostane srdíčko.
+    tentative: dict[str, float] = {}
+    if len(act.timeline) < av.YOUNG_PROFILE:
+        with Session(engine) as session:
+            chosen_artists = {
+                a for a in (act.artist_of.get(r) for r in (chosen or _chosen_tracks(session, user_id))) if a
+            }
+        tentative = av.tentative_factors(
+            act.artist_days(), chosen_artists | {a for a, d in manual.items() if d > 0}, len(act.timeline)
+        )
 
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
@@ -392,6 +403,8 @@ def pick(
             f *= SESSION_DECAY ** session_counts[artist]
         if rid in recent_batches:
             f *= RECENT_BATCH_PENALTY
+        if artist in tentative and not session_counts.get(artist) and not done_artists.get(artist):
+            f *= tentative[artist]  # v právě běžící relaci platí, co hraje
         return base * f
 
     from app.home.personal_mixes import _cap_per_artist, _spread, _weighted_order
@@ -446,6 +459,8 @@ def pick(
         # Malý profil: z RŮZNÝCH interpretů všeho, co slyšel a co má rád --
         # jinak by po jedné písničce uvízl v jedné škatulce.
         pool = list(dict.fromkeys([*recent_order, *sorted(act.total, key=lambda r: -act.total[r]), *chosen, *familiar]))
+        # Potvrzený vkus napřed, jednorázové zkoušení až za ním.
+        pool.sort(key=lambda r: act.artist_of.get(r) in tentative)
         new_seeds = _distinct_artist_seeds(pool, act.artist_of, 4) or new_seeds
         if not familiar and new_seeds:
             meta = _rec_meta(new_seeds[:1])

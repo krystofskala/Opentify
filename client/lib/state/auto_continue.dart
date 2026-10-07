@@ -45,12 +45,19 @@ class AutoContinue {
     _failures++;
   }
 
+  /// Profil bez dat: poslední `start` vrátil "zeptej se, z čeho začít".
+  bool needsStart = false;
+
   /// Spustí "Pusť teď" -- první várku hned, další se doplňují samy.
-  Future<String?> start({String? mood}) async {
+  /// `startArtistId` / `startRecordingId`: "Z čeho mám začít?" (profil bez dat).
+  Future<String?> start({String? mood, String? startArtistId, String? startRecordingId}) async {
     this.mood = mood;
     _retryAfter = null;
     _failures = 0;
-    final chunk = await _ref.read(playNowRepositoryProvider).next(size: 10, mood: mood);
+    final chunk = await _ref
+        .read(playNowRepositoryProvider)
+        .next(size: 10, mood: mood, startArtistId: startArtistId, startRecordingId: startRecordingId);
+    needsStart = chunk.needsStart;
     if (chunk.tracks.isEmpty) return chunk.reason;
     final infos = [for (final r in chunk.tracks) nowPlayingInfoFor(r)];
     await _ref.read(audioPlayerControllerProvider.notifier).playQueue(infos, 0, sourceLabel: playNowLabel);

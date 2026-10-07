@@ -49,27 +49,36 @@ def fresh(payload: dict[str, Any] | None) -> bool:
     return bool(payload and payload.get("date") == date.today().isoformat() and payload.get("releaseId"))
 
 
-def _seed_artists(user_id: str) -> list[str]:
-    """Jména interpretů, které člověk slyšel nebo má rád (nejnovější první)."""
+def _seed_artists(user_id: str) -> tuple[list[str], bool]:
+    """(jména interpretů, kteří jsou potvrzený vkus, mladý profil).
+    Potvrzený = srdíčko / knihovna, nebo se k němu vrací opakovaně po delší
+    době -- zkoušení nebo puštění pro někoho album neurčí."""
+    from app.home import activation as av
     from app.home.play_now import _chosen_tracks
-    from app.models import Artist, Listen, Recording
+    from app.models import Artist, Recording
 
+    act = av.compute(user_id)
+    days = act.artist_days()
     with Session(engine) as session:
-        rids = list(
-            session.exec(
-                select(Listen.recording_id).where(Listen.user_id == user_id).order_by(Listen.played_at.desc()).limit(50)  # type: ignore[attr-defined]
-            ).all()
-        )
-        rids += _chosen_tracks(session, user_id, 50)
-        names: list[str] = []
-        for rid in dict.fromkeys(rids):
+        chosen = _chosen_tracks(session, user_id, 50)
+        chosen_artists = []
+        for rid in chosen:
             rec = session.get(Recording, rid)
-            artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
+            if rec and rec.artist_id:
+                chosen_artists.append(rec.artist_id)
+        # Jen interpreti, ke kterým se vrací opakovaně po delší době.
+        heard = [
+            a for a, (n, span) in sorted(days.items(), key=lambda x: -x[1][0])
+            if av.confirmation(n, span) >= 1.0 or len(act.timeline) >= av.YOUNG_PROFILE and n >= 2
+        ]
+        names: list[str] = []
+        for aid in dict.fromkeys([*chosen_artists, *heard]):
+            artist = session.get(Artist, aid)
             if artist and artist.name not in names:
                 names.append(artist.name)
             if len(names) >= 5:
                 break
-    return names
+    return names, len(act.timeline) < av.YOUNG_PROFILE
 
 
 def _heard_album_titles(user_id: str) -> set[str]:
@@ -100,7 +109,11 @@ async def build(user_id: str) -> dict[str, Any] | None:
     from app.catalog.artwork import _normalize
 
     heard = await asyncio.to_thread(_heard_album_titles, user_id)
-    artists = await asyncio.to_thread(_seed_artists, user_id)
+    artists, young = await asyncio.to_thread(_seed_artists, user_id)
+    if young and _day_index(user_id + ":explore", 2) == 0:
+        # Mladý profil: každý druhý den žánr mimo dosavadní poslechy, ať ho
+        # první poslechy nezavřou v jedné škatulce.
+        artists = []
     release_id, reason = None, ""
     for name in artists:
         try:

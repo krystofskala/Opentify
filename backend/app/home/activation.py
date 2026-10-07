@@ -47,6 +47,61 @@ PEAK_WINDOW_DAYS = 60
 PEAK_MIN = 4
 
 
+# Mladý profil (čistý start): zkoušení ani puštění pro někoho nesmí určit
+# vkus natrvalo. Trvalý vliv má interpret, ke kterému se člověk VRACÍ:
+# aspoň CONFIRM_DAYS různých dnů v rozpětí aspoň CONFIRM_SPAN_DAYS. Do té doby
+# vliv roste postupně od TENTATIVE (jeden den) k 1. Srdíčko / knihovna /
+# playlist / "víc takových" = výslovná volba, platí hned. Platí pro všechny
+# poslechy stejně (feedback_equal_listen_weight): rozhoduje opakování v
+# čase, ne odkud poslech je. S rostoucí historií se rozdíl plynule ztrácí
+# (u YOUNG_PROFILE poslechů zmizí). V běžící relaci hraje, co hraje (40 min).
+YOUNG_PROFILE = 300
+TENTATIVE = 0.35
+CONFIRM_DAYS = 3
+CONFIRM_SPAN_DAYS = 7
+
+
+def confirmation(days: int, span_days: float) -> float:
+    """0 = jeden den, 1 = vrací se opakovaně po delší době."""
+    if days <= 1:
+        return 0.0
+    return min(1.0, (days - 1) / (CONFIRM_DAYS - 1)) * min(1.0, span_days / CONFIRM_SPAN_DAYS)
+
+
+def tentative_factors(
+    artist_days: dict[str, tuple[int, float]], confirmed: set[str], listens: int
+) -> dict[str, float]:
+    """Interpret -> násobek jeho vlivu na vkus (chybí = 1).
+    `artist_days`: interpret -> (počet různých dnů, rozpětí první–poslední v dnech)."""
+    if listens >= YOUNG_PROFILE:
+        return {}
+    young = 1 - listens / YOUNG_PROFILE
+    out: dict[str, float] = {}
+    for a, (days, span) in artist_days.items():
+        if a in confirmed:
+            continue
+        conf = confirmation(days, span)
+        if conf < 1.0:
+            out[a] = 1 - (1 - TENTATIVE) * young * (1 - conf)
+    return out
+
+
+def artist_day_stats(rows) -> dict[str, tuple[int, float]]:
+    """(čas, interpret) -> interpret -> (různých dnů, rozpětí v dnech)."""
+    days: dict[str, set] = defaultdict(set)
+    first: dict[str, datetime] = {}
+    last: dict[str, datetime] = {}
+    for t, a in rows:
+        if not a:
+            continue
+        days[a].add(t.date())
+        if a not in first or t < first[a]:
+            first[a] = t
+        if a not in last or t > last[a]:
+            last[a] = t
+    return {a: (len(d), (last[a] - first[a]).total_seconds() / 86400) for a, d in days.items()}
+
+
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
@@ -78,6 +133,13 @@ class Activation:
     # (čas, skladba) všech započtených poslechů, chronologicky -- co se
     # poslouchá spolu (Pusť teď / nekonečné hraní).
     timeline: list[tuple[datetime, str]] = field(default_factory=list)
+
+    def artist_days(self) -> dict[str, tuple[int, float]]:
+        """Interpret -> (v kolika různých dnech, rozpětí první–poslední v dnech)."""
+        return artist_day_stats((t, self.artist_of.get(r)) for t, r in self.timeline)
+
+    def listening_days(self) -> int:
+        return len({t.date() for t, _r in self.timeline})
 
     def co_listened_artists(self, seed_artists: set[str], window_min: int = 60) -> Counter:
         """Interpreti, které profil pouští ve stejných chvílích jako semínka

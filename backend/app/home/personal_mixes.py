@@ -102,6 +102,9 @@ class Taste:
     # Nový model (TASTE_MODEL=v2, app/home/activation.py): celá historie ve
     # třech profilech. None = původní model (posledních 365 dní).
     activation: Any = None
+    # V kolika různých dnech profil poslouchal (Denní mixy až od 3 dnů --
+    # jeden večer neurčí vkus natrvalo).
+    listen_days: int = 0
 
     def track_score(self, recording_id: str) -> float:
         """Jak moc skladba "žije" teď (v2): střední profil + půlka dlouhého."""
@@ -279,11 +282,28 @@ def load_taste(user_id: str) -> Taste:
             for artist_id, share in taste.activation.blend(av.ARTIST_BLEND).items():
                 if artist_id not in banned:
                     taste.artist_weight[artist_id] += share * scale
-        # "Víc / míň takových": jednotka = dvacetina nejsilnějšího interpreta,
-        # takže +15 je zřetelné, ale nepřebije celý vkus.
+        # Mladý profil: trvalý vliv má jen interpret, ke kterému se vrací
+        # opakovaně po delší době, nebo výslovná volba (srdíčko, knihovna,
+        # playlist) -- activation.tentative_factors.
+        from app.home import activation as av
         from app.home.feedback import deltas as _feedback
 
         manual = _feedback(user_id)
+        taste.listen_days = len({_aware(listen.played_at).date() for listen in listens})
+        if taste.activation is not None:
+            taste.listen_days = max(taste.listen_days, taste.activation.listening_days())
+        deliberate = liked_set | taste.library | taste.playlisted
+        confirmed = {taste.artist_of[r] for r in deliberate if r in taste.artist_of} | {
+            a for a, d in manual.items() if d > 0
+        }
+        day_stats = av.artist_day_stats(
+            (_aware(listen.played_at), taste.artist_of.get(listen.recording_id)) for listen in listens
+        )
+        for artist_id, factor in av.tentative_factors(day_stats, confirmed, len(listens)).items():
+            if artist_id in taste.artist_weight:
+                taste.artist_weight[artist_id] *= factor
+        # "Víc / míň takových": jednotka = dvacetina nejsilnějšího interpreta,
+        # takže +15 je zřetelné, ale nepřebije celý vkus.
         if manual:
             unit = max(1.0, (max(taste.artist_weight.values(), default=20.0)) / 20)
             for artist_id, delta in manual.items():
@@ -596,7 +616,12 @@ async def build_daily_mixes() -> int:
     if done is not None:
         return done
     taste = await asyncio.to_thread(load_taste, g.home_user())
-    if len(taste.known) < 20:
+    deliberate = set(taste.liked) | taste.library | taste.playlisted
+    if len(taste.known) < 20 or (len(deliberate) < 20 and taste.listen_days < 3):
+        # 20 skladeb z jednoho večera (zkoušení, pouštění pro někoho) ještě
+        # není vkus -- mixy až z poslechů aspoň ve 3 dnech, nebo z 20
+        # výslovně vybraných (srdíčka, knihovna, playlisty, import). Jejich
+        # složení pak drží váhy interpretů (jen opakované návraty trvale).
         # Nový profil bez historie -- očekávaný stav, ne chyba (dřív to každou
         # hodinu v logu hlásilo "generátor selhal").
         logger.info("osobní mixy %s: zatím málo dat o chuti, přeskakuji", g.home_user()[:8])

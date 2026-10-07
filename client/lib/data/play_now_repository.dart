@@ -3,8 +3,11 @@ import '../models/recording_model.dart';
 
 /// Várka skladeb pro "Pusť teď" / nekonečné hraní (backend app/home/play_now.py).
 class PlayNowChunk {
-  const PlayNowChunk({required this.tracks, required this.reason});
+  const PlayNowChunk({required this.tracks, required this.reason, this.needsStart = false});
   final List<RecordingModel> tracks;
+
+  /// Profil bez poslechů i srdíček: appka se zeptá, z čeho začít.
+  final bool needsStart;
 
   /// Jeden důvod pro celou várku ("Podle toho, co posloucháš v tuhle dobu"),
   /// nikdy u každé skladby.
@@ -26,12 +29,16 @@ class PlayNowRepository {
     List<String> playedIds = const [],
     int size = 8,
     String? mood,
+    String? startArtistId,
+    String? startRecordingId,
   }) async {
     final json = await _api.postJson('/home/play-now', body: {
       'seedIds': seedIds,
       'playedIds': playedIds,
       'size': size,
       if (mood != null) 'mood': mood,
+      if (startArtistId != null) 'startArtistId': startArtistId,
+      if (startRecordingId != null) 'startRecordingId': startRecordingId,
     }, timeout: const Duration(seconds: 40));
     return PlayNowChunk(
       tracks: [
@@ -39,6 +46,7 @@ class PlayNowRepository {
           RecordingModel.fromJson(t as Map<String, dynamic>),
       ],
       reason: json['reason'] as String? ?? '',
+      needsStart: json['needsStart'] as bool? ?? false,
     );
   }
 
