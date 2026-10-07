@@ -312,3 +312,12 @@ def test_failed_book_is_only_for_requester(eng, monkeypatch):
         with pytest.raises(HTTPException):
             routes.retry("bad", session=s, current=("friend", "d"))
         assert routes.retry("bad", session=s, current=("admin", "d"))["status"] == "pending"
+
+
+def test_title_tag_in_wrong_encoding_is_fixed_only_when_file_name_agrees():
+    assert importer.fix_title_encoding("02 Zaklínaè", "02 Zaklínač") == "02 Zaklínač"
+    assert importer.fix_title_encoding("10 Konec svìta", "10 Konec světa") == "10 Konec světa"
+    assert importer.fix_title_encoding("06 Men\x9aí zlo", "06 Menší zlo") == "06 Menší zlo"
+    # Skutečné "è" a soubor jinak pojmenovaný -> beze změny.
+    assert importer.fix_title_encoding("Pièce montée", "01 Piece montee") == "Pièce montée"
+    assert importer.fix_title_encoding("Kapitola 1", "track01") == "Kapitola 1"

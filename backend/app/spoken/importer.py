@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 import mutagen
@@ -37,6 +38,23 @@ def _tag(audio, *keys: str) -> str | None:
             if text and text.lower() not in _PLACEHOLDERS:
                 return text
     return None
+
+
+def _fold(text: str) -> str:
+    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFC", text)).casefold()
+
+
+def fix_title_encoding(title: str, stem: str) -> str:
+    """Tag uložený ve Windows-1250, přečtený jako Latin-1 ("Zaklínaè",
+    "svìta", "ž" jako řídicí znak 0x9E). Opravená verze se vezme, jen když sedí na
+    název souboru -- skutečné "è" (francouzština) zůstane."""
+    try:
+        fixed = title.encode("latin-1").decode("cp1250")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return title
+    if fixed != title and _fold(fixed) and _fold(fixed) in _fold(stem):
+        return fixed
+    return title
 
 
 def _track_no(audio) -> int:
@@ -127,7 +145,7 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
                 session.delete(row)
         # Všechny části se často jmenují jako kniha ("Saturnin", "Saturnin")
         # -- v seznamu kapitol by nešly rozlišit, pak radši "Část N".
-        titles = [_tag(audio, "title") or p.stem for p, audio in rows]
+        titles = [fix_title_encoding(_tag(audio, "title") or p.stem, p.stem) for p, audio in rows]
         if len(rows) > 1 and len(set(titles)) < len(titles):
             titles = [f"Část {i + 1}" for i in range(len(rows))]
         total = 0
