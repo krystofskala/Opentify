@@ -347,9 +347,44 @@ def test_person_page_books_on_server_and_releases_to_download(eng, monkeypatch):
             ]
 
         monkeypatch.setattr(sktorrent, "search", fake_search)
+        from app.spoken import people
+
+        async def fake_wiki(name, role="author"):
+            return {"image": "https://upload.wikimedia.org/x.jpg", "bio": "Český spisovatel.", "description": "spisovatel"}
+
+        monkeypatch.setattr(people, "wiki_person", fake_wiki)
         out = asyncio.run(routes.person("Zdeněk Jirotka", session=s, current=("me", "d")))
         assert [b["id"] for b in out["books"]] == ["b1"]  # b2 je cizí nepovedené, b3 jiný autor
         assert out["books"][0]["mine"] is False
         assert [r["infohash"] for r in out["releases"]] == ["new1"]
+        assert out["image"].startswith("https://upload.wikimedia.org/") and out["bio"] == "Český spisovatel."
         narr = asyncio.run(routes.person("Oldrich Vizner", role="narrator", session=s, current=("dad", "d")))
         assert [b["id"] for b in narr["books"]] == ["b2"] and narr["role"] == "narrator"
+
+
+def test_local_search_books_and_people(eng, monkeypatch):
+    import asyncio
+
+    from app.spoken import people
+
+    calls = []
+
+    async def fake_wiki(name, role="author"):
+        calls.append(name)
+        return {"image": "https://upload.wikimedia.org/c.jpg"} if name == "Karel Čapek" else {}
+
+    monkeypatch.setattr(people, "wiki_person", fake_wiki)
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref=HASH_A, release_title="x", title="Saturnin", author="Zdeněk Jirotka",
+                         narrator="Oldřich Vízner", status="ready", requested_by_user_id="dad"))
+        s.add(SpokenBook(id="b2", source_ref=HASH_B, release_title="y", title="Muž se psem", author="Jirotka, Zdeněk",
+                         status="ready", requested_by_user_id="me"))
+        s.commit()
+        out = asyncio.run(routes.search_local("jirotka", session=s, current=("me", "d")))
+        assert {b["id"] for b in out["books"]} == {"b1", "b2"}
+        assert out["people"] == [{"name": "Zdeněk Jirotka", "role": "author", "books": 2}]  # obě podoby jména
+        out = asyncio.run(routes.search_local("vizner", session=s, current=("me", "d")))
+        assert out["people"] == [{"name": "Oldřich Vízner", "role": "narrator", "books": 1}]
+        assert calls == []  # jedno slovo: Wikidata se neptá
+        out = asyncio.run(routes.search_local("Karel Čapek", session=s, current=("me", "d")))
+        assert out["books"] == [] and out["people"][0]["name"] == "Karel Čapek" and out["people"][0]["image"]

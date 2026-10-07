@@ -247,6 +247,9 @@ typedef SpokenPerson = ({
   List<SpokenBook> books,
   List<SpokenRelease> releases,
   bool loginConfigured,
+  String? image,
+  String? bio,
+  String? description,
 });
 
 /// Stránka autora / interpreta (čte): jeho knihy na serveru a další vydání
@@ -264,7 +267,37 @@ final spokenPersonProvider =
       for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>),
     ],
     loginConfigured: json['loginConfigured'] as bool? ?? false,
+    image: json['image'] as String?,
+    bio: json['bio'] as String?,
+    description: json['description'] as String?,
   );
+});
+
+/// Hledání v tom, co už je na serveru: knihy a autoři / interpreti.
+typedef SpokenLocalSearch = ({List<SpokenBook> books, List<({String name, String role, int books, String? image})> people});
+
+final spokenLocalSearchProvider = FutureProvider.autoDispose.family<SpokenLocalSearch, String>((ref, q) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/search/local', query: {'q': q});
+  return (
+    books: [for (final b in json['books'] as List<dynamic>? ?? const []) SpokenBook.fromJson(b as Map<String, dynamic>)],
+    people: [
+      for (final p in (json['people'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        (
+          name: p['name'] as String? ?? '',
+          role: p['role'] as String? ?? 'author',
+          books: (p['books'] as num?)?.toInt() ?? 0,
+          image: p['image'] as String?,
+        ),
+    ],
+  );
+});
+
+/// Fotka autora / interpreta (Wikidata) pro náhled v hledání.
+final spokenPersonImageProvider =
+    FutureProvider.autoDispose.family<String?, ({String name, String role})>((ref, who) async {
+  final json =
+      await ref.watch(apiClientProvider).getJson('/spoken/person/wiki', query: {'name': who.name, 'role': who.role});
+  return json['image'] as String?;
 });
 
 /// Cesta na stránku autora / interpreta.

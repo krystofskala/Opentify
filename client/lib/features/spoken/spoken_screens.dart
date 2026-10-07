@@ -15,8 +15,10 @@ import '../library/offline_tab.dart';
 import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass_button.dart';
+import '../../widgets/detail_hero.dart' show HeroTeaser;
 import '../../widgets/glass/glass_search_field.dart';
 import '../../widgets/media_card.dart' show ArtworkImage, MediaCard;
+import '../../widgets/net_image.dart' show NetImage;
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
@@ -224,20 +226,6 @@ class SpokenHomeScreen extends ConsumerWidget {
                           ),
                       ]),
                     ],
-                  if (shelf.isNotEmpty)
-                    'my_books': [
-                      const SectionHeader('Tvoje knihy'),
-                      _Rail(children: [
-                        for (final b in shelf)
-                          MediaCard(
-                            title: b.title,
-                            subtitle: b.author ?? formatHours(b.durationMs),
-                            imageUrl: b.coverUrl,
-                            placeholderIcon: Symbols.menu_book_rounded,
-                            onTap: () => context.push('/spoken/book/${b.id}'),
-                          ),
-                      ]),
-                    ],
                   if (shows.isNotEmpty)
                     'shows': [
                       const SectionHeader('Tvoje pořady'),
@@ -249,21 +237,6 @@ class SpokenHomeScreen extends ConsumerWidget {
                             imageUrl: s.artworkUrl,
                             placeholderIcon: Symbols.podcasts_rounded,
                             onTap: () => context.push('/podcasts/show/${s.id}'),
-                          ),
-                      ]),
-                    ],
-                  if (recs != null && recs.books.isNotEmpty)
-                    'rec_books': [
-                      const SectionHeader('Doporučené knihy'),
-                      _Rail(children: [
-                        for (final b in recs.books)
-                          MediaCard(
-                            title: b.release.title,
-                            subtitle: b.reason,
-                            imageUrl: b.release.coverUrl,
-                            placeholderIcon: Symbols.menu_book_rounded,
-                            // Rovnou obsah vydání (co by se stáhlo).
-                            onTap: () => _download(context, ref, b.release),
                           ),
                       ]),
                     ],
@@ -285,6 +258,35 @@ class SpokenHomeScreen extends ConsumerWidget {
                                 if (context.mounted) toast(context, 'Pořad se nepodařilo otevřít');
                               }
                             },
+                          ),
+                      ]),
+                    ],
+                  if (shelf.isNotEmpty)
+                    'my_books': [
+                      const SectionHeader('Tvoje knihy'),
+                      _Rail(children: [
+                        for (final b in shelf)
+                          MediaCard(
+                            title: b.title,
+                            subtitle: b.author ?? formatHours(b.durationMs),
+                            imageUrl: b.coverUrl,
+                            placeholderIcon: Symbols.menu_book_rounded,
+                            onTap: () => context.push('/spoken/book/${b.id}'),
+                          ),
+                      ]),
+                    ],
+                  if (recs != null && recs.books.isNotEmpty)
+                    'rec_books': [
+                      const SectionHeader('Doporučené knihy'),
+                      _Rail(children: [
+                        for (final b in recs.books)
+                          MediaCard(
+                            title: b.release.title,
+                            subtitle: b.reason,
+                            imageUrl: b.release.coverUrl,
+                            placeholderIcon: Symbols.menu_book_rounded,
+                            // Rovnou obsah vydání (co by se stáhlo).
+                            onTap: () => _download(context, ref, b.release),
                           ),
                       ]),
                     ],
@@ -521,6 +523,8 @@ class _Results extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final czech = ref.watch(spokenSearchProvider(query));
+    // Co už je na serveru (autoři, knihy) -- rychlé, zobrazí se hned nahoře.
+    final local = ref.watch(spokenLocalSearchProvider(query)).valueOrNull;
     // Záloha (Soulseek, typicky anglicky) se načítá zvlášť -- je pomalejší.
     final foreign = ref.watch(spokenForeignSearchProvider(query));
     final theme = Theme.of(context);
@@ -528,13 +532,47 @@ class _Results extends ConsumerWidget {
     final cz = czech.valueOrNull;
     final other = foreign.valueOrNull ?? const <SpokenRelease>[];
     if (czech.isLoading && foreign.isLoading) return const LoadingState();
-    if (cz != null && cz.releases.isEmpty && !foreign.isLoading && other.isEmpty) {
+    final hasLocal = local != null && (local.books.isNotEmpty || local.people.isNotEmpty);
+    if (cz != null && cz.releases.isEmpty && !foreign.isLoading && other.isEmpty && !hasLocal) {
       return const EmptyState(
           icon: Symbols.menu_book_rounded, message: 'Nic se nenašlo – ani česky, ani v jiných jazycích.');
     }
     return ListView(
       padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
       children: [
+        if (local != null && local.people.isNotEmpty) ...[
+          const _Heading('Autoři a interpreti'),
+          SizedBox(
+            height: 150,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: local.people.length,
+              separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.xs),
+              itemBuilder: (context, i) {
+                final p = local.people[i];
+                return _PersonChip(name: p.name, role: p.role, books: p.books, image: p.image);
+              },
+            ),
+          ),
+        ],
+        if (local != null && local.books.isNotEmpty) ...[
+          const _Heading('Na serveru'),
+          for (final b in local.books)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: _Cover(url: b.coverUrl),
+              title: Text(b.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+              subtitle: Text(
+                [if (b.byline.isNotEmpty) b.byline, if (b.isReady) formatHours(b.durationMs) else _statusLine(b)]
+                    .where((s) => s.isNotEmpty)
+                    .join(' · '),
+                style: muted,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => context.push('/spoken/book/${b.id}'),
+            ),
+        ],
         const _Heading('Česky'),
         if (czech.isLoading)
           const Padding(padding: EdgeInsets.all(AppSpacing.sm), child: LinearProgressIndicator(minHeight: 2))
@@ -1001,6 +1039,64 @@ class _PersonLink extends StatelessWidget {
       );
 }
 
+/// Kulatá fotka autora / interpreta; bez fotky ikona.
+class _PersonAvatar extends StatelessWidget {
+  const _PersonAvatar({required this.url, this.size = 64});
+  final String? url;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final placeholder = ColoredBox(
+      color: scheme.surfaceContainerHighest,
+      child: Icon(Symbols.person_rounded, size: size * 0.45, color: scheme.onSurfaceVariant),
+    );
+    return ClipOval(
+      child: SizedBox.square(
+        dimension: size,
+        child: url == null ? placeholder : NetImage(url: url!, placeholder: placeholder),
+      ),
+    );
+  }
+}
+
+/// Autor / interpret ve výsledcích hledání -- fotka se dotáhne zvlášť.
+class _PersonChip extends ConsumerWidget {
+  const _PersonChip({required this.name, required this.role, required this.books, this.image});
+  final String name;
+  final String role;
+  final int books;
+  final String? image;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final narrator = role == 'narrator';
+    final url = image ?? ref.watch(spokenPersonImageProvider((name: name, role: role))).valueOrNull;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppSpacing.sm),
+      onTap: () => context.push(spokenPersonPath(name, narrator: narrator)),
+      child: SizedBox(
+        width: 104,
+        child: Column(
+          children: [
+            _PersonAvatar(url: url, size: 88),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+            Text(
+              [narrator ? 'Interpret' : 'Autor', if (books > 0) czCount(books, 'kniha', 'knihy', 'knih')].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Stránka autora / interpreta: knihy na serveru (pustit hned) a další
 /// vydání na SkTorrentu ke stažení.
 class SpokenPersonScreen extends ConsumerWidget {
@@ -1033,7 +1129,13 @@ class SpokenPersonScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Fotka z Wikidat (jako u interpretů hudby), jen když sedí jméno i povolání.
+                    if (p.image != null) ...[
+                      _PersonAvatar(url: p.image, size: 140),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
                     Text(p.name, style: theme.textTheme.headlineMedium),
+                    if (p.description != null) Text(p.description!, style: muted),
                     Text(
                       [
                         narrator ? 'Interpret' : 'Autor',
@@ -1044,6 +1146,7 @@ class SpokenPersonScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              if (p.bio != null) HeroTeaser(text: p.bio!),
               if (p.books.isNotEmpty) ...[
                 const SectionHeader('Na serveru'),
                 _Rail(children: [

@@ -119,6 +119,9 @@ void main() {
             books: [_book('d', 'ready', mine: false)],
             releases: [const SpokenRelease(infohash: 'h', title: 'Profesor Kujal - Zdeněk Jirotka', seeders: 4)],
             loginConfigured: true,
+            image: null,
+            bio: 'Český spisovatel, humorista a dramatik, autor Saturnina.',
+            description: 'český spisovatel',
           )),
     ]));
     await tester.pump();

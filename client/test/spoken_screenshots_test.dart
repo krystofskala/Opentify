@@ -70,7 +70,7 @@ void main() {
         '$home/Pub/Cache/hosted/pub.dev/material_symbols_icons-4.2960.0/lib/fonts/MaterialSymbolsRounded.ttf',
       );
     });
-    tester.view.physicalSize = const Size(390 * 2, 2500 * 2);
+    tester.view.physicalSize = const Size(390 * 2, 2300 * 2);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
 
@@ -105,7 +105,30 @@ void main() {
               SpokenRelease(infohash: 'h3', title: 'Hvězda padá vzhůru - Zdeněk Jirotka (2019)', sizeBytes: 401000000, seeders: 0),
             ],
             loginConfigured: true,
+            image: null,
+            bio: 'Zdeněk Jirotka (7. ledna 1911 Slezská Ostrava – 12. dubna 2003 Praha) byl český spisovatel, '
+                'humorista, scenárista a novinář. Proslavil se humoristickým románem Saturnin (1942), '
+                'který patří k nejoblíbenějším českým knihám 20. století.',
+            description: 'český dramatik, humorista, novinář a spisovatel',
           )),
+    ]);
+    await shoot(tester, '3_hledani', const SpokenSearchScreen(), [
+      spokenSearchRequestProvider.overrideWith((ref) => 'Jirotka'),
+      spokenLocalSearchProvider.overrideWith((ref, q) async => (
+            books: [books[0], books[1]],
+            people: [
+              (name: 'Zdeněk Jirotka', role: 'author', books: 2, image: null),
+              (name: 'Oldřich Vízner', role: 'narrator', books: 2, image: null),
+            ],
+          )),
+      spokenPersonImageProvider.overrideWith((ref, who) async => null),
+      spokenSearchProvider.overrideWith((ref, q) async => (
+            releases: const [
+              SpokenRelease(infohash: 'h1', title: 'Profesor Kujal spí - Zdeněk Jirotka (2015) čte Jiří Lábus', sizeBytes: 312000000, seeders: 6),
+            ],
+            loginConfigured: true,
+          )),
+      spokenForeignSearchProvider.overrideWith((ref, q) async => const <SpokenRelease>[]),
     ]);
   });
 }

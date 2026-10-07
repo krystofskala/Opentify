@@ -20,13 +20,15 @@ from app.utils import utcnow
 # ukážou, až v nich něco je -- nový profil tak vidí jen základ: Pokračovat,
 # Nové díly, doporučení a knihy, které už na serveru jsou (uživatel 7. 10.:
 # „audioknihy ostatních ve vlastní sekci, ušetří to stahování“).
+# Podcasty pohromadě, pak knihy -- ne střídavě (uživatel 7. 10.: „nejdřív
+# podcasty, pak knihy“; přeházet si to jde v Upravit Domů).
 SECTIONS: list[tuple[str, str]] = [
     ("continue", "Pokračovat"),
     ("new_episodes", "Nové díly"),
-    ("my_books", "Tvoje knihy"),
     ("shows", "Tvoje pořady"),
-    ("rec_books", "Doporučené knihy"),
     ("rec_podcasts", "Doporučené podcasty"),
+    ("my_books", "Tvoje knihy"),
+    ("rec_books", "Doporučené knihy"),
     ("others_books", "Knihy ostatních"),
     ("downloading", "Stahuje se"),
 ]

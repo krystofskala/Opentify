@@ -332,6 +332,60 @@ def _names(field: str | None) -> list[str]:
     return out
 
 
+@spoken_router.get("/search/local")
+async def search_local(
+    q: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)
+):
+    """Hledání v tom, co už je na serveru: knihy (název, autor, kdo čte) a
+    autoři / interpreti. Když se dotaz shoduje se spisovatelem na Wikidatech
+    a na serveru od něj nic není, je mezi autory i tak (jeho stránka nabídne
+    stažení)."""
+    from app.spoken import people
+
+    words = _fold(q).split()
+    if not words or len(q.strip()) < 2:
+        return {"books": [], "people": []}
+    rows = session.exec(select(SpokenBook).order_by(SpokenBook.created_at.desc())).all()  # type: ignore[attr-defined]
+
+    def hit(*texts: str | None) -> bool:
+        text = " ".join(_fold(t) for t in texts if t)
+        return all(w in text for w in words)
+
+    matched = [b for b in rows if hit(b.title, b.author, b.narrator)]
+    found: dict[tuple[str, str], dict] = {}
+    for b in rows:
+        for role, name in (("author", b.author), ("narrator", b.narrator)):
+            if name and hit(name):
+                # "Jirotka, Zdeněk" a "Zdeněk Jirotka" je jeden člověk.
+                key = sorted(people.name_variants(name), key=lambda v: "," in v)[0]
+                entry = found.setdefault((role, key), {"name": name, "role": role, "books": 0})
+                if "," in entry["name"] and "," not in name:
+                    entry["name"] = name
+                entry["books"] += 1
+    persons = sorted(found.values(), key=lambda p: (p["role"] != "author", -p["books"]))[:8]
+    if not any(p["role"] == "author" for p in persons) and len(words) >= 2:
+        wiki = await people.wiki_person(q.strip(), "author")
+        if wiki:
+            persons.insert(0, {"name": q.strip(), "role": "author", "books": 0, "image": wiki.get("image")})
+    ids = [b.id for b in matched[:20]]
+    progress = {
+        p.book_id: p
+        for p in session.exec(
+            select(SpokenProgress).where(SpokenProgress.user_id == current[0], SpokenProgress.book_id.in_(ids))  # type: ignore[attr-defined]
+        ).all()
+    } if ids else {}
+    return {"books": _book_items(matched[:20], progress, {}, current[0]), "people": persons}
+
+
+@spoken_router.get("/person/wiki")
+async def person_wiki(name: str, role: str = "author", _current=Depends(get_current_user)):
+    """Jen fotka a medailonek (Wikidata / Wikipedie) -- pro náhledy autorů."""
+    from app.spoken import people
+
+    wiki = await people.wiki_person(name.strip(), role)
+    return {"image": wiki.get("image"), "description": wiki.get("description")}
+
+
 @spoken_router.get("/person")
 async def person(
     name: str,
@@ -365,10 +419,16 @@ async def person(
         playable[book_id] = playable.get(book_id, 0) + 1
     books = _book_items(rows, progress, playable, current[0])
 
-    try:
-        releases = await sktorrent.search(name)
-    except Exception:  # noqa: BLE001 - SkTorrent nedostupný: stránka i tak ukáže knihy na serveru
-        releases = []
+    from app.spoken import people
+
+    async def search() -> list:
+        try:
+            return await sktorrent.search(name)
+        except Exception:  # noqa: BLE001 - SkTorrent nedostupný: stránka i tak ukáže knihy na serveru
+            return []
+
+    # Fotka a medailonek z Wikidat / Wikipedie (jako u interpretů hudby).
+    releases, wiki = await asyncio.gather(search(), people.wiki_person(name, role))
     on_server = {b.source_ref: b for b in rows}
     known = {
         b.source_ref: b
@@ -391,6 +451,9 @@ async def person(
         "role": "narrator" if role == "narrator" else "author",
         "books": books,
         "releases": out[:40],
+        "image": wiki.get("image"),
+        "bio": wiki.get("bio"),
+        "description": wiki.get("description"),
         "loginConfigured": sktorrent.credentials() is not None,
     }
 

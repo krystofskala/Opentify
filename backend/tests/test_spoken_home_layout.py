@@ -41,9 +41,10 @@ def test_per_profile_order_and_hidden(eng):
 def test_new_section_lands_after_its_predecessor(eng):
     with Session(eng) as s:
         s.add(HomeSnapshot(key=hl.layout_key("u1"), payload={"order": ["my_books", "continue"], "visible": {}}))
+    # rec_books následuje ve výchozím pořadí po my_books, new_episodes po continue.
         s.commit()
     order = ids(hl.entries("u1"))
-    assert order.index("shows") == order.index("my_books") + 1
+    assert order.index("rec_books") == order.index("my_books") + 1
     assert order.index("new_episodes") == order.index("continue") + 1
 
 

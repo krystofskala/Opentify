@@ -116,8 +116,12 @@ class WikimediaClient:
         entity = (entity_data.get("entities") or {}).get(wikidata_qid)
         if not entity:
             return None
-        sitelinks = entity.get("sitelinks") or {}
+        return await self.get_bio_from_sitelinks(entity.get("sitelinks") or {})
 
+    async def get_bio_from_sitelinks(self, sitelinks: dict[str, Any]) -> str | None:
+        """Úvod článku (čeština -> angličtina) z už načtených sitelinks
+        entity -- bez dalšího dotazu na Wikidata (mluvené slovo je má
+        z vlastního `wbgetentities`)."""
         for wiki_key in _PREFERRED_WIKIS:
             sitelink = sitelinks.get(wiki_key)
             if not sitelink or not sitelink.get("title"):
