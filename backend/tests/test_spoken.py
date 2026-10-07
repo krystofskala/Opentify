@@ -321,3 +321,35 @@ def test_title_tag_in_wrong_encoding_is_fixed_only_when_file_name_agrees():
     # Skutečné "è" a soubor jinak pojmenovaný -> beze změny.
     assert importer.fix_title_encoding("Pièce montée", "01 Piece montee") == "Pièce montée"
     assert importer.fix_title_encoding("Kapitola 1", "track01") == "Kapitola 1"
+
+
+def test_person_page_books_on_server_and_releases_to_download(eng, monkeypatch):
+    """Stránka autora: knihy na serveru (bez diakritiky, obě pořadí jména),
+    vydání ke stažení bez těch, co už jsou výš; cizí nepovedené stažení ne."""
+    import asyncio
+
+    from app.spoken import sktorrent
+
+    with Session(eng) as s:
+        s.add(SpokenBook(id="b1", source_ref=HASH_A, release_title="x", title="Saturnin", author="Jirotka, Zdeněk",
+                         status="ready", requested_by_user_id="dad"))
+        s.add(SpokenBook(id="b2", source_ref=HASH_B, release_title="y", title="Muž se psem", author="Zdenek Jirotka",
+                         narrator="Oldřich Vízner", status="failed", requested_by_user_id="dad"))
+        s.add(SpokenBook(id="b3", source_ref="h3", release_title="z", title="Jiná", author="Karel Čapek",
+                         status="ready", requested_by_user_id="me"))
+        s.commit()
+
+        async def fake_search(q):
+            assert q == "Zdeněk Jirotka"
+            return [
+                sktorrent.Release(infohash=HASH_A, title="Saturnin - Zdeněk Jirotka", size_bytes=1, seeders=3, leechers=0, cover_url=None, added=None),
+                sktorrent.Release(infohash="new1", title="Profesor Kujal - Zdeněk Jirotka", size_bytes=1, seeders=5, leechers=0, cover_url=None, added=None),
+            ]
+
+        monkeypatch.setattr(sktorrent, "search", fake_search)
+        out = asyncio.run(routes.person("Zdeněk Jirotka", session=s, current=("me", "d")))
+        assert [b["id"] for b in out["books"]] == ["b1"]  # b2 je cizí nepovedené, b3 jiný autor
+        assert out["books"][0]["mine"] is False
+        assert [r["infohash"] for r in out["releases"]] == ["new1"]
+        narr = asyncio.run(routes.person("Oldrich Vizner", role="narrator", session=s, current=("dad", "d")))
+        assert [b["id"] for b in narr["books"]] == ["b2"] and narr["role"] == "narrator"

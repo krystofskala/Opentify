@@ -108,6 +108,31 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('Stránka autora: na serveru a ke stažení', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1600 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(const SpokenPersonScreen(name: 'Zdeněk Jirotka'), [
+      spokenPersonProvider.overrideWith((ref, who) async => (
+            name: who.name,
+            role: who.role,
+            books: [_book('d', 'ready', mine: false)],
+            releases: [const SpokenRelease(infohash: 'h', title: 'Profesor Kujal - Zdeněk Jirotka', seeders: 4)],
+            loginConfigured: true,
+          )),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Zdeněk Jirotka'), findsOneWidget);
+    expect(find.text('Autor · 1 kniha na serveru'), findsOneWidget);
+    expect(find.text('Na serveru'), findsOneWidget);
+    expect(find.text('Ke stažení'), findsOneWidget);
+    expect(find.text('Stáhnout'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('Hledání audioknih: výsledky se Stáhnout bez přetečení', (tester) async {
     tester.view.physicalSize = const Size(375 * 3, 700 * 3);
     tester.view.devicePixelRatio = 3;

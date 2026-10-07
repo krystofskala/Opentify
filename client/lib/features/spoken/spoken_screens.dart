@@ -897,9 +897,21 @@ class SpokenBookScreen extends ConsumerWidget {
               Center(child: _Cover(url: book.coverUrl, size: 220)),
               const SizedBox(height: AppSpacing.md),
               Text(book.title, style: theme.textTheme.headlineSmall, textAlign: TextAlign.center),
-              if (book.byline.isNotEmpty) ...[
+              // Autor a interpret (čte) -- klepnutím jejich stránka.
+              if (book.author != null || book.narrator != null) ...[
                 const SizedBox(height: AppSpacing.xxs),
-                Text(book.byline, style: muted, textAlign: TextAlign.center),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (book.author != null) _PersonLink(name: book.author!, style: muted),
+                    if (book.author != null && book.narrator != null) Text(' · ', style: muted),
+                    if (book.narrator != null) ...[
+                      Text('čte ', style: muted),
+                      _PersonLink(name: book.narrator!, style: muted, narrator: true),
+                    ],
+                  ],
+                ),
               ],
               const SizedBox(height: AppSpacing.xxs),
               Text(
@@ -959,6 +971,110 @@ class SpokenBookScreen extends ConsumerWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Jméno autora / interpreta, které otevře jeho stránku.
+class _PersonLink extends StatelessWidget {
+  const _PersonLink({required this.name, this.style, this.narrator = false});
+  final String name;
+  final TextStyle? style;
+  final bool narrator;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        link: true,
+        label: narrator ? 'Interpret $name' : 'Autor $name',
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: () => context.push(spokenPersonPath(name, narrator: narrator)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+            child: Text(
+              name,
+              style: style?.copyWith(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Stránka autora / interpreta: knihy na serveru (pustit hned) a další
+/// vydání na SkTorrentu ke stažení.
+class SpokenPersonScreen extends ConsumerWidget {
+  const SpokenPersonScreen({super.key, required this.name, this.narrator = false});
+  final String name;
+  final bool narrator;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final who = (name: name, role: narrator ? 'narrator' : 'author');
+    final async = ref.watch(spokenPersonProvider(who));
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return Scaffold(
+      appBar: const SectionAppBar(''),
+      body: async.when(
+        loading: () => const LoadingState(),
+        error: (e, _) => ErrorState(
+          message: 'Stránku se nepodařilo načíst.',
+          error: e,
+          onRetry: () => ref.invalidate(spokenPersonProvider(who)),
+        ),
+        data: (p) => RefreshIndicator(
+          onRefresh: () async => ref.invalidate(spokenPersonProvider(who)),
+          child: ListView(
+            padding: EdgeInsets.only(bottom: AppSpacing.lg + navBottomInset(context)),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(p.name, style: theme.textTheme.headlineMedium),
+                    Text(
+                      [
+                        narrator ? 'Interpret' : 'Autor',
+                        if (p.books.isNotEmpty) '${czCount(p.books.length, 'kniha', 'knihy', 'knih')} na serveru',
+                      ].join(' · '),
+                      style: muted,
+                    ),
+                  ],
+                ),
+              ),
+              if (p.books.isNotEmpty) ...[
+                const SectionHeader('Na serveru'),
+                _Rail(children: [
+                  for (final b in p.books)
+                    MediaCard(
+                      title: b.title,
+                      subtitle: b.isReady ? formatHours(b.durationMs) : _statusLine(b),
+                      imageUrl: b.coverUrl,
+                      placeholderIcon: Symbols.menu_book_rounded,
+                      onTap: () => context.push('/spoken/book/${b.id}'),
+                    ),
+                ]),
+              ],
+              if (p.releases.isNotEmpty) ...[
+                const SectionHeader('Ke stažení'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: Column(children: [for (final r in p.releases) _ReleaseTile(release: r)]),
+                ),
+              ],
+              if (p.books.isEmpty && p.releases.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: AppSpacing.xl),
+                  child: EmptyState(
+                    icon: Symbols.menu_book_rounded,
+                    message: 'Nic dalšího od tohohle jména jsme nenašli.',
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -241,6 +241,36 @@ final spokenSearchProvider = FutureProvider.autoDispose.family<SpokenSearchResul
   );
 });
 
+typedef SpokenPerson = ({
+  String name,
+  String role,
+  List<SpokenBook> books,
+  List<SpokenRelease> releases,
+  bool loginConfigured,
+});
+
+/// Stránka autora / interpreta (čte): jeho knihy na serveru a další vydání
+/// ke stažení. `role`: author | narrator.
+final spokenPersonProvider =
+    FutureProvider.autoDispose.family<SpokenPerson, ({String name, String role})>((ref, who) async {
+  ref.watch(spokenEventsProvider);
+  final json =
+      await ref.watch(apiClientProvider).getJson('/spoken/person', query: {'name': who.name, 'role': who.role});
+  return (
+    name: json['name'] as String? ?? who.name,
+    role: json['role'] as String? ?? who.role,
+    books: [for (final b in json['books'] as List<dynamic>? ?? const []) SpokenBook.fromJson(b as Map<String, dynamic>)],
+    releases: [
+      for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>),
+    ],
+    loginConfigured: json['loginConfigured'] as bool? ?? false,
+  );
+});
+
+/// Cesta na stránku autora / interpreta.
+String spokenPersonPath(String name, {bool narrator = false}) =>
+    Uri(path: '/spoken/person', queryParameters: {'name': name, if (narrator) 'role': 'narrator'}).toString();
+
 /// Počítadlo událostí `spoken.book` z WS (stav stahování knihy).
 final spokenEventsProvider = StreamProvider.autoDispose<int>((ref) async* {
   var n = 0;

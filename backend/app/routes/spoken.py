@@ -286,12 +286,16 @@ def books(session: Session = Depends(get_session), current: tuple[str, str] = De
     playable: dict[str, int] = {}
     for book_id in session.exec(select(SpokenFile.book_id)).all():
         playable[book_id] = playable.get(book_id, 0) + 1
-    admin = download_limits.is_admin(current[0])
+    return {"books": _book_items(rows, progress, playable, current[0])}
+
+
+def _book_items(rows, progress: dict, playable: dict[str, int], user_id: str) -> list[dict]:
+    admin = download_limits.is_admin(user_id)
     out = []
     for b in rows:
         # Nepovedené stažení vidí jen ten, kdo o knihu žádal (a správce) --
         # ostatním by v „Stahuje se“ strašila cizí chyba (UX audit 7. 10.).
-        if b.status == "failed" and not admin and b.requested_by_user_id != current[0]:
+        if b.status == "failed" and not admin and b.requested_by_user_id != user_id:
             continue
         item = book_out(b)
         p = progress.get(b.id)
@@ -300,9 +304,95 @@ def books(session: Session = Depends(get_session), current: tuple[str, str] = De
         item["playableFiles"] = playable.get(b.id, 0)
         # Moje = o knihu jsem žádal, nebo ji poslouchám. Ostatní knihy na
         # serveru má Domů ve vlastní sekci (pustit hned, bez stahování).
-        item["mine"] = b.requested_by_user_id == current[0] or p is not None
+        item["mine"] = b.requested_by_user_id == user_id or p is not None
         out.append(item)
-    return {"books": out}
+    return out
+
+
+def _fold(text: str | None) -> str:
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().casefold()
+    return " ".join(text.split())
+
+
+def _names(field: str | None) -> list[str]:
+    """"Zdeněk Jirotka a Josef Hrubín" -> jednotlivá jména (bez diakritiky).
+    Čárka jméno nedělí ("Jirotka, Zdeněk" je jeden člověk) -- obě pořadí."""
+    import re
+
+    out: list[str] = []
+    for n in re.split(r"\s*(?:;|&|/|\ba\b|\band\b)\s*", field or ""):
+        if not n.strip():
+            continue
+        out.append(_fold(n))
+        if "," in n:  # "Jirotka, Zdeněk" -> i "Zdeněk Jirotka"
+            last, _, first = n.partition(",")
+            out.append(_fold(f"{first} {last}"))
+    return out
+
+
+@spoken_router.get("/person")
+async def person(
+    name: str,
+    role: str = "author",
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+):
+    """Stránka autora / interpreta (čte): jeho knihy na serveru a další
+    vydání na SkTorrentu ke stažení (u už stažených `bookId`)."""
+    name = name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Chybí jméno.")
+    field = SpokenBook.narrator if role == "narrator" else SpokenBook.author
+    wanted = _fold(name)
+    rows = [
+        b
+        for b in session.exec(
+            select(SpokenBook).where(field.is_not(None)).order_by(SpokenBook.created_at.desc())  # type: ignore[union-attr,attr-defined]
+        ).all()
+        if wanted in _names(b.narrator if role == "narrator" else b.author)
+    ]
+    ids = [b.id for b in rows]
+    progress = {
+        p.book_id: p
+        for p in session.exec(
+            select(SpokenProgress).where(SpokenProgress.user_id == current[0], SpokenProgress.book_id.in_(ids))  # type: ignore[attr-defined]
+        ).all()
+    } if ids else {}
+    playable: dict[str, int] = {}
+    for book_id in session.exec(select(SpokenFile.book_id).where(SpokenFile.book_id.in_(ids))).all() if ids else []:  # type: ignore[attr-defined]
+        playable[book_id] = playable.get(book_id, 0) + 1
+    books = _book_items(rows, progress, playable, current[0])
+
+    try:
+        releases = await sktorrent.search(name)
+    except Exception:  # noqa: BLE001 - SkTorrent nedostupný: stránka i tak ukáže knihy na serveru
+        releases = []
+    on_server = {b.source_ref: b for b in rows}
+    known = {
+        b.source_ref: b
+        for b in session.exec(
+            select(SpokenBook).where(SpokenBook.source_ref.in_([r.infohash for r in releases]))  # type: ignore[attr-defined]
+        ).all()
+    } if releases else {}
+    out = []
+    for r in releases:
+        if r.infohash in on_server:
+            continue  # už je výš v "Na serveru"
+        item = r.to_json()
+        book = known.get(r.infohash)
+        if book is not None:
+            item["bookId"] = book.id
+            item["status"] = book.status
+        out.append(item)
+    return {
+        "name": name,
+        "role": "narrator" if role == "narrator" else "author",
+        "books": books,
+        "releases": out[:40],
+        "loginConfigured": sktorrent.credentials() is not None,
+    }
 
 
 def _progress_out(p: SpokenProgress) -> dict:
