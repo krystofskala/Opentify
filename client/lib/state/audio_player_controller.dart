@@ -1184,7 +1184,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       queueSourceLabel: sourceLabel,
       shuffleEnabled: shuffleOn,
       shuffleOrder: order,
-      repeatMode: repeatMode ?? state.repeatMode,
+      // Nekonečné hraní platí jen pro frontu, kde ho člověk zapnul -- nové
+      // album / playlist končí svým koncem (audit 7. 10.: jednou zapnuté
+      // navazovalo "podobnou hudbu" za každým dalším albem).
+      repeatMode: repeatMode ?? (state.repeatMode == RepeatMode.endless ? RepeatMode.off : state.repeatMode),
       speed: state.speed,
       volume: state.volume,
       recentlyPlayed: state.recentlyPlayed,

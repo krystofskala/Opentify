@@ -413,9 +413,13 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
         select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.kind == PlaylistKind.USER)
     ).all()
     candidates.append(liked)
-    # Žebříčky a nálady soutěží taky, ale mají jen `qp.WIDE_SLOTS` míst.
-    wide = {p.id for key in ("charts", "editorial") for p in by_section.get(key, [])}
-    candidates += [p for key in ("charts", "editorial") for p in by_section.get(key, [])]
+    # Žebříčky a nálady soutěží taky, ale mají jen `qp.WIDE_SLOTS` míst -- a
+    # jen když si je člověk na Domů zapnul. Dřív je dostal i nováček, který
+    # je vypnuté má (rozpor s pravidlem "nic, co si nevybral"; audit 7. 10.).
+    layout = get_layout(session, user_id)
+    wide_keys = [key for key in ("charts", "editorial") if is_visible(layout, key)]
+    wide = {p.id for key in wide_keys for p in by_section.get(key, [])}
+    candidates += [p for key in wide_keys for p in by_section.get(key, [])]
     candidates = [p for p in {p.id: p for p in candidates}.values() if p.id not in taken]
     ranked = qp.rank(session, user_id, candidates, liked.id)
     auto: list = []
