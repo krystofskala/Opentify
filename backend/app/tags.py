@@ -7,6 +7,7 @@ mix, hlavní interpreti, zásadní alba, popis a příbuzné styly.
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import re
 from typing import Any
@@ -208,6 +209,9 @@ async def _resolve_tracks(items: list[dict[str, str]], limit: int) -> list[str]:
             return None
         if _normalize((found.get("artist") or {}).get("name", "")) != _normalize(item["artist"]):
             return None
+        # Deezer občas vrátí "(Slowed)" / "Sped Up" verzi místo původní.
+        if _JUNK_VERSION.search(found.get("title") or "") and not _JUNK_VERSION.search(item.get("title") or ""):
+            return None
         return found
 
     found = [f for f in await asyncio.gather(*(one(i) for i in items[: limit + limit // 2])) if f]
@@ -276,11 +280,23 @@ async def _taste_bridge(
         n for n in dict.fromkeys(n for lst in lists if isinstance(lst, list) for n in lst)
         if _normalize(n) not in skip_names
     ]
+    cand_tags = [
+        (name, tags) for name, tags in zip(candidates, await asyncio.gather(*(tags_of(n) for n in candidates)))
+        if _strong(tags, t)
+    ]
+    # Vzácnost štítku mezi kandidáty (IDF): co má skoro každý rapper (pop,
+    # hip-hop) rozhoduje málo, co tě odlišuje (folk, akustické, jazz) hodně.
+    df: dict[str, int] = {}
+    for _name, tags in cand_tags:
+        for tag, _c in tags:
+            df[slug(tag)] = df.get(slug(tag), 0) + 1
+    idf = {k: math.log((1 + len(cand_tags)) / (1 + v)) for k, v in df.items()}
     scored: list[tuple[float, str]] = []
-    for name, tags in zip(candidates, await asyncio.gather(*(tags_of(n) for n in candidates))):
-        if not _strong(tags, t):
-            continue
-        fit = sum(profile.get(slug(tag), 0.0) * count / 100 for tag, count in tags if slug(tag) != t and _profile_tag(tag))
+    for name, tags in cand_tags:
+        fit = sum(
+            profile.get(slug(tag), 0.0) * idf.get(slug(tag), 0.0) * count / 100
+            for tag, count in tags if slug(tag) != t and _profile_tag(tag)
+        )
         if fit > 0:
             scored.append((fit * (0.8 + 0.4 * rng.random()), name))
     scored.sort(reverse=True)
