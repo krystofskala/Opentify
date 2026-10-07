@@ -34,6 +34,7 @@ import '../../core/share_image.dart' show shareFile;
 import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import '../../widgets/toast.dart';
+import '../../widgets/state_views.dart' show humanError;
 import '../artist/artist_support.dart' show openExternal;
 import '../../core/app_update.dart';
 import '../../widgets/app_update_sheet.dart';
@@ -859,24 +860,55 @@ final importedHistoryProvider = FutureProvider.autoDispose<Map<String, int>>((re
   return {for (final e in json.entries) e.key: (e.value as num).toInt()};
 });
 
+/// Které nahrané zdroje se počítají do vkusu (`/library/taste-sources`).
+final tasteSourcesProvider = FutureProvider.autoDispose<Map<String, bool>>((ref) async {
+  final json = await ref.read(apiClientProvider).getJson('/library/taste-sources');
+  return {for (final e in json.entries) e.key: e.value as bool};
+});
+
+/// Nahraná historie po službách, u každé přepínač „Do vkusu“ -- vypnutý zdroj
+/// se nepočítá do doporučování (Wrapped a historie ho počítají dál).
 class _ImportedHistoryLine extends ConsumerWidget {
   const _ImportedHistoryLine();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final counts = ref.watch(importedHistoryProvider).valueOrNull ?? const {};
+    final counted = ref.watch(tasteSourcesProvider).valueOrNull ?? const {};
     const names = {'spotify': 'Spotify', 'ytmusic': 'YouTube Music', 'applemusic': 'Apple Music'};
-    final parts = [
-      for (final e in names.entries)
-        if ((counts[e.key] ?? 0) > 0) '${e.value}: ${counts[e.key]} poslechů',
-    ];
-    if (parts.isEmpty) return const SizedBox.shrink();
+    final present = [for (final e in names.entries) if ((counts[e.key] ?? 0) > 0) e];
+    if (present.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     return Padding(
       padding: const EdgeInsets.only(left: 30, bottom: AppSpacing.xs),
-      child: Text(
-        'Nahraná historie – ${parts.join(' · ')}',
-        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Nahraná historie', style: muted),
+          for (final e in present)
+            Row(
+              children: [
+                Expanded(child: Text('${e.value}: ${counts[e.key]} poslechů', style: theme.textTheme.bodySmall)),
+                Text('Do vkusu', style: muted),
+                Switch(
+                  value: counted[e.key] ?? true,
+                  onChanged: (on) async {
+                    final messenger = ScaffoldMessenger.maybeOf(context);
+                    try {
+                      await ref
+                          .read(apiClientProvider)
+                          .putJson('/library/taste-sources', body: {'source': e.key, 'counted': on});
+                      ref.invalidate(tasteSourcesProvider);
+                      ref.invalidate(homeProvider);
+                    } catch (err) {
+                      showToast(messenger, 'Nepovedlo se: ${humanError(err)}');
+                    }
+                  },
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }

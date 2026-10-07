@@ -84,6 +84,11 @@ def read_zip(raw: bytes) -> list[dict[str, Any]]:
                         # (PlayEvent). Zařízení/platforma se dál nečtou.
                         "reason_end": row.get("reason_end"),
                         "skipped": bool(row.get("skipped")),
+                        # Jak přehrání začalo (clickrow = vybral skladbu) a
+                        # náhodné pořadí -- vlastní volba vs. jejich algoritmus
+                        # (app/home/activation.import_algorithmic).
+                        "reason_start": row.get("reason_start"),
+                        "shuffle": bool(row.get("shuffle")),
                     }
                 )
     return plays
@@ -181,6 +186,10 @@ def import_history(user_id: str, plays: list[dict[str, Any]], source: str = SOUR
                     played_at=_parse_ts(play["ts"]).replace(tzinfo=None),
                     duration_played_ms=ms,
                     source=source,
+                    context=(
+                        f"spotify:{'shuffle:' if play.get('shuffle') else ''}{play['reason_start']}"
+                        if play.get("reason_start") else None
+                    ),
                     lb_submitted_at=now,
                 )
             )

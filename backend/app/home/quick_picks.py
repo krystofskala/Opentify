@@ -83,7 +83,7 @@ def time_profile(session: Session, user_id: str) -> tuple[Counter, Counter, Coun
         w *= 0.5 ** ((now - played).total_seconds() / 86400 / 21)
         if w < 0.01:
             continue
-        if context:
+        if context and context.startswith("/"):  # cesta v appce, ne "spotify:clickrow" z importu
             ctx[context] += w
         rec_w[rid] += w
     artists: Counter = Counter()

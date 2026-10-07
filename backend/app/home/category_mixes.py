@@ -42,8 +42,11 @@ logger = logging.getLogger(__name__)
 
 MIX_SIZE = 40
 FAMILIAR_SHARE = 0.6
-MIN_FAMILIAR = 4
-MIN_MIX_SIZE = 15
+# Stejně jako mixy stylů (uživatel 7. 10.): aspoň 1 tvá skladba a 12
+# celkem; s "připraveným" vkusem (zaběhlý profil / dost potvrzených
+# interpretů) i bez tvých skladeb -- podle nejbližší hudby (most vkusu).
+MIN_FAMILIAR = 1
+MIN_MIX_SIZE = 12
 MEMBER_SHARE = 0.25  # interpret patří do žánru, když v něm má aspoň čtvrtinu alb
 HOME_PICKS = 4
 REPLACE_MARGIN = 1.15
@@ -92,7 +95,7 @@ _CLASSIFY_BUDGET_BACKGROUND = 250
 _CLASSIFY_BUDGET_PAGE = 25
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_VERSION = 2  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
+_VERSION = 3  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
 
 
 def _source(category_id: str) -> str:
@@ -237,10 +240,27 @@ async def _genre_mix(c: Category, taste: pm.Taste, shares: dict[str, dict[str, f
     # Nové: "rádio" nejposlouchanějších interpretů, kteří jsou v žánru hlavně.
     core = sorted((a for a, s in members.items() if s >= 0.5), key=lambda a: -taste.artist_weight[a])
     seeds = [taste.artist_deezer[a] for a in core[:4] if a in taste.artist_deezer]
-    want = min(MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
-    new = await pm._new_tracks_from(seeds, taste.known, rng, want) if seeds else []
+    want = min(MIX_SIZE - len(familiar), max(12, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
+    radio = await pm._new_tracks_from(seeds, taste.known, rng, want) if seeds else []
+    # + nejbližší hudba žánru podle celého trvalého vkusu (most vkusu) --
+    # i žánr, který jsi ještě neobjevil (folkař a jazz rap).
+    from app import browse, tags
+    from app.home import taste_bridge
+
+    lasting = [(taste.artist_name.get(a) or "", w) for a, w in taste.artist_weight.most_common(300)]
+    known_names = {taste_bridge._normalize(taste.artist_name.get(a) or "") for a in members}
+    styles = list(browse.LASTFM_TAGS.get(c.id) or (c.title.lower(),))
+    try:
+        items = await taste_bridge.bridge(styles, lasting, known_names, rng, n_artists=12)
+        near = [r for r in await tags._resolve_tracks(items, want) if r not in taste.known]
+    except Exception:  # noqa: BLE001 -- objevy navíc, mix vznikne i bez nich
+        logger.exception("most vkusu pro %s", c.id)
+        near = []
+    new: list[str] = []
+    for i in range(max(len(radio), len(near))):
+        new += [x for x in (radio[i : i + 1] + near[i : i + 1]) if x not in new]
     top_artists = sorted(members, key=lambda a: -taste.artist_weight[a])
-    return familiar, new, top_artists
+    return familiar, new[:want], top_artists
 
 
 async def _related_sets(taste: pm.Taste, limit: int = 60) -> dict[str, set[str]]:
@@ -360,7 +380,12 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
         tracks = pm._interleave(familiar, new)
         tracks = listen_later.weave(tracks, await _listen_later_fitting(c, taste, top_artists))
         playlist_id = None
-        if len(familiar) >= MIN_FAMILIAR and len(tracks) >= MIN_MIX_SIZE:
+        from app.home import activation as av
+
+        ready = c.group == "genre" and taste.activation is not None and (
+            await asyncio.to_thread(av.taste_state, g.home_user(), taste.activation)
+        ).ready
+        if (len(familiar) >= MIN_FAMILIAR or ready) and len(tracks) >= MIN_MIX_SIZE:
             names = [taste.artist_name[a] for a in top_artists[:2] if a in taste.artist_name]
             playlist_id = g._save_playlist(
                 owner=g.home_user(),

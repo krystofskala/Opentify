@@ -1309,6 +1309,49 @@ def history_imports(
     return {names[src]: count for src, count in rows}
 
 
+class TasteSourceIn(BaseModel):
+    source: str  # spotify | ytmusic | applemusic
+    counted: bool
+
+
+_TASTE_SOURCE_IDS = {"spotify": "spotify-history", "ytmusic": "ytmusic-history", "applemusic": "applemusic-history"}
+
+
+@library_router.get("/taste-sources")
+def taste_sources(current: tuple[str, str] = Depends(get_current_user)):
+    """Které nahrané zdroje se počítají do vkusu (Profil › Moje hudba)."""
+    from app.home.activation import excluded_sources
+
+    off = excluded_sources(current[0])
+    return {key: src not in off for key, src in _TASTE_SOURCE_IDS.items()}
+
+
+@library_router.put("/taste-sources")
+async def set_taste_source(body: TasteSourceIn, current: tuple[str, str] = Depends(get_current_user)):
+    """Vypnout / zapnout zdroj ve vkusu. Wrapped, roky a historie ho počítají
+    dál -- jde jen o doporučování."""
+    from app.home import play_now
+    from app.home.service import invalidate_home_cache_for
+    from app.models import HomeSnapshot
+    from app.utils import utcnow
+
+    src = _TASTE_SOURCE_IDS.get(body.source)
+    if src is None:
+        raise HTTPException(status_code=400, detail="Neznámý zdroj.")
+    with Session(engine) as session:
+        key = f"taste_sources:{current[0]}"
+        row = session.get(HomeSnapshot, key) or HomeSnapshot(key=key, payload={})
+        off = set((row.payload or {}).get("excluded") or [])
+        (off.discard if body.counted else off.add)(src)
+        row.payload = {"excluded": sorted(off)}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    play_now._cache.pop(current[0], None)
+    await invalidate_home_cache_for(current[0])
+    return taste_sources(current)
+
+
 @library_router.get("/favorite-artists")
 def favorite_artists(
     session: Session = Depends(get_session),

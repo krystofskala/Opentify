@@ -312,18 +312,25 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
         if a in similar and a not in known_names and per_artist.get(a, 0) < 2:
             per_artist[a] = per_artist.get(a, 0) + 1
             pool.append(x)
+    # Styl vznikne i bez tvých skladeb, když je vkus "připravený" (zaběhlý
+    # profil nebo dost potvrzených interpretů): jde se po nejbližší hudbě
+    # (uživatel 7. 10.). Jinak aspoň 1 tvá skladba.
+    from app.home import activation as av
+
+    ready = (await asyncio.to_thread(av.taste_state, user_id, taste.activation)).ready if taste.activation else True
+    if not own and not ready:
+        return None
     # Málo vlastních (okrajový styl): víc objevů, ať mix vznikne i tak.
-    want = 14 if len(own) >= 8 else 24
-    # Půlka objevů podle celého vkusu (jaký rap by se líbil folkaři), půlka
-    # od interpretů podobných těm, které ze stylu už posloucháš.
-    bridge = await taste_bridge.bridge(
-        [t], [(names[a] or "", artist_weight[a]) for a in top_artists if names.get(a)], known_names, rng
-    )
+    want = 14 if len(own) >= 8 else (24 if own else 30)
+    # Objevy podle celého TRVALÉHO vkusu (jaký rap by se líbil folkaři) a od
+    # interpretů podobných těm, které ze stylu už posloucháš.
+    lasting = [(taste.artist_name.get(a) or "", w) for a, w in taste.artist_weight.most_common(300)]
+    bridge = await taste_bridge.bridge([t], lasting, known_names, rng, n_artists=16 if not own else 12)
     mixed: list[dict[str, str]] = []
     for i in range(max(len(bridge), len(pool))):
         mixed += bridge[i : i + 1] + pool[i : i + 1]
     discovery = [r for r in await _resolve_tracks(mixed, want + 6) if r not in set(own)][:want]
-    if len(own) + len(discovery) < 12 or not own:
+    if len(own) + len(discovery) < 12:
         return None
     ids: list[str] = []
     while own or discovery:

@@ -566,26 +566,18 @@ ALBUM_GENRES = {
 ALBUM_PICKS_SIZE = 14
 # Podíl alb napříč žánry podle potvrzeného vkusu: bez dat celá řada, s
 # přibývajícími potvrzenými interprety klesá (12 -> jen čtvrtina) a u
-# zaběhlého profilu (activation.YOUNG_PROFILE) zmizí.
+# zaběhlého profilu (activation.YOUNG_DAYS dnů poslechu) zmizí.
 _COMPILATION = re.compile(r"\b(hits|best of|greatest|collection|essential|anthology|gold|the very best|singles)\b", re.I)
 EXPLORE_FULL_AT = 12
 EXPLORE_MIN = 0.25
 
 
 def _taste_confidence(user_id: str) -> tuple[bool, set[str]]:
-    """(mladý profil, potvrzení interpreti). Potvrzený = srdíčko, knihovna,
-    oblíbený interpret, nebo se k němu vrací opakovaně po delší době --
-    zkoušení ani puštění pro někoho sekci neurčí (activation.confirmation)."""
+    """(mladý profil, potvrzení interpreti) -- activation.taste_state."""
     from app.home import activation as av
-    from app.home.play_now import _chosen_tracks, _rec_meta
 
-    act = av.compute(user_id)
-    with Session(engine) as s:
-        chosen = _chosen_tracks(s, user_id, 300)
-        favorites = set(s.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all())
-    confirmed = {aid for aid, _t in _rec_meta(chosen).values() if aid} | favorites
-    confirmed |= {a for a, (n, span) in act.artist_days().items() if av.confirmation(n, span) >= 1.0}
-    return len(act.timeline) < av.YOUNG_PROFILE, confirmed
+    state = av.taste_state(user_id)
+    return state.young > 0, state.confirmed
 
 
 def explore_share(young: bool, confirmed: int) -> float:

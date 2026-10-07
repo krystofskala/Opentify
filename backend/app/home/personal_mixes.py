@@ -197,7 +197,13 @@ def load_taste(user_id: str) -> Taste:
                 taste.playlist_weight[rid] = max(taste.playlist_weight.get(rid, 0.0), share)
             taste.playlisted = set(taste.playlist_weight)
         since = now - timedelta(days=365)
-        listens = session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
+        from app.home.activation import excluded_sources
+
+        off = excluded_sources(user_id)  # zdroje vypnuté ze vkusu (Profil › Hudba)
+        listens = [
+            x for x in session.exec(select(Listen).where(Listen.user_id == user_id, Listen.played_at >= since)).all()
+            if x.source not in off
+        ]
         for listen in listens:
             played = _aware(listen.played_at)
             taste.listen_counts[listen.recording_id] += 1
@@ -282,9 +288,10 @@ def load_taste(user_id: str) -> Taste:
             for artist_id, share in taste.activation.blend(av.ARTIST_BLEND).items():
                 if artist_id not in banned:
                     taste.artist_weight[artist_id] += share * scale
-        # Mladý profil: trvalý vliv má jen interpret, ke kterému se vrací
-        # opakovaně po delší době, nebo výslovná volba (srdíčko, knihovna,
-        # playlist) -- activation.tentative_factors.
+        # Mladý profil: trvalý vliv má jen interpret, ke kterému se sám
+        # vrací (návraty z vlastní volby, algoritmus třetinou) nebo výslovná
+        # volba (srdíčko, knihovna, playlist) -- activation.tentative_factors,
+        # váhy z auditu 7. 10.
         from app.home import activation as av
         from app.home.feedback import deltas as _feedback
 
@@ -296,10 +303,15 @@ def load_taste(user_id: str) -> Taste:
         confirmed = {taste.artist_of[r] for r in deliberate if r in taste.artist_of} | {
             a for a, d in manual.items() if d > 0
         }
-        day_stats = av.artist_day_stats(
-            (_aware(listen.played_at), taste.artist_of.get(listen.recording_id)) for listen in listens
-        )
-        for artist_id, factor in av.tentative_factors(day_stats, confirmed, len(listens)).items():
+        if taste.activation is not None:
+            day_stats = taste.activation.artist_days()  # ví i o algoritmu
+        else:
+            labels = av.algorithmic_labels(session, user_id)
+            day_stats = av.artist_day_stats(
+                (_aware(x.played_at), taste.artist_of.get(x.recording_id), av.is_algorithmic(x.source, labels))
+                for x in listens
+            )
+        for artist_id, factor in av.tentative_factors(day_stats, confirmed, taste.listen_days).items():
             if artist_id in taste.artist_weight:
                 taste.artist_weight[artist_id] *= factor
         # "Víc / míň takových": jednotka = dvacetina nejsilnějšího interpreta,
@@ -779,6 +791,30 @@ def prefer_unused(recording_ids: list[str], used: set[str]) -> list[str]:
     return [r for r in recording_ids if r not in used] + [r for r in recording_ids if r in used]
 
 
+def _transient_seeds(taste: Taste, n: int) -> list[str]:
+    """Interpreti, ze kterých jdou Objevy týdne: DOČASNÝ vkus -- co posloucháš
+    teď (poslední týdny, vlastní volba i algoritmus), ne trvalý. Sestaví se
+    tedy i z jednoho poslechu, ale příští týden už jdou podle toho, co hrálo
+    pak (opentify-notes/skladani-hudby-navrh-2026-10-07.md). Výslovné volby
+    (srdíčko, "víc takových") a trvalý vkus jako menší příměs."""
+    act = taste.activation
+    if act is None:
+        return [a for a, _w in taste.artist_weight.most_common(n)]
+    from app.home.activation import ARTIST_BLEND
+
+    now = act.blend({"short": 0.75, "medium": 0.25})
+    lasting = act.blend(ARTIST_BLEND)
+    total_w = sum(taste.artist_weight.values()) or 1.0
+    score: Counter = Counter()
+    for a, v in now.items():
+        score[a] += v
+    for a, v in lasting.items():
+        score[a] += 0.2 * v
+    for a, w in taste.artist_weight.items():
+        score[a] += 0.1 * w / total_w
+    return [a for a, _s in score.most_common(n * 2) if a in taste.artist_weight][:n]
+
+
 async def build_discover_weekly() -> int:
     week = _week_key()
     done = _already_built("personal:discover-weekly", week)
@@ -790,11 +826,12 @@ async def build_discover_weekly() -> int:
     exclude = taste.known | recent
     known_names = {primary_artist_name(n).casefold() for n in taste.artist_name.values()}
     known_dz = set(taste.artist_deezer.values())
+    seeds = _transient_seeds(taste, 15)
 
     # Kandidáti = "related" interpreti tvých top interpretů, které neznáš;
     # čím víc tvých interpretů je doporučuje, tím výš.
     candidates: Counter = Counter()
-    for artist_id, _ in taste.artist_weight.most_common(15):
+    for artist_id in seeds:
         dz = await _deezer_id(taste, artist_id)
         if dz is None:
             continue
@@ -807,7 +844,7 @@ async def build_discover_weekly() -> int:
     # + podobní podle posluchačů Last.fm (shoda váží; víc tvých interpretů =
     # výš), převedení na Deezer přes přesné jméno.
     lf_scores: Counter = Counter()
-    for artist_id, _ in taste.artist_weight.most_common(15):
+    for artist_id in seeds:
         if is_own_artist(artist_id):  # Last.fm by našel stejnojmennou cizí kapelu
             continue
         for name, match in await lt.similar_artist_names(taste.artist_name.get(artist_id, ""), 25):

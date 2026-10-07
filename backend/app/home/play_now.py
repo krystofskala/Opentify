@@ -371,13 +371,13 @@ def pick(
     # Mladý profil: interpret jen z jednoho dne (zkoušení, puštěné pro
     # někoho) má malý vliv, dokud se nevrátí jiný den nebo nedostane srdíčko.
     tentative: dict[str, float] = {}
-    if len(act.timeline) < av.YOUNG_PROFILE:
+    if av.youngness(act.listening_days()) > 0:
         with Session(engine) as session:
             chosen_artists = {
                 a for a in (act.artist_of.get(r) for r in (chosen or _chosen_tracks(session, user_id))) if a
             }
         tentative = av.tentative_factors(
-            act.artist_days(), chosen_artists | {a for a, d in manual.items() if d > 0}, len(act.timeline)
+            act.artist_days(), chosen_artists | {a for a, d in manual.items() if d > 0}, act.listening_days()
         )
 
     def score(rid: str) -> float:

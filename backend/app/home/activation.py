@@ -47,59 +47,220 @@ PEAK_WINDOW_DAYS = 60
 PEAK_MIN = 4
 
 
-# Mladý profil (čistý start): zkoušení ani puštění pro někoho nesmí určit
-# vkus natrvalo. Trvalý vliv má interpret, ke kterému se člověk VRACÍ:
-# aspoň CONFIRM_DAYS různých dnů v rozpětí aspoň CONFIRM_SPAN_DAYS. Do té doby
-# vliv roste postupně od TENTATIVE (jeden den) k 1. Srdíčko / knihovna /
-# playlist / "víc takových" = výslovná volba, platí hned. Platí pro všechny
-# poslechy stejně (feedback_equal_listen_weight): rozhoduje opakování v
-# čase, ne odkud poslech je. S rostoucí historií se rozdíl plynule ztrácí
-# (u YOUNG_PROFILE poslechů zmizí). V běžící relaci hraje, co hraje (40 min).
-YOUNG_PROFILE = 300
-TENTATIVE = 0.35
-CONFIRM_DAYS = 3
-CONFIRM_SPAN_DAYS = 7
+# Vkus ve vrstvách (opentify-notes/skladani-hudby-navrh-2026-10-07.md):
+# všechno slyšené se projeví hned, ale natrvalo jen to, k čemu se člověk
+# sám VRACÍ (vlastní volba: hledání, album, interpret, knihovna) nebo co si
+# výslovně vybral (srdíčko, knihovna, playlist, "víc takových" -> platí
+# hned). Váhy z auditu 7. 10. na 8 807 nových interpretech vlastníka: kolik
+# jich vydrželo (poslech aspoň ve 3 dnech v dalším roce) podle počtu dní a
+# rozpětí v prvních 30 dnech -- 1 den 10 %, 3 dny přes 2 týdny 38 %, 5+ dní
+# přes 2 týdny 76 % (= plná váha). Poslech, který pustil algoritmus (Pusť teď,
+# mix, rádio, žebříček), se do návratů počítá jen třetinou dne. Import =
+# vlastní volba (stejná váha, feedback_equal_listen_weight).
+YOUNG_DAYS = 30  # mladý profil = méně různých dnů poslechu (audit: 300 poslechů jsou u někoho 4 dny)
+ALGO_DAY = 1 / 3
+CONFIRMED_AT = 0.5  # od téhle váhy je interpret "potvrzený" (Celá alba, osobní část)
 
 
-def confirmation(days: int, span_days: float) -> float:
-    """0 = jeden den, 1 = vrací se opakovaně po delší době."""
-    if days <= 1:
-        return 0.0
-    return min(1.0, (days - 1) / (CONFIRM_DAYS - 1)) * min(1.0, span_days / CONFIRM_SPAN_DAYS)
+def persistence_weight(days: float, span_days: float) -> float:
+    """Váha interpreta pro trvalý vkus (0,13-1) podle návratů: `days` různých
+    dnů (algoritmus = třetina dne), `span_days` první-poslední poslech."""
+    if days < 2:
+        return 0.13
+    if days < 3:
+        return 0.2 if span_days < 7 else 0.25
+    if days < 4:
+        return 0.35 if span_days < 7 else (0.4 if span_days < 14 else 0.5)
+    if days < 5:
+        return 0.35 if span_days < 7 else 0.53
+    # 5+ dní: týdenní nárazové poslouchání vydrží málokdy (15 %), přes 2 týdny ano.
+    return 0.2 if span_days < 7 else (0.75 if span_days < 14 else 1.0)
+
+
+def youngness(listening_days: int) -> float:
+    """1 = úplně nový profil, 0 = zaběhlý (YOUNG_DAYS a víc dnů poslechu)."""
+    return max(0.0, 1.0 - listening_days / YOUNG_DAYS)
 
 
 def tentative_factors(
-    artist_days: dict[str, tuple[int, float]], confirmed: set[str], listens: int
+    artist_days: dict[str, tuple[float, float]], confirmed: set[str], listening_days: int
 ) -> dict[str, float]:
-    """Interpret -> násobek jeho vlivu na vkus (chybí = 1).
-    `artist_days`: interpret -> (počet různých dnů, rozpětí první–poslední v dnech)."""
-    if listens >= YOUNG_PROFILE:
+    """Interpret -> násobek jeho vlivu na trvalý vkus (chybí = 1). U mladého
+    profilu nepotvrzený interpret táhne jen podle váhy návratů; s přibývajícími
+    dny poslechu se rozdíl plynule ztrácí. `confirmed` = výslovné volby."""
+    young = youngness(listening_days)
+    if young <= 0:
         return {}
-    young = 1 - listens / YOUNG_PROFILE
     out: dict[str, float] = {}
     for a, (days, span) in artist_days.items():
         if a in confirmed:
             continue
-        conf = confirmation(days, span)
-        if conf < 1.0:
-            out[a] = 1 - (1 - TENTATIVE) * young * (1 - conf)
+        w = persistence_weight(days, span)
+        if w < 1.0:
+            out[a] = 1 - (1 - w) * young
     return out
 
 
-def artist_day_stats(rows) -> dict[str, tuple[int, float]]:
-    """(čas, interpret) -> interpret -> (různých dnů, rozpětí v dnech)."""
-    days: dict[str, set] = defaultdict(set)
+def artist_day_stats(rows) -> dict[str, tuple[float, float]]:
+    """(čas, interpret[, z algoritmu]) -> interpret -> (dní, rozpětí v dnech).
+    Den, kdy interpreta pustil jen algoritmus, se počítá třetinou."""
+    own: dict[str, set] = defaultdict(set)
+    algo: dict[str, set] = defaultdict(set)
     first: dict[str, datetime] = {}
     last: dict[str, datetime] = {}
-    for t, a in rows:
+    for row in rows:
+        t, a = row[0], row[1]
+        is_algo = bool(row[2]) if len(row) > 2 else False
         if not a:
             continue
-        days[a].add(t.date())
+        (algo if is_algo else own)[a].add(t.date())
         if a not in first or t < first[a]:
             first[a] = t
         if a not in last or t > last[a]:
             last[a] = t
-    return {a: (len(d), (last[a] - first[a]).total_seconds() / 86400) for a, d in days.items()}
+    return {
+        a: (len(own[a]) + ALGO_DAY * len(algo[a] - own[a]), (last[a] - first[a]).total_seconds() / 86400)
+        for a in first
+    }
+
+
+# Odkud poslech je: fronty, které skládá algoritmus nebo cizí výběr (mixy,
+# rádio, Pusť teď, žebříčky, žánrové a redakční playlisty). Stejné druhy
+# jako PlayEvent.algorithmic (app/connect_listens.py) + žebříčky.
+_ALGO_KINDS = ("PERSONAL_MIX", "GENERATED_RECOMMENDATION", "RADIO", "CHART", "GENRE", "EDITORIAL")
+_ALGO_PREFIXES = ("Pusť teď", "Rádio · ")
+TASTE_SOURCES = ("spotify-history", "applemusic-history", "ytmusic-history")
+
+
+def algorithmic_labels(session: Session, user_id: str) -> set[str]:
+    from app.models import GLOBAL_PLAYLIST_OWNER, Playlist
+
+    return {
+        t for t in session.exec(
+            select(Playlist.title).where(
+                Playlist.owner_user_id.in_([user_id, GLOBAL_PLAYLIST_OWNER]),  # type: ignore[attr-defined]
+                Playlist.kind.in_(_ALGO_KINDS),  # type: ignore[attr-defined]
+            )
+        ).all() if t
+    }
+
+
+def is_algorithmic(source: str | None, labels: set[str]) -> bool:
+    """Poslech z appky: pustil ho algoritmus? (Import řeší `import_algorithmic`.)"""
+    if not source or source in TASTE_SOURCES:
+        return False
+    return source in labels or source.startswith(_ALGO_PREFIXES)
+
+
+# Import (Spotify / Apple): algoritmus není nikdy vlastní volba (uživatel
+# 7. 10.). Vlastní volba = vybral skladbu (Spotify `reason_start` clickrow,
+# ukládá se od 7. 10. do `Listen.context`), skladba z jeho sbírky (srdíčka,
+# knihovna, vlastní playlisty), nebo aspoň 3 skladby stejného alba /
+# interpreta za sebou (pustil si album nebo interpreta -- algoritmus tak
+# nehraje). Zbytek (osamocené cizí skladby: Objevy týdne, rádio, autoplay,
+# ale bez `reason_start` i jednotlivě vyhledané) se počítá jako algoritmus.
+# Audit 7. 10.: u vlastníka takhle ~50 % Spotify historie vlastní volba.
+OWN_REASONS = ("clickrow",)
+RUN_MIN = 3
+RUN_GAP_S = 15 * 60
+
+
+def import_algorithmic(rows: list[tuple], collection: set[str]) -> set[int]:
+    """`rows` = (čas, recording, album, interpret, context) seřazené podle
+    času; vrací indexy poslechů, které pustil algoritmus."""
+    n = len(rows)
+
+    def runs(idx: int) -> list[int]:
+        out = [1] * n
+        i = 0
+        while i < n:
+            j = i
+            key = rows[i][idx]
+            while (
+                key and j + 1 < n and rows[j + 1][idx] == key
+                and (rows[j + 1][0] - rows[j][0]).total_seconds() < RUN_GAP_S
+            ):
+                j += 1
+            for k in range(i, j + 1):
+                out[k] = j - i + 1
+            i = j + 1
+        return out
+
+    by_album, by_artist = runs(2), runs(3)
+    algo: set[int] = set()
+    for k, (_t, rid, _rel, _art, context) in enumerate(rows):
+        reason = (context or "").split(":")[-1] if (context or "").startswith("spotify:") else None
+        if reason in OWN_REASONS or rid in collection or by_album[k] >= RUN_MIN or by_artist[k] >= RUN_MIN:
+            continue
+        algo.add(k)
+    return algo
+
+
+def collection_tracks(session: Session, user_id: str) -> set[str]:
+    """Sbírka profilu: srdíčka, knihovna a vlastní playlisty."""
+    from app.home.play_now import _chosen_tracks
+    from app.models import Playlist, PlaylistItem, PlaylistKind
+
+    out = set(_chosen_tracks(session, user_id, 100_000))
+    own = [p for p in session.exec(
+        select(Playlist.id).where(Playlist.owner_user_id == user_id, Playlist.kind == PlaylistKind.USER)
+    ).all()]
+    if own:
+        out |= set(session.exec(select(PlaylistItem.recording_id).where(PlaylistItem.playlist_id.in_(own))).all())  # type: ignore[attr-defined]
+    return out
+
+
+def excluded_sources(user_id: str) -> set[str]:
+    """Zdroje importu, které si profil vypnul ze vkusu (Profil › Hudba)."""
+    from app.models import HomeSnapshot
+
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, f"taste_sources:{user_id}")
+    return set((row.payload or {}).get("excluded") or []) if row else set()
+
+
+# Vkus "připravený" na mixy žánrů a stylů podle nejbližší hudby (i žánr,
+# který profil ještě neobjevil): zaběhlý profil, nebo dost potvrzených
+# interpretů.
+READY_CONFIRMED = 12
+
+
+@dataclass
+class TasteState:
+    listening_days: int
+    young: float  # 1 = úplně nový, 0 = zaběhlý
+    confirmed: set[str]  # výslovné volby + interpreti s váhou návratů >= CONFIRMED_AT
+    explicit: set[str]  # srdíčko, knihovna, oblíbený interpret, "víc takových"
+    day_stats: dict[str, tuple[float, float]]
+
+    @property
+    def ready(self) -> bool:
+        return self.young <= 0 or len(self.confirmed) >= READY_CONFIRMED
+
+    def factors(self) -> dict[str, float]:
+        return tentative_factors(self.day_stats, self.explicit, self.listening_days)
+
+
+def explicit_artists(user_id: str) -> set[str]:
+    """Výslovné volby: interpreti srdíček a knihovny, oblíbení, "víc takových"."""
+    from app.home.feedback import deltas
+    from app.home.play_now import _chosen_tracks, _rec_meta
+    from app.models import FavoriteArtist
+
+    with Session(engine) as session:
+        chosen = _chosen_tracks(session, user_id, 500)
+        favorites = set(session.exec(select(FavoriteArtist.artist_id).where(FavoriteArtist.user_id == user_id)).all())
+    out = {aid for aid, _t in _rec_meta(chosen).values() if aid} | favorites
+    return out | {a for a, d in deltas(user_id).items() if d > 0}
+
+
+def taste_state(user_id: str, act: "Activation | None" = None) -> TasteState:
+    act = act or compute(user_id)
+    stats = act.artist_days()
+    explicit = explicit_artists(user_id)
+    confirmed = explicit | {a for a, (d, span) in stats.items() if persistence_weight(d, span) >= CONFIRMED_AT}
+    days = act.listening_days()
+    return TasteState(days, youngness(days), confirmed, explicit, stats)
 
 
 def _aware(value: datetime) -> datetime:
@@ -133,10 +294,13 @@ class Activation:
     # (čas, skladba) všech započtených poslechů, chronologicky -- co se
     # poslouchá spolu (Pusť teď / nekonečné hraní).
     timeline: list[tuple[datetime, str]] = field(default_factory=list)
+    # Pustil to algoritmus? (paralelně s `timeline`)
+    timeline_algo: list[bool] = field(default_factory=list)
 
-    def artist_days(self) -> dict[str, tuple[int, float]]:
-        """Interpret -> (v kolika různých dnech, rozpětí první–poslední v dnech)."""
-        return artist_day_stats((t, self.artist_of.get(r)) for t, r in self.timeline)
+    def artist_days(self) -> dict[str, tuple[float, float]]:
+        """Interpret -> (dní návratů, algoritmus = třetina dne; rozpětí v dnech)."""
+        algo = self.timeline_algo or [False] * len(self.timeline)
+        return artist_day_stats((t, self.artist_of.get(r), al) for (t, r), al in zip(self.timeline, algo))
 
     def listening_days(self) -> int:
         return len({t.date() for t, _r in self.timeline})
@@ -208,10 +372,38 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
     act = Activation(now=now)
     ln2 = math.log(2)
     with Session(engine) as session:
-        query = select(Listen.recording_id, Listen.played_at, Listen.duration_played_ms).where(Listen.user_id == user_id)
+        query = select(
+            Listen.recording_id, Listen.played_at, Listen.duration_played_ms, Listen.source, Listen.context
+        ).where(Listen.user_id == user_id)
         if before is not None:
             query = query.where(Listen.played_at < before.replace(tzinfo=None))
-        rows = session.exec(query).all()
+        excluded = excluded_sources(user_id)
+        labels = algorithmic_labels(session, user_id)
+        algo_of: dict[tuple[str, datetime], bool] = {}
+        rows = []
+        imported = []
+        for rid, played_at, ms, source, context in session.exec(query).all():
+            if source in excluded:
+                continue  # zdroj vypnutý ze vkusu (Wrapped a roky ho počítají dál)
+            rows.append((rid, played_at, ms))
+            if source in TASTE_SOURCES:
+                imported.append((played_at, rid, context))
+            elif is_algorithmic(source, labels):
+                algo_of[(rid, played_at)] = True
+        if imported:
+            imported.sort()
+            meta: dict[str, tuple[str | None, str | None]] = {}
+            imp_ids = list({r for _t, r, _c in imported})
+            for i in range(0, len(imp_ids), 500):
+                for r, rel, art in session.exec(
+                    select(Recording.id, Recording.release_id, Recording.artist_id).where(
+                        Recording.id.in_(imp_ids[i : i + 500])  # type: ignore[attr-defined]
+                    )
+                ).all():
+                    meta[r] = (rel, art)
+            full = [(t, r, *meta.get(r, (None, None)), c) for t, r, c in imported]
+            for k in import_algorithmic(full, collection_tracks(session, user_id)):
+                algo_of[(full[k][1], full[k][0])] = True
         durations: dict[str, int | None] = {}
         rids = {r for r, _p, _m in rows}
         ids = list(rids)
@@ -258,6 +450,7 @@ def compute(user_id: str, now: datetime | None = None, before: datetime | None =
         act.last[rid] = played
         times[rid].append(played)
         act.timeline.append((played, rid))
+        act.timeline_algo.append(algo_of.get((rid, played_at), False))
     # Vrchol: nejvíc poslechů v klouzavém 60denním okně.
     for rid, ts in times.items():
         best, best_at, j = 0, ts[0], 0
