@@ -3,6 +3,7 @@ právě zahraných, nekonečné hraní navazuje na interprety semínka."""
 import asyncio
 import random
 import uuid
+from collections import Counter
 from datetime import timedelta
 
 from sqlmodel import Session
@@ -93,6 +94,7 @@ def test_mood_prefers_fitting_artists():
 
 
 def test_next_chunk_without_network(monkeypatch):
+    _no_prefetch(monkeypatch)
     user = "pn-u2-" + _RUN
     _setup(user)
     pn._cache.clear()
@@ -112,6 +114,7 @@ def test_new_profile_continues_from_first_listens(monkeypatch):
     """Nový profil: poslechy jen z poslední hodiny (ty se ze známých
     vynechávají) -> nové navážou na ně, ne prázdná várka."""
     user = "pn-new-" + _RUN
+    _no_prefetch(monkeypatch)
     now = utcnow().replace(tzinfo=None)
     with Session(engine) as s:
         heard_artist = Artist(name="Heard " + _RUN)
@@ -141,3 +144,123 @@ def test_new_profile_continues_from_first_listens(monkeypatch):
     assert asked and asked[0] == [heard_id]
     assert out["recordingIds"] and set(out["recordingIds"]) <= set(fresh_ids)
     assert out["reason"] == "Navazuje na First song"
+
+
+def _no_prefetch(monkeypatch):
+    async def nothing(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(pn, "_prefetch", nothing)
+
+
+def _artist_of(rid):
+    with Session(engine) as s:
+        return s.get(Artist, s.get(Recording, rid).artist_id).name
+
+
+def test_session_cap_mutes_artist_played_a_lot():
+    user = "pn-cap-" + _RUN
+    ids = _setup(user)
+    pn._cache.clear()
+    pn._batches.clear()
+    act = pn._activation(user)
+    blue = act.artist_of[ids[("Bluegrass Band", 0)]]
+    hits = 0
+    for seed in range(20):
+        fam, _s, _r = pn.pick(user, [], [], 2, random.Random(seed), session_counts=Counter({blue: 3}))
+        hits += sum(1 for r in fam if act.artist_of.get(r) == blue)
+    assert hits <= 2  # 0,3^3 ~ 3 % -- skoro nikdy
+
+
+def test_endless_keeps_one_seed_artist_track_even_when_capped():
+    user = "pn-seed-" + _RUN
+    ids = _setup(user)
+    pn._cache.clear()
+    act = pn._activation(user)
+    seed = ids[("Metal Act", 0)]
+    metal = act.artist_of[seed]
+    fam, _s, _r = pn.pick(user, [seed], [seed], 3, random.Random(1), session_counts=Counter({metal: 6}))
+    assert any(act.artist_of.get(r) == metal for r in fam)
+
+
+def test_second_tap_gives_a_different_batch():
+    user = "pn-mem-" + _RUN
+    _setup(user)
+    pn._cache.clear()
+    pn._batches.clear()
+    first, _s, _r = pn.pick(user, [], [], 4, random.Random(7))
+    pn._remember_batch(user, first)
+    second, _s, _r = pn.pick(user, [], [], 4, random.Random(7))
+    assert len(set(first) & set(second)) <= 1
+
+
+def test_safe_start_puts_downloaded_first():
+    assert pn._safe_start(["a", "b", "c", "d"], {"c", "d"}) == ["c", "d", "a", "b"]
+    assert pn._safe_start(["a", "b", "c"], {"a"}) == ["a", "b", "c"]
+    assert pn._safe_start(["a", "b"], set()) == ["a", "b"]
+
+
+def test_band_links_group_solo_project_with_band(monkeypatch):
+    import json
+
+    import app.redis_bus as bus
+    from app.catalog.cache import CACHE_PREFIX
+
+    with Session(engine) as s:
+        band = Artist(name="Band " + _RUN, mbid="mb-band-" + _RUN)
+        solo = Artist(name="Solo " + _RUN, mbid="mb-solo-" + _RUN)
+        s.add(band)
+        s.add(solo)
+        s.commit()
+        band_id, solo_id = band.id, solo.id
+
+    class FakeRedis:
+        async def mget(self, keys):
+            out = []
+            for k in keys:
+                if k == CACHE_PREFIX + f"mb:artist:mb-solo-{_RUN}":
+                    out.append(json.dumps({"relations": [{"type": "member of band", "artist": {"id": f"mb-band-{_RUN}"}}]}))
+                else:
+                    out.append(None)
+            return out
+
+    monkeypatch.setattr(bus, "get_redis", lambda: FakeRedis())
+    links = asyncio.run(pn._band_links([solo_id, band_id]))
+    assert links.get(solo_id) == {band_id}
+
+
+def test_new_tracks_obey_filters_and_title_key(monkeypatch):
+    """Nové skladby: neoblíbený interpret ven, stejná píseň jinde ven."""
+    user = "pn-newf-" + _RUN
+    ids = _setup(user)
+    _no_prefetch(monkeypatch)
+    now = utcnow().replace(tzinfo=None)
+    with Session(engine) as s:
+        ok_artist = Artist(name="Fresh Ok " + _RUN)
+        bad_artist = Artist(name="Fresh Banned " + _RUN)
+        cover_artist = Artist(name="Cover " + _RUN)
+        s.add_all([ok_artist, bad_artist, cover_artist])
+        s.flush()
+        ok = Recording(title="Brand New Tune", artist_id=ok_artist.id, duration_ms=1000)
+        bad = Recording(title="Other Tune", artist_id=bad_artist.id, duration_ms=1000)
+        cover = Recording(title="Bluegrass Band song 0", artist_id=cover_artist.id, duration_ms=1000)
+        s.add_all([ok, bad, cover])
+        s.commit()
+        cand = [ok.id, bad.id, cover.id]
+        bad_aid = bad_artist.id
+    pn._cache.clear()
+    pn._batches.clear()
+
+    async def similar(seeds, exclude, rng, n):
+        return cand
+
+    from app.home import lastfm_taste as lt
+    import app.library.dislikes as dislikes
+
+    monkeypatch.setattr(lt, "similar_track_ids", similar)
+    monkeypatch.setattr(dislikes, "disliked_artist_ids", lambda _s, _u: {bad_aid})
+    seed = ids[("Bluegrass Band", 0)]
+    out = asyncio.run(pn.next_chunk(user, [seed], [seed], 8))
+    assert cand[0] in out["recordingIds"]
+    assert cand[1] not in out["recordingIds"]  # neoblíbený
+    assert cand[2] not in out["recordingIds"]  # tatáž píseň (semínko) jinde

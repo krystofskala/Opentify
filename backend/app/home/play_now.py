@@ -31,6 +31,15 @@ from app.utils import utcnow
 
 NEW_SHARE = 0.2
 _CACHE_SECONDS = 600
+# Strop interpreta pro celou relaci (návrh 1): každé zahrání v posledních
+# `SESSION_WINDOW` skladbách fronty sníží šanci dalšího na `SESSION_DECAY`×.
+SESSION_WINDOW = 30
+SESSION_DECAY = 0.3
+# Paměť posledních várek (návrh 4): nové ťuknutí nedá skoro to samé.
+_BATCH_MEMORY = 3
+_BATCH_TTL_S = 6 * 3600
+RECENT_BATCH_PENALTY = 0.15
+_batches: dict[str, list[tuple[float, set[str]]]] = {}
 
 # Čipy nálad (plán P2): nálada -> (kategorie z app/tags.SUBGENRES, štítky
 # navíc, popisek). Nálada interpreta ze štítků Last.fm (cache týden) -- dokud
@@ -90,6 +99,94 @@ def _title_key(title: str) -> str:
     return " ".join(tokens(core_title(title or "")))
 
 
+def _recent_batch_ids(user_id: str) -> set[str]:
+    now = time.time()
+    keep = [(t, ids) for t, ids in _batches.get(user_id, []) if now - t < _BATCH_TTL_S]
+    _batches[user_id] = keep
+    return set().union(*(ids for _t, ids in keep)) if keep else set()
+
+
+def _remember_batch(user_id: str, ids: list[str]) -> None:
+    keep = _batches.get(user_id, [])
+    keep.append((time.time(), set(ids)))
+    _batches[user_id] = keep[-_BATCH_MEMORY:]
+
+
+def _artist_counts(recording_ids: list[str]) -> Counter:
+    """Interpret -> kolikrát je v daných skladbách."""
+    out: Counter = Counter()
+    if not recording_ids:
+        return out
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Recording.id, Recording.artist_id).where(Recording.id.in_(list(set(recording_ids))))  # type: ignore[attr-defined]
+        ).all()
+    artist_of = dict(rows)
+    for rid in recording_ids:
+        if artist_of.get(rid):
+            out[artist_of[rid]] += 1
+    return out
+
+
+async def _band_links(artist_ids: list[str]) -> dict[str, set[str]]:
+    """Sólo projekty a kapely (Tyler Joseph <-> twenty one pilots) podle vztahů
+    z MusicBrainz -- jen z cache (bez dotazů ven); co cache nezná, nespojí."""
+    import json
+
+    from app.catalog.cache import CACHE_PREFIX
+    from app.models import Artist
+    from app.redis_bus import get_redis
+
+    if not artist_ids:
+        return {}
+    with Session(engine) as session:
+        mbids = {
+            a.id: a.mbid
+            for a in session.exec(select(Artist).where(Artist.id.in_(artist_ids))).all()  # type: ignore[attr-defined]
+            if a.mbid and not a.mbid.startswith("own:")
+        }
+    if not mbids:
+        return {}
+    try:
+        raws = await get_redis().mget([CACHE_PREFIX + f"mb:artist:{m}" for m in mbids.values()])
+    except Exception:  # noqa: BLE001 -- bez Redisu bez spojování
+        return {}
+    related_mbids: dict[str, set[str]] = {}
+    for aid, raw in zip(mbids, raws):
+        if not raw:
+            continue
+        try:
+            rels = (json.loads(raw) or {}).get("relations") or []
+        except (ValueError, AttributeError):
+            continue
+        related_mbids[aid] = {
+            (rel.get("artist") or {}).get("id")
+            for rel in rels
+            if rel.get("type") == "member of band" and (rel.get("artist") or {}).get("id")
+        }
+    wanted = set().union(*related_mbids.values()) if related_mbids else set()
+    if not wanted:
+        return {}
+    with Session(engine) as session:
+        by_mbid = {
+            a.mbid: a.id
+            for a in session.exec(select(Artist).where(Artist.mbid.in_(list(wanted)))).all()  # type: ignore[attr-defined]
+        }
+    return {aid: {by_mbid[m] for m in ms if m in by_mbid} for aid, ms in related_mbids.items()}
+
+
+async def session_artist_counts(played: list[str]) -> Counter:
+    """Kolikrát interpret (i přes svou kapelu / sólo projekt) hrál v
+    posledních `SESSION_WINDOW` skladbách fronty."""
+    counts = await asyncio.to_thread(_artist_counts, played[-SESSION_WINDOW:])
+    links = await _band_links(list(counts))
+    out = Counter(counts)
+    for artist, related in links.items():
+        for other in related:
+            out[other] += counts[artist]
+    return out
+
+
 def _session_signals(session: Session, user_id: str) -> tuple[Counter, Counter, bool]:
     """(přeskočení interpreti, dohraní interpreti, změnit směr) za 40 minut."""
     since = (utcnow() - timedelta(minutes=40)).replace(tzinfo=None)
@@ -114,8 +211,12 @@ def _session_signals(session: Session, user_id: str) -> tuple[Counter, Counter, 
 def pick(
     user_id: str, seeds: list[str], played: list[str], size: int, rng: random.Random,
     mood: str | None = None, moods: dict[str, float] | None = None, new_share: float = NEW_SHARE,
+    session_counts: Counter | None = None, ctx: dict[str, Any] | None = None,
 ) -> tuple[list[str], list[str], str]:
-    """Známé skladby + semínka pro nové. Vrací (známé, semínka_pro_nové, důvod)."""
+    """Známé skladby + semínka pro nové. Vrací (známé, semínka_pro_nové, důvod).
+    `session_counts`: interpreti z poslední části fronty (strop relace);
+    `ctx` (je-li dané) dostane filtry pro nové skladby."""
+    session_counts = session_counts or Counter()
     from app.home.quick_picks import time_profile
     from app.library.dislikes import disliked_artist_ids
 
@@ -168,8 +269,12 @@ def pick(
 
     if seed_artists:
         near = act.co_listened_artists(seed_artists)
-        top = max(near.values(), default=1)
-        fit = {a: 0.3 + 0.7 * n / top for a, n in near.items()}
+        # Poměr místo prostého souběhu (návrh 2): kdo hraje se vším (oblíbenci),
+        # nevyhraje jen tím, že ho posloucháš pořád.
+        freq = Counter(act.artist_of.get(r) for _t, r in act.timeline)
+        lift = {a: n / (freq.get(a, 1) ** 0.5) for a, n in near.items()}
+        top = max(lift.values(), default=1) or 1
+        fit = {a: 0.3 + 0.7 * v / top for a, v in lift.items()}
         for a in seed_artists:
             fit[a] = 1.0
         reason = f"Navazuje na {seed_title}" if seed_title else "Navazuje na to, co hrálo"
@@ -193,6 +298,7 @@ def pick(
 
     manual = feedback_deltas(user_id)
     exclude = set(played) | recent | skipped_tracks | set(seeds)
+    recent_batches = _recent_batch_ids(user_id) if not seeds else set()
     max_long = max(act.long.values(), default=0) or 1.0
     max_med = max(act.medium.values(), default=0) or 1.0
     # Tatáž píseň v jiné verzi ("Salt Creek" od Blake & Rice a pak od Rice
@@ -206,6 +312,8 @@ def pick(
         if _title_key(act.title_of.get(rid, "")) in played_titles:
             return 0.0
         base = act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
+        if seed_artists:
+            base = base ** 0.5  # navazování: podobnost víc než oblíbenost (návrh 2)
         f = fit.get(artist, 0.01 if moods is not None and mood != "prekvap" else
                     (0.05 if (seed_artists or time_artists) else 1.0))
         if skipped_artists.get(artist):
@@ -214,6 +322,10 @@ def pick(
             f *= 1.3
         if artist in manual:
             f *= fit_multiplier(manual[artist])  # "víc / míň takových"
+        if session_counts.get(artist):
+            f *= SESSION_DECAY ** session_counts[artist]
+        if rid in recent_batches:
+            f *= RECENT_BATCH_PENALTY
         return base * f
 
     from app.home.personal_mixes import _cap_per_artist, _spread, _weighted_order
@@ -231,7 +343,37 @@ def pick(
     from app.home import energy_flow
 
     familiar = _spread(_cap_per_artist(ordered, act.artist_of, 1)[:known_target], act.artist_of)
+    if seed_artists and familiar and not any(act.artist_of.get(r) in seed_artists for r in familiar):
+        # Nekonečné hraní drží směr (návrh 2): aspoň jedna skladba od
+        # interpreta semínka, i když ho strop relace ztlumil.
+        def seed_score(rid: str) -> float:
+            artist = act.artist_of.get(rid)
+            # Jen interpret, který v relaci ještě moc nehrál -- jinak by se
+            # nekonečné hraní točilo kolem jedné kapely.
+            if artist not in seed_artists or session_counts.get(artist, 0) >= 3:
+                return 0.0
+            if rid in exclude or rid in familiar:
+                return 0.0
+            if _title_key(act.title_of.get(rid, "")) in played_titles:
+                return 0.0
+            return act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
+
+        seeded = [r for r in _weighted_order(list(act.total), seed_score, rng) if seed_score(r) > 0]
+        if seeded:
+            familiar = (familiar[:-1] if len(familiar) >= known_target else familiar) + [seeded[0]]
     familiar = energy_flow.order(familiar, act.artist_of)  # plynulé navazování (P3)
+    if ctx is not None:
+        # Filtry i pro nové skladby (audit F) -- stejné jako pro známé.
+        ctx.update(
+            banned=set(banned),
+            muted={a for a, d in manual.items() if fit_multiplier(d) < 1},
+            skipped_artists={a for a, n in skipped_artists.items() if n},
+            titles=(played_titles | {_title_key(act.title_of.get(r, "")) for r in familiar}) - {""},
+            session_counts=session_counts,
+            weak_mood=bool(
+                moods is not None and mood != "prekvap" and sum(1 for m in moods.values() if m >= 0.3) < 3
+            ),
+        )
     # Semínka pro nové: semínka nekonečného hraní, jinak první známé.
     new_seeds = (seeds[-2:] if seeds else []) + familiar[:2]
     if not new_seeds and fallback_seeds:
@@ -240,6 +382,96 @@ def pick(
             first = session.get(Recording, fallback_seeds[0])
         reason = f"Navazuje na {first.title}" if first else reason
     return familiar, new_seeds, reason
+
+
+def _rec_meta(recording_ids: list[str]) -> dict[str, tuple[str | None, str]]:
+    """Skladba -> (interpret, název) jedním dotazem."""
+    if not recording_ids:
+        return {}
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Recording.id, Recording.artist_id, Recording.title).where(Recording.id.in_(recording_ids))  # type: ignore[attr-defined]
+        ).all()
+    return {rid: (aid, title or "") for rid, aid, title in rows}
+
+
+def _available(recording_ids: list[str]) -> set[str]:
+    from app.models import MediaAsset, MediaAssetStatus
+
+    if not recording_ids:
+        return set()
+    with Session(engine) as session:
+        return set(
+            session.exec(
+                select(MediaAsset.recording_id).where(
+                    MediaAsset.recording_id.in_(recording_ids),  # type: ignore[attr-defined]
+                    MediaAsset.status == MediaAssetStatus.AVAILABLE,
+                )
+            ).all()
+        )
+
+
+def _safe_start(out: list[str], available: set[str], first: int = 2) -> list[str]:
+    """Prvních `first` míst jen stažené (návrh 3) -- jistý start bez čekání;
+    nestažené se posunou za ně, pořadí ostatních zůstane."""
+    head = [r for r in out if r in available][:first]
+    rest = [r for r in out if r not in head]
+    return head + rest
+
+
+async def _prefetch(user_id: str, recording_ids: list[str]) -> None:
+    """Nestažené skladby várky obstarat hned na pozadí (návrh 3) -- dřív se
+    ~každá 4. nová stahovala až při puštění. V limitech stahování profilu;
+    přes limit se nic nezakládá."""
+    from fastapi import HTTPException
+
+    from app import download_limits
+    from app.provisioning_service import enqueue, get_or_create_job, would_create_job
+
+    admin = await asyncio.to_thread(download_limits.is_admin, user_id)
+
+    def _job(rid: str):
+        with Session(engine) as session:
+            if not would_create_job(session, rid):
+                return None, False
+            _asset, job, created = get_or_create_job(session, rid, user_id, None)
+            if job is not None:
+                session.expunge(job)
+            return job, created
+
+    for rid in recording_ids:
+        try:
+            if not admin:
+                await download_limits.check_music(user_id)
+            job, created = await asyncio.to_thread(_job, rid)
+            if job is not None and created:
+                await download_limits.count_music(user_id)
+                await enqueue(job, interactive=False)
+        except HTTPException:
+            return  # limit -- zbytek se stáhne až při puštění (a zase narazí)
+        except Exception:  # noqa: BLE001 -- jen předstažení
+            continue
+
+
+async def _mood_tag_tracks(mood: str, exclude: set[str], rng: random.Random, want: int) -> list[str]:
+    """Nové skladby přímo podle štítku nálady (Last.fm), když profil na
+    náladu skoro nic nemá (návrh 5)."""
+    from app.catalog import lastfm
+    from app.tags import _resolve_tracks
+
+    _category, extra, _label = MOODS[mood]
+    items: list[dict[str, str]] = []
+    for tag in extra[:2]:
+        try:
+            items += await lastfm.tag_top_tracks(tag, 40)
+        except Exception:  # noqa: BLE001
+            continue
+    rng.shuffle(items)
+    try:
+        ids = await _resolve_tracks(items, want * 2)
+    except Exception:  # noqa: BLE001
+        return []
+    return [r for r in ids if r not in exclude][: want * 2]
 
 
 async def next_chunk(
@@ -253,35 +485,55 @@ async def next_chunk(
     moods = None
     if mood and mood != "prekvap":
         moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
-    new_share = 0.5 if mood == "prekvap" else NEW_SHARE
+    weak_mood = bool(moods is not None and sum(1 for m in moods.values() if m >= 0.3) < 3)
+    new_share = 0.5 if mood == "prekvap" else (0.6 if weak_mood else NEW_SHARE)
+    session_counts = await session_artist_counts(played)
+    ctx: dict[str, Any] = {}
     familiar, new_seeds, reason = await asyncio.to_thread(
-        pick, user_id, seeds, played, size, rng, mood, moods, new_share
+        pick, user_id, seeds, played, size, rng, mood, moods, new_share, session_counts, ctx
     )
+    if weak_mood and mood:
+        reason = f"{MOODS[mood][2]} – u tebe toho na tohle moc není, zkouším i nové"
     want_new = size - len(familiar)
     new: list[str] = []
-    if want_new > 0 and new_seeds:
+    if want_new > 0 and (new_seeds or weak_mood):
         act = _activation(user_id)
         exclude = set(act.total) | set(played) | set(familiar) | set(seeds)
-        try:
-            cands = await asyncio.wait_for(lt.similar_track_ids(new_seeds, exclude, rng, want_new * 2), timeout=12)
-        except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
-            cands = []
+        cands: list[str] = []
+        if weak_mood and mood:
+            try:
+                cands += await asyncio.wait_for(_mood_tag_tracks(mood, exclude, rng, want_new), timeout=12)
+            except Exception:  # noqa: BLE001
+                pass
+        if new_seeds:
+            try:
+                cands += await asyncio.wait_for(lt.similar_track_ids(new_seeds, exclude, rng, want_new * 2), timeout=12)
+            except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
+                pass
+        cands = list(dict.fromkeys(cands))
 
         class _T:  # _drop_heard čte jen .activation
             activation = act
 
         new = await asyncio.to_thread(_drop_heard, _T, cands)
-        # Nový interpret ne zároveň mezi známými ani dvakrát mezi novými.
-        from app.home.personal_mixes import _artists_of
-
-        artist_of = await asyncio.to_thread(_artists_of, new)
+        meta = await asyncio.to_thread(_rec_meta, new)
+        # Nový interpret ne zároveň mezi známými ani dvakrát mezi novými; a
+        # stejné filtry jako u známých (audit F): neoblíbení, "míň takových",
+        # přeskočení v relaci, už hodně hraní, tatáž píseň (návrh 7).
         used = {act.artist_of.get(r) for r in familiar}
+        blocked = ctx.get("banned", set()) | ctx.get("muted", set()) | ctx.get("skipped_artists", set())
+        titles = set(ctx.get("titles", set()))
+        counts = ctx.get("session_counts", Counter())
         kept = []
         for rid in new:
-            a = artist_of.get(rid)
-            if a and a in used:
+            a, title = meta.get(rid, (None, ""))
+            key = _title_key(title)
+            if not a or a in used or a in blocked or counts.get(a, 0) >= 2:
+                continue
+            if key and key in titles:
                 continue
             used.add(a)
+            titles.add(key)
             kept.append(rid)
         new = kept[:want_new]
     # Nové proložit mezi známé (ne všechny na konec).
@@ -297,7 +549,61 @@ async def next_chunk(
                 out.extend(new)
                 break
             out.append(nxt)
+    out = out[:size]
     if not out:
         # Nový profil bez historie: nic nevnucovat (žádné žebříčky), jen říct proč.
         reason = "Zatím nevím, co posloucháš – pusť si něco z Hledat a příště navážu."
-    return {"recordingIds": out[:size], "reason": reason}
+        return {"recordingIds": [], "reason": reason}
+    available = await asyncio.to_thread(_available, out)
+    out = _safe_start(out, available)
+    missing = [r for r in out if r not in available]
+    if missing:
+        task = asyncio.get_running_loop().create_task(_prefetch(user_id, missing))
+        _prefetching.add(task)
+        task.add_done_callback(_prefetching.discard)
+    _remember_batch(user_id, out)
+    return {"recordingIds": out, "reason": reason}
+
+
+_prefetching: set[asyncio.Task] = set()
+
+
+async def warm_mood_tags_loop(hour: int = 4, top: int = 80) -> None:
+    """V noci (4:00) načte štítky Last.fm top interpretů každého profilu do
+    cache (den), ať první čip nálady čeká ~1 s místo ~20 s (návrh 9). Na
+    pozadí -- uživatel má přednost (app/catalog/rate_limit.py)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.catalog.rate_limit import mark_background
+    from app.home import lastfm_taste as lt
+    from app.models import AppUser, Artist
+
+    mark_background()
+    tz = ZoneInfo("Europe/Prague")
+    done_day = None
+    while True:
+        await asyncio.sleep(600)
+        now = datetime.now(tz)
+        if now.hour != hour or done_day == now.date():
+            continue
+        done_day = now.date()
+        try:
+            with Session(engine) as session:
+                users = list(session.exec(select(AppUser.id)).all())
+            for user_id in users:
+                act = await asyncio.to_thread(_activation, user_id)
+                artists = [a for a, _ in act.blend(av.ARTIST_BLEND).most_common(top)]
+                with Session(engine) as session:
+                    names = [n for n in session.exec(select(Artist.name).where(Artist.id.in_(artists))).all() if n]  # type: ignore[attr-defined]
+                for name in names:
+                    try:
+                        await lt.artist_tags(name)
+                    except Exception:  # noqa: BLE001
+                        continue
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 -- smyčka nesmí umřít
+            import logging
+
+            logging.getLogger(__name__).exception("předehřátí štítků nálad selhalo")

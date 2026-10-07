@@ -218,6 +218,9 @@ async def on_startup() -> None:
     from app.probe_watch import probe_watch_loop
 
     asyncio.create_task(probe_watch_loop())
+    from app.home.play_now import warm_mood_tags_loop
+
+    asyncio.create_task(warm_mood_tags_loop())
 
 
 async def on_shutdown() -> None:
