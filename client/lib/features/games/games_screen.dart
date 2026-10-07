@@ -20,6 +20,7 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/detail_hero.dart';
 import '../../widgets/track_tile.dart';
+import '../../core/cz_plural.dart';
 
 /// Procházet › Herní soundtracky / Filmy a seriály (app/games.py,
 /// app/movies.py): velké obrázky nahoře, mixy, série (jako interpret --
@@ -32,8 +33,19 @@ List<Map<String, dynamic>> _list(Object? value) => (value as List<dynamic>? ?? c
 
 String _composerLine(Map<String, dynamic> game) {
   final composers = (game['composers'] as List<dynamic>? ?? const []).cast<String>();
-  return [if (composers.isNotEmpty) composers.take(2).join(', '), if (game['year'] != null) '${game['year']}']
+  final names = composers.where((c) => c.trim().isNotEmpty).take(2).toList();
+  return [if (names.isNotEmpty) names.join(', '), if (game['year'] != null) '${game['year']}']
       .join(' · ');
+}
+
+/// "3 her" -> "3 hry": server posílá jednotku jen v 2. pádě množného čísla.
+String _countLabel(Object? count, String unit) {
+  final n = (count as num?)?.toInt() ?? 0;
+  return switch (unit) {
+    'her' => czCount(n, 'hra', 'hry', 'her'),
+    'dílů' => czCount(n, 'díl', 'díly', 'dílů'),
+    _ => '$n $unit',
+  };
 }
 
 /// Dílo = jeho soundtrack (album). Bez alba (GTA -- jen rádia) franšíza.
@@ -356,7 +368,7 @@ class _SeriesTile extends StatelessWidget {
                             .textTheme
                             .titleMedium
                             ?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
-                    Text('${series['count']} $unit', style: const TextStyle(color: Colors.white70)),
+                    Text(_countLabel(series['count'], unit), style: const TextStyle(color: Colors.white70)),
                   ],
                 ),
               ),

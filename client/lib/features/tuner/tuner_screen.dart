@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -436,9 +436,10 @@ class _Readout extends StatelessWidget {
             'Povol mikrofon v Nastavení › Safari › Mikrofon (na počítači u zámečku v adresním řádku) a zkus to znovu.',
           'unavailable' => 'Nepoužívá ho jiná aplikace? Zkus to znovu.',
           'unsupported' => 'Chybí přístup k mikrofonu (Web Audio).',
-          _ => 'Ladičku se nepodařilo spustit.',
+          _ => 'Zkus to znovu.',
         },
-      _Phase.idle => 'iPhone se na mikrofon zeptá při každém spuštění appky.',
+      _Phase.idle when defaultTargetPlatform == TargetPlatform.iOS =>
+        'iPhone se na mikrofon zeptá při každém spuštění appky.',
       _ => null,
     };
 

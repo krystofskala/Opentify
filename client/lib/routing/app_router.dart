@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -39,10 +38,21 @@ import '../features/profile/download_requests_screen.dart';
 import '../features/profile/playback_test_screen.dart';
 import '../features/profile/verify_downloads_screen.dart';
 import '../features/library/playlist_join_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
+import '../widgets/state_views.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = _AppRouter(
     initialLocation: '/',
+    // Neexistující adresa: česky a cesta Domů (dřív anglické „Page Not Found“).
+    errorBuilder: (context, state) => Scaffold(
+      body: EmptyState(
+        icon: Symbols.explore_off_rounded,
+        message: 'Tahle stránka neexistuje.',
+        action: TextButton(onPressed: () => context.go('/'), child: const Text('Domů')),
+      ),
+    ),
     routingConfig: ValueNotifier(RoutingConfig(
       // `/artists/x` z kterékoli záložky -> detail v té záložce.
       redirect: (context, state) => branchRedirect(state.uri),
@@ -133,7 +143,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 /// proto nejdřív sundají a detail se otevře v záložce pod nimi (zpět pak
 /// vede v záložce, jako u každého detailu).
 class _AppRouter extends GoRouter {
-  _AppRouter({required super.routingConfig, super.initialLocation}) : super.routingConfig();
+  _AppRouter({required super.routingConfig, super.initialLocation, super.errorBuilder}) : super.routingConfig();
 
   @override
   Future<T?> push<T extends Object?>(String location, {Object? extra}) {

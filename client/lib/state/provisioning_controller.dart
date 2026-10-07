@@ -357,7 +357,7 @@ String friendlyJobError(String? raw) {
   const fallback = 'Skladbu se nepodařilo stáhnout';
   final text = raw?.trim() ?? '';
   if (text.isEmpty) return fallback;
-  final technical = RegExp(r"yt-dlp|slskd|ffmpeg|peer|Traceback|Exception|Error|[{}\[\]]|/data/|/tmp/|https?://|\.py", caseSensitive: false);
+  final technical = RegExp(r'yt-dlp|slskd|ffmpeg|peer|Traceback|Exception|Error\b|[{}\[\]]|/data/|/tmp/|https?://|\.py\b', caseSensitive: false);
   if (technical.hasMatch(text) || text.length > 140) return fallback;
   return text;
 }
