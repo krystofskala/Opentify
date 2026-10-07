@@ -215,15 +215,32 @@ def load_taste(user_id: str) -> Taste:
         from app.library.dislikes import disliked_artist_ids
 
         banned = disliked_artist_ids(session, user_id)
+        # Dávkově po 500 -- dřív `session.get` na každou skladbu i album
+        # (u admina ~85 tisíc dotazů, 27-45 s; audit výkonu 7. 10.).
+        known = list(taste.known)
+        rec_rows: dict[str, tuple[str | None, str | None]] = {}
+        for i in range(0, len(known), _BATCH):
+            for rid, aid, relid in session.exec(
+                select(Recording.id, Recording.artist_id, Recording.release_id).where(
+                    Recording.id.in_(known[i : i + _BATCH])  # type: ignore[attr-defined]
+                )
+            ).all():
+                rec_rows[rid] = (aid, relid)
+        release_ids = list({relid for _aid, relid in rec_rows.values() if relid})
+        genres_of: dict[str, list] = {}
+        for i in range(0, len(release_ids), _BATCH):
+            for relid, genres in session.exec(
+                select(Release.id, Release.genres).where(Release.id.in_(release_ids[i : i + _BATCH]))  # type: ignore[attr-defined]
+            ).all():
+                if genres:
+                    genres_of[relid] = genres
         for recording_id in taste.known:
-            recording = session.get(Recording, recording_id)
-            if recording is None or not recording.artist_id or recording.artist_id in banned:
+            artist_id, release_id = rec_rows.get(recording_id, (None, None))
+            if not artist_id or artist_id in banned:
                 continue
-            taste.artist_of[recording_id] = recording.artist_id
-            if recording.release_id:
-                release = session.get(Release, recording.release_id)
-                if release is not None and release.genres:
-                    taste.release_genres[recording_id] = release.genres
+            taste.artist_of[recording_id] = artist_id
+            if release_id and release_id in genres_of:
+                taste.release_genres[recording_id] = genres_of[release_id]
 
         liked_set = set(taste.liked)
         library_count: Counter = Counter()
@@ -277,16 +294,29 @@ def load_taste(user_id: str) -> Taste:
             if recording is not None and recording.artist_id in taste.artist_weight:
                 taste.artist_weight[recording.artist_id] = max(0.0, taste.artist_weight[recording.artist_id] - 1.0)
 
+        artist_ids = list(taste.artist_weight)
+        artist_rows: dict[str, tuple] = {}
+        for i in range(0, len(artist_ids), _BATCH):
+            for aid, name, deezer_id, images in session.exec(
+                select(Artist.id, Artist.name, Artist.deezer_id, Artist.images).where(
+                    Artist.id.in_(artist_ids[i : i + _BATCH])  # type: ignore[attr-defined]
+                )
+            ).all():
+                artist_rows[aid] = (name, deezer_id, images)
         for artist_id in taste.artist_weight:
-            artist = session.get(Artist, artist_id)
-            if artist is None:
+            row = artist_rows.get(artist_id)
+            if row is None:
                 continue
-            taste.artist_name[artist_id] = artist.name
-            if artist.deezer_id:
-                taste.artist_deezer[artist_id] = artist.deezer_id
-            if artist.images:
-                taste.artist_photo[artist_id] = artist.images[0]
+            name, deezer_id, images = row
+            taste.artist_name[artist_id] = name
+            if deezer_id:
+                taste.artist_deezer[artist_id] = deezer_id
+            if images:
+                taste.artist_photo[artist_id] = images[0]
     return taste
+
+
+_BATCH = 500
 
 
 async def _deezer_id(taste: Taste, artist_id: str) -> str | None:
