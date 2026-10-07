@@ -388,3 +388,16 @@ def test_local_search_books_and_people(eng, monkeypatch):
         assert calls == []  # jedno slovo: Wikidata se neptá
         out = asyncio.run(routes.search_local("Karel Čapek", session=s, current=("me", "d")))
         assert out["books"] == [] and out["people"][0]["name"] == "Karel Čapek" and out["people"][0]["image"]
+
+
+def test_foreign_release_files_route_is_not_taken_as_infohash():
+    """`/releases/foreign/files` musí vyhrát nad `/releases/{infohash}/files`."""
+    from starlette.routing import Match
+
+    for route in routes.spoken_router.routes:
+        match, _ = route.matches({"type": "http", "path": f"{routes.spoken_router.prefix}/releases/foreign/files", "method": "GET"})
+        if match == Match.FULL:
+            assert route.endpoint is routes.foreign_release_files
+            break
+    else:
+        raise AssertionError("cesta nenalezena")

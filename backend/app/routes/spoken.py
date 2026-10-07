@@ -97,6 +97,23 @@ async def search_foreign(q: str, session: Session = Depends(get_session)):
 _AUDIO_EXT = (".mp3", ".m4a", ".m4b", ".flac", ".ogg", ".opus", ".aac", ".wma")
 
 
+# Musí být PŘED `/releases/{infohash}/files` -- jinak FastAPI vezme
+# "foreign" jako infohash a obsah vydání ze Soulseeku se nikdy nenačte
+# (422, nahlášeno 7. 10.: "Obsah vydání se nepodařilo načíst").
+@spoken_router.get("/releases/foreign/files")
+async def foreign_release_files(ref: str):
+    """Obsah vydání ze Soulseeku před stažením (složka z výsledku hledání;
+    stahuje se celá)."""
+    found = await slsk_books.cached(ref.strip())
+    if found is None:
+        raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
+    files = [
+        {"index": i, "name": str(f["filename"]).replace("\\", "/").rsplit("/", 1)[-1], "size": int(f.get("size") or 0)}
+        for i, f in enumerate(found["files"])
+    ]
+    return {"groups": [{"folder": "", "size": sum(f["size"] for f in files), "files": files}]}
+
+
 @spoken_router.get("/releases/{infohash}/files")
 async def release_files(infohash: str):
     """Obsah vydání (sbírky) před stažením: zvukové soubory seskupené po
@@ -117,20 +134,6 @@ async def release_files(infohash: str):
         g["size"] += f["size"]
         g["files"].append({"index": f["index"], "name": "/".join(parts[1:]) or parts[0], "size": f["size"]})
     return {"groups": sorted(groups.values(), key=lambda g: importer_natural(g["folder"]))}
-
-
-@spoken_router.get("/releases/foreign/files")
-async def foreign_release_files(ref: str):
-    """Obsah vydání ze Soulseeku před stažením (složka z výsledku hledání;
-    stahuje se celá)."""
-    found = await slsk_books.cached(ref.strip())
-    if found is None:
-        raise HTTPException(status_code=409, detail="výsledek hledání vypršel, vyhledej knihu znovu")
-    files = [
-        {"index": i, "name": str(f["filename"]).replace("\\", "/").rsplit("/", 1)[-1], "size": int(f.get("size") or 0)}
-        for i, f in enumerate(found["files"])
-    ]
-    return {"groups": [{"folder": "", "size": sum(f["size"] for f in files), "files": files}]}
 
 
 class AcquireIn(BaseModel):
