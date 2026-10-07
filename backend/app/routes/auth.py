@@ -711,7 +711,9 @@ def update_user(user_id: str, body: UserPatchIn, _admin=Depends(require_admin)):
             raise HTTPException(status_code=404, detail="Profil neexistuje.")
         if body.name is not None and body.name.strip():
             user.name = body.name.strip()
-        if body.username is not None:
+        # Prázdné pole = beze změny: smazané přihlašovací jméno by kamaráda
+        # zamklo venku (UX audit 7. 10.).
+        if body.username is not None and body.username.strip():
             username = _clean_username(body.username)
             if username and _username_taken(session, username, except_id=user.id):
                 raise HTTPException(status_code=409, detail="Tohle přihlašovací jméno už někdo má.")

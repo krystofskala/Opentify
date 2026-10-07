@@ -340,6 +340,29 @@ class ProfilesSection extends ConsumerWidget {
   }
 
   Future<void> _revokeDevice(BuildContext context, WidgetRef ref, DeviceRow d) async {
+    // Vedle sebe malé ✕ -- omylem odhlášený telefon potřebuje nový kód.
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Odhlásit ${d.label}?'),
+        content: const Text('Na tomhle zařízení se pak bude potřeba znovu přihlásit (nový kód zařízení).'),
+        actions: [
+          GlassButton(
+            label: 'Zrušit',
+            style: GlassButtonStyle.plain,
+            compact: true,
+            onPressed: () => Navigator.of(dialog).pop(false),
+          ),
+          GlassButton(
+            label: 'Odhlásit',
+            destructive: true,
+            compact: true,
+            onPressed: () => Navigator.of(dialog).pop(true),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !context.mounted) return;
     try {
       await ref.read(apiClientProvider).deleteJson('/auth/devices/${d.id}');
       ref.invalidate(profilesProvider);
@@ -372,7 +395,7 @@ class ProfilesSection extends ConsumerWidget {
         Text('Profily', style: theme.textTheme.titleMedium),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          'Jen pro tebe. Nový profil dostane přihlašovací jméno, heslo si vytvoří sám. '
+          'Jen pro tebe. Nový profil dostane pozvánku – přihlašovací jméno i heslo si z ní vybere sám. '
           'Přepni se na profil, když mu chceš něco nastavit nebo nahrát jeho Spotify data.',
           style: muted,
         ),

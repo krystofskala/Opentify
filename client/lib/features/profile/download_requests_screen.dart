@@ -67,7 +67,7 @@ class DownloadRequestsScreen extends ConsumerWidget {
       body: async.when(
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(
-          message: 'Žádosti se nepodařilo načíst. Správa funguje jen přes Tailscale.',
+          message: 'Žádosti se nepodařilo načíst.',
           error: e,
           onRetry: () => ref.invalidate(downloadRequestsProvider),
         ),
