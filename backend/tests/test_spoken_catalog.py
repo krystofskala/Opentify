@@ -72,3 +72,16 @@ def test_audio_record_keeps_narrator_as_contributor():
     hit = match_record(parse_release("Jo Nesbo - Snehulak (2021 CZ)"), records)
     work = work_out(hit)
     assert work["audio"] and work["contributors"] == ["David Matásek"]
+
+
+def test_english_series_name_release_is_not_a_czech_subtitled_book():
+    records = [rec("Harry Potter : Potterovský průvodce", "J. K. Rowling, 1965-")]
+    assert match_record(parse_release("J.K. Rowling - Harry Potter (AudioBook)(2008)(EN)"), records) is None
+    hobit = [rec("Hobit : aneb Cesta tam a zase zpátky", "J. R. R. Tolkien, 1892-1973")]
+    assert match_record(parse_release("J.R.R.Tolkien / Hobit (2003)(CZ)"), hobit) is not None
+
+
+def test_series_only_from_main_title():
+    from app.spoken.catalog import _series
+
+    assert _series(rec("Old Shatterhand : Na motivy románu K. Maye napsali D. 1, Smrt", "Karl May")) is None

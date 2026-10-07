@@ -128,10 +128,14 @@ async def _search(lookfor: str, limit: int = 20) -> list[dict[str, Any]]:
         wait = _GAP_S - (time.monotonic() - _last)
         if wait > 0:
             await asyncio.sleep(wait)
+        params = {"lookfor": lookfor, "type": "AllFields", "limit": limit, "field[]": _FIELDS}
         try:
-            resp = await _http.get(
-                SEARCH_URL, params={"lookfor": lookfor, "type": "AllFields", "limit": limit, "field[]": _FIELDS}
-            )
+            try:
+                resp = await _http.get(SEARCH_URL, params=params)
+            except httpx.TimeoutException:
+                # Občas vyprší (4 z 202 při měření 7. 10.) -- jednou znovu.
+                await asyncio.sleep(2)
+                resp = await _http.get(SEARCH_URL, params=params)
         finally:
             _last = time.monotonic()
     resp.raise_for_status()
@@ -184,7 +188,8 @@ def _title_variants(record: dict[str, Any]) -> set[str]:
 
 def _series(record: dict[str, Any]) -> dict[str, Any] | None:
     """{"name": "Zaklínač", "number": 1} z "Zaklínač. I., Poslední přání"."""
-    t = record.get("title") or ""
+    # Jen hlavní název (bez podtitulu) -- "Old Shatterhand : Na motivy románu K. Maye…" řada není.
+    t = re.split(r"\s+:\s+|\s+/\s*", record.get("title") or "")[0]
     m = re.match(r"^(.*?)\.\s*([IVXLC]+|\d+)\s*\.?,?\s*\S", t)
     if not m:
         return None
@@ -209,19 +214,41 @@ def match_record(parsed: dict[str, Any], records: list[dict[str, Any]]) -> dict[
     if not parts:
         return None
     whole = " ".join(parts)
+
+    def author_elsewhere(i: int, surnames: list[str]) -> bool:
+        others = " ".join(p for j, p in enumerate(parts) if j != i)
+        return any(s in others.split() for s in surnames)
+
+    # 1. Celý název záznamu (i s podtitulem) = strana vydání.
+    for record in records:
+        surnames = _primary_surnames(record)
+        full = fold(re.split(r"\s+/\s*", record.get("title") or "")[0])
+        for i, part in enumerate(parts):
+            if surnames and part == full and author_elsewhere(i, surnames):
+                return record
+    # 2. Bez podtitulu / čísla dílu -- jen když to není název řady samotný
+    # ("Harry Potter (AudioBook)(EN)" není "Harry Potter : Potterovský
+    # průvodce", měření 7. 10.).
+    series_names = {fold(s["name"]) for r in records if (s := _series(r))}
     for record in records:
         titles = _title_variants(record)
         surnames = _primary_surnames(record)
         if not titles or not surnames:
             continue
         for i, part in enumerate(parts):
-            if part not in titles:
+            if part not in titles or part in series_names:
                 continue
-            others = " ".join(p for j, p in enumerate(parts) if j != i)
-            if any(s in others.split() for s in surnames):
+            main = fold(re.split(r"\s+:\s+|\s+/\s*", record.get("title") or "")[0])
+            if parsed.get("lang") == "en" and part == main and fold(re.split(r"\s+/\s*", record.get("title") or "")[0]) != main:
+                continue  # anglické vydání k českému záznamu jen podle hlavního názvu ne
+            if author_elsewhere(i, surnames):
                 return record
         # "Zaklinac I Posledni prani" (název řady a dílu bez autora) + autor jinde
+        main = fold(re.split(r"\s+:\s+|\s+/\s*", record.get("title") or "")[0])
+        subtitled = fold(re.split(r"\s+/\s*", record.get("title") or "")[0]) != main
         for title in titles:
+            if title in series_names or (parsed.get("lang") == "en" and subtitled and title == main):
+                continue
             if len(title.split()) >= 2 and f" {title} " in f" {whole} ":
                 rest = f" {whole} ".replace(f" {title} ", " ")
                 if any(s in rest.split() for s in surnames):
@@ -251,6 +278,16 @@ async def match_release(title: str) -> dict[str, Any] | None:
     if parsed["collection"] or not parsed["parts"]:
         return None  # sbírka není jedna kniha (fáze 2: rozpis obsahu)
     lookfor = " ".join(parsed["parts"])[:200]
-    records = await _search(lookfor)
-    record = match_record(parsed, records)
+    record = match_record(parsed, await _search(lookfor))
+    if record is None and len(parsed["parts"]) > 2:
+        # Interpret / název řady v dotazu hledání zúžil ("Babička - Jiří
+        # Štědroň"): ještě dvojice stran (název + autor), nejvýš tři dotazy.
+        tried = 0
+        for i in range(len(parsed["parts"])):
+            for j in range(i + 1, len(parsed["parts"])):
+                if tried >= 3 or record is not None:
+                    break
+                tried += 1
+                pair = f"{parsed['parts'][i]} {parsed['parts'][j]}"
+                record = match_record(parsed, await _search(pair))
     return work_out(record) if record else None
