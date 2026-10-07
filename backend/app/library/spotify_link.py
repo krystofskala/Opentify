@@ -24,7 +24,7 @@ import httpx
 from sqlmodel import Session
 
 from app.catalog.embedded_art import URL_TEMPLATE, _save_resized, artwork_path
-from app.library.matching import find_or_create_artist, find_or_create_recording
+from app.library.matching import find_or_create_artist, find_or_create_recording, fold_name
 from app.library.spotify_import import PlaylistReport, TrackRow, _get_or_create_playlist, _import_tracks_into_playlist
 
 EMBED_LIMIT = 100
@@ -119,6 +119,19 @@ async def fetch_spotify_link(text: str) -> tuple[str, str, str, str | None, list
     return kind, sid, name, owner, rows, cover
 
 
+def is_compilation(owner: str | None, rows: list[TrackRow]) -> bool:
+    """Album od víc interpretů ("Various Artists", "100% Handmade Music"):
+    autor alba je "Various Artists" / "Různí interpreti", nebo aspoň 3
+    různí hlavní interpreti a žádný nemá polovinu skladeb."""
+    from collections import Counter
+
+    who = (owner or "").casefold()
+    if any(w in who for w in ("various artists", "různí interpreti", "rôzni interpreti", "various")):
+        return True
+    counts = Counter(fold_name(a) for a, *_ in rows if a)
+    return len(counts) >= 3 and max(counts.values()) * 2 < sum(counts.values())
+
+
 async def import_spotify_link(session: Session, user_id: str, text: str) -> SpotifyLinkResult:
     """Odkaz na Spotify NEBO Apple Music (app/library/apple_link.py)."""
     from app.library.apple_link import fetch_apple_link, is_apple_music_url
@@ -141,9 +154,18 @@ async def import_spotify_link(session: Session, user_id: str, text: str) -> Spot
         recording = find_or_create_recording(session, artist, track_name, duration_ms=duration_ms)
         session.commit()
         return SpotifyLinkResult(report=None, kind=kind, truncated=False, owner=owner, recording_id=recording.id)
+    compilation = kind == "album" and is_compilation(owner, rows)
+    if compilation:
+        # Kompilace: skladby jsou nahrávky z alb jejich interpretů -- album
+        # s názvem kompilace by se u každého interpreta rozpadlo na mini
+        # "alba" po 1-3 skladbách (#58, 100% Handmade Music, 6. 10.).
+        # Zůstane jednou položkou v Sdílené (obal a pořadí ze Spotify).
+        rows = [(artist, track, None, duration) for artist, track, _album, duration in rows]
     playlist = _get_or_create_playlist(session, user_id, f"{prefix}{kind}:{sid}", name)
     # Autor ("Ze Spotify · Jméno") a obal pro záložku Sdílené v Knihovně.
     playlist.description = f"{origin} · {owner}" if owner else origin
+    if compilation:
+        playlist.description = f"Kompilace · {playlist.description}"
     if cover and _save_resized(cover, artwork_path(playlist.id)):
         playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id)]
     session.add(playlist)
