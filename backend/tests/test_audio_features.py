@@ -55,3 +55,15 @@ def test_tempo_gap_half_double_is_same():
     assert _tempo_gap(120, 60) == 0
     assert _tempo_gap(120, 121) < 0.1
     assert _tempo_gap(120, 160) == 1.0
+
+
+def test_long_file_is_capped_and_keeps_real_ending():
+    import time
+
+    t = _t(40 * 60)  # 40 minut
+    x = 0.5 * np.sin(2 * np.pi * 330 * t).astype(np.float32)
+    x[-af.SR * 20 :] = 0  # 20 s ticha na skutečném konci
+    started = time.perf_counter()
+    f = af.compute(_pcm(x))
+    assert f and time.perf_counter() - started < 10
+    assert 19 < f["tail_silence_s"] < 21

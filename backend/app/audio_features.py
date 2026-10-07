@@ -28,6 +28,7 @@ SR = 11025
 FRAME = 1024
 HOP = 512
 EDGE_S = 10.0
+MAX_SECONDS = 12 * 60
 SILENCE_DB = -50.0  # pod tímhle (vůči špičce skladby) je ticho / doznění
 
 
@@ -81,8 +82,11 @@ def _tempo(onset_env: np.ndarray) -> tuple[float | None, float]:
     Jistota bývá nízká u volné hudby -- navazování ji bere v úvahu."""
     if len(onset_env) < 200:
         return None, 0.0
-    env = onset_env - onset_env.mean()
-    ac = np.correlate(env, env, mode="full")[len(env) - 1 :]
+    env = (onset_env - onset_env.mean()).astype(np.float64)
+    # Autokorelace přes FFT -- np.correlate je O(n²), u dlouhých souborů minuty.
+    n = 1 << int(np.ceil(np.log2(2 * len(env))))
+    spec = np.fft.rfft(env, n)
+    ac = np.fft.irfft(spec * np.conj(spec), n)[: len(env)]
     if ac[0] <= 0:
         return None, 0.0
     ac = ac / ac[0]
@@ -103,7 +107,13 @@ def _tempo(onset_env: np.ndarray) -> tuple[float | None, float]:
 
 def compute(pcm: bytes) -> dict | None:
     """PCM s16le mono 11 025 Hz -> rysy skladby, nebo None (moc krátké)."""
-    x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    # Nejvýš MAX_SECONDS (hodinový mix / dlouhý soubor nesmí spolknout paměť
+    # a minuty CPU v procesu API) -- na energii i tempo to stačí.
+    raw = np.frombuffer(pcm, dtype=np.int16)
+    if len(raw) > MAX_SECONDS * SR:
+        # Začátek + poslední minuta: konec a dozvuk zůstanou skutečné.
+        raw = np.concatenate([raw[: (MAX_SECONDS - 60) * SR], raw[-60 * SR :]])
+    x = raw.astype(np.float32) / 32768.0
     if len(x) < SR * 5:
         return None
     frames = _frames(x)
@@ -122,7 +132,7 @@ def compute(pcm: bytes) -> dict | None:
     fps = SR / HOP
     edge = int(EDGE_S * fps)
 
-    power = mag.astype(np.float64) ** 2
+    power = mag**2  # float32 -- polovina paměti
     logmag = np.log1p(mag * 100.0)
     onset_env = np.concatenate([[0.0], np.maximum(0.0, np.diff(logmag, axis=0)).sum(axis=1)])
     bpm, conf = _tempo(onset_env[first : last + 1])
