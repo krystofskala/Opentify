@@ -81,17 +81,52 @@ async def search(query: str, limit: int = 10) -> list[dict[str, Any]]:
     return await cached_json(f"sc:search:{query.strip().lower()}:{limit}", DAY, fetch, is_empty=lambda v: not v)
 
 
+def _track_details(ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Délka a pravidla skladeb po 50 jedním dotazem (plochý výpis profilu
+    je nemá). {} když se nepovede -- pak se nefiltruje."""
+    import yt_dlp
+
+    out: dict[str, dict[str, Any]] = {}
+    with yt_dlp.YoutubeDL(_opts()) as ydl:
+        ie = ydl.get_info_extractor("Soundcloud")
+        ie.initialize()
+        for i in range(0, len(ids), 50):
+            data = ie._call_api(
+                "https://api-v2.soundcloud.com/tracks", None, query={"ids": ",".join(ids[i : i + 50])}, note=False
+            )
+            for t in data or []:
+                out[str(t.get("id"))] = t
+    return out
+
+
 async def profile_tracks(profile_url: str, limit: int = 60) -> list[dict[str, Any]]:
-    """Nahrané skladby profilu (nejnovější první)."""
+    """Nahrané skladby profilu (nejnovější první), bez Go+ ukázek."""
 
     async def fetch() -> list[dict[str, Any]]:
         try:
             info = await asyncio.to_thread(_extract, profile_url.rstrip("/") + "/tracks")
         except Exception:  # noqa: BLE001
             return []
-        return [x for x in (_entry(e) for e in (info.get("entries") or [])[: limit * 2] if e) if x][:limit]
+        raw = [e for e in (info.get("entries") or [])[: limit * 2] if e]
+        try:
+            details = await asyncio.to_thread(_track_details, [str(e["id"]) for e in raw if e.get("id")])
+        except Exception:  # noqa: BLE001 -- bez podrobností jako dřív
+            details = {}
+        entries = []
+        for e in raw:
+            d = details.get(str(e.get("id")))
+            if d is not None:
+                # Go+ (policy SNIP) = jen 30s ukázka. Na oficiálním profilu to
+                # bývají i cizí skladby od distributora (u Prince pandžábský
+                # zpěvák stejného jména -- #76).
+                if d.get("policy") == "SNIP":
+                    continue
+                if d.get("duration"):
+                    e = {**e, "duration": d["duration"] / 1000}
+            entries.append(e)
+        return [x for x in (_entry(e) for e in entries) if x][:limit]
 
-    return await cached_json(f"sc:profile:{profile_url}", DAY, fetch, is_empty=lambda v: not v)
+    return await cached_json(f"sc:profile:v2:{profile_url}", DAY, fetch, is_empty=lambda v: not v)
 
 
 def recording_for(session: Session, artist: Any, item: dict[str, Any]) -> Any:
