@@ -209,3 +209,28 @@ async def artist_styles(artist_ids: list[str]) -> dict[str, dict[str, float]]:
         if vec:
             out[aid] = vec
     return out
+
+
+async def not_playing(artist_ids: list[str], styles: list[str], limit: int = 120) -> set[str]:
+    """Interpreti, kteří podle štítků Last.fm styl / žánr NEHRAJÍ -- pro
+    kontrolu zařazení podle Deezeru (Kevin Morby v Rap / Hip Hop, Frankie
+    Valli v Jazzu; 7i). Kdo štítky nemá (nebo je vlastní interpret), projde --
+    nic nevyřazovat jen kvůli chybějícím datům."""
+    from sqlmodel import Session, select
+
+    from app.catalog.identity import is_own_artist
+    from app.db import engine
+    from app.models import Artist
+
+    styles = [s.strip().lower() for s in styles if s]
+    names_set = style_set(styles)
+    fam = family(styles)
+    ids = [a for a in dict.fromkeys(artist_ids) if a and not is_own_artist(a)][:limit]
+    if not ids:
+        return set()
+    with Session(engine) as session:
+        names = dict(session.exec(select(Artist.id, Artist.name).where(Artist.id.in_(ids))).all())  # type: ignore[attr-defined]
+    sem = asyncio.Semaphore(6)
+    pairs = [(a, n) for a, n in names.items() if n]
+    tag_lists = await asyncio.gather(*(_tags_of(n, sem) for _a, n in pairs))
+    return {a for (a, _n), tags in zip(pairs, tag_lists) if tags and not plays_style(tags, names_set, fam)}

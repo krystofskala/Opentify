@@ -95,7 +95,7 @@ _CLASSIFY_BUDGET_BACKGROUND = 250
 _CLASSIFY_BUDGET_PAGE = 25
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_VERSION = 3  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
+_VERSION = 4  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
 
 
 def _source(category_id: str) -> str:
@@ -245,20 +245,39 @@ def _familiar(taste: pm.Taste, artists: dict[str, float], rng: random.Random) ->
 
 async def _genre_mix(c: Category, taste: pm.Taste, shares: dict[str, dict[str, float]], rng: random.Random) -> tuple[list[str], list[str], list[str]]:
     members = {a: s[c.id] for a, s in shares.items() if s.get(c.id, 0) >= MEMBER_SHARE}
+    # Deezer řadí alba do žánrů hrubě (Kevin Morby, Angus Stone v Rap / Hip
+    # Hop) -- členství potvrdit štítky Last.fm (výrazný štítek žánru nebo jeho
+    # rodiny); bez štítků projde (7i).
+    from app import browse
+    from app.home import taste_bridge
+
+    styles = list(browse.LASTFM_TAGS.get(c.id) or (c.title.lower(),))
+    try:
+        wrong = await taste_bridge.not_playing(sorted(members, key=lambda a: -taste.artist_weight[a]), styles)
+    except Exception:  # noqa: BLE001
+        wrong = set()
+    members = {a: v for a, v in members.items() if a not in wrong}
     familiar = _familiar(taste, members, rng)
     # Nové: "rádio" nejposlouchanějších interpretů, kteří jsou v žánru hlavně.
     core = sorted((a for a, s in members.items() if s >= 0.5), key=lambda a: -taste.artist_weight[a])
     seeds = [taste.artist_deezer[a] for a in core[:4] if a in taste.artist_deezer]
     want = min(MIX_SIZE - len(familiar), max(12, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
     radio = await pm._new_tracks_from(seeds, taste.known, rng, want) if seeds else []
+    # Rádio Deezeru přinese i mimo žánr (Frankie Valli v tátově Jazzu) --
+    # stejná kontrola štítků jako u členů.
+    if radio:
+        radio_artist = await asyncio.to_thread(pm._artists_of, radio)
+        try:
+            off = await taste_bridge.not_playing(list(set(radio_artist.values())), styles)
+        except Exception:  # noqa: BLE001
+            off = set()
+        radio = [r for r in radio if radio_artist.get(r) not in off]
     # + nejbližší hudba žánru podle celého trvalého vkusu (most vkusu) --
     # i žánr, který jsi ještě neobjevil (folkař a jazz rap).
-    from app import browse, tags
-    from app.home import taste_bridge
+    from app import tags
 
     lasting = [(taste.artist_name.get(a) or "", w) for a, w in taste.artist_weight.most_common(300)]
     known_names = {taste_bridge._normalize(taste.artist_name.get(a) or "") for a in members}
-    styles = list(browse.LASTFM_TAGS.get(c.id) or (c.title.lower(),))
     try:
         items = await taste_bridge.bridge(styles, lasting, known_names, rng, n_artists=12)
         near = [r for r in await tags._resolve_tracks(items, want) if r not in taste.known]
