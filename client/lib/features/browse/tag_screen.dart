@@ -32,6 +32,7 @@ class TagPage {
     this.about,
     this.parents = const [],
     this.related = const [],
+    this.genreId,
   });
 
   final String tag;
@@ -46,6 +47,9 @@ class TagPage {
   final String? about;
   final List<BrowseCategory> parents;
   final List<String> related;
+
+  /// Štítek je celým žánrem ("jazz", "rock") -- otevře se stránka žánru.
+  final String? genreId;
 
   TagPage copyWithExtras({HomePlaylistCard? mix, HomePlaylistCard? forYou, List<BrowsePlaylist>? playlists}) => TagPage(
         tag: tag,
@@ -74,6 +78,7 @@ class TagPage {
       about: json['about'] as String?,
       parents: list('parents').map(BrowseCategory.fromJson).toList(),
       related: (json['related'] as List<dynamic>? ?? const []).cast<String>(),
+      genreId: json['genreId'] as String?,
     );
   }
 }
@@ -141,6 +146,14 @@ class TagScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final page = ref.watch(tagPageProvider(tag));
     final theme = Theme.of(context);
+    // Štítek, který je celým žánrem (Jazz), nahradit stránkou žánru ve
+    // stejné záložce (".../browse/tag/jazz" -> ".../browse/jazz").
+    if (page.valueOrNull?.genreId case final genreId?) {
+      final path = GoRouterState.of(context).uri.path;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.replace(path.replaceFirst(RegExp(r'tag/[^/]+$'), genreId));
+      });
+    }
     return Scaffold(
       bottomNavigationBar: const ShellBarSpace(),
       body: CustomScrollView(

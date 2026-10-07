@@ -351,6 +351,21 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
     )
 
 
+# Štítek, který je celým žánrem z Procházet ("jazz", "rock", "hip-hop"),
+# se otevírá jako stránka žánru (uživatel 7. 10.: "Jazz se měl otevřít jako
+# celý žánr, ne styl"). "Rap" zůstává stylem -- je užší než Rap / Hip Hop.
+_GENRE_ALIASES = {"hip-hop": "hiphop", "hip hop": "hiphop", "r&b": "rnb", "electronica": "electronic"}
+
+
+def genre_for_tag(tag: str) -> str | None:
+    from app import browse
+
+    t = slug(tag)
+    cid = _GENRE_ALIASES.get(t, t)
+    c = browse.get_category(cid)
+    return c.id if c is not None and c.group == "genre" else None
+
+
 async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
     """Stránka stylu: mix (náš playlist ze štítku), interpreti, alba, popis,
     příbuzné styly. Cache 12 h, mix se mění denně."""
@@ -359,6 +374,9 @@ async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
     from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
 
     t = slug(tag)
+    genre = genre_for_tag(t)
+    if genre:
+        return {"tag": t, "title": title_of(t), "genreId": genre}  # appka otevře stránku žánru
 
     async def build() -> dict[str, Any]:
         # Bez mixu (40 skladeb přes Deezer = ~18 s) -- ten zvlášť, `tag_mix`.
@@ -399,7 +417,9 @@ async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
             for_you = _card(session, pl).model_dump(mode="json", by_alias=True) if pl else None
         artists = [browse._artist_card(a) for a in (session.get(Artist, i) for i in data.get("artistIds") or []) if a]
         albums = [browse._album_card(session, r) for r in (session.get(Release, i) for i in data.get("albumIds") or []) if r]
-    parents = parent_genres(t)
+    # "Patří pod" jen žánry (ne nálady -- jazz byl pod "Ráno") a příbuzné
+    # styly z rodiny žánru.
+    parents = [p for p in parent_genres(t) if (c := browse.get_category(p)) is not None and c.group == "genre"]
     siblings: list[str] = []
     for p in parents:
         siblings += [s for s in SUBGENRES[p] if s != t and s not in siblings]
