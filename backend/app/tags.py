@@ -328,7 +328,24 @@ async def _taste_bridge(
         if fit > 0:
             scored.append((fit * (0.8 + 0.4 * rng.random()), name))
     scored.sort(reverse=True)
-    picked = [name for _f, name in scored[:n_artists]]
+    # Popularita: z žebříčků podstylů ("czech rap") lezla i jména s pár
+    # posluchači a šumem ve štítcích. Pod 10 tisíc posluchačů ven, nad tím
+    # roste váha s řádem (10 tis. -> 0,25, milion -> 1).
+    head = scored[: n_artists * 3]
+
+    async def listeners(name: str) -> int:
+        async with sem:
+            try:
+                return int(((await lastfm.artist_info(name)) or {}).get("listeners") or 0)
+            except Exception:  # noqa: BLE001
+                return 0
+
+    counts = await asyncio.gather(*(listeners(n) for _f, n in head))
+    rescored = [
+        (f * min(1.0, max(0.25, (math.log10(c) - 3.5) / 2.5)), n) for (f, n), c in zip(head, counts) if c >= 10_000
+    ]
+    rescored.sort(reverse=True)
+    picked = [name for _f, name in rescored[:n_artists]]
     tracks = await asyncio.gather(*(lastfm.artist_top_tracks(n, 10) for n in picked), return_exceptions=True)
     out: list[dict[str, str]] = []
     for lst in tracks:
