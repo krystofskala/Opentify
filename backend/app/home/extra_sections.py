@@ -26,6 +26,7 @@ import asyncio
 import logging
 import math
 import random
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -566,6 +567,7 @@ ALBUM_PICKS_SIZE = 14
 # Podíl alb napříč žánry podle potvrzeného vkusu: bez dat celá řada, s
 # přibývajícími potvrzenými interprety klesá (12 -> jen čtvrtina) a u
 # zaběhlého profilu (activation.YOUNG_PROFILE) zmizí.
+_COMPILATION = re.compile(r"\b(hits|best of|greatest|collection|essential|anthology|gold|the very best|singles)\b", re.I)
 EXPLORE_FULL_AT = 12
 EXPLORE_MIN = 0.25
 
@@ -627,9 +629,11 @@ async def _genre_canon(user_id: str, n: int, heard: set[str]) -> list[dict[str, 
             albums = await lastfm.tag_top_albums(tag, 20)
         except Exception:  # noqa: BLE001
             continue
+        # Desky, ne výběrovky; jen z nejposlouchanějších (uznávané, ne náhodné).
         fresh = [
-            a for a in albums[:12]
+            a for a in albums[:8]
             if _normalize(a["title"]) not in heard and _normalize(a["artist"]) not in seen_artists
+            and not _COMPILATION.search(a["title"])
         ]
         if fresh:
             pick = rng.choice(fresh)
