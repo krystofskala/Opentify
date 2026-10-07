@@ -234,7 +234,9 @@ async def _taste_bridge(
     z tvých poslechů profil štítků (folk, jazz, akustické, česká…), pak
     interpreti stylu -- z jeho žebříčku i kombinací "<tvůj štítek> <styl>"
     (jazz rap, czech rap…) -- seřazení podle toho, kolik s tvým profilem
-    sdílí. Vrací (interpret, název) jejich nejznámějších skladeb."""
+    sdílí. Kandidáti jen z 200 nejposlouchanějších interpretů stylu --
+    kombinace "folk rap" na Last.fm vracely neznámé jména se šumem ve
+    štítcích. Vrací (interpret, název) jejich nejznámějších skladeb."""
     from app.catalog.lastfm import artist_top_tags
 
     sem = asyncio.Semaphore(6)
@@ -257,15 +259,11 @@ async def _taste_bridge(
         return []
     total = sum(profile.values())
     profile = {k: v / total for k, v in profile.items()}
-    mine = sorted(profile, key=lambda k: -profile[k])[:8]
-    lists = await asyncio.gather(
-        lastfm.tag_top_artists(t, 100),
-        *(lastfm.tag_top_artists(f"{k.replace('-', ' ')} {t}", 30) for k in mine),
-        return_exceptions=True,
-    )
-    candidates = list(dict.fromkeys(
-        n for lst in lists if isinstance(lst, list) for n in lst if _normalize(n) not in skip_names
-    ))[:220]
+    try:
+        ranked = await lastfm.tag_top_artists(t, 200)
+    except Exception:  # noqa: BLE001
+        return []
+    candidates = [n for n in dict.fromkeys(ranked) if _normalize(n) not in skip_names]
     scored: list[tuple[float, str]] = []
     for name, tags in zip(candidates, await asyncio.gather(*(tags_of(n) for n in candidates))):
         if not _strong(tags, t):
@@ -365,8 +363,17 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
     similar: set[str] = set()
     for a in tag_artists[:6]:
         similar |= {_normalize(n) for n, _m in await lt.similar_artist_names(names[a] or "", 25)}
-    pool = [x for x in await lastfm.tag_top_tracks(t, limit=200) if _normalize(x["artist"]) in (known_names | similar)]
-    rng.shuffle(pool)
+    # Objevy jen od podobných (ne od těch, které už posloucháš -- jinak byl
+    # půlka mixu Eminem), nejvýš 2 skladby na interpreta.
+    per_artist: dict[str, int] = {}
+    pool = []
+    tops = await lastfm.tag_top_tracks(t, limit=200)
+    rng.shuffle(tops)
+    for x in tops:
+        a = _normalize(x["artist"])
+        if a in similar and a not in known_names and per_artist.get(a, 0) < 2:
+            per_artist[a] = per_artist.get(a, 0) + 1
+            pool.append(x)
     # Málo vlastních (okrajový styl): víc objevů, ať mix vznikne i tak.
     want = 14 if len(own) >= 8 else 24
     # Půlka objevů podle celého vkusu (jaký rap by se líbil folkaři), půlka
