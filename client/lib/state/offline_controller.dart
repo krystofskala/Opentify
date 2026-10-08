@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/offline_storage.dart';
-import 'audio_player_controller.dart' show NowPlayingInfo;
+import '../core/config.dart' show AppConfig;
+import '../features/spoken/spoken_data.dart' show spokenStreamUrl;
+import 'audio_player_controller.dart' show AudioPlayerController, NowPlayingInfo;
 import 'provisioning_controller.dart';
 import 'providers.dart';
 
@@ -100,6 +102,10 @@ class OfflineController extends StateNotifier<OfflineState> {
 
   static bool _isEpisode(String id) => id.startsWith('pc:');
 
+  /// Díl audioknihy (`sp:<kniha>:<soubor>`) -- stovky MB, stahuje se rovnou
+  /// do souboru (`OfflineStorage.putFromUrl`), ne do paměti.
+  static bool _isBookPart(String id) => id.startsWith('sp:');
+
   /// Stáhnout do zařízení (skladby, které tam ještě nejsou).
   void add(List<NowPlayingInfo> infos) {
     final pending = {...state.pending};
@@ -128,6 +134,28 @@ class OfflineController extends StateNotifier<OfflineState> {
     final info = state.pending[id];
     if (info == null) return;
     try {
+      if (_isBookPart(id)) {
+        final parts = AudioPlayerController.spokenParts(id);
+        if (parts == null) throw StateError('neznámý díl knihy');
+        final size = await OfflineStorage.putFromUrl(_storageKey(id), spokenStreamUrl(AppConfig.apiBaseUrl, parts.fileId));
+        if (!mounted || !state.pending.containsKey(id)) {
+          if (!mounted || !has(id)) await OfflineStorage.remove(_storageKey(id));
+          return;
+        }
+        final track = (
+          id: id,
+          title: info.title,
+          artist: info.artistName,
+          artistId: info.artistId,
+          releaseId: info.releaseId,
+          artworkUrl: info.artworkUrl,
+          bytes: size,
+          addedAt: DateTime.now(),
+        );
+        state = (tracks: {...state.tracks, id: track}, pending: {...state.pending}..remove(id));
+        await _save();
+        return;
+      }
       // Epizodu podcastu server přeposílá od vydavatele -- nic se neobstarává.
       final bytes = _isEpisode(id)
           ? await _ref

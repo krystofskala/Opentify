@@ -38,6 +38,17 @@ Future<void> put(String id, Uint8List bytes, String mimeType) async {
   await cache.put(_key(id).toJS, response).toDart;
 }
 
+/// Prohlížeč stáhne soubor a uloží ho do Cache Storage sám (Dart ho do
+/// paměti nenačítá). Přihlášení: cookie téhož původu / token v adrese.
+Future<int> putFromUrl(String id, String url) async {
+  final response = await web.window.fetch(url.toJS, web.RequestInit(credentials: 'same-origin')).toDart;
+  if (!response.ok) throw StateError('HTTP ${response.status}');
+  final size = int.tryParse(response.headers.get('Content-Length') ?? '') ?? 0;
+  final cache = await _open();
+  await cache.put(_key(id).toJS, response).toDart;
+  return size;
+}
+
 Future<String?> localUrl(String id) async {
   _currentId = id;
   _releaseOthers(id);

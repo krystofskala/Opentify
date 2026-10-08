@@ -179,7 +179,7 @@ class _PlaybackTestScreenState extends ConsumerState<PlaybackTestScreen> {
       }
 
       // 5) Soubor uložený v telefonu.
-      final offline = ref.read(offlineControllerProvider).tracks.values.where((t) => !t.id.startsWith('pc:')).toList()
+      final offline = ref.read(offlineControllerProvider).tracks.values.where((t) => !t.id.startsWith('pc:') && !t.id.startsWith('sp:')).toList()
         ..shuffle();
       if (offline.isNotEmpty) setState(() => _status = 'Skladba v telefonu');
       for (final t in offline.take(2)) {

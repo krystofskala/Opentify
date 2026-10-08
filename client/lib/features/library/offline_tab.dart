@@ -47,7 +47,7 @@ class OfflineTab extends ConsumerWidget {
     if (ok != true) return;
     final ctrl = ref.read(offlineControllerProvider.notifier);
     // Jen to, co je v tomhle režimu vidět (skladby / epizody).
-    final ids = ref.read(offlineControllerProvider).tracks.keys.where((id) => id.startsWith('pc:') == episodes).toList();
+    final ids = ref.read(offlineControllerProvider).tracks.keys.where((id) => _spoken(id) == episodes).toList();
     for (final id in ids) {
       await ctrl.remove(id);
     }
@@ -58,10 +58,10 @@ class OfflineTab extends ConsumerWidget {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final offline = ref.watch(offlineControllerProvider);
-    final tracks = offline.tracks.values.where((t) => t.id.startsWith('pc:') == episodes).toList()
+    final tracks = offline.tracks.values.where((t) => _spoken(t.id) == episodes).toList()
       ..sort((a, b) => b.addedAt.compareTo(a.addedAt));
-    final pendingCount = offline.pending.keys.where((id) => id.startsWith('pc:') == episodes).length;
-    String count(int n) => episodes ? '$n ${n == 1 ? 'epizoda' : (n < 5 && n > 0 ? 'epizody' : 'epizod')}' : songsCount(n);
+    final pendingCount = offline.pending.keys.where((id) => _spoken(id) == episodes).length;
+    String count(int n) => episodes ? '$n ${n == 1 ? 'položka' : (n < 5 && n > 0 ? 'položky' : 'položek')}' : songsCount(n);
     final usage = ref.watch(offlineUsageProvider).valueOrNull;
     final ownBytes = tracks.fold<int>(0, (a, t) => a + t.bytes);
 
@@ -204,3 +204,7 @@ class _OfflineRow extends ConsumerWidget {
     );
   }
 }
+
+/// Mluvené slovo v zařízení: epizody podcastů i díly audioknih (do hudby
+/// nepatří -- dřív by se díly knih ukázaly mezi skladbami).
+bool _spoken(String id) => id.startsWith('pc:') || id.startsWith('sp:');

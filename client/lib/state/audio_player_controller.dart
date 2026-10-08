@@ -2373,7 +2373,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         unawaited(_startStream(info, ready, isProgressive: false, isLocal: true));
         return;
       }
-      if (podcastEpisodeId(info.recordingId) != null && offline.has(info.recordingId)) {
+      // Epizoda i díl knihy stažený do telefonu hraje odtud (i bez internetu).
+      if (offline.has(info.recordingId)) {
         final local = await offline.localUrl(info.recordingId);
         if (state.nowPlaying?.recordingId != info.recordingId) return;
         if (local != null) {

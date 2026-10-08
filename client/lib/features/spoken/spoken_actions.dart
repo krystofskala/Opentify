@@ -14,6 +14,7 @@ import '../../widgets/media_card.dart' show ArtworkImage;
 import '../../widgets/share_sheet.dart';
 import '../../widgets/toast.dart';
 import 'spoken_collections.dart' show showAddToCollectionSheet;
+import '../../state/offline_controller.dart' show offlineControllerProvider;
 import 'spoken_data.dart';
 import 'spoken_screens.dart' show playBook;
 
@@ -224,6 +225,35 @@ class _BookActionsSheetState extends ConsumerState<_BookActionsSheet> {
                     if (context.mounted) close();
                   }),
                 ),
+              if (book.isReady)
+                Builder(builder: (context) {
+                  final offline = ref.watch(offlineControllerProvider);
+                  final ids = [for (final f in book.files) spokenQueueId(book.id, f.id)];
+                  final saved = ids.isNotEmpty && ids.every(offline.tracks.containsKey);
+                  final pending = ids.any(offline.pending.containsKey);
+                  return _Row(
+                    icon: saved
+                        ? Symbols.mobile_off_rounded
+                        : (pending ? Symbols.downloading_rounded : Symbols.download_for_offline_rounded),
+                    label: saved ? 'Smazat ze zařízení' : (pending ? 'Stahuje se do zařízení…' : 'Stáhnout do zařízení'),
+                    onTap: _guard(() async {
+                      final ctrl = ref.read(offlineControllerProvider.notifier);
+                      if (saved) {
+                        for (final id in ids) {
+                          ctrl.remove(id);
+                        }
+                        toast('Smazáno ze zařízení');
+                      } else if (!pending) {
+                        final b = await full();
+                        if (b != null) {
+                          ctrl.add(spokenQueue(b));
+                          toast('Kniha se stahuje do zařízení – pak hraje i bez internetu');
+                        }
+                      }
+                      if (context.mounted) close();
+                    }),
+                  );
+                }),
               _Row(
                 icon: Symbols.collections_bookmark_rounded,
                 label: 'Přidat do sbírky…',

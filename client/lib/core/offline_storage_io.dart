@@ -41,6 +41,32 @@ Future<void> put(String id, Uint8List bytes, String mimeType) async {
   await file.writeAsBytes(bytes, flush: true);
 }
 
+/// Stream z adresy po kouscích do souboru (díl knihy může mít stovky MB --
+/// dřív se celý načetl do paměti). Nejdřív do `.part`, pak přejmenovat.
+Future<int> putFromUrl(String id, String url) async {
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(Uri.parse(url));
+    final response = await request.close();
+    if (response.statusCode != 200) throw HttpException('HTTP ${response.statusCode}');
+    final mime = (response.headers.contentType?.mimeType ?? 'audio/mp4').toLowerCase();
+    await remove(id);
+    final dir = await _dir();
+    final part = File('${dir.path}/$id.part');
+    final sink = part.openWrite();
+    try {
+      await response.pipe(sink);
+    } catch (_) {
+      if (part.existsSync()) await part.delete();
+      rethrow;
+    }
+    final file = await part.rename('${dir.path}/$id.${_extFor(mime)}');
+    return file.lengthSync();
+  } finally {
+    client.close();
+  }
+}
+
 Future<String?> localUrl(String id) async => (await _existing(id))?.uri.toString();
 
 Future<void> remove(String id) async {

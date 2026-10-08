@@ -10,6 +10,11 @@ import 'offline_storage_stub.dart'
 abstract final class OfflineStorage {
   static Future<void> put(String id, Uint8List bytes, String mimeType) => impl.put(id, bytes, mimeType);
 
+  /// Velký soubor (díl audioknihy) rovnou z adresy, bez načtení do paměti:
+  /// nativně po kouscích do souboru, na webu ho uloží prohlížeč. Vrací
+  /// velikost v bajtech (0 = neznámá).
+  static Future<int> putFromUrl(String id, String url) => impl.putFromUrl(id, url);
+
   /// URL/cesta pro přehrávač, nebo `null`, když skladba v zařízení není.
   static Future<String?> localUrl(String id) => impl.localUrl(id);
 
