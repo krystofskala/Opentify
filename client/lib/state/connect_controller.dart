@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
+import '../core/device_token.dart' show withDeviceToken, withoutDeviceToken;
 import '../core/realtime_event.dart';
 import 'audio_player_controller.dart';
 import 'providers.dart';
@@ -39,7 +40,13 @@ class RemoteDevice {
       name: j['name'] as String? ?? 'Zařízení',
       title: np?['title'] as String?,
       artist: np?['artist'] as String?,
-      artworkUrl: np?['artworkUrl'] as String?,
+      // Obal z našeho serveru: s tokenem TOHOTO zařízení (odesílatel ho
+      // nepřikládá -- token zařízení se nemá šířit dál).
+      artworkUrl: switch (np?['artworkUrl']) {
+        final String url when url.startsWith(AppConfig.apiBaseUrl) => withDeviceToken(url),
+        final String url => url,
+        _ => null,
+      },
       isPlaying: j['isPlaying'] as bool? ?? false,
       positionMs: (j['positionMs'] as num?)?.toInt() ?? 0,
       durationMs: (j['durationMs'] as num?)?.toInt(),
@@ -93,7 +100,7 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
     _ref.read(realtimeClientProvider).send('device.state', {
       'nowPlaying': np == null
           ? null
-          : {'recordingId': np.recordingId, 'title': np.title, 'artist': np.artistName, 'artworkUrl': np.artworkUrl},
+          : {'recordingId': np.recordingId, 'title': np.title, 'artist': np.artistName, 'artworkUrl': np.artworkUrl == null ? null : withoutDeviceToken(np.artworkUrl!)},
       'isPlaying': s.isPlaying,
       'positionMs': s.position.inMilliseconds,
       'durationMs': s.duration?.inMilliseconds,

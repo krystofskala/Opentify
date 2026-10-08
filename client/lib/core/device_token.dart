@@ -190,6 +190,15 @@ Map<String, String> authHeaders() => {
     };
 
 /// URL na vlastní backend s klíčem v dotazu (stream, obrázek, WebSocket).
+/// Adresa bez tokenu zařízení (`t=`) -- než odejde jinam (Connect: ostatní
+/// zařízení si přidají svůj, `withDeviceToken`).
+String withoutDeviceToken(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.queryParameters.containsKey('t')) return url;
+  final rest = {...uri.queryParameters}..remove('t');
+  return uri.replace(queryParameters: rest.isEmpty ? null : rest).toString();
+}
+
 String withDeviceToken(String url) {
   final token = deviceToken;
   if (kIsWeb || token == null) return url;
