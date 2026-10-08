@@ -216,12 +216,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         _ActionRow(
                           icon: Symbols.cloud_upload_rounded,
                           title: 'Import ze Spotify, Apple Music a YouTube Music',
-                          description: 'Spotify: export playlistů (ZIP s CSV, např. z Exportify) nebo '
-                              'YourLibrary.json z oficiálního exportu – Liked Songs pro denní mix, '
-                              'ostatní playlisty pod svým jménem. ZIP s historií poslechů (Extended '
-                              'streaming history) nahraje poslechy pro Wrapped a mixy.\n'
-                              'YouTube Music: Google Takeout › YouTube a YouTube Music › historie, '
-                              'formát JSON (v Takeoutu přepnout z HTML) – poslechy se přidají k těm ze Spotify.\n'
+                          description: 'Spotify (spotify.com › Účet › Soukromí): „Údaje o účtu“ přijdou za pár dní – '
+                              'poslechy za poslední rok, playlisty a knihovna. „Rozšířená historie streamování“ '
+                              'trvá týdny, ale má celou historii (Wrapped za všechny roky). Nahrát můžeš obojí '
+                              'v libovolném pořadí, nic se nezapočítá dvakrát. Playlisty jdou i jako ZIP s CSV '
+                              '(např. z Exportify).\n'
+                              'YouTube Music: Google Takeout › jen „YouTube a YouTube Music“ › jen historie '
+                              '(a hudební knihovna) – malý ZIP, HTML i JSON. Poslechy se přidají k těm ze Spotify.\n'
                               'Apple Music: privacy.apple.com › kopie dat › Média a nákupy Apple – nahraj ZIP '
                               '„Informace o mediálních službách Apple“ (část 1). Poslechy i knihovna.',
                           buttonLabel: 'Vybrat soubor…',
