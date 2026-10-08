@@ -330,6 +330,10 @@ async def import_youtube_link(
         playlist.description = f"{label} · {info['channel']}" if info["channel"] else label
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
+        # Zápis hned uzavřít: párování na katalog čeká na Deezer u každé
+        # skladby a otevřený zápis by mezitím zamkl databázi všem ostatním
+        # (8. 10.: import 101 s -> "database is locked").
+        session.commit()
         matched = 0
         for position, v in enumerate(videos):
             # Oficiální skladba z katalogu (správný interpret/album/obal),
@@ -348,6 +352,7 @@ async def import_youtube_link(
                     recording.external_refs = {**(recording.external_refs or {}), **_ref(source, v)}
                     session.add(recording)
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording.id, position=position))
+            session.commit()
         cover = await _fetch_cover(info["thumbnail"])
         if cover and _save_resized(cover, artwork_path(playlist.id)):
             playlist.cover_urls = [URL_TEMPLATE.format(release_id=playlist.id)]
@@ -402,6 +407,7 @@ async def import_youtube_link(
         recording.duration_ms = int(v["duration"] * 1000) if v.get("duration") else recording.duration_ms
         recording.external_refs = {**(recording.external_refs or {}), **_ref(source, v)}
         session.add(recording)
+    session.commit()  # stahování obalu ať nedrží zápis otevřený
     cover = await _fetch_cover(info["thumbnail"])
     if cover and _save_resized(cover, artwork_path(release.id)):
         release.images = [URL_TEMPLATE.format(release_id=release.id)]

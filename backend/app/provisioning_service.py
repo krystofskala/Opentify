@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.db import engine
@@ -147,7 +148,15 @@ def get_or_create_job(
     if asset is None:
         asset = MediaAsset(recording_id=recording_id, status=MediaAssetStatus.MISSING)
         session.add(asset)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # Dva požadavky na tutéž skladbu naráz (dvě zařízení, dvojklik):
+            # záznam mezitím založil ten druhý -- vzít jeho (8. 10.: 500).
+            session.rollback()
+            asset = session.get(MediaAsset, recording_id)
+            if asset is None:
+                raise
         session.refresh(asset)
 
     heal_missing_file(session, asset)
