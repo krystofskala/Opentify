@@ -343,6 +343,8 @@ async def _mood_mix(
     mood_artists = Counter(str((t.get("artist") or {}).get("id") or "") for t in mood_dz)
     mood_artists.pop("", None)
     dz_track_ids = {str(t["id"]) for t in mood_dz if t.get("id")}
+    dz_keys = {mood_tracks.track_key(str((t.get("artist") or {}).get("name") or ""), str(t.get("title") or "")) for t in mood_dz}
+    chart = await mood_tracks.chart_keys(c.id)
 
     # Interpreti nálady postaru -- už jen záloha, když skladeb s doklady je málo.
     related = await _related_sets(taste)
@@ -357,7 +359,7 @@ async def _mood_mix(
     # Tvoje skladby, které náladu opravdu mají.
     liked_or_played = list(dict.fromkeys([*taste.liked, *(r for r, _c in taste.listen_counts.most_common())]))
     pool = (liked_or_played + [r for r in taste.library if r not in set(liked_or_played)])[:2500]
-    ev = await mood_tracks.evidence(pool, c.id, dz_track_ids)
+    ev = await mood_tracks.evidence(pool, c.id, dz_track_ids, dz_keys, chart)
     target = round(MIX_SIZE * FAMILIAR_SHARE)
     familiar = _familiar_tracks(taste, [r for r in pool if ev.get(r, 0) >= 1], rng, target)
     if len(familiar) < target:
@@ -408,7 +410,7 @@ async def _mood_mix(
         ids += [x for x in close_ids[i : i + 1] + lfm_ids[i : i + 1] if x not in ids]
     ids += [x for x in rest_ids if x not in ids]
     # Co už máme rozebrané a zvukem náladě odporuje, pryč.
-    ev_new = await mood_tracks.evidence(ids, c.id, dz_track_ids)
+    ev_new = await mood_tracks.evidence(ids, c.id, dz_track_ids, dz_keys, chart)
     ids = [r for r in ids if ev_new.get(r, 0) >= 0]
     artist_of = await asyncio.to_thread(pm._artists_of, ids)
     from app.home import novelty

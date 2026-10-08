@@ -4,11 +4,13 @@ Dřív patřil do nálady celý interpret, když on nebo tři jemu podobní byli
 v redakčních playlistech Deezeru -- do Párty se tak dostali Angus & Julia
 Stone s čímkoli. Teď se rozhoduje u každé skladby ze tří zdrojů:
 
-1. štítky skladby z Last.fm (sad, chill, workout…), plní je na pozadí
-   `warm()` -- skládání mixu čte jen to, co už je v cache,
-2. vlastní rozbor zvuku (`TrackFeatures`: energie, tempo) -- u Cvičení
-   a Spánku sám dokladem, u ostatních jen veto (balada do Cvičení ne),
-3. skladba přímo v redakčním playlistu nálady na Deezeru.
+1. žebříčky štítků nálad na Last.fm (stovky nejoznačovanějších skladeb za
+   „sad“, „chill“, „party“…) -- skladba v nich podle interpreta a názvu;
+   štítky jednotlivých skladeb (`warm()`) jen doplňkově, většina skladeb je
+   nemá (8. 10.: z 539 jen 55 nějaké, nálady skoro žádné),
+2. skladba v redakčním playlistu nálady na Deezeru (číslo nebo jméno),
+3. vlastní rozbor zvuku (`TrackFeatures`: energie, tempo) -- sám dokladem jen
+   u Spánku (energie necítí „cvičení“), jinak veto (balada do Cvičení ne).
 """
 
 from __future__ import annotations
@@ -71,14 +73,30 @@ def audio_veto(mood: str, energy: float | None, bpm: float | None) -> bool:
 
 
 def audio_evidence(mood: str, energy: float | None, bpm: float | None) -> bool:
-    """Zvuk sám stačí jako doklad -- jen kde je to jednoznačné."""
+    """Zvuk sám stačí jako doklad -- jen u Spánku (velmi klidné). U Cvičení
+    ne: energie (jas zvuku) brala i „People Are Strange“ (8. 10.)."""
     if energy is None:
         return False
-    if mood == "workout":
-        return energy >= 0.7 and (bpm is None or bpm >= 110)
-    if mood == "sleep":
-        return energy <= 0.15
-    return False
+    return mood == "sleep" and energy <= 0.12 and (bpm is None or bpm <= 100)
+
+
+def track_key(artist: str, title: str) -> str:
+    """Párování skladby mezi zdroji: hlavní interpret + název bez závorek."""
+    from app.catalog.artwork import _normalize, primary_artist_name
+
+    return _normalize(primary_artist_name(artist or "")) + "|" + _normalize(title or "")
+
+
+async def chart_keys(mood: str, per_tag: int = 500) -> set[str]:
+    """Skladby z žebříčků štítků nálady na Last.fm (den v cache)."""
+    keys: set[str] = set()
+    for tag in MOOD_TAGS.get(mood, ())[:4]:
+        try:
+            for x in await lastfm.tag_top_tracks(tag, per_tag):
+                keys.add(track_key(x["artist"], x["title"]))
+        except Exception:  # noqa: BLE001 -- bez žebříčku jen méně dokladů
+            logger.exception("žebříček nálady %s", tag)
+    return keys
 
 
 def tag_strength(tags: list[tuple[str, int]] | None, mood: str) -> int:
@@ -105,10 +123,19 @@ def _infos(rids: list[str]) -> dict[str, TrackInfo]:
     return out
 
 
-async def evidence(rids: list[str], mood: str, deezer_track_ids: set[str]) -> dict[str, float]:
-    """recording -> skóre nálady: ≥ 1 = doložená skladba (štítek / playlist
-    nálady / jednoznačný zvuk), 0 = nic nevíme, < 0 = zvuk odporuje."""
+async def evidence(
+    rids: list[str],
+    mood: str,
+    deezer_track_ids: set[str],
+    deezer_keys: set[str] | None = None,
+    chart: set[str] | None = None,
+) -> dict[str, float]:
+    """recording -> skóre nálady: ≥ 1 = doložená skladba (žebříček / štítek /
+    playlist nálady / jednoznačný zvuk), 0 = nic nevíme, < 0 = zvuk odporuje."""
     infos = await asyncio.to_thread(_infos, list(dict.fromkeys(rids)))
+    if chart is None:
+        chart = await chart_keys(mood)
+    deezer_keys = deezer_keys or set()
     sem = asyncio.Semaphore(20)
 
     async def tags_of(info: TrackInfo) -> list[tuple[str, int]] | None:
@@ -127,9 +154,12 @@ async def evidence(rids: list[str], mood: str, deezer_track_ids: set[str]) -> di
             out[rid] = -1.0
             continue
         score = 0.0
+        key = track_key(info.artist, info.title)
         if tag_strength(tags, mood) >= MIN_TAG:
             score += 1.0
-        if info.deezer_id and info.deezer_id in deezer_track_ids:
+        if not info.own and key in chart:
+            score += 1.0
+        if (info.deezer_id and info.deezer_id in deezer_track_ids) or key in deezer_keys:
             score += 1.0
         if audio_evidence(mood, info.energy, info.bpm):
             score += 1.0
