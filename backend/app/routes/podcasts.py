@@ -376,7 +376,12 @@ def save_progress(
         raise HTTPException(status_code=404, detail="epizoda nenalezena")
     p = session.exec(
         select(PodcastProgress).where(PodcastProgress.user_id == current[0], PodcastProgress.episode_id == episode_id)
-    ).first() or PodcastProgress(user_id=current[0], episode_id=episode_id)
+    ).first()
+    from app.spoken import history
+
+    history.record(session, current[0], "episode", episode_id,
+                   history.listened_ms(None, p.position_ms if p else None, None, body.positionMs))
+    p = p or PodcastProgress(user_id=current[0], episode_id=episode_id)
     p.position_ms, p.finished, p.updated_at = max(0, body.positionMs), body.finished, utcnow()
     session.add(p)
     session.commit()

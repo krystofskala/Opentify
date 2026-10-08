@@ -621,6 +621,19 @@ class SpokenProgress(SQLModel, table=True):
     finished: bool = False
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
+class SpokenListenDay(SQLModel, table=True):
+    """Kolik profil za den poslouchal knihu / epizodu (`app/spoken/history.py`)
+    -- historie, hodiny za rok, opuštěné knihy."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    kind: str  # book | episode
+    ref: str = Field(index=True)  # id knihy / epizody
+    day: str = Field(index=True)  # YYYY-MM-DD (český čas)
+    seconds: float = 0.0
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class SpokenFavorite(SQLModel, table=True):
     """Srdíčko u mluveného slova: celá kniha (`kind=book`, `ref` = id knihy)
     nebo autor / interpret (`kind=person`, `ref` = "author:jméno" /

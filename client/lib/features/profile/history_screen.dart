@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/recording_model.dart';
 import '../../routing/home_shell.dart' show navBottomInset;
+import '../../state/app_mode.dart';
 import '../../state/providers.dart';
+import '../spoken/spoken_history_screen.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
@@ -49,6 +51,8 @@ class HistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // V režimu mluveného slova historie knih a epizod (po dnech, čas poslechu).
+    if (ref.watch(appModeProvider) == AppMode.spoken) return const SpokenHistoryScreen();
     final async = ref.watch(historyProvider);
     return Scaffold(
       appBar: const SectionAppBar('Historie'),

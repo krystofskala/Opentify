@@ -206,7 +206,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         _ActionRow(
                           icon: Symbols.history_rounded,
                           title: 'Historie',
-                          description: 'Posledních 100 skladeb, které sis v appce poslechl, a odkud hrály.',
+                          description: 'Posledních 100 skladeb, které sis v appce poslechl, a odkud hrály '
+                              '(v režimu mluveného slova knihy a epizody po dnech, i s časem poslechu).',
                           buttonLabel: 'Otevřít',
                           onPressed: () => context.push('/history'),
                         ),

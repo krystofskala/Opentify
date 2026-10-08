@@ -502,6 +502,29 @@ async def series(title: str, author: str, current: tuple[str, str] = Depends(get
     return {"series": await asyncio.to_thread(series_mod.with_library, found, current[0])}
 
 
+@spoken_router.get("/history")
+def spoken_history(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Historie poslechu mluveného slova po dnech (jen vlastní profil)."""
+    from app.models import PodcastEpisode, PodcastShow
+    from app.spoken import history
+
+    out = history.days(session, current[0])
+    for day in out:
+        for item in day["items"]:
+            if item["kind"] == "book":
+                b = session.get(SpokenBook, item["ref"])
+                item.update(title=b.title if b else "Kniha", subtitle=b.author if b else None,
+                            coverUrl=b.cover_url if b else None, gone=b is None)
+            else:
+                ep = session.get(PodcastEpisode, item["ref"])
+                show = session.get(PodcastShow, ep.show_id) if ep else None
+                item.update(title=ep.title if ep else "Epizoda", subtitle=show.title if show else None,
+                            coverUrl=(ep.artwork_url if ep and getattr(ep, "artwork_url", None) else (show.artwork_url if show else None)),
+                            showId=show.id if show else None, gone=ep is None)
+    total = sum(i["seconds"] for d in out for i in d["items"])
+    return {"days": out, "totalSeconds": total}
+
+
 @spoken_router.get("/series/next")
 async def next_in_series(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
     """Domů › Další díl řady: u dočtených knih řady následující díl -- na
@@ -884,7 +907,13 @@ def save_progress(
         raise HTTPException(status_code=404, detail="soubor do knihy nepatří")
     p = session.exec(
         select(SpokenProgress).where(SpokenProgress.user_id == current[0], SpokenProgress.book_id == book_id)
-    ).first() or SpokenProgress(user_id=current[0], book_id=book_id, file_id=body.fileId)
+    ).first()
+    from app.spoken import history
+
+    # Historie po dnech: poslouchaný čas z posunu pozice (ne pro úplně první uložení).
+    history.record(session, current[0], "book", book_id,
+                   history.listened_ms(p.file_id if p else None, p.position_ms if p else None, body.fileId, body.positionMs))
+    p = p or SpokenProgress(user_id=current[0], book_id=book_id, file_id=body.fileId)
     p.file_id, p.position_ms, p.finished, p.updated_at = body.fileId, max(0, body.positionMs), body.finished, utcnow()
     session.add(p)
     session.commit()
