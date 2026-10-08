@@ -47,8 +47,10 @@ const _html = '''
   button svg { width: 24px; height: 24px; fill: currentColor; }
   #play { background: #fff; color: #000; width: 40px; height: 40px; }
   #play:hover { background: #ddd; }
-  #like { opacity: .55; }
-  #like.on { opacity: 1; color: #ff5252; }
+  /* Srdíčko místo Spotify ⊕: prázdné obrysové, v Oblíbených plné červené. */
+  #like svg { fill: none; stroke: currentColor; stroke-width: 2; }
+  #like.on { color: #ff5252; }
+  #like.on svg { fill: currentColor; }
   #like.hide { display: none; }
   #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.15); }
   #fill { height: 100%; width: 0; background: #fff; }
