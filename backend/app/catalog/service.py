@@ -23,6 +23,7 @@ import json
 import logging
 import re
 import unicodedata
+from datetime import timedelta
 
 import httpx
 from collections import Counter
@@ -2005,7 +2006,7 @@ class CatalogService:
         if release.images:
             return
         self._session.commit()
-        if await fill_release(release.id, force=True):
+        if await fill_release(release.id, force=True, min_gap=timedelta(hours=1)):
             self._session.refresh(release)
 
     async def _enrich_recording_previews(self, recordings: list[Recording]) -> None:

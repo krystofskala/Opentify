@@ -296,10 +296,49 @@ def _mark_checked(refs: dict[str, Any]) -> dict[str, Any]:
     return {**refs, _CHECKED_KEY: datetime.now(timezone.utc).isoformat()}
 
 
-async def fill_release(release_id: str, *, force: bool = False) -> bool:
+# Dohledání obalu, které právě běží -- stejné album z víc dlaždic / lidí
+# naráz čeká na jedno hledání, ne každé zvlášť.
+_filling: dict[str, asyncio.Future] = {}
+
+
+async def fill_release(release_id: str, *, force: bool = False, min_gap: timedelta | None = None) -> bool:
+    """`force` = i když se hledalo v posledních 14 dnech; `min_gap` = ale ne
+    znovu, když se hledalo před chvílí (dlaždice bez obalu se jinak ptaly
+    cizích služeb při každém zobrazení: 8. 10. ~480 dotazů za 2 min, průměr
+    22 s, kamarádovi pak server odmítal i přehrávání)."""
+    running = _filling.get(release_id)
+    if running is not None:
+        return await asyncio.shield(running)
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _filling[release_id] = future
+    try:
+        result = await _fill_release(release_id, force=force, min_gap=min_gap)
+        future.set_result(result)
+        return result
+    except BaseException as exc:
+        future.set_exception(exc)
+        future.exception()  # čekající dostanou výjimku; nikdo nečeká = bez varování
+        raise
+    finally:
+        _filling.pop(release_id, None)
+
+
+def _checked_within(refs: dict[str, Any], gap: timedelta) -> bool:
+    stamp = refs.get(_CHECKED_KEY)
+    if not stamp:
+        return False
+    try:
+        return datetime.now(timezone.utc) - datetime.fromisoformat(stamp) < gap
+    except ValueError:
+        return False
+
+
+async def _fill_release(release_id: str, *, force: bool, min_gap: timedelta | None) -> bool:
     with Session(engine) as session:
         release = session.get(Release, release_id)
         if release is None or release.images or (not force and _recently_checked(release.external_refs)):
+            return False
+        if min_gap is not None and _checked_within(release.external_refs or {}, min_gap):
             return False
         artist = session.get(Artist, release.artist_id)
         mbid, title, artist_name = release.mbid, release.title, artist.name if artist else ""

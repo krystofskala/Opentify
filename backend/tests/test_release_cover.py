@@ -37,7 +37,7 @@ def test_cover_from_db_without_lookup(eng, monkeypatch):
 
 
 def test_missing_cover_is_filled(eng, monkeypatch):
-    async def fill(release_id, force=False):
+    async def fill(release_id, force=False, min_gap=None):
         with Session(eng) as s:
             r = s.get(Release, release_id)
             r.images = ["https://img/y.jpg"]

@@ -8,6 +8,7 @@ v `app.catalog.service.CatalogService`, routy jen validují vstup a mapují
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
@@ -447,7 +448,9 @@ async def get_release_cover(release_id: str, _current=Depends(get_current_user))
         if release is None:
             raise HTTPException(status_code=404, detail="Album nenalezeno.")
         images = list(release.images or [])
-    if not images and await fill_release(release_id, force=True):
+    # Hledalo se před chvílí -> znovu ne (každé zobrazení dlaždice to dřív
+    # zkoušelo u cizích služeb znovu).
+    if not images and await fill_release(release_id, force=True, min_gap=timedelta(hours=1)):
         with Session(engine) as session:
             release = session.get(Release, release_id)
             images = list((release.images if release else None) or [])
