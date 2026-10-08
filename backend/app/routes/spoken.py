@@ -1035,7 +1035,8 @@ def _collection_out(session: Session, c) -> dict:
     items = session.exec(
         select(SpokenCollectionItem).where(SpokenCollectionItem.collection_id == c.id).order_by(SpokenCollectionItem.position)
     ).all()
-    ids = [i.book_id for i in items if session.get(SpokenBook, i.book_id) is not None]
+    # Bez duplicit (dvojí klepnutí naráz mohlo knihu přidat dvakrát).
+    ids = list(dict.fromkeys(i.book_id for i in items if session.get(SpokenBook, i.book_id) is not None))
     first = session.get(SpokenBook, ids[0]) if ids else None
     return {"id": c.id, "title": c.title, "bookIds": ids, "coverUrl": first.cover_url if first else None}
 

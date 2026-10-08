@@ -76,13 +76,22 @@ Future<void> showAddToCollectionSheet(BuildContext context, WidgetRef ref, Spoke
   await showGlassSheet<void>(context, builder: (_) => GlassSheet(child: _AddSheet(book: book, hostContext: context)));
 }
 
-class _AddSheet extends ConsumerWidget {
+class _AddSheet extends ConsumerStatefulWidget {
   const _AddSheet({required this.book, required this.hostContext});
   final SpokenBook book;
   final BuildContext hostContext;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AddSheet> createState() => _AddSheetState();
+}
+
+class _AddSheetState extends ConsumerState<_AddSheet> {
+  bool _busy = false; // jedno klepnutí -- ne kniha dvakrát
+
+  @override
+  Widget build(BuildContext context) {
+    final book = widget.book;
+    final hostContext = widget.hostContext;
     final theme = Theme.of(context);
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
     final async = ref.watch(spokenCollectionsProvider);
@@ -104,6 +113,7 @@ class _AddSheet extends ConsumerWidget {
               leading: const Icon(Symbols.add_rounded),
               title: const Text('Nová sbírka…'),
               onTap: () async {
+                if (_busy) return;
                 final title = await _askTitle(context);
                 if (title == null || title.isEmpty) return;
                 try {
@@ -128,6 +138,8 @@ class _AddSheet extends ConsumerWidget {
                       onTap: c.bookIds.contains(book.id)
                           ? null
                           : () async {
+                              if (_busy) return;
+                              _busy = true;
                               try {
                                 await addToCollection(ref, c.id, book.id);
                                 showToast(messenger, 'Přidáno do sbírky „${c.title}“');
@@ -156,17 +168,18 @@ class SpokenCollectionsRail extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final list = ref.watch(spokenCollectionsProvider).valueOrNull ?? const <SpokenCollection>[];
     if (list.isEmpty) return const SizedBox.shrink();
+    // Stejné rozměry jako řady na Domů (140 × 200) -- místo i pro větší písmo.
     return SizedBox(
-      height: 190,
+      height: 200,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
         itemCount: list.length,
         separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
         itemBuilder: (context, i) {
           final c = list[i];
           return SizedBox(
-            width: 130,
+            width: 140,
             child: MediaCard(
               title: c.title,
               subtitle: '${c.bookIds.length} ${c.bookIds.length == 1 ? 'kniha' : (c.bookIds.length < 5 && c.bookIds.isNotEmpty ? 'knihy' : 'knih')}',
@@ -217,8 +230,12 @@ class SpokenCollectionScreen extends ConsumerWidget {
                           Navigator.of(sheet).pop();
                           final title = await _askTitle(context, initial: c.title, title: 'Přejmenovat sbírku');
                           if (title == null || title.isEmpty) return;
-                          await ref.read(apiClientProvider).putJson('/spoken/collections/${c.id}', body: {'title': title});
-                          ref.invalidate(spokenCollectionsProvider);
+                          try {
+                            await ref.read(apiClientProvider).putJson('/spoken/collections/${c.id}', body: {'title': title});
+                            ref.invalidate(spokenCollectionsProvider);
+                          } catch (_) {
+                            showToast(messenger, 'Nepodařilo se uložit');
+                          }
                         },
                       ),
                       ListTile(
@@ -227,10 +244,26 @@ class SpokenCollectionScreen extends ConsumerWidget {
                         subtitle: const Text('Knihy zůstanou'),
                         onTap: () async {
                           Navigator.of(sheet).pop();
-                          await ref.read(apiClientProvider).deleteJson('/spoken/collections/${c.id}');
-                          ref.invalidate(spokenCollectionsProvider);
-                          showToast(messenger, 'Sbírka smazána (knihy zůstaly)');
-                          if (context.mounted) context.pop();
+                          final sure = await showDialog<bool>(
+                            context: context,
+                            builder: (d) => AlertDialog(
+                              title: Text('Smazat sbírku „${c.title}“?'),
+                              content: const Text('Knihy zůstanou na serveru i ve tvé knihovně.'),
+                              actions: [
+                                GlassButton(label: 'Zrušit', style: GlassButtonStyle.plain, compact: true, onPressed: () => Navigator.of(d).pop(false)),
+                                GlassButton(label: 'Smazat', destructive: true, compact: true, onPressed: () => Navigator.of(d).pop(true)),
+                              ],
+                            ),
+                          );
+                          if (sure != true) return;
+                          try {
+                            await ref.read(apiClientProvider).deleteJson('/spoken/collections/${c.id}');
+                            ref.invalidate(spokenCollectionsProvider);
+                            showToast(messenger, 'Sbírka smazána (knihy zůstaly)');
+                            if (context.mounted) context.pop();
+                          } catch (_) {
+                            showToast(messenger, 'Nepodařilo se smazat');
+                          }
                         },
                       ),
                     ],
@@ -270,7 +303,13 @@ class SpokenCollectionScreen extends ConsumerWidget {
                             trailing: IconButton(
                               tooltip: 'Odebrat ze sbírky',
                               icon: const Icon(Symbols.remove_circle_rounded),
-                              onPressed: () => removeFromCollection(ref, c.id, b.id),
+                              onPressed: () async {
+                                try {
+                                  await removeFromCollection(ref, c.id, b.id);
+                                } catch (_) {
+                                  showToast(messenger, 'Nepodařilo se odebrat');
+                                }
+                              },
                             ),
                             onTap: () => context.push('/spoken/book/${b.id}'),
                             onLongPress: b.canPlay ? () async => playBook(ref, await ref.read(spokenBookProvider(b.id).future)) : null,

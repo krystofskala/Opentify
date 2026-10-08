@@ -419,6 +419,16 @@ async def latest(limit: int = 20) -> list[dict]:
     r = get_redis()
     if (cached := await r.get("spoken:cro:latest:v1")) is not None:
         return json.loads(cached)
+    # Jedno sestavení naráz (~75 dotazů na rozhlas při studené mezipaměti).
+    if not await r.set("spoken:cro:latest:lock", "1", nx=True, ex=120):
+        return []
+    try:
+        return await _build_latest(r, limit)
+    finally:
+        await r.delete("spoken:cro:latest:lock")
+
+
+async def _build_latest(r, limit: int) -> list[dict]:
     found: list[tuple[str, dict]] = []
     seen: set[str] = set()
     async with _client() as c:
@@ -457,5 +467,6 @@ async def latest(limit: int = 20) -> list[dict]:
                 await _cache_release(rel)
             if rel:
                 out.append(public(rel))
-    await r.set("spoken:cro:latest:v1", json.dumps(out), ex=_NEW_TTL_S)
+    # Prázdný výsledek (výpadek rozhlasu) jen na 10 minut, ne na 6 hodin.
+    await r.set("spoken:cro:latest:v1", json.dumps(out), ex=_NEW_TTL_S if out else 600)
     return out
