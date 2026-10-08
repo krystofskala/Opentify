@@ -109,6 +109,34 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Knihy ostatních'), findsOneWidget);
     expect(find.text('Tvoje knihy'), findsNothing);
+    expect(find.text('Další díl řady'), findsNothing); // vypnutá, nenačítá se
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('Domů: Další díl řady, když je zapnutá', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1800 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(const SpokenHomeScreen(), [
+      spokenBooksProvider.overrideWith((ref) async => [_book('d', 'ready')]),
+      spokenRecommendationsProvider.overrideWith((ref) async => (
+            podcasts: <({PodcastSearchResult show, String reason})>[],
+            books: <({SpokenRelease release, String reason})>[]
+          )),
+      myPodcastsProvider.overrideWith((ref) async => <PodcastShowItem>[]),
+      podcastHomeProvider
+          .overrideWith((ref) async => (inProgress: <PodcastEpisodeItem>[], latest: <PodcastEpisodeItem>[])),
+      spokenHomeLayoutProvider.overrideWith((ref) async => [(id: 'next_in_series', visible: true)]),
+      spokenNextInSeriesProvider.overrideWith((ref) async => <SpokenNextPart>[
+            (seriesName: 'Sága o zaklínači', number: 4, title: 'Čas opovržení', author: 'Andrzej Sapkowski', bookId: null, coverUrl: null),
+          ]),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Další díl řady'), findsOneWidget);
+    expect(find.text('Sága o zaklínači · díl 4 · ke stažení'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
   });

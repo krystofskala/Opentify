@@ -184,6 +184,9 @@ class SpokenHomeScreen extends ConsumerWidget {
             ];
           }
 
+          // Volitelná sekce (vypnutá, zapíná se v Upravit Domů): načíst jen když je zapnutá.
+          final nextOn = layout?.any((e) => e.id == 'next_in_series' && e.visible) ?? false;
+          final nextParts = nextOn ? ref.watch(spokenNextInSeriesProvider).valueOrNull ?? const <SpokenNextPart>[] : const <SpokenNextPart>[];
           final newEpisodes = (podcasts?.latest ?? const <PodcastEpisodeItem>[])
               .where((e) => !e.finished && !e.started)
               .take(15)
@@ -338,6 +341,23 @@ class SpokenHomeScreen extends ConsumerWidget {
                             placeholderIcon: Symbols.theater_comedy_rounded,
                             onTap: () => context.push('/spoken/book/${b.id}'),
                             onLongPress: () => showSpokenBookActions(context, b),
+                          ),
+                      ]),
+                    ],
+                  if (nextParts.isNotEmpty)
+                    'next_in_series': [
+                      const SectionHeader('Další díl řady'),
+                      _Rail(children: [
+                        for (final n in nextParts)
+                          MediaCard(
+                            title: n.title,
+                            subtitle: '${n.seriesName} · díl ${n.number == n.number.roundToDouble() ? n.number.toInt() : n.number}'
+                                '${n.bookId == null ? ' · ke stažení' : ''}',
+                            imageUrl: n.coverUrl,
+                            placeholderIcon: Symbols.format_list_numbered_rounded,
+                            onTap: () => context.push(n.bookId != null
+                                ? '/spoken/book/${n.bookId}'
+                                : spokenWorkPath(n.title, n.author ?? '')),
                           ),
                       ]),
                     ],

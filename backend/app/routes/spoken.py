@@ -502,6 +502,46 @@ async def series(title: str, author: str, current: tuple[str, str] = Depends(get
     return {"series": await asyncio.to_thread(series_mod.with_library, found, current[0])}
 
 
+@spoken_router.get("/series/next")
+async def next_in_series(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Domů › Další díl řady: u dočtených knih řady následující díl -- na
+    serveru (pustit hned), jinak název ke stažení (stránka knihy). Jen co
+    profil sám dočetl; nic se nedoporučuje navíc."""
+    from app.spoken import series as series_mod
+
+    user_id = current[0]
+    finished = {p.book_id for p in session.exec(select(SpokenProgress).where(SpokenProgress.user_id == user_id)).all() if p.finished}
+    started = {p.book_id for p in session.exec(select(SpokenProgress).where(SpokenProgress.user_id == user_id)).all()}
+    books = session.exec(select(SpokenBook).where(SpokenBook.status != "failed")).all()
+    by_series: dict[tuple[str, float], SpokenBook] = {
+        (b.series_name, b.series_number): b for b in books if b.series_name and b.series_number is not None
+    }
+    out, seen = [], set()
+    for b in books:
+        if b.id not in finished or not b.series_name or b.series_number is None or not b.author:
+            continue
+        nxt = b.series_number + 1
+        if (b.series_name, nxt) in seen:
+            continue
+        seen.add((b.series_name, nxt))
+        on_server = by_series.get((b.series_name, nxt))
+        if on_server is not None:
+            if on_server.id in finished or on_server.id in started:
+                continue  # už rozečtený / dočtený
+            out.append({"seriesName": b.series_name, "number": nxt, "title": on_server.title, "author": on_server.author,
+                        "bookId": on_server.id, "coverUrl": on_server.cover_url})
+            continue
+        try:
+            found = await series_mod.lookup(b.title, b.author)
+        except Exception:  # noqa: BLE001 -- bez Wikidat jen díly na serveru
+            found = None
+        part = next((p for p in (found or {}).get("parts") or [] if p.get("number") == nxt), None)
+        if part:
+            out.append({"seriesName": b.series_name, "number": nxt, "title": part["title"], "author": b.author,
+                        "bookId": None, "coverUrl": None})
+    return {"items": out[:20]}
+
+
 @spoken_router.get("/series/collections")
 async def series_collections(name: str, author: str, session: Session = Depends(get_session)):
     """Celá řada ke stažení: komplety / sbírky ze SkTorrentu ("Zaklínač

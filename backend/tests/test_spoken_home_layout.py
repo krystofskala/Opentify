@@ -24,7 +24,9 @@ def ids(entries):
 def test_default_everything_visible_in_default_order():
     out = hl.entries("u1")
     assert ids(out) == [sid for sid, _ in hl.SECTIONS]
-    assert all(e["visible"] for e in out)
+    # Vše zapnuté kromě nových volitelných sekcí (minimální výchozí stav).
+    assert all(e["visible"] == (e["id"] not in hl.DEFAULT_OFF) for e in out)
+    assert "next_in_series" in hl.DEFAULT_OFF
 
 
 def test_per_profile_order_and_hidden(eng):
@@ -51,4 +53,5 @@ def test_new_section_lands_after_its_predecessor(eng):
 def test_reset(eng):
     hl.save("u1", ["downloading"], ["continue"])
     out = hl.save("u1", [], [])
-    assert ids(out) == [sid for sid, _ in hl.SECTIONS] and all(e["visible"] for e in out)
+    assert ids(out) == [sid for sid, _ in hl.SECTIONS]
+    assert all(e["visible"] == (e["id"] not in hl.DEFAULT_OFF) for e in out)

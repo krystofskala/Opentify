@@ -460,6 +460,24 @@ final spokenSeriesProvider =
   );
 });
 
+/// Domů › Další díl řady: u dočtených knih další díl (na serveru / ke stažení).
+typedef SpokenNextPart = ({String seriesName, num number, String title, String? author, String? bookId, String? coverUrl});
+
+final spokenNextInSeriesProvider = FutureProvider.autoDispose<List<SpokenNextPart>>((ref) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/series/next');
+  return [
+    for (final i in (json['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+      (
+        seriesName: i['seriesName'] as String? ?? '',
+        number: i['number'] as num? ?? 0,
+        title: i['title'] as String? ?? '',
+        author: i['author'] as String?,
+        bookId: i['bookId'] as String?,
+        coverUrl: spokenCoverUrl(i['coverUrl'] as String?),
+      ),
+  ];
+});
+
 /// Celá řada ke stažení: komplety / sbírky ze SkTorrentu.
 final spokenSeriesCollectionsProvider =
     FutureProvider.autoDispose.family<List<SpokenRelease>, ({String name, String author})>((ref, who) async {
