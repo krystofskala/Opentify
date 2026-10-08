@@ -95,3 +95,26 @@ def test_book_without_author_gets_author_from_series(monkeypatch):
                       cover_url="spoken/books/hp/cover", requested_by_user_id="me")
     fields = asyncio.run(series_link.link(book))
     assert fields["author"] == "Joanne Rowlingová" and fields["series_number"] == 3
+
+
+def test_junk_author_from_tags_is_replaced(monkeypatch):
+    _engine(monkeypatch)
+    calls = []
+
+    async def fake_lookup(title, author):
+        calls.append(author)
+        if author:  # "Harry Potter" jako autor nesedí
+            return None
+        return {"name": "Harry Potter", "author": "Joanne Rowlingová",
+                "parts": [{"title": "Harry Potter a Fénixův řád", "number": 5}], "loose": []}
+
+    async def no_cover(*a):
+        return False
+
+    monkeypatch.setattr(series, "lookup", fake_lookup)
+    monkeypatch.setattr(describe, "cover_image", no_cover)
+    book = SpokenBook(id="hp5", source_ref="hp5", release_title="x", title="Harry Potter a Fénixův řád",
+                      author="Harry Potter", cover_url="spoken/books/hp5/cover", requested_by_user_id="me")
+    fields = asyncio.run(series_link.link(book))
+    assert calls == ["Harry Potter", ""] and fields["author"] == "Joanne Rowlingová" and fields["series_number"] == 5
+    assert series_link.junk_author("01", "x") and not series_link.junk_author("Pavel Zedníček", "J. K. Rowlingová: Harry Potter")

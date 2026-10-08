@@ -66,18 +66,30 @@ def _shared_cover(book: SpokenBook) -> bool:
     return n > 1
 
 
+def junk_author(author: str | None, title: str) -> bool:
+    """Autor z tagů souborů, který autorem není: část názvu ("Harry Potter"),
+    číslo ("01"), jedno slovo ("Další") -- živě 8. 10."""
+    if not author:
+        return True
+    a = fold(author)
+    return not a or any(ch.isdigit() for ch in a) or len(a.split()) < 2 or a in fold(title)
+
+
 async def link(book: SpokenBook) -> dict:
     """Řada a díl jedné knihy -> pole k uložení (vyhazuje při 429)."""
     for cand in title_candidates(book.title):
         found = await series.lookup(cand, book.author or "")
+        if not found and book.author and len(fold(cand).split()) >= 3:
+            # Autor nesedí (z tagů bývá nesmysl): jednoznačný dlouhý název stačí.
+            found = await series.lookup(cand, "")
         if not found:
             continue
         part = _matching_part(found, cand)
         if part is None:
             continue
         fields: dict = {"series_name": found["name"] or "Řada", "series_number": part["number"]}
-        if not book.author and found.get("author"):
-            fields["author"] = found["author"]  # kniha bez autora: z Wikidat
+        if found.get("author") and junk_author(book.author, book.title) and fold(found["author"]) != fold(book.author or ""):
+            fields["author"] = found["author"]  # bez autora / nesmysl z tagů: z Wikidat
         # "kniha 1.posledni prani" -> "Poslední přání" (název z katalogu
         # audioknihy.cz se nepřepisuje).
         if book.metadata_source != "audioknihy.cz" and book.title != part["title"]:
