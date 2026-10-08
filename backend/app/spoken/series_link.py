@@ -35,6 +35,8 @@ _ROMAN_LEAD = re.compile(r"^\s*[IVX]{1,4}\s*[.):\-–]+\s*")
 def title_candidates(title: str) -> list[str]:
     """Možné názvy dílu z názvu knihy / složky, nejpravděpodobnější první."""
     t = re.sub(r"[\[(].*?[\])]", " ", title or "")
+    # "Harry Potter a relikvie smrti CD1", "… (2. CD)" -- část nosiče do názvu nepatří.
+    t = re.sub(r"\s*\b(?:CD|disk|disc)\s*\d+\b|\b\d+\s*\.?\s*CD\b", " ", t, flags=re.I)
     t = " ".join(t.split())
     out: list[str] = []
 

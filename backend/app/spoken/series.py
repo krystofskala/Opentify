@@ -38,6 +38,17 @@ def _surname(author: str) -> str:
     return parts[-1] if parts else ""
 
 
+def same_surname(want: str, name: str) -> bool:
+    """Příjmení ve jméně, i v české ženské podobě: "rowling" ~ "Joanne
+    Rowlingová", "christie" ~ "Christieová" (živě 8. 10.: Harry Potter bez řady)."""
+    if not want:
+        return False
+    for w in fold(name).split():
+        if w == want or (len(want) >= 4 and (w.startswith(want) and len(w) - len(want) <= 3)):
+            return True
+    return False
+
+
 def _label(entity: dict[str, Any]) -> str | None:
     labels = entity.get("labels") or {}
     return next((labels[lang]["value"] for lang in ("cs", "sk", "en") if lang in labels), None)
@@ -87,7 +98,7 @@ async def _find_series(title: str, author: str) -> tuple[str, str, str] | None:
         return (_ids(e, "P179")[0], qid, name) if name else None
     for qid, e in candidates:
         names = {fold(v["value"]) for a in _ids(e, "P50") for v in ((people.get(a) or {}).get("labels") or {}).values()}
-        if any(want in n.split() for n in names):
+        if any(same_surname(want, n) for n in names):
             return _ids(e, "P179")[0], qid, author_label(e) or author
     return None
 
@@ -213,7 +224,7 @@ def with_library(series: dict[str, Any], user_id: str) -> dict[str, Any]:
     want = _surname(series.get("author") or "")
     with Session(engine) as session:
         books = [b for b in session.exec(select(SpokenBook).where(SpokenBook.status != "failed")).all()
-                 if b.author and want and want in fold(b.author).split()]
+                 if b.author and want and same_surname(want, fold(b.author))]
         progress = {p.book_id: p for p in session.exec(select(SpokenProgress).where(SpokenProgress.user_id == user_id)).all()}
 
     def same_title(book_title: str, title: str) -> bool:
