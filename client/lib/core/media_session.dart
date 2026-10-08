@@ -23,6 +23,11 @@ abstract class MediaSessionBridge {
 
   void setPlaying(bool playing);
 
+  /// Kniha / epizoda: na zamčené obrazovce ±30 s místo Další / Předchozí
+  /// (`onSkip` dostane posun). Hudba: zase Další / Předchozí. Zatím jen web
+  /// (Media Session); nativní appka beze změny.
+  void setSpokenSkip({required bool spoken, void Function(Duration delta)? onSkip});
+
   void setPosition({required Duration position, Duration? duration, double speed = 1.0});
 
   void clear();

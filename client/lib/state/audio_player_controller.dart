@@ -1517,6 +1517,22 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     } catch (_) {}
   }
 
+  /// Do konce kapitoly (kniha s kapitolami v souboru), jinak do konce
+  /// souboru -- ve skutečném čase, tedy s rychlostí přehrávání. Pro uspávač
+  /// "Konec kapitoly" (m4b kniha má jeden soubor na desítky hodin).
+  Duration? untilChapterEnd() {
+    final s = state;
+    final d = s.duration;
+    var end = d;
+    if (_chaptersFor != null && _chaptersFor == s.nowPlaying?.recordingId) {
+      final next = _chapterStarts.where((c) => c > s.position.inMilliseconds + 1000).firstOrNull;
+      if (next != null) end = Duration(milliseconds: next);
+    }
+    if (end == null || end <= s.position) return null;
+    final speed = s.speed > 0 ? s.speed : 1.0;
+    return Duration(milliseconds: ((end - s.position).inMilliseconds / speed).round());
+  }
+
   /// `true` = přeskočeno v rámci souboru (nic dalšího nedělat).
   bool _skipChapter({required bool forward}) {
     if (_chaptersFor == null || _chaptersFor != state.nowPlaying?.recordingId) return false;
@@ -1848,9 +1864,37 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _radioSyncUpcoming();
   }
 
+  // Rychlost zvlášť pro každou knihu, pro podcasty a pro hudbu (převzato
+  // z hudby do mluveného slova 8. 10.): dřív jedna pro všechno -- 1,5× z knihy
+  // hrálo i hudbu a po restartu appky se vrátilo na 1×.
+  static const _speedPrefPrefix = 'player.speed.';
+  final Map<String, double> _speeds = {};
+
+  /// Klíč rychlosti: "book:<id>" / "podcast" / "music".
+  static String _speedKey(String? recordingId) {
+    if (recordingId == null) return 'music';
+    final parts = spokenParts(recordingId);
+    if (parts != null) return 'book:${parts.bookId}';
+    return podcastEpisodeId(recordingId) != null ? 'podcast' : 'music';
+  }
+
+  /// Při přepnutí položky: rychlost, kterou si tahle kniha / podcasty /
+  /// hudba pamatují (výchozí 1×).
+  void _applySpeedFor(NowPlayingInfo info) {
+    final want = _speeds[_speedKey(info.recordingId)] ?? 1.0;
+    if ((want - state.speed).abs() < 0.001) return;
+    state = state.copyWith(speed: want);
+    unawaited(_player.setSpeed(want).catchError((Object _) {}));
+  }
+
   Future<void> setSpeed(double value) async {
     await _player.setSpeed(value);
     state = state.copyWith(speed: value);
+    final key = _speedKey(state.nowPlaying?.recordingId);
+    _speeds[key] = value;
+    unawaited(SharedPreferences.getInstance()
+        .then((prefs) => prefs.setDouble('$_speedPrefPrefix$key', value))
+        .then<void>((_) {}, onError: (Object _) {}));
     // Zamčená obrazovka počítá čas z rychlosti -- bez téhle zprávy jí čas
     // ujížděl (audit přehrávače 8. 10.).
     if (!_radioActive) _mediaSession.setPosition(position: state.position, duration: state.duration, speed: value);
@@ -1880,6 +1924,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (enabled != null && enabled != state.normalizationEnabled) {
         state = state.copyWith(normalizationEnabled: enabled);
         _applyVolume();
+      }
+      for (final key in prefs.getKeys()) {
+        if (key.startsWith(_speedPrefPrefix)) {
+          final v = prefs.getDouble(key);
+          if (v != null) _speeds[key.substring(_speedPrefPrefix.length)] = v;
+        }
       }
     } catch (_) {
       // Bez uložené preference prostě zůstane výchozí (zapnuto).
@@ -2253,6 +2303,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   ///   na `track.available`/`FAILED` z WS (viz `ProvisioningController._handleEvent`).
   Future<void> _playCurrent() async {
     final info = state.nowPlaying!;
+    _applySpeedFor(info);
+    // Zamčená obrazovka u knihy: ±30 s (web; převzato z hudby 8. 10.).
+    _mediaSession.setSpokenSkip(spoken: isSpokenId(info.recordingId) && !_radioMode, onSkip: (d) => unawaited(seekBy(d)));
     // Pozice k navázání patří jiné skladbě (chyba A, pak přeskočeno) --
     // jinak by A příště začala uprostřed.
     if (_resumeFor != info.recordingId) {

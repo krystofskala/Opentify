@@ -81,6 +81,12 @@ class _NativeMediaSession implements MediaSessionBridge {
   }
 
   @override
+  void setSpokenSkip({required bool spoken, void Function(Duration delta)? onSkip}) {
+    // Nativně (iOS/Android) zatím beze změny: interval přeskoku se nastavuje
+    // při startu audio služby -- chce to vyzkoušet na zařízení.
+  }
+
+  @override
   void setPlaying(bool playing) {
     _playing = playing;
     _publish(null);

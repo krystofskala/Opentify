@@ -282,7 +282,15 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                         children: [
                           Expanded(child: _swipeArea(playback, fg, hasError, isProvisioning, provisioningState)),
                           if (!AudioPlayerController.isSpokenId(nowPlaying.recordingId))
-                            LikeHeart(recordingId: nowPlaying.recordingId, size: 22, color: fg),
+                            LikeHeart(recordingId: nowPlaying.recordingId, size: 22, color: fg)
+                          else
+                            // Kniha / epizoda: o 30 s zpět i bez otevření přehrávače
+                            // (místo srdíčka skladby; převzato z hudby 8. 10.).
+                            IconButton(
+                              icon: Icon(Symbols.replay_30_rounded, color: fg, size: 24, semanticLabel: 'O 30 s zpět'),
+                              tooltip: 'O 30 s zpět',
+                              onPressed: () => ref.read(audioPlayerControllerProvider.notifier).seekBy(const Duration(seconds: -30)),
+                            ),
                           IconButton(
                             icon: playback.isBuffering
                                 ? SizedBox(

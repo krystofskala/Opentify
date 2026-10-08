@@ -21,6 +21,9 @@ class _NoopMediaSession implements MediaSessionBridge {
   void setPlaying(bool playing) {}
 
   @override
+  void setSpokenSkip({required bool spoken, void Function(Duration delta)? onSkip}) {}
+
+  @override
   void setPosition({required Duration position, Duration? duration, double speed = 1.0}) {}
 
   @override

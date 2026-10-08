@@ -25,6 +25,10 @@ class _WebMediaSession implements MediaSessionBridge {
     }
   }
 
+  void Function()? _onNext;
+  void Function()? _onPrevious;
+  bool _spoken = false;
+
   @override
   void setHandlers({
     required void Function() onPlay,
@@ -33,10 +37,14 @@ class _WebMediaSession implements MediaSessionBridge {
     required void Function() onPrevious,
     required void Function(Duration position) onSeek,
   }) {
+    _onNext = onNext;
+    _onPrevious = onPrevious;
     _action('play', (_) => onPlay());
     _action('pause', (_) => onPause());
-    _action('nexttrack', (_) => onNext());
-    _action('previoustrack', (_) => onPrevious());
+    if (!_spoken) {
+      _action('nexttrack', (_) => onNext());
+      _action('previoustrack', (_) => onPrevious());
+    }
     _action('seekto', (d) {
       final seconds = d.seekTime;
       if (seconds == null) return;
@@ -45,11 +53,35 @@ class _WebMediaSession implements MediaSessionBridge {
     // U živého streamu (rádio, HLS) nabízel iOS na zamykací obrazovce ±10 s
     // místo další/předchozí skladby (živě nahlášeno) -- akce posunu výslovně
     // zrušit, ať zbydou jen předchozí/další.
+    if (_spoken) return; // kniha: posuny místo další/předchozí (setSpokenSkip)
     for (final name in ['seekbackward', 'seekforward']) {
       try {
         _session?.setActionHandler(name, null);
       } catch (_) {}
     }
+  }
+
+  @override
+  void setSpokenSkip({required bool spoken, void Function(Duration delta)? onSkip}) {
+    _spoken = spoken && onSkip != null;
+    if (_spoken) {
+      // iOS ukáže ±30 s místo předchozí/další, když jsou akce posunu a ne skladby.
+      for (final name in ['nexttrack', 'previoustrack']) {
+        try {
+          _session?.setActionHandler(name, null);
+        } catch (_) {}
+      }
+      _action('seekbackward', (d) => onSkip!(-Duration(milliseconds: ((d.seekOffset ?? 30) * 1000).round())));
+      _action('seekforward', (d) => onSkip!(Duration(milliseconds: ((d.seekOffset ?? 30) * 1000).round())));
+      return;
+    }
+    for (final name in ['seekbackward', 'seekforward']) {
+      try {
+        _session?.setActionHandler(name, null);
+      } catch (_) {}
+    }
+    if (_onNext != null) _action('nexttrack', (_) => _onNext!());
+    if (_onPrevious != null) _action('previoustrack', (_) => _onPrevious!());
   }
 
   @override
@@ -103,4 +135,5 @@ class _WebMediaSession implements MediaSessionBridge {
 /// typ už nemá.
 extension type _ActionDetails._(JSObject _) implements JSObject {
   external double? get seekTime;
+  external double? get seekOffset;
 }

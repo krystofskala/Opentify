@@ -289,14 +289,17 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                   compact: true,
                                   onPressed: () => controller.startSleepTimer(Duration(minutes: minutes)),
                                 ),
+                              // Kniha / epizoda: konec kapitoly (m4b = jeden soubor
+                              // na celou knihu); hudba: konec skladby. Obojí podle
+                              // skutečného času (rychlost přehrávání).
                               GlassButton(
-                                label: 'Konec skladby',
+                                label: song ? 'Konec skladby' : 'Konec kapitoly',
                                 compact: true,
                                 onPressed: !hasDuration
                                     ? null
                                     : () {
-                                        final s = ref.read(audioPlayerControllerProvider);
-                                        controller.startSleepTimer(s.duration! - s.position);
+                                        final left = controller.untilChapterEnd();
+                                        if (left != null) controller.startSleepTimer(left);
                                       },
                               ),
                             ],
