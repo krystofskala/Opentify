@@ -65,7 +65,7 @@ const _html = '''
   @media (max-width: 280px) { #prev { display: none; } }
   @media (max-width: 220px) { #meta { display: none; } #root { justify-content: space-between; } }
   @media (max-height: 62px) { #artist { display: none; } }
-  @media (min-height: 230px) and (min-width: 220px) {
+  @media (min-height: 230px) and (min-width: 220px) and (max-aspect-ratio: 149/100) {
     #root { flex-direction: column; align-items: stretch; padding: 18px 20px 20px; gap: 12px; }
     #artbox { flex: 1 1 0; min-height: 0; height: auto; aspect-ratio: auto; container-type: size;
       display: flex; align-items: center; justify-content: center; }
@@ -81,7 +81,28 @@ const _html = '''
     #like { display: grid; }
     #like.hide { display: none; }
     #prev { display: grid; }
-    #meta { display: block; }
+    /* Volné místo dostane obal, ne název. */
+    #meta { display: block; flex: none; }
+  }
+  /* Široké okno (střední výška, nebo velké a podlouhlé): obal vlevo přes
+     celou výšku, vpravo název, průběh a tlačítka. */
+  @media (min-height: 110px) and (max-height: 229px) and (min-width: 360px), (min-height: 230px) and (min-aspect-ratio: 3/2) {
+    #root { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 1fr auto auto;
+      grid-template-areas: "art meta" "art bar" "art ctl"; column-gap: clamp(12px, 3vw, 24px); row-gap: clamp(6px, 3vh, 14px);
+      padding: 12px 16px; align-items: end; }
+    #artbox { grid-area: art; height: calc(100vh - 24px); width: auto; aspect-ratio: 1; align-self: center; container-type: normal; display: block; }
+    #art { width: 100%; height: 100%; border-radius: 8px; }
+    #meta { grid-area: meta; display: block; align-self: end; }
+    #title { font-size: clamp(15px, 9vh, 26px); }
+    #artist { font-size: clamp(13px, 6vh, 18px); margin-top: 3px; }
+    #bar { grid-area: bar; position: relative; height: 4px; border-radius: 2px; }
+    #ctl { grid-area: ctl; justify-content: flex-start; gap: clamp(4px, 2vw, 16px); margin-left: -6px; }
+    button { width: clamp(36px, 20vh, 48px); height: clamp(36px, 20vh, 48px); }
+    button svg { width: clamp(22px, 12vh, 28px); height: clamp(22px, 12vh, 28px); }
+    #play { width: clamp(40px, 27vh, 58px); height: clamp(40px, 27vh, 58px); margin: 0 4px; }
+    #play svg { width: clamp(22px, 15vh, 32px); height: clamp(22px, 15vh, 32px); }
+    #like, #prev { display: grid; }
+    #like.hide { display: none; }
   }
 </style>
 <img id="bg" alt="">
