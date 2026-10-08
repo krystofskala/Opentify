@@ -314,6 +314,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     if (nowPlaying == null) {
       return const Scaffold(appBar: SectionAppBar(''), body: EmptyState(message: 'Nic nehraje.'));
     }
+    // Kniha / epizoda text písně nemá (tlačítko Text nahrazují Kapitoly) --
+    // uložený režim textu z hudby ji otevřel v prázdném textu (audit 8. 10.).
+    // Jen pro tohle zobrazení, uložená volba pro hudbu zůstává.
+    if (_lyricsMode && AudioPlayerController.isSpokenId(nowPlaying.recordingId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _setLyrics(false, animate: false, save: false);
+      });
+    }
 
     return PopScope(
       canPop: false,

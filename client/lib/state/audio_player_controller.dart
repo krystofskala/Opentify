@@ -1292,6 +1292,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   DateTime _spokenSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// Uložená pozice v tomhle dílu knihy (jen když je poslední uložené místo
+  /// právě v něm a kniha není dočtená); nejvýš 3 s, jinak od začátku.
+  Future<Duration?> _savedSpokenPosition(String id) async {
+    final parts = spokenParts(id);
+    if (parts == null) return null;
+    try {
+      final json = await _ref.read(apiClientProvider).getJson('/spoken/books/${parts.bookId}').timeout(const Duration(seconds: 3));
+      final p = json['progress'];
+      if (p is! Map<String, dynamic> || p['fileId'] != parts.fileId || p['finished'] == true) return null;
+      return Duration(milliseconds: (p['positionMs'] as num?)?.toInt() ?? 0);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Kde v knize jsem -- každých 15 s při hraní, hned při pauze / odchodu.
   void _maybeSaveSpokenProgress({bool force = false}) {
     final s = state;
@@ -2227,6 +2242,19 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Mluvené slovo: nic se neobstarává (kniha je na serveru celá, podcast
     // server přeposílá). Epizoda stažená do telefonu hraje odtud.
     if (isSpokenId(info.recordingId)) {
+      // Díl knihy puštěný z fronty (klepnutí ve Frontě, Další, Předchozí) bez
+      // pozice: navázat na uloženou -- dřív začal od 0:00 a za 15 s tu nulu
+      // uložil na server (audit 8. 10.).
+      // Jen při ručním přepnutí: po dohrání předchozího dílu se na síť
+      // nečeká (zamčený iPhone musí navázat hned) a nový díl jde od začátku.
+      if (_resumeFor != info.recordingId && !_switchTag.startsWith('auto')) {
+        final at = await _savedSpokenPosition(info.recordingId);
+        if (state.nowPlaying?.recordingId != info.recordingId) return;
+        if (at != null && at > Duration.zero) {
+          _resumeAt = at;
+          _resumeFor = info.recordingId;
+        }
+      }
       // Další kapitola předem v telefonu (jako u hudby) -- hned a bez sítě.
       final ready = _radioMode ? null : _prefetched[info.recordingId];
       if (ready != null) {
@@ -2489,7 +2517,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // "pozastaveno".
       if (startPaused) state = state.copyWith(isPlaying: _player.playing, isBuffering: false);
       _announceStart(info, paused: startPaused && !_player.playing, resumedAt: _unannouncedResume);
+      // Mluvené slovo měřenou hlasitost nemá -- dřív 3 zbytečné dotazy na díl.
       if (!_radioActive &&
+          !isSpokenId(info.recordingId) &&
           _ref.read(provisioningControllerProvider.notifier).loudnessGainFor(info.recordingId) == null) {
         unawaited(_loadGainFor(info.recordingId));
       }
