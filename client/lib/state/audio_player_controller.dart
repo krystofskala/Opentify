@@ -1834,6 +1834,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> setSpeed(double value) async {
     await _player.setSpeed(value);
     state = state.copyWith(speed: value);
+    // Zamčená obrazovka počítá čas z rychlosti -- bez téhle zprávy jí čas
+    // ujížděl (audit přehrávače 8. 10.).
+    if (!_radioActive) _mediaSession.setPosition(position: state.position, duration: state.duration, speed: value);
   }
 
   Future<void> setVolume(double value) async {
