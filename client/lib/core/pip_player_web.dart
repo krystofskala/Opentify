@@ -28,51 +28,73 @@ const _heart =
 
 String _svg(String path) => '<svg viewBox="0 0 24 24"><path d="$path"/></svg>';
 
-// Malé okno: obal | název | tlačítka v řádku. Zvětšené (výška ≥ 170):
-// obal a název nahoře, tlačítka pod nimi -- jako Spotify.
+// Rozložení podle velikosti okna (jako Spotify): malé = řádek obal | název |
+// tlačítka (u úzkého se postupně schová srdíčko, předchozí, název -- nic se
+// neořízne); velké = obal přes celou šířku, pod ním název, průběh a větší
+// tlačítka. Pozadí = rozmazaný obal.
 const _html = '''
 <style>
-  html, body { margin: 0; height: 100%; background: #17171b; color: #fff;
-    font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; user-select: none; }
-  #root { height: 100%; box-sizing: border-box; padding: 10px 12px 14px; display: grid;
-    grid-template-columns: auto 1fr auto; grid-template-areas: "art meta ctl"; align-items: center; gap: 12px; position: relative; }
-  #art { grid-area: art; width: 56px; height: 56px; border-radius: 6px; object-fit: cover; background: #2a2a30; }
-  #meta { grid-area: meta; min-width: 0; }
-  #title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #artist { opacity: .7; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-  #ctl { grid-area: ctl; display: flex; align-items: center; gap: 6px; }
-  button { background: none; border: 0; color: #fff; cursor: pointer; padding: 6px; border-radius: 50%;
-    display: grid; place-items: center; font: 600 13px system-ui, sans-serif; }
-  button:hover { background: rgba(255,255,255,.1); }
-  button svg { width: 24px; height: 24px; fill: currentColor; }
-  #play { background: #fff; color: #000; width: 40px; height: 40px; }
-  #play:hover { background: #ddd; }
+  html, body { margin: 0; height: 100%; background: #121214; color: #fff; overflow: hidden; user-select: none;
+    font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  #bg { position: fixed; inset: -60px; width: calc(100% + 120px); height: calc(100% + 120px); object-fit: cover;
+    filter: blur(48px) saturate(1.5) brightness(.42); z-index: 0; }
+  #root { position: relative; z-index: 1; height: 100%; box-sizing: border-box; padding: 10px 12px;
+    display: flex; align-items: center; gap: 12px; }
+  #artbox { flex: none; height: min(calc(100vh - 20px), 80px); aspect-ratio: 1; }
+  #art { width: 100%; height: 100%; border-radius: 6px; object-fit: cover; background: #2a2a30;
+    box-shadow: 0 6px 20px rgba(0,0,0,.45); display: block; }
+  #meta { flex: 1 1 auto; min-width: 0; }
+  #title { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #artist { opacity: .72; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  #ctl { flex: none; display: flex; align-items: center; gap: 2px; }
+  button { background: none; border: 0; color: #fff; cursor: pointer; padding: 0; width: 36px; height: 36px;
+    border-radius: 50%; display: grid; place-items: center; font: 650 13px system-ui, sans-serif; transition: background .15s, transform .1s; }
+  button:hover { background: rgba(255,255,255,.12); }
+  button:active { transform: scale(.94); }
+  button svg { width: 22px; height: 22px; fill: currentColor; }
+  #play { width: 40px; height: 40px; background: #fff; color: #000; margin: 0 4px; }
+  #play:hover { background: #e8e8e8; }
   /* Srdíčko místo Spotify ⊕: prázdné obrysové, v Oblíbených plné červené. */
   #like svg { fill: none; stroke: currentColor; stroke-width: 2; }
   #like.on { color: #ff5252; }
   #like.on svg { fill: currentColor; }
   #like.hide { display: none; }
-  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.15); }
-  #fill { height: 100%; width: 0; background: #fff; }
-  @media (min-height: 170px) {
-    #root { grid-template-columns: auto 1fr; grid-template-rows: 1fr auto;
-      grid-template-areas: "art meta" "ctl ctl"; padding: 14px 16px 18px; }
-    #art { width: 96px; height: 96px; }
-    #title { font-size: 17px; }
-    #ctl { justify-content: center; gap: 14px; }
-    #play { width: 48px; height: 48px; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.18); }
+  #fill { height: 100%; width: 0; background: #fff; border-radius: inherit; }
+  @media (max-width: 340px) { #like { display: none; } }
+  @media (max-width: 280px) { #prev { display: none; } }
+  @media (max-width: 220px) { #meta { display: none; } #root { justify-content: space-between; } }
+  @media (max-height: 62px) { #artist { display: none; } }
+  @media (min-height: 230px) and (min-width: 220px) {
+    #root { flex-direction: column; align-items: stretch; padding: 18px 20px 20px; gap: 12px; }
+    #artbox { flex: 1 1 0; min-height: 0; height: auto; aspect-ratio: auto; container-type: size;
+      display: flex; align-items: center; justify-content: center; }
+    #art { width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); border-radius: 8px; }
+    #title { font-size: clamp(15px, 4.6vw, 24px); }
+    #artist { font-size: clamp(13px, 3.4vw, 17px); margin-top: 4px; }
+    #bar { position: relative; flex: none; height: 4px; border-radius: 2px; }
+    #ctl { justify-content: center; gap: clamp(6px, 4vw, 22px); }
+    button { width: 44px; height: 44px; }
+    button svg { width: 28px; height: 28px; }
+    #play { width: 58px; height: 58px; }
+    #play svg { width: 32px; height: 32px; }
+    #like { display: grid; }
+    #like.hide { display: none; }
+    #prev { display: grid; }
+    #meta { display: block; }
   }
 </style>
+<img id="bg" alt="">
 <div id="root">
-  <img id="art" alt="">
+  <div id="artbox"><img id="art" alt=""></div>
   <div id="meta"><div id="title"></div><div id="artist"></div></div>
+  <div id="bar"><div id="fill"></div></div>
   <div id="ctl">
     <button id="like" title="Oblíbené">${'<svg viewBox="0 0 24 24"><path d="$_heart"/></svg>'}</button>
     <button id="prev" title="Předchozí"></button>
     <button id="play" title="Přehrát / pozastavit"></button>
     <button id="next" title="Další"></button>
   </div>
-  <div id="bar"><div id="fill"></div></div>
 </div>
 ''';
 
@@ -181,6 +203,7 @@ class _WebPipPlayer implements PipPlayer {
       // Okno je about:blank -- relativní adresu doplnit k adrese appky.
       final src = s.artworkUrl == null ? Uri.base.resolve('icons/Icon-192.png') : Uri.base.resolve(s.artworkUrl!);
       (el('art') as web.HTMLImageElement?)?.src = src.toString();
+      (el('bg') as web.HTMLImageElement?)?.src = src.toString();
     }
     if (prev?.playing != s.playing) {
       (el('play') as JSObject?)?.setProperty('innerHTML'.toJS, _svg(s.playing ? _pause : _play).toJS);

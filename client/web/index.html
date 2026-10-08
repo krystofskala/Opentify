@@ -142,7 +142,23 @@
         try { if (navigator.sendBeacon && navigator.sendBeacon(LOG, new Blob([body], { type: 'application/json' }))) return; } catch (e) {}
         try { fetch(LOG, { method: 'POST', body: body, headers: { 'content-type': 'application/json' }, keepalive: true }); } catch (e) {}
       }
-      window.__opentifyReport = function (kind, extra) { var s = state(); s.kind = kind; s.extra = extra || null; send(s); };
+      // Šetrně: stejné hlášení (druh + zpráva) nejvýš jednou za 30 s s počtem
+      // opakování a celkem nejvýš 20 za minutu -- chyba v každém snímku
+      // poslala stovky hlášení a server pak odmítal i přehrávání (8. 10.).
+      var seen = {}, sentAt = [];
+      window.__opentifyReport = function (kind, extra) {
+        var now = Date.now();
+        var key = kind + '|' + (extra && (extra.msg || extra.detail) || '');
+        var prev = seen[key];
+        if (prev && now - prev.at < 30000) { prev.repeats++; return; }
+        while (sentAt.length && now - sentAt[0] > 60000) sentAt.shift();
+        if (sentAt.length >= 20) return;
+        sentAt.push(now);
+        var s = state(); s.kind = kind; s.extra = extra || null;
+        if (prev && prev.repeats) s.repeats = prev.repeats;
+        seen[key] = { at: now, repeats: 0 };
+        send(s);
+      };
 
       var getContext = HTMLCanvasElement.prototype.getContext;
       HTMLCanvasElement.prototype.getContext = function (type) {

@@ -44,6 +44,25 @@ def test_public_rate_limit_per_ip(monkeypatch):
     assert client.get("/health").status_code == 200
 
 
+def test_covers_and_client_log_have_own_limits(monkeypatch):
+    """Obaly (stovky při posouvání) a diagnostika appky nesmí vyčerpat limit
+    pro přehrávání (živě 8. 10.: kamarádovi pak server odmítal i hudbu)."""
+    monkeypatch.setattr(pa, "PUBLIC_RATE_PER_MIN", 2)
+    monkeypatch.setattr(pa, "LOG_RATE_PER_MIN", 1)
+    monkeypatch.setattr(pa, "_hits", {})
+    assert pa.bucket("GET", "/api/v1/catalog/releases/x/cover") == "img"
+    assert pa.bucket("GET", "/api/v1/artwork/releases/x") == "img"
+    assert pa.bucket("POST", "/api/v1/client-log") == "log"
+    assert pa.bucket("GET", "/api/v1/tracks/x/stream") == "main"
+    assert not pa.over_limit("ip", now=0, kind="log")
+    assert pa.over_limit("ip", now=1, kind="log")
+    for t in range(50):
+        assert not pa.over_limit("ip", now=t / 100, kind="img")
+    assert not pa.over_limit("ip", now=2)  # hlavní limit nedotčený
+    assert not pa.over_limit("ip", now=3)
+    assert pa.over_limit("ip", now=4)
+
+
 def test_sliding_window_forgets_old_hits():
     pa._hits.clear()
     assert not any(pa.over_limit("x", now=t, limit=2) for t in (0, 1))

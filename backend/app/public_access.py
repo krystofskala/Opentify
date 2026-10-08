@@ -27,7 +27,27 @@ FUNNEL_HEADER = "tailscale-funnel-request"
 # Požadavků za minutu z jedné IP. Přehrávač stahuje skladbu po kouscích
 # (Range), takže strop je volný; přihlášení má vlastní přísnější limit.
 PUBLIC_RATE_PER_MIN = 600
+# Obaly mají vlastní, volnější strop: Domů / knihovna při posouvání načte
+# stovky obrázků a nad 600/min pak server odmítal i přehrávání (živě 8. 10.,
+# kamarád přes Funnel). Diagnostika appky má vlastní malý strop a nikoho
+# neupozorňuje -- zaseklá appka ji umí poslat stokrát za minutu.
+IMAGE_RATE_PER_MIN = 3000
+LOG_RATE_PER_MIN = 60
 _hits: dict[str, deque[float]] = {}
+
+
+def bucket(method: str, path: str) -> str:
+    """Do jakého limitu požadavek patří: `img` (obaly), `log` (diagnostika
+    appky), jinak `main`."""
+    if path == "/api/v1/client-log":
+        return "log"
+    if method == "GET" and (path.endswith("/cover") or path.startswith("/api/v1/artwork/")):
+        return "img"
+    return "main"
+
+
+def limit_for(kind: str) -> int:
+    return {"img": IMAGE_RATE_PER_MIN, "log": LOG_RATE_PER_MIN}.get(kind, PUBLIC_RATE_PER_MIN)
 
 
 def deny_public(request: Request) -> None:
@@ -48,14 +68,15 @@ def client_ip(conn) -> str:
     return conn.client.host if conn.client else "?"
 
 
-def over_limit(ip: str, now: float | None = None, limit: int | None = None) -> bool:
+def over_limit(ip: str, now: float | None = None, limit: int | None = None, kind: str = "main") -> bool:
     """Klouzavé okno 60 s. `True` = tenhle požadavek už je nad limit."""
     now = time.monotonic() if now is None else now
-    limit = PUBLIC_RATE_PER_MIN if limit is None else limit
-    if ip not in _hits:
+    limit = limit_for(kind) if limit is None else limit
+    key = ip if kind == "main" else f"{kind}:{ip}"
+    if key not in _hits and kind == "main":
         # Přehled, kdo chodí zvenku (a podklad pro upozornění).
         logger.info("funnel: nová veřejná IP %s", ip)
-    q = _hits.setdefault(ip, deque())
+    q = _hits.setdefault(key, deque())
     while q and now - q[0] > 60:
         q.popleft()
     if len(q) >= limit:

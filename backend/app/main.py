@@ -96,11 +96,14 @@ async def _public_guard(request, call_next):  # type: ignore[no-untyped-def]
         if auth_mode() != "login":
             return JSONResponse(status_code=403, content={"detail": "Z internetu jen s přihlášením."})
         ip = public_access.client_ip(request)
-        if public_access.over_limit(ip):
-            from app.notify import notify
+        kind = public_access.bucket(request.method, request.url.path)
+        if public_access.over_limit(ip, kind=kind):
+            if kind != "log":
+                from app.notify import notify
 
-            notify("⚠️ Zahlcení z internetu", f"Adresa {ip} přes limit {public_access.PUBLIC_RATE_PER_MIN} požadavků/min",
-                   tags=["warning"], key=f"rate:{ip}", every_s=900)
+                what = "obrázků" if kind == "img" else "požadavků"
+                notify("⚠️ Zahlcení z internetu", f"Adresa {ip} přes limit {public_access.limit_for(kind)} {what}/min",
+                       tags=["warning"], key=f"rate:{kind}:{ip}", every_s=900)
             return JSONResponse(status_code=429, content={"detail": "Moc požadavků, zkus to za chvíli."})
         response = await call_next(request)
         if response.status_code == 404 and request.scope.get("route") is None:
