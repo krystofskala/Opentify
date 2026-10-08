@@ -1016,6 +1016,120 @@ async def upload_book_cover(
     return book_out(session.get(SpokenBook, book_id))
 
 
+class CollectionIn(BaseModel):
+    title: str
+
+
+def _own_collection(session: Session, collection_id: str, user_id: str):
+    from app.models import SpokenCollection
+
+    c = session.get(SpokenCollection, collection_id)
+    if c is None or c.user_id != user_id:
+        raise HTTPException(status_code=404, detail="sbírka nenalezena")
+    return c
+
+
+def _collection_out(session: Session, c) -> dict:
+    from app.models import SpokenCollectionItem
+
+    items = session.exec(
+        select(SpokenCollectionItem).where(SpokenCollectionItem.collection_id == c.id).order_by(SpokenCollectionItem.position)
+    ).all()
+    ids = [i.book_id for i in items if session.get(SpokenBook, i.book_id) is not None]
+    first = session.get(SpokenBook, ids[0]) if ids else None
+    return {"id": c.id, "title": c.title, "bookIds": ids, "coverUrl": first.cover_url if first else None}
+
+
+@spoken_router.get("/collections")
+def list_collections(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Sbírky knih profilu (jako playlisty u hudby), naposledy změněné napřed."""
+    from app.models import SpokenCollection
+
+    rows = session.exec(
+        select(SpokenCollection).where(SpokenCollection.user_id == current[0]).order_by(SpokenCollection.updated_at.desc())  # type: ignore[attr-defined]
+    ).all()
+    return {"collections": [_collection_out(session, c) for c in rows]}
+
+
+@spoken_router.post("/collections")
+def create_collection(body: CollectionIn, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    from app.models import SpokenCollection
+
+    title = " ".join(body.title.split())[:120]
+    if not title:
+        raise HTTPException(status_code=400, detail="Chybí název.")
+    c = SpokenCollection(user_id=current[0], title=title)
+    session.add(c)
+    session.commit()
+    session.refresh(c)
+    return _collection_out(session, c)
+
+
+@spoken_router.put("/collections/{collection_id}")
+def rename_collection(collection_id: str, body: CollectionIn, session: Session = Depends(get_session),
+                      current: tuple[str, str] = Depends(get_current_user)):
+    c = _own_collection(session, collection_id, current[0])
+    title = " ".join(body.title.split())[:120]
+    if not title:
+        raise HTTPException(status_code=400, detail="Chybí název.")
+    c.title, c.updated_at = title, utcnow()
+    session.add(c)
+    session.commit()
+    return _collection_out(session, c)
+
+
+@spoken_router.delete("/collections/{collection_id}", status_code=204)
+def delete_collection(collection_id: str, session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Smaže jen sbírku -- knihy zůstávají."""
+    from app.models import SpokenCollectionItem
+
+    c = _own_collection(session, collection_id, current[0])
+    for i in session.exec(select(SpokenCollectionItem).where(SpokenCollectionItem.collection_id == c.id)).all():
+        session.delete(i)
+    session.delete(c)
+    session.commit()
+
+
+class CollectionBookIn(BaseModel):
+    bookId: str
+
+
+@spoken_router.post("/collections/{collection_id}/books")
+def add_to_collection(collection_id: str, body: CollectionBookIn, session: Session = Depends(get_session),
+                      current: tuple[str, str] = Depends(get_current_user)):
+    from sqlmodel import func
+
+    from app.models import SpokenCollectionItem
+
+    c = _own_collection(session, collection_id, current[0])
+    if session.get(SpokenBook, body.bookId) is None:
+        raise HTTPException(status_code=404, detail="kniha nenalezena")
+    exists = session.exec(select(SpokenCollectionItem).where(
+        SpokenCollectionItem.collection_id == c.id, SpokenCollectionItem.book_id == body.bookId)).first()
+    if exists is None:
+        top = session.exec(select(func.max(SpokenCollectionItem.position)).where(SpokenCollectionItem.collection_id == c.id)).one()
+        session.add(SpokenCollectionItem(collection_id=c.id, book_id=body.bookId, position=(top or 0) + 1))
+        c.updated_at = utcnow()
+        session.add(c)
+        session.commit()
+    return _collection_out(session, c)
+
+
+@spoken_router.delete("/collections/{collection_id}/books/{book_id}")
+def remove_from_collection(collection_id: str, book_id: str, session: Session = Depends(get_session),
+                           current: tuple[str, str] = Depends(get_current_user)):
+    from app.models import SpokenCollectionItem
+
+    c = _own_collection(session, collection_id, current[0])
+    for i in session.exec(select(SpokenCollectionItem).where(
+            SpokenCollectionItem.collection_id == c.id, SpokenCollectionItem.book_id == book_id)).all():
+        session.delete(i)
+    c.updated_at = utcnow()
+    session.add(c)
+    session.commit()
+    return _collection_out(session, c)
+
+
 class BookMetaIn(BaseModel):
     title: str
     author: str | None = None

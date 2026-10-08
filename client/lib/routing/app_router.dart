@@ -23,6 +23,7 @@ import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/profile/discoveries_screen.dart';
 import '../features/profile/history_screen.dart';
+import '../features/spoken/spoken_collections.dart' show SpokenCollectionScreen;
 import '../features/spoken/podcast_screens.dart';
 import '../features/spoken/spoken_screens.dart';
 import '../state/app_mode.dart';
@@ -211,6 +212,10 @@ List<RouteBase> _detailRoutes() => [
           title: state.uri.queryParameters['title'] ?? '',
           author: state.uri.queryParameters['author'] ?? '',
         ),
+      ),
+      GoRoute(
+        path: 'spoken/collection/:collectionId',
+        builder: (context, state) => SpokenCollectionScreen(collectionId: state.pathParameters['collectionId']!),
       ),
       GoRoute(
         path: 'spoken/series',

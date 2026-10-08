@@ -28,6 +28,8 @@ from app.models import (
     SpokenBook,
     SpokenFavorite,
     SpokenListenDay,
+    SpokenCollection,
+    SpokenCollectionItem,
     SpokenProgress,
     AuthToken,
     Blend,
@@ -56,7 +58,7 @@ logger = logging.getLogger(__name__)
 # Každá tabulka se sloupcem `user_id` (hlídá test_delete_profile_covers_all).
 _PER_USER = [Listen, PlayEvent, SkipStreak, RecordingDislike, HeardFully, AuthToken, InviteCode, PairCode,
              LibraryEntry, PlaylistMember, PinnedPlaylist, ArtistDislike, FavoriteArtist, CollectionProgress,
-             ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay, SpokenProgress, SpokenFavorite, SpokenListenDay, PodcastSubscription, PodcastProgress, PodcastListenHistory,
+             ListenLater, HomeImpression, ArtistFeedback, PendingImportPlay, SpokenProgress, SpokenFavorite, SpokenListenDay, SpokenCollection, PodcastSubscription, PodcastProgress, PodcastListenHistory,
              DownloadRequest, RecBatchItem]
 
 
@@ -70,6 +72,11 @@ def delete_profile(user_id: str) -> dict[str, int]:
         # Kromě vlastních i blendy u partnera (`blend:<id>:*`) a řada "Co
         # poslouchá rodina" s mými skladbami u ostatních -- jinak by po
         # smazání zůstaly otevíratelné.
+        # Položky sbírek knih (bez user_id) -- přes sbírky profilu.
+        coll_ids = list(session.exec(select(SpokenCollection.id).where(SpokenCollection.user_id == user_id)).all())
+        if coll_ids:
+            for item in session.exec(select(SpokenCollectionItem).where(SpokenCollectionItem.collection_id.in_(coll_ids))).all():  # type: ignore[attr-defined]
+                session.delete(item)
         blend_ids = list(session.exec(
             select(Blend.id).where(or_(Blend.user_a == user_id, Blend.user_b == user_id, Blend.created_by == user_id))
         ).all())

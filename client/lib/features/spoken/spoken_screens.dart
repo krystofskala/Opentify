@@ -30,6 +30,7 @@ import '../../widgets/glass/glass_sheet.dart';
 import 'podcast_data.dart';
 import 'podcast_screens.dart';
 import 'spoken_actions.dart';
+import 'spoken_collections.dart' show SpokenCollectionsRail;
 import 'spoken_data.dart';
 import 'spoken_heart.dart';
 
@@ -1088,6 +1089,8 @@ class _BooksLibraryState extends ConsumerState<_BooksLibrary> {
     final books = _visible(scope, sort, filter);
     final bottom = AppSpacing.lg + navBottomInset(context);
     final header = [
+      // Sbírky knih (jako playlisty) -- jen když nějaké jsou.
+      const SpokenCollectionsRail(),
       Padding(
         padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
         child: GlassSearchField(

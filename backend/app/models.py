@@ -621,6 +621,24 @@ class SpokenProgress(SQLModel, table=True):
     finished: bool = False
     updated_at: datetime = Field(default_factory=utcnow, index=True)
 
+class SpokenCollection(SQLModel, table=True):
+    """Sbírka knih profilu (jako playlist u hudby; souhrn 8. 10. #17)."""
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    user_id: str = Field(index=True)
+    title: str
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SpokenCollectionItem(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    collection_id: str = Field(index=True)
+    book_id: str = Field(index=True)
+    position: int = 0
+    added_at: datetime = Field(default_factory=utcnow)
+
+
 class SpokenListenDay(SQLModel, table=True):
     """Kolik profil za den poslouchal knihu / epizodu (`app/spoken/history.py`)
     -- historie, hodiny za rok, opuštěné knihy."""

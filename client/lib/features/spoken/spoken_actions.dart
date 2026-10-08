@@ -13,6 +13,7 @@ import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart' show ArtworkImage;
 import '../../widgets/share_sheet.dart';
 import '../../widgets/toast.dart';
+import 'spoken_collections.dart' show showAddToCollectionSheet;
 import 'spoken_data.dart';
 import 'spoken_screens.dart' show playBook;
 
@@ -223,6 +224,14 @@ class _BookActionsSheetState extends ConsumerState<_BookActionsSheet> {
                     if (context.mounted) close();
                   }),
                 ),
+              _Row(
+                icon: Symbols.collections_bookmark_rounded,
+                label: 'Přidat do sbírky…',
+                onTap: _guard(() async {
+                  close();
+                  await showAddToCollectionSheet(hostContext, ref, book);
+                }),
+              ),
               if (favs != null)
                 _Row(
                   icon: Symbols.favorite_rounded,
