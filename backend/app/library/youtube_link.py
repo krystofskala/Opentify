@@ -66,6 +66,49 @@ def _split_title(title: str, channel: str) -> tuple[str, str]:
     return channel, clean or title
 
 
+# Řádek tracklistu v popisu: čas na začátku („00:00 Interpret - Skladba“,
+# „1. [03:15] …“) nebo na konci („Interpret - Skladba 1:02:03“).
+_TS = r"\[?\(?((?:\d{1,2}:)?\d{1,2}:\d{2})\)?\]?"
+_LINE_START = re.compile(rf"^\s*(?:\d{{1,3}}[.)]\s*)?{_TS}\s*[-–—|.:)]*\s*(.+?)\s*$")
+_LINE_END = re.compile(rf"^\s*(?:\d{{1,3}}[.)]\s*)?(.+?)\s*[-–—|]?\s*{_TS}\s*$")
+_NOT_TRACKS = re.compile(r"^(intro|outro|start|začátek|konec|end|tracklist|break|interlude)\b", re.I)
+
+
+def _seconds(stamp: str) -> int:
+    total = 0
+    for part in stamp.split(":"):
+        total = total * 60 + int(part)
+    return total
+
+
+def tracklist(info: dict) -> list[dict]:
+    """Skladby jednoho videa (DJ mix, set, kompilace): z kapitol, jinak
+    z časů v popisu. Jen řádky „Interpret - Skladba“ (bez interpreta se
+    v katalogu nedá nic jistě najít); nejméně 3, jinak to tracklist není."""
+    rows: list[tuple[int, str]] = []
+    for ch in info.get("chapters") or []:
+        if ch.get("title") is not None and ch.get("start_time") is not None:
+            rows.append((int(ch["start_time"]), str(ch["title"])))
+    if len(rows) < 3:
+        rows = []
+        for line in (info.get("description") or "").splitlines():
+            if m := _LINE_START.match(line):
+                rows.append((_seconds(m.group(1)), m.group(2)))
+            elif m := _LINE_END.match(line):
+                rows.append((_seconds(m.group(2)), m.group(1)))
+    rows.sort(key=lambda r: r[0])
+    end = int(info.get("duration") or 0)
+    out: list[dict] = []
+    for i, (start, text) in enumerate(rows):
+        text = re.sub(r"^\d{1,3}[.)]\s*", "", text).strip()
+        parts = re.split(r"\s+[-–—]\s+", text, maxsplit=1)
+        if len(parts) != 2 or not parts[0] or not parts[1] or _NOT_TRACKS.match(text):
+            continue
+        nxt = rows[i + 1][0] if i + 1 < len(rows) else end
+        out.append({"artist": parts[0].strip(), "title": parts[1].strip(), "duration": (nxt - start) if nxt > start else None})
+    return out if len(out) >= 3 else []
+
+
 def _extract(url: str) -> dict[str, Any]:
     import yt_dlp
 
@@ -146,10 +189,13 @@ async def inspect_youtube_link(text: str) -> dict[str, Any]:
     thumb = thumbs[-1].get("url") if thumbs else info.get("thumbnail")
     if not thumb and videos and source == "youtube":
         thumb = f"https://i.ytimg.com/vi/{videos[0]['id']}/hqdefault.jpg"
+ 
     return {
         "url": url,
         "source": source,
         "kind": "playlist" if is_playlist else "video",
+        # Jedno video s tracklistem (DJ mix, set): jde i jako playlist skladeb.
+        "tracklist": [] if is_playlist else tracklist(info),
         "title": info.get("title") or "",
         "channel": channel,
         # Návrh interpreta: nejčastější interpret videí, jinak kanál.
@@ -270,6 +316,14 @@ async def import_youtube_link(
         session.commit()
         return {"kind": "track", "recordingId": recording.id}
 
+    if kind == "playlist" and info["kind"] == "video":
+        # Jedno video jako playlist: skladby z jeho tracklistu (kapitoly /
+        # popis) -- napárované na katalog, jinak běžné obstarání podle jména.
+        videos = info["tracklist"]
+        if not videos:
+            raise YoutubeLinkError("Video nemá tracklist (kapitoly ani časy v popisu) – jako playlist nejde.")
+        info = {**info, "videos": videos}
+
     if kind == "playlist":
         playlist = _get_or_create_playlist(session, user_id, f"{source}-link:playlist:{source_id}", title or info["title"])
         label = _FROM[source][0].upper() + _FROM[source][1:]
@@ -288,7 +342,9 @@ async def import_youtube_link(
                 recording = find_or_create_recording(
                     session, artist, v["title"], duration_ms=int(v["duration"] * 1000) if v.get("duration") else None
                 )
-                if not _has_file(session, recording.id):
+                # Skladba z tracklistu videa nemá vlastní video -- obstará se
+                # běžně podle jména.
+                if not _has_file(session, recording.id) and v.get("id"):
                     recording.external_refs = {**(recording.external_refs or {}), **_ref(source, v)}
                     session.add(recording)
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording.id, position=position))

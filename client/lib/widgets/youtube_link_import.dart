@@ -35,6 +35,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
 
   final isPlaylist = info['kind'] == 'playlist';
   final count = (info['videos'] as List<dynamic>? ?? const []).length;
+  final tracklist = (info['tracklist'] as List<dynamic>? ?? const []).length;
   final choice = await showDialog<({String kind, String artist, String title, int? year})>(
     context: context,
     builder: (context) => _YoutubeKindDialog(
@@ -43,6 +44,7 @@ Future<void> importYoutubeLink(BuildContext context, WidgetRef ref, String url) 
       artist: info['artist'] as String? ?? '',
       channel: info['channel'] as String? ?? '',
       count: count,
+      tracklist: tracklist,
     ),
   );
   if (choice == null) return;
@@ -88,6 +90,7 @@ class _YoutubeKindDialog extends StatefulWidget {
     required this.artist,
     required this.channel,
     required this.count,
+    this.tracklist = 0,
   });
 
   final bool isPlaylist;
@@ -95,6 +98,10 @@ class _YoutubeKindDialog extends StatefulWidget {
   final String artist;
   final String channel;
   final int count;
+
+  /// Skladby v tracklistu jednoho videa (kapitoly / časy v popisu) -- DJ
+  /// mix nebo set jde přidat i jako playlist těch skladeb.
+  final int tracklist;
 
   @override
   State<_YoutubeKindDialog> createState() => _YoutubeKindDialogState();
@@ -120,6 +127,8 @@ class _YoutubeKindDialogState extends State<_YoutubeKindDialog> {
     final options = [
       if (widget.isPlaylist) ('playlist', 'Playlist', 'Do Knihovny › Sdílené')
       else ('track', 'Skladba', 'Jen ji pustit'),
+      if (!widget.isPlaylist && widget.tracklist > 0)
+        ('playlist', 'Playlist', '${widget.tracklist} ${widget.tracklist < 5 ? 'skladby' : 'skladeb'} z popisu videa – do Knihovny › Sdílené'),
       ('album', 'Album interpreta', 'Neoficiální / jen na YouTube či SoundCloudu – do jeho diskografie'),
       ('live', 'Koncert', 'Živé vystoupení – k interpretovi'),
       ('soundtrack', 'Soundtrack', 'Hudba k filmu, seriálu nebo hře – jako album'),
