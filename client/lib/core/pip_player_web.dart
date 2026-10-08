@@ -109,14 +109,16 @@ class _WebPipPlayer implements PipPlayer {
   }
 
   @override
-  void enableAutoOpen() {
+  void setAutoOpen(bool on) {
     if (!supported) return;
     try {
       web.window.navigator.mediaSession.setActionHandler(
         'enterpictureinpicture',
-        ((JSAny? _) {
-          open();
-        }).toJS,
+        on
+            ? ((JSAny? _) {
+                open();
+              }).toJS
+            : null,
       );
     } catch (_) {
       // Prohlížeč akci nezná (starší Chrome, Edge bez podpory) -- jen ručně.

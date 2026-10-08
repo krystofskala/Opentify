@@ -16,7 +16,7 @@ class _NoPip implements PipPlayer {
     void Function()? onOpened,
   }) {}
   @override
-  void enableAutoOpen() {}
+  void setAutoOpen(bool on) {}
   @override
   Future<void> open() async {}
   @override

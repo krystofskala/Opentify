@@ -33,6 +33,8 @@ import '../../core/page_location.dart' show reloadPage;
 import '../../core/share_image.dart' show shareFile;
 import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+
+import '../../state/pip_player_service.dart' show pipAutoOpenProvider, pipPlayerProvider;
 import '../../widgets/toast.dart';
 import '../../widgets/state_views.dart' show humanError;
 import '../artist/artist_support.dart' show openExternal;
@@ -557,6 +559,17 @@ class _AppearanceSettings extends ConsumerWidget {
                 setState(() {});
               },
             ),
+          ),
+        ],
+        // Web v Chrome / Edge na počítači: plovoucí okno samo při přepnutí panelu.
+        if (kIsWeb && ref.read(pipPlayerProvider).supported) ...[
+          const SizedBox(height: 12),
+          _SwitchRow(
+            title: 'Plovoucí přehrávač při přepnutí panelu',
+            subtitle: 'Když hraje hudba a přepneš jinam, otevře se malé okno nad ostatními okny. '
+                'Ručně jde otevřít vždy v menu přehrávače. Platí jen pro tento prohlížeč.',
+            value: ref.watch(pipAutoOpenProvider),
+            onChanged: ref.read(pipAutoOpenProvider.notifier).set,
           ),
         ],
         if (!glassOff) ...[

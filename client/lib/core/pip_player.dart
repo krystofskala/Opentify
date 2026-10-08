@@ -31,8 +31,9 @@ abstract class PipPlayer {
   });
 
   /// Prohlížeč ho smí otevřít sám při přepnutí panelu (Media Session
-  /// `enterpictureinpicture`, Chrome 134+); jinde se nic nestane.
-  void enableAutoOpen();
+  /// `enterpictureinpicture`, Chrome 134+); jinde se nic nestane. Vypíná se
+  /// v Profilu › Vzhled.
+  void setAutoOpen(bool on);
 
   Future<void> open();
   void close();

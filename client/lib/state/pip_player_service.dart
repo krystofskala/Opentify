@@ -1,11 +1,33 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/pip_player.dart';
 import 'artwork_provider.dart';
 import 'audio_player_controller.dart';
 import 'liked_songs_controller.dart';
+
+/// Otevřít plovoucí přehrávač samo při přepnutí panelu (výchozí ano, jako
+/// Spotify); vypíná se v Profilu › Vzhled. Jen pro toto zařízení.
+final pipAutoOpenProvider = StateNotifierProvider<PipAutoOpen, bool>((ref) => PipAutoOpen());
+
+class PipAutoOpen extends StateNotifier<bool> {
+  PipAutoOpen() : super(true) {
+    unawaited(SharedPreferences.getInstance().then((p) {
+      if (mounted) state = p.getBool(_key) ?? true;
+    }).catchError((Object _) {}));
+  }
+
+  static const _key = 'pip_auto_open';
+
+  Future<void> set(bool on) async {
+    state = on;
+    try {
+      await (await SharedPreferences.getInstance()).setBool(_key, on);
+    } catch (_) {}
+  }
+}
 
 /// Plovoucí mini přehrávač na webu (viz `PipPlayer`): drží okno v souladu
 /// s přehrávačem. Čte se jednou v `OpentifyApp` -- pak se okno může otevřít
@@ -68,7 +90,7 @@ final pipPlayerProvider = Provider<PipPlayer>((ref) {
     },
     onOpened: push,
   );
-  pip.enableAutoOpen();
+  ref.listen(pipAutoOpenProvider, (_, on) => pip.setAutoOpen(on), fireImmediately: true);
 
   // Pozice tiká často -- do okna nejvýš jednou za sekundu, jiné změny hned.
   DateTime last = DateTime.fromMillisecondsSinceEpoch(0);
