@@ -102,6 +102,8 @@ class OfflineController extends StateNotifier<OfflineState> {
 
   static bool _isEpisode(String id) => id.startsWith('pc:');
 
+  final Map<String, DateTime> _queuedAt = {};
+
   /// Díl audioknihy (`sp:<kniha>:<soubor>`) -- stovky MB, stahuje se rovnou
   /// do souboru (`OfflineStorage.putFromUrl`), ne do paměti.
   static bool _isBookPart(String id) => id.startsWith('sp:');
@@ -109,9 +111,13 @@ class OfflineController extends StateNotifier<OfflineState> {
   /// Stáhnout do zařízení (skladby, které tam ještě nejsou).
   void add(List<NowPlayingInfo> infos) {
     final pending = {...state.pending};
-    for (final info in infos) {
+    final now = DateTime.now();
+    for (final (i, info) in infos.indexed) {
       if (has(info.recordingId) || pending.containsKey(info.recordingId)) continue;
       pending[info.recordingId] = info;
+      // Čas zařazení (s pořadím), ne dokončení -- díly knihy dorážejí
+      // napřeskáčku a Offline je řadí podle něj (audit 8. 10.).
+      _queuedAt[info.recordingId] = now.add(Duration(microseconds: i));
       _queue.add(info.recordingId);
     }
     state = (tracks: state.tracks, pending: pending);
@@ -150,7 +156,7 @@ class OfflineController extends StateNotifier<OfflineState> {
           releaseId: info.releaseId,
           artworkUrl: info.artworkUrl,
           bytes: size,
-          addedAt: DateTime.now(),
+          addedAt: _queuedAt.remove(id) ?? DateTime.now(),
         );
         state = (tracks: {...state.tracks, id: track}, pending: {...state.pending}..remove(id));
         await _save();
@@ -181,7 +187,7 @@ class OfflineController extends StateNotifier<OfflineState> {
         releaseId: info.releaseId,
         artworkUrl: info.artworkUrl,
         bytes: bytes.length,
-        addedAt: DateTime.now(),
+        addedAt: _queuedAt.remove(id) ?? DateTime.now(),
       );
       state = (tracks: {...state.tracks, id: track}, pending: {...state.pending}..remove(id));
       await _save();

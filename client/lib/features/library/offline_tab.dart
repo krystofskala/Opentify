@@ -60,6 +60,7 @@ class OfflineTab extends ConsumerWidget {
     final offline = ref.watch(offlineControllerProvider);
     final tracks = offline.tracks.values.where((t) => _spoken(t.id) == episodes).toList()
       ..sort((a, b) => b.addedAt.compareTo(a.addedAt));
+    if (episodes) _orderBooks(tracks);
     final pendingCount = offline.pending.keys.where((id) => _spoken(id) == episodes).length;
     String count(int n) => episodes ? '$n ${n == 1 ? 'položka' : (n < 5 && n > 0 ? 'položky' : 'položek')}' : songsCount(n);
     final usage = ref.watch(offlineUsageProvider).valueOrNull;
@@ -69,7 +70,8 @@ class OfflineTab extends ConsumerWidget {
       return EmptyState(
         icon: Symbols.download_for_offline_rounded,
         message: episodes
-            ? 'Epizody stažené do zařízení hrají i bez internetu. Stáhneš je u epizody – „Stáhnout do zařízení“.'
+            ? 'Epizody a audioknihy stažené do zařízení hrají i bez internetu. Epizodu stáhneš u epizody, '
+                'knihu v jejím menu (podržení) – „Stáhnout do zařízení“.'
             : 'Skladby stažené do zařízení hrají i bez internetu. '
                 'Stáhneš je v menu skladby, alba nebo playlistu – „Stáhnout do zařízení“.',
       );
@@ -142,7 +144,21 @@ class OfflineTab extends ConsumerWidget {
         for (var i = 0; i < tracks.length; i++)
           _OfflineRow(
             track: tracks[i],
-            onTap: () => ref.read(audioPlayerControllerProvider.notifier).playQueue(infos, i, sourceLabel: 'Offline'),
+            onTap: () {
+              // Díl knihy: jen díly téže knihy, v pořadí (ne všechno stažené).
+              final group = _groupOf(tracks[i].id);
+              if (group == null) {
+                ref.read(audioPlayerControllerProvider.notifier).playQueue(infos, i, sourceLabel: 'Offline');
+                return;
+              }
+              final idx = [for (var k = 0; k < tracks.length; k++) if (_groupOf(tracks[k].id) == group) k];
+              ref.read(audioPlayerControllerProvider.notifier).playQueue(
+                    [for (final k in idx) infos[k]],
+                    idx.indexOf(i),
+                    sourceLabel: tracks[i].artist ?? 'Offline',
+                    shuffle: false,
+                  );
+            },
             onRemove: () => ref.read(offlineControllerProvider.notifier).remove(tracks[i].id),
           ),
       ],
@@ -208,3 +224,26 @@ class _OfflineRow extends ConsumerWidget {
 /// Mluvené slovo v zařízení: epizody podcastů i díly audioknih (do hudby
 /// nepatří -- dřív by se díly knih ukázaly mezi skladbami).
 bool _spoken(String id) => id.startsWith('pc:') || id.startsWith('sp:');
+
+/// Kniha dílu (`sp:<kniha>:<soubor>`), jinak null.
+String? _groupOf(String id) {
+  if (!id.startsWith('sp:')) return null;
+  final parts = id.split(':');
+  return parts.length >= 3 ? parts[1] : null;
+}
+
+/// Knihy pohromadě a jejich díly v pořadí zařazení (díl 1 napřed); knihy a
+/// epizody podle toho, co je nejnovější.
+void _orderBooks(List<OfflineTrack> tracks) {
+  final newest = <String, DateTime>{};
+  for (final t in tracks) {
+    final key = _groupOf(t.id) ?? t.id;
+    final at = newest[key];
+    if (at == null || t.addedAt.isAfter(at)) newest[key] = t.addedAt;
+  }
+  tracks.sort((a, b) {
+    final ga = _groupOf(a.id) ?? a.id, gb = _groupOf(b.id) ?? b.id;
+    if (ga != gb) return newest[gb]!.compareTo(newest[ga]!);
+    return a.addedAt.compareTo(b.addedAt);
+  });
+}

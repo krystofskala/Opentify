@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -225,12 +226,16 @@ class _BookActionsSheetState extends ConsumerState<_BookActionsSheet> {
                     if (context.mounted) close();
                   }),
                 ),
-              if (book.isReady)
+              // Jen nativní appka: web by díl při přehrání načetl celý do
+              // paměti (stovky MB; Safari na iPhonu stránku ukončí).
+              if (book.isReady && !kIsWeb)
                 Builder(builder: (context) {
                   final offline = ref.watch(offlineControllerProvider);
-                  final ids = [for (final f in book.files) spokenQueueId(book.id, f.id)];
-                  final saved = ids.isNotEmpty && ids.every(offline.tracks.containsKey);
-                  final pending = ids.any(offline.pending.containsKey);
+                  // Podle předpony -- kniha ze seznamu nemá seznam souborů (audit 8. 10.).
+                  final prefix = 'sp:${book.id}:';
+                  final savedIds = [for (final id in offline.tracks.keys) if (id.startsWith(prefix)) id];
+                  final pending = offline.pending.keys.any((id) => id.startsWith(prefix));
+                  final saved = savedIds.isNotEmpty && !pending;
                   return _Row(
                     icon: saved
                         ? Symbols.mobile_off_rounded
@@ -239,7 +244,7 @@ class _BookActionsSheetState extends ConsumerState<_BookActionsSheet> {
                     onTap: _guard(() async {
                       final ctrl = ref.read(offlineControllerProvider.notifier);
                       if (saved) {
-                        for (final id in ids) {
+                        for (final id in savedIds) {
                           ctrl.remove(id);
                         }
                         toast('Smazáno ze zařízení');

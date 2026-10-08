@@ -14,11 +14,12 @@ Future<Directory> _dir() async {
 
 // iOS přehrávač (AVPlayer) pozná formát podle přípony -- dřív ".audio"
 // a lokální kopie by nešla přehrát.
-const _exts = ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav', 'audio'];
+const _exts = ['mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wav', 'audio'];
 
 String _extFor(String mimeType) => switch (mimeType) {
       'audio/mpeg' => 'mp3',
-      'audio/mp4' || 'audio/aac' || 'audio/x-m4a' => 'm4a',
+      'audio/mp4' || 'audio/x-m4a' => 'm4a',
+      'audio/aac' => 'aac',  // přehrávač iOS pozná formát podle přípony
       'audio/flac' || 'audio/x-flac' => 'flac',
       'audio/ogg' => 'ogg',
       'audio/opus' => 'opus',
@@ -44,7 +45,8 @@ Future<void> put(String id, Uint8List bytes, String mimeType) async {
 /// Stream z adresy po kouscích do souboru (díl knihy může mít stovky MB --
 /// dřív se celý načetl do paměti). Nejdřív do `.part`, pak přejmenovat.
 Future<int> putFromUrl(String id, String url) async {
-  final client = HttpClient();
+  // Zaseknuté spojení nesmí navždy obsadit frontu stahování (audit 8. 10.).
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
   try {
     final request = await client.getUrl(Uri.parse(url));
     final response = await request.close();
@@ -55,8 +57,10 @@ Future<int> putFromUrl(String id, String url) async {
     final part = File('${dir.path}/$id.part');
     final sink = part.openWrite();
     try {
-      await response.pipe(sink);
+      // Bez dat 60 s = výpadek (ne nekonečné čekání).
+      await response.timeout(const Duration(seconds: 60)).pipe(sink);
     } catch (_) {
+      await sink.close().catchError((Object _) {});
       if (part.existsSync()) await part.delete();
       rethrow;
     }
