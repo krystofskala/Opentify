@@ -22,6 +22,7 @@ import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
 import 'widgets/toast.dart';
 import 'state/connect_controller.dart';
+import 'features/spoken/spoken_queue_sync.dart';
 import 'state/auto_continue.dart';
 import 'state/server_notice.dart';
 
@@ -50,6 +51,8 @@ class OpentifyApp extends ConsumerWidget {
     ref.watch(connectProvider);
     // Pusť teď / nekonečné hraní: doplňuje frontu, když dochází.
     ref.watch(autoContinueProvider);
+    // Díly knihy dostažené během poslechu se doplní do fronty.
+    ref.watch(spokenQueueSyncProvider);
     // Plánovaný restart serveru: hláška místo „chyby“ (state/server_notice.dart).
     ref.watch(serverRestartNoticeProvider);
     ref.listen<String?>(playerNoticeProvider, (_, message) {

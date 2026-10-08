@@ -1705,6 +1705,23 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     unawaited(_ref.read(provisioningControllerProvider.notifier).provision(info.recordingId));
   }
 
+  /// Vloží položky na pozici `at` (díly knihy dostažené během poslechu, viz
+  /// `spokenQueueSyncProvider`); právě hrající ani pořadí ostatních se nemění.
+  void insertQueueItems(int at, List<NowPlayingInfo> infos) {
+    if (infos.isEmpty || at < 0 || at > state.queue.length) return;
+    final newQueue = [...state.queue]..insertAll(at, infos);
+    final newIndex = state.queueIndex >= at ? state.queueIndex + infos.length : state.queueIndex;
+    var order = state.shuffleOrder;
+    if (order != null) {
+      order = [
+        for (final i in order) i >= at ? i + infos.length : i,
+        for (var k = 0; k < infos.length; k++) at + k,
+      ];
+    }
+    state = state.copyWith(queue: newQueue, queueIndex: newIndex, shuffleOrder: order);
+    _radioSyncUpcoming();
+  }
+
   /// Označí skladby jako jeden blok fronty (viz `NowPlayingInfo.groupId`).
   /// Jedna skladba blok netvoří.
   List<NowPlayingInfo> _asGroup(List<NowPlayingInfo> infos, String? label) {
