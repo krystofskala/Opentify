@@ -28,6 +28,7 @@ from collections import Counter, defaultdict
 from sqlalchemy import delete, func, update
 from sqlmodel import Session, select
 
+from app.catalog.identity import is_own_artist
 from app.db import engine
 from app.models import (
     Artist,
@@ -353,6 +354,12 @@ def run(apply: bool) -> Counter:
         # 2) Stejné jméno.
         groups: dict[str, list[Artist]] = defaultdict(list)
         for artist in session.exec(select(Artist)).all():
+            # Stejnojmenná cizí kapela ("Nepatří k tomuto interpretovi",
+            # `homonymOf`) a už sloučený zbytek (`mergedInto`) se znovu
+            # neslučují -- dřív by je úklid spojil zpátky (kontrola 8. 10.:
+            # 62 takových skupin, Tame Impala, Aurora, Mňága a Žďorp...).
+            if {"homonymOf", "mergedInto"} & set((artist.external_refs or {}).keys()) or is_own_artist(artist):
+                continue  # ani vlastní interpret (tátova kapela) se s cizím nespojí
             groups[artist.name.strip().lower()].append(artist)
         for name, rows in groups.items():
             if len(rows) < 2:
