@@ -119,6 +119,58 @@ def _csv(rows: list[list[str]], header: list[str]) -> bytes:
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
 
+def _spoken(session: Session, user_id: str) -> tuple[dict, str]:
+    """Mluvené slovo do exportu (souhrn 8. 10. #16): moje knihy s pozicí,
+    srdíčka, historie po dnech -> JSON; odebírané podcasty -> OPML (načte je
+    každá podcastová appka)."""
+    from xml.sax.saxutils import quoteattr
+
+    from app.models import (
+        PodcastShow, PodcastSubscription, SpokenBook, SpokenFavorite, SpokenListenDay, SpokenProgress,
+    )
+
+    progress = {p.book_id: p for p in session.exec(select(SpokenProgress).where(SpokenProgress.user_id == user_id)).all()}
+    favs = session.exec(select(SpokenFavorite).where(SpokenFavorite.user_id == user_id)).all()
+    fav_books = {f.ref for f in favs if f.kind == "book"}
+    books = []
+    for b in session.exec(select(SpokenBook)).all():
+        p = progress.get(b.id)
+        if p is None and b.id not in fav_books and b.requested_by_user_id != user_id:
+            continue  # jen moje knihy (poslouchané, se srdíčkem, stažené mnou)
+        books.append({
+            "title": b.title, "author": b.author, "narrator": b.narrator, "kind": b.kind or "book",
+            "series": b.series_name or None, "seriesNumber": b.series_number,
+            "favorite": b.id in fav_books,
+            "progress": None if p is None else {"positionMs": p.position_ms, "finished": p.finished,
+                                                "updatedAt": p.updated_at.isoformat() if p.updated_at else None},
+        })
+    history = [
+        {"day": r.day, "kind": r.kind, "ref": r.ref, "seconds": round(r.seconds or 0)}
+        for r in session.exec(select(SpokenListenDay).where(SpokenListenDay.user_id == user_id).order_by(SpokenListenDay.day)).all()
+    ]
+    shows = [
+        session.get(PodcastShow, s.show_id)
+        for s in session.exec(select(PodcastSubscription).where(PodcastSubscription.user_id == user_id)).all()
+    ]
+    shows = [s for s in shows if s is not None]
+    data = {
+        "books": books,
+        "favoritePeople": [{"name": f.name, "role": f.ref.split(":", 1)[0]} for f in favs if f.kind == "person"],
+        "podcasts": [{"title": s.title, "author": s.author, "feedUrl": s.feed_url} for s in shows],
+        "listeningByDay": history,
+    }
+    outlines = "\n".join(
+        f'    <outline type="rss" text={quoteattr(s.title)} title={quoteattr(s.title)} xmlUrl={quoteattr(s.feed_url)}/>'
+        for s in shows
+    )
+    opml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n'
+        "  <head><title>Opentify – podcasty</title></head>\n"
+        f"  <body>\n{outlines}\n  </body>\n</opml>\n"
+    )
+    return data, opml
+
+
 def build_export(session: Session, user_id: str, profile_name: str) -> bytes:
     look = _Lookup(session)
     playlists: list[tuple[str, list[dict]]] = []
@@ -198,6 +250,9 @@ def build_export(session: Session, user_id: str, profile_name: str) -> bytes:
                 indent=1,
             ),
         )
+        spoken, opml = _spoken(session, user_id)
+        z.writestr("mluvene_slovo.json", json.dumps(spoken, ensure_ascii=False, indent=1))
+        z.writestr("podcasty.opml", opml)
         z.writestr(
             "CTI_ME.txt",
             "Export z Opentify\n\n"
@@ -206,7 +261,10 @@ def build_export(session: Session, user_id: str, profile_name: str) -> bytes:
             "                            vytvori pod svym jmenem.\n"
             "playlisty/*.csv          -- totez po jednotlivych playlistech\n"
             "historie_poslechu.csv    -- vsechny poslechy s casem\n"
-            "opentify.json            -- uplna zaloha vseho\n",
+            "opentify.json            -- uplna zaloha vseho\n"
+            "mluvene_slovo.json       -- audioknihy (pozice, srdicka, rady), oblibeni autori,\n"
+            "                            historie poslechu po dnech\n"
+            "podcasty.opml            -- odebirane podcasty (nacte je kazda podcastova appka)\n",
         )
     return out.getvalue()
 
