@@ -6,7 +6,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart' show Theme;
-import 'package:material_symbols_icons/symbols.dart';
 
 /// Rychlé posouvání dlouhých seznamů myší a klávesnicí (Míša, 8. 10.:
 /// u hodně dlouhého playlistu šlo jen kolečkem):
@@ -65,11 +64,26 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     return null;
   }
 
-  Offset get _target {
+  /// Co posouvat: seznam pod kurzorem, jinak hlavní (největší viditelný)
+  /// seznam stránky -- kurzor nad hlavičkou, přehrávačem nebo prázdným
+  /// místem dřív nedělal nic (živě 8. 10.: „funguje jen někdy“). Hledá se
+  /// zkusmo v mřížce bodů přes obrazovku: najde jen to, co je opravdu
+  /// vidět (ne skryté karty a stránky pod ní).
+  ScrollPosition? _scrollTarget() {
     final p = _pointer;
-    if (p != null) return p;
+    if (p != null) {
+      final under = _positionAt(p);
+      if (under != null) return under;
+    }
     final size = MediaQuery.sizeOf(context);
-    return Offset(size.width / 2, size.height / 2);
+    ScrollPosition? best;
+    for (var y = 1; y <= 5; y++) {
+      for (var x = 1; x <= 3; x++) {
+        final found = _positionAt(Offset(size.width * x / 4, size.height * y / 6));
+        if (found != null && (best == null || found.viewportDimension > best.viewportDimension)) best = found;
+      }
+    }
+    return best;
   }
 
   bool _onKey(KeyEvent event) {
@@ -94,7 +108,7 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     }
     // Textové pole si Home / End / PgUp nechá.
     if (FocusManager.instance.primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() != null) return false;
-    final position = _positionAt(_target);
+    final position = _scrollTarget();
     if (position == null) return false;
     final page = position.viewportDimension * 0.85;
     final to = switch (key) {
@@ -122,7 +136,7 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
       return;
     }
     if (event.kind != PointerDeviceKind.mouse || event.buttons & kMiddleMouseButton == 0) return;
-    final position = _positionAt(event.position);
+    final position = _scrollTarget();
     if (position == null) return;
     setState(() {
       _auto = position;
@@ -147,9 +161,17 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     if (_auto != null && pressed && (position - _origin).distance > 16) _movedWhileHeld = true;
   }
 
+  static const _dead = 15.0;
+  int _direction = 0;
+
   void _stopAuto() {
     _ticker.stop();
-    if (mounted) setState(() => _auto = null);
+    if (mounted) {
+      setState(() {
+        _auto = null;
+        _direction = 0;
+      });
+    }
   }
 
   void _tick(Duration elapsed) {
@@ -160,10 +182,11 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     final dt = _lastTick == Duration.zero ? 0.0 : (elapsed - _lastTick).inMicroseconds / 1e6;
     _lastTick = elapsed;
     final d = pointer.dy - _origin.dy;
-    const dead = 12.0;
-    if (d.abs() <= dead || dt <= 0) return;
-    // Dál od místa kliknutí = rychleji (mírně víc než lineárně).
-    final speed = math.min(math.pow(d.abs() - dead, 1.35) * 3.0, 9000.0) * d.sign;
+    final direction = d.abs() <= _dead ? 0 : d.sign.toInt();
+    if (direction != _direction) setState(() => _direction = direction);
+    if (direction == 0 || dt <= 0) return;
+    // Jako Chrome: rychlost roste rovnoměrně se vzdáleností od místa kliknutí.
+    final speed = math.min((d.abs() - _dead) * 8.0, 12000.0) * d.sign;
     final to = (position.pixels + speed * dt).clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
     if (to != position.pixels) position.jumpTo(to);
   }
@@ -178,25 +201,30 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
       onPointerMove: (e) => _onMove(e.position, pressed: true),
       onPointerHover: (e) => _onMove(e.position),
       child: MouseRegion(
-        cursor: _auto == null ? MouseCursor.defer : SystemMouseCursors.allScroll,
+        // Kurzor jako v prohlížeči: na místě kliknutí „posun“, jinak šipka směru.
+        cursor: _auto == null
+            ? MouseCursor.defer
+            : switch (_direction) {
+                1 => SystemMouseCursors.resizeDown,
+                -1 => SystemMouseCursors.resizeUp,
+                _ => SystemMouseCursors.allScroll,
+              },
         onHover: (e) => _pointer = e.position,
         child: Stack(
           children: [
             widget.child,
             if (_auto != null)
               Positioned(
-                left: _origin.dx - 16,
-                top: _origin.dy - 16,
+                left: _origin.dx - 14,
+                top: _origin.dy - 14,
+                // Značka místa kliknutí jako v prohlížeči: kolečko se šipkami
+                // nahoru / dolů a tečkou uprostřed.
                 child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.9),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: theme.colorScheme.outline),
-                    ),
-                    child: SizedBox.square(
-                      dimension: 32,
-                      child: Icon(Symbols.unfold_more_rounded, size: 20, color: theme.colorScheme.onSurface),
+                  child: CustomPaint(
+                    size: const Size.square(28),
+                    painter: _AutoscrollMark(
+                      fill: theme.colorScheme.surface.withValues(alpha: 0.92),
+                      ink: theme.colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -206,4 +234,36 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
       ),
     );
   }
+}
+
+class _AutoscrollMark extends CustomPainter {
+  _AutoscrollMark({required this.fill, required this.ink});
+  final Color fill;
+  final Color ink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.width / 2;
+    canvas.drawCircle(c, r - 1, Paint()..color = fill);
+    canvas.drawCircle(c, r - 1, Paint()
+      ..color = ink.withValues(alpha: 0.6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1);
+    final p = Paint()..color = ink;
+    canvas.drawCircle(c, 2, p);
+    canvas.drawPath(Path()
+      ..moveTo(c.dx, c.dy - r + 4)
+      ..lineTo(c.dx - 4.5, c.dy - r + 10)
+      ..lineTo(c.dx + 4.5, c.dy - r + 10)
+      ..close(), p);
+    canvas.drawPath(Path()
+      ..moveTo(c.dx, c.dy + r - 4)
+      ..lineTo(c.dx - 4.5, c.dy + r - 10)
+      ..lineTo(c.dx + 4.5, c.dy + r - 10)
+      ..close(), p);
+  }
+
+  @override
+  bool shouldRepaint(_AutoscrollMark old) => old.fill != fill || old.ink != ink;
 }

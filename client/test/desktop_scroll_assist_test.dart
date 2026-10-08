@@ -47,6 +47,32 @@ void main() {
     await mouse.removePointer();
   });
 
+  testWidgets('kurzor mimo seznam (nad vodorovnou řadou): PgDn i klik kolečkem posunou hlavní seznam', (tester) async {
+    final controller = await pump(tester);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(100, 30));
+    await mouse.moveTo(const Offset(110, 30));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    await tester.pumpAndSettle();
+    expect(controller.offset, greaterThan(300));
+    await mouse.removePointer();
+    final before = controller.offset;
+    final middle = await tester.createGesture(kind: PointerDeviceKind.mouse, buttons: kMiddleMouseButton);
+    await middle.addPointer(location: const Offset(100, 30));
+    await middle.down(const Offset(100, 30));
+    await middle.up();
+    await tester.pump();
+    await middle.moveTo(const Offset(100, 250));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(controller.offset, greaterThan(before + 50));
+    await middle.down(const Offset(100, 250));
+    await middle.up();
+    await tester.pump();
+    await middle.removePointer();
+  });
+
   testWidgets('mezerník přepne přehrávání, v textovém poli píše mezeru', (tester) async {
     var toggles = 0;
     final text = TextEditingController();
