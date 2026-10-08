@@ -1185,10 +1185,16 @@ class SpokenBookScreen extends ConsumerWidget {
                   children: [
                     if (book.author != null) _PersonLink(name: book.author!, style: muted),
                     if (book.author != null && book.narrator != null) Text(' · ', style: muted),
-                    if (book.narrator != null) ...[
-                      Text('čte ', style: muted),
-                      _PersonLink(name: book.narrator!, style: muted, narrator: true),
-                    ],
+                    // "čte X" pohromadě (nezalomit mezi slovem a jménem); víc
+                    // interpretů = "čtou" (Český rozhlas: "Čtou: A a B").
+                    if (book.narrator != null)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(RegExp(r',| a ').hasMatch(book.narrator!) ? 'čtou ' : 'čte ', style: muted),
+                          Flexible(child: _PersonLink(name: book.narrator!, style: muted, narrator: true)),
+                        ],
+                      ),
                   ],
                 ),
               ],

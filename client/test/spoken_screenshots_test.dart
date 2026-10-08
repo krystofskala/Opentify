@@ -51,6 +51,7 @@ void main() {
     ));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 900)); // dojet animace barev tlačítek
     final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final bytes = await tester.runAsync(() async {
       final image = await boundary.toImage(pixelRatio: 2);
@@ -151,6 +152,43 @@ void main() {
     await shoot(tester, '5_knihovna', const SpokenLibraryScreen(), [
       spokenBooksProvider.overrideWith((ref) async => books),
       libraryScopeProvider.overrideWith((ref) => LibraryScopeController(ref)..state = LibraryScope.all),
+    ]);
+    tester.view.physicalSize = const Size(390 * 2, 1300 * 2);
+    final series = (
+      name: 'Sága o zaklínači',
+      author: 'Andrzej Sapkowski',
+      parts: <SpokenSeriesPart>[
+        (title: 'Poslední přání', number: 1, year: 1993, bookId: 'b1', state: 'finished'),
+        (title: 'Meč osudu', number: 2, year: 1992, bookId: 'b2', state: 'listening'),
+        (title: 'Krev elfů', number: 3, year: 1994, bookId: 'b3', state: 'ready'),
+        (title: 'Čas opovržení', number: 4, year: 1995, bookId: null, state: null),
+        (title: 'Křest ohněm', number: 5, year: 1996, bookId: null, state: null),
+        (title: 'Věž vlaštovky', number: 6, year: 1997, bookId: null, state: null),
+        (title: 'Paní jezera', number: 7, year: 1999, bookId: null, state: null),
+        (title: 'Bouřková sezóna', number: 8, year: 2013, bookId: null, state: null),
+      ],
+      loose: <SpokenSeriesPart>[(title: 'Rozcestí krkavců', number: null, year: 2024, bookId: null, state: null)],
+    );
+    await shoot(tester, '6_rada', const SpokenSeriesScreen(title: 'Krev elfů', author: 'Andrzej Sapkowski'), [
+      spokenSeriesProvider.overrideWith((ref, who) async => series),
+      spokenSeriesCollectionsProvider.overrideWith((ref, who) async => [
+            const SpokenRelease(infohash: 'h', title: 'Andrzej Sapkowski - Zaklínač I.-VIII. komplet (čte Jan Hyhlík)', sizeBytes: 9800000000, seeders: 14),
+          ]),
+    ]);
+    final rozhlasBook = SpokenBook.fromJson({
+      'id': 'cro', 'title': 'Čas vos', 'author': 'Alena Mornštajnová', 'narrator': 'Andrea Elsnerová, Kamil Halbich',
+      'releaseTitle': 'Alena Mornštajnová: Čas vos', 'status': 'ready', 'durationMs': 55 * 60000, 'kind': 'book',
+      'error': '12 z 14 dílů se nepodařilo stáhnout', 'seriesName': null,
+      'files': [
+        {'id': 'f1', 'position': 0, 'title': 'Část 1', 'durationMs': 1700000},
+        {'id': 'f2', 'position': 1, 'title': 'Část 14', 'durationMs': 1600000},
+      ],
+    });
+    await shoot(tester, '7_kniha_chybi_dily', const SpokenBookScreen(bookId: 'cro'), [
+      spokenBookProvider.overrideWith((ref, id) async => rozhlasBook),
+      spokenBookDescriptionProvider.overrideWith((ref, id) async => 'Bářin život se nevyvíjel podle jejích představ a směr, který nabral, si sama nevybrala.'),
+      spokenSeriesProvider.overrideWith((ref, who) async => null),
+      spokenFavoritesProvider.overrideWith((ref) async => (books: <String>{}, people: <String>{})),
     ]);
   });
 }
