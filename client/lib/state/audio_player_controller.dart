@@ -430,6 +430,14 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         !_currentLocal &&
         processing != ProcessingState.completed &&
         processing != ProcessingState.idle;
+    // Skrytý panel prohlížeče (jiný panel, minimalizované okno): Chrome tam
+    // načtení zvuku odloží, dokud se panel neukáže -- nic se ještě nenačetlo
+    // = čekat, ne hlásit zaseknutí (živě 8. 10.: „Nepodařilo se přehrát“).
+    if (kIsWeb && !_appVisible && _player.bufferedPosition == Duration.zero && _player.duration == null) {
+      _noSourceSince = null;
+      _stallSince = now;
+      return;
+    }
     // Zdroj se vůbec nenačetl (502 při restartu serveru), ale web hlásí
     // "hraje" a pozice běží dál podle hodin (UX test 7. 10.). Jen u zdroje,
     // který už doběhl načítání (`_readyGen`), a jen když je stav "bez délky
@@ -2603,10 +2611,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // spojení, iOS přehrávač čeká donekonečna), je chyba -- dřív se
       // kolečko točilo navždy. Rostoucí soubor může čekat na data déle.
       if (!isProgressive) {
-        Timer(_loadTimeout, () {
-          if (gen != _sourceGen || _readyGen == gen || state.nowPlaying?.recordingId != info.recordingId) return;
-          _handleStreamFailure(info, TimeoutException('zdroj se nenačetl', _loadTimeout), isProgressive: false);
-        });
+        void watchLoad() {
+          Timer(_loadTimeout, () {
+            if (gen != _sourceGen || _readyGen == gen || state.nowPlaying?.recordingId != info.recordingId) return;
+            // Skrytý panel: prohlížeč načítání odložil -- počkat, až se ukáže.
+            if (kIsWeb && !_appVisible && _player.bufferedPosition == Duration.zero) return watchLoad();
+            _handleStreamFailure(info, TimeoutException('zdroj se nenačetl', _loadTimeout), isProgressive: false);
+          });
+        }
+
+        watchLoad();
       }
       final durationFuture = _player.setUrl(streamUrl, initialPosition: resumeAt);
       if (!startPaused) {
