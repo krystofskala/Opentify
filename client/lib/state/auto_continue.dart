@@ -62,6 +62,18 @@ class AutoContinue {
   /// si uživatel přidal ručně (audit 8. 10.).
   final Set<String> _algoIds = {};
 
+  List<NowPlayingInfo>? _seenQueue;
+
+  /// Jen skladby z aktuální fronty (jiná hudba = jiná fronta -> pryč). Pusť
+  /// teď obnovené po restartu / předání: celá fronta je od algoritmu.
+  void _syncAlgoIds(AudioPlayerState s, bool playNow) {
+    if (identical(s.queue, _seenQueue)) return;
+    _seenQueue = s.queue;
+    final ids = {for (final q in s.queue) q.recordingId};
+    _algoIds.retainWhere(ids.contains);
+    if (playNow && _algoIds.isEmpty) _algoIds.addAll(ids);
+  }
+
   bool _wasSkip(AudioPlayerState s) {
     final dur = _lastDur;
     if (_lastIndex == null || s.queueIndex != _lastIndex! + 1 || dur == null || dur <= Duration.zero) return false;
@@ -91,6 +103,7 @@ class AutoContinue {
     if (s.nowPlaying == null || s.queue.isEmpty) return;
     final playNow = s.queueSourceLabel == playNowLabel;
     final endless = s.repeatMode == RepeatMode.endless;
+    _syncAlgoIds(s, playNow);
     final id = s.nowPlaying!.recordingId;
     if (id != _lastId) {
       // Jen přeskočení skladby od algoritmu (v nekonečném hraní je napřed

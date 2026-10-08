@@ -851,10 +851,13 @@ def save_progress(
     return {"ok": True}
 
 
-def _failed_book(session: Session, book_id: str, user_id: str) -> SpokenBook:
+def _failed_book(session: Session, book_id: str, user_id: str, partial: bool = False) -> SpokenBook:
     book = session.get(SpokenBook, book_id)
     if book is None or (book.requested_by_user_id != user_id and not download_limits.is_admin(user_id)):
         raise HTTPException(status_code=404, detail="kniha neexistuje")
+    # `partial`: hotová kniha, které chybí díly (Český rozhlas) -- dotáhnout je.
+    if partial and book.status == "ready" and book.error:
+        return book
     if book.status != "failed":
         raise HTTPException(status_code=409, detail="jde jen u knihy, jejíž stažení selhalo")
     return book
@@ -898,7 +901,7 @@ def retry(
     _local_only: None = Depends(deny_public),
 ):
     """Nepovedené stažení znovu (stejné vydání, stejný výběr souborů)."""
-    book = _failed_book(session, book_id, current[0])
+    book = _failed_book(session, book_id, current[0], partial=True)
     book.status, book.error, book.progress, book.created_at = "pending", None, 0.0, utcnow()
     session.add(book)
     session.commit()

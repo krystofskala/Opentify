@@ -2267,8 +2267,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // Jen při ručním přepnutí: po dohrání předchozího dílu se na síť
       // nečeká (zamčený iPhone musí navázat hned) a nový díl jde od začátku.
       if (_resumeFor != info.recordingId && !_switchTag.startsWith('auto')) {
+        final gen = _sourceGen;
         final at = await _savedSpokenPosition(info.recordingId);
-        if (state.nowPlaying?.recordingId != info.recordingId) return;
+        // Mezitím jiné přepnutí (i na tentýž díl / kapitolu) -- to má přednost.
+        if (gen != _sourceGen || state.nowPlaying?.recordingId != info.recordingId) return;
         if (at != null && at > Duration.zero) {
           _resumeAt = at;
           _resumeFor = info.recordingId;

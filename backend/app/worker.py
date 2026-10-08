@@ -1271,6 +1271,12 @@ async def _spoken_tick(r) -> None:
     await acquire.tick(r)
 
 
+async def _spoken_series_tick(r) -> None:
+    from app.spoken import series_link
+
+    await series_link.tick(r)
+
+
 async def _vpn_port_tick(r) -> None:
     # Port z ProtonVPN do slskd (app/vpn_ports.py) -- jednou za minutu.
     if await r.set("maintenance:vpn-port", CONSUMER_NAME, nx=True, ex=60):
@@ -1317,6 +1323,8 @@ async def main() -> None:
             _housekeep("db-backup", "záloha databáze selhala", lambda: _db_backup(r))
             _housekeep("upgrades", "zpracování upgradů selhalo", lambda: _process_due_upgrades(r))
             _housekeep("spoken", "stahování audioknih selhalo", lambda: _spoken_tick(r))
+            # Řady knih (Wikidata) zvlášť -- stahování knih na ně nečeká.
+            _housekeep("spoken-series", "řady audioknih selhaly", lambda: _spoken_series_tick(r))
             _housekeep("podcasts", "obnova podcastů selhala", lambda: _podcasts_tick(r))
             _housekeep("vpn-port", "port z VPN do slskd se nenastavil", lambda: _vpn_port_tick(r))
 

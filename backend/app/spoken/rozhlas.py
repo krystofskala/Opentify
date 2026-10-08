@@ -246,11 +246,12 @@ async def search(q: str, limit: int = 12) -> list[dict]:
     return found
 
 
-async def release(ref: str) -> dict | None:
-    """Vydání podle refu (z mezipaměti hledání, jinak znovu z API)."""
+async def release(ref: str, fresh: bool = False) -> dict | None:
+    """Vydání podle refu (z mezipaměti hledání, jinak znovu z API).
+    `fresh`: vždy z API -- "Zkusit znovu" po mrtvých odkazech."""
     from app.redis_bus import get_redis
 
-    if (cached := await get_redis().get(f"spoken:cro:rel:v1:{ref}")) is not None:
+    if not fresh and (cached := await get_redis().get(f"spoken:cro:rel:v1:{ref}")) is not None:
         return json.loads(cached)
     kind, _, rid = ref[4:].partition(":")
     async with _client() as c:
@@ -320,7 +321,9 @@ def download(
     with httpx.Client(proxy=proxy, timeout=60, headers=_UA, follow_redirects=True) as c:
         for i, ep in enumerate(episodes):
             path = dest / file_name(i, ep)
-            if path.is_file():
+            # Hotový díl: při známé velikosti musí sedět (poškozený soubor ze
+            # souběžného stahování se stáhne znovu).
+            if path.is_file() and (not sizes[i] or path.stat().st_size == sizes[i]):
                 done += sizes[i] or path.stat().st_size
                 on_progress(share(i + 1))
                 on_file(path)

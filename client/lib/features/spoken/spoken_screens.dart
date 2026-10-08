@@ -52,7 +52,8 @@ void playBook(WidgetRef ref, SpokenBook book, {int? fileIndex, Duration? positio
     queue,
     index,
     sourceLabel: book.title,
-    startPosition: start,
+    // Od začátku výslovně (0) -- přehrávač se pak na pozici neptá serveru.
+    startPosition: start ?? Duration.zero,
     rememberProgress: false,
     context: (route: '/spoken/book/${book.id}'),
     // Náhodné pořadí / opakování z hudby do knihy nepatří (díly by hrály
@@ -1228,6 +1229,25 @@ class SpokenBookScreen extends ConsumerWidget {
               if (book.status == 'failed') ...[
                 const SizedBox(height: AppSpacing.md),
                 _FailedActions(book: book),
+              ],
+              // Hotová kniha, které chybí díly (Český rozhlas): říct to a nabídnout dotažení.
+              if (book.isReady && book.error != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(book.error!, style: muted, textAlign: TextAlign.center),
+                Center(
+                  child: GlassButton(
+                    label: 'Dotáhnout chybějící díly',
+                    icon: Symbols.refresh_rounded,
+                    compact: true,
+                    onPressed: () async {
+                      try {
+                        await retrySpokenBook(ref, book.id);
+                      } catch (_) {
+                        if (context.mounted) toast(context, 'Nepodařilo se, zkus to znovu.');
+                      }
+                    },
+                  ),
+                ),
               ],
               if (book.status == 'downloading') ...[
                 const SizedBox(height: AppSpacing.xs),

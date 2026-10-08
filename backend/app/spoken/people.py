@@ -55,7 +55,9 @@ async def _wd(params: dict[str, Any]) -> dict[str, Any]:
     if isinstance(data, dict) and data.get("error"):
         # Chyba API v odpovědi 200 (maxlag, špatný dotaz) -- dřív se uložila
         # jako "kniha bez řady" na 30 dní (audit 8. 10.).
-        raise RuntimeError(f"wikidata: {data['error'].get('code') if isinstance(data['error'], dict) else data['error']}")
+        # ValueError: volající (wiki_person) ji chytají jako jiné chyby dat --
+        # RuntimeError shodila stránku autora (kontrola oprav 8. 10.).
+        raise ValueError(f"wikidata: {data['error'].get('code') if isinstance(data['error'], dict) else data['error']}")
     return data
 
 # Povolání (P106). Autor: spisovatel, romanopisec, básník, autor, dramatik,

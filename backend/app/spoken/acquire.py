@@ -242,7 +242,10 @@ async def _rozhlas_download(book_id: str, data: dict) -> None:
         # souborů (audit 8. 10.).
         while True:
             await asyncio.sleep(30)
-            await r.set(lock, "1", ex=_YT_LOCK_S)
+            try:
+                await r.set(lock, "1", ex=_YT_LOCK_S)
+            except Exception:  # noqa: BLE001 -- výpadek Redisu: zkusit za 30 s znovu
+                logger.info("rozhlas: obnova zámku %s selhala", book_id)
 
     beat = asyncio.create_task(heartbeat())
     try:
@@ -309,7 +312,7 @@ async def _start_rozhlas(book: SpokenBook) -> None:
         # Nové / znovu zkoušené stažení: čerstvé odkazy z rozhlasu (staré mohly
         # zmizet -- dřív "Zkusit znovu" selhávalo pořád stejně).
         try:
-            rel = await rozhlas.release(book.source_ref)
+            rel = await rozhlas.release(book.source_ref, fresh=True)
         except Exception:  # noqa: BLE001
             rel = None
         if rel and rel.get("episodes"):
@@ -477,6 +480,3 @@ async def tick(r) -> None:
         await enrich(r)
     finally:
         await r.delete("spoken:tick")
-    from app.spoken import series_link
-
-    await series_link.tick(r)
