@@ -113,29 +113,50 @@ async def podcasts_for(user_id: str) -> list[dict]:
 
 
 async def books_for(user_id: str) -> list[dict]:
-    def mine() -> tuple[set[str], list[str]]:
+    from app.models import SpokenFavorite
+    from app.spoken.catalog import fold, parse_release
+
+    def mine() -> tuple[set[str], list[str], set[str]]:
         with Session(engine) as s:
-            have = {b.source_ref.split(":")[0] for b in s.exec(select(SpokenBook)).all()}
-            listened = s.exec(select(SpokenProgress.book_id).where(SpokenProgress.user_id == user_id)).all()
+            books = s.exec(select(SpokenBook)).all()
+            have = {b.source_ref.split(":")[0] for b in books}
+            listened = set(s.exec(select(SpokenProgress.book_id).where(SpokenProgress.user_id == user_id)).all())
+            favs = s.exec(select(SpokenFavorite).where(SpokenFavorite.user_id == user_id)).all()
+            fav_books = {f.ref for f in favs if f.kind == "book"}
             authors: Counter = Counter()
+            # Autoři se srdíčkem napřed (vlastní volba), pak poslouchaní.
+            for f in favs:
+                if f.kind == "person" and f.ref.startswith("author:") and f.name:
+                    authors[f.name] += 10
+            by_id = {b.id: b for b in books}
             for bid in listened:
-                b = s.get(SpokenBook, bid)
+                b = by_id.get(bid)
                 if b and b.author:
                     authors[b.author] += 1
             if not authors:  # zatím nic neposlouchal -> autoři knih, které si stáhl
-                for b in s.exec(select(SpokenBook).where(SpokenBook.requested_by_user_id == user_id)).all():
-                    if b.author:
+                for b in books:
+                    if b.requested_by_user_id == user_id and b.author:
                         authors[b.author] += 1
-            return have, [a for a, _ in authors.most_common(2)]
+            # Knihy, které profil má / poslouchá / dočetl -- jiné vydání téže
+            # knihy nedoporučovat (souhrn 8. 10. #13).
+            mine_titles = {
+                fold(b.title) for b in books
+                if b.id in listened or b.id in fav_books or b.requested_by_user_id == user_id
+            } - {""}
+            return have, [a for a, _ in authors.most_common(2)], mine_titles
 
-    have, authors = await asyncio.to_thread(mine)
+    have, authors, mine_titles = await asyncio.to_thread(mine)
     out: list[dict] = []
     seen = set(have)
+
+    def another_edition(title: str) -> bool:
+        parts = {fold(p) for p in parse_release(title)["parts"]}
+        return bool(parts & mine_titles)
 
     def add(releases, reason: str, limit: int) -> None:
         n = 0
         for r in sorted(releases, key=lambda r: -r.seeders):
-            if r.infohash in seen or r.seeders == 0:
+            if r.infohash in seen or r.seeders == 0 or another_edition(r.title):
                 continue
             seen.add(r.infohash)
             out.append({**r.to_json(), "reason": reason})
