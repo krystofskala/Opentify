@@ -2421,11 +2421,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // musí proběhnout hned v obsluze konce skladby; server se zeptá až potom.
     final known = _ref.read(provisioningControllerProvider)[info.recordingId];
     if (known != null && known.status == 'AVAILABLE' && known.streamUrl != null) {
-      unawaited(_startStream(
-        info,
-        _streamUrlFor(info.recordingId),
-        isProgressive: false,
-      ));
+      unawaited(_startFromServer(info, available: true));
       return;
     }
 
@@ -2468,11 +2464,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // proti špatnému originu a stream by potichu spadl na 404 -- stavíme
       // si vlastní absolutní URL přes `ProvisioningRepository`
       // (`ApiClient.baseUrl`), stejně jako to dělal starší kód.
-      await _startStream(
-        info,
-        _streamUrlFor(info.recordingId),
-        isProgressive: !result.isAvailable,
-      );
+      await _startFromServer(info, available: result.isAvailable);
     } else if (result != null && result.isFailed) {
       _awaitingProvisioning = false;
       _priming = false;
@@ -2484,6 +2476,39 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _awaitingProvisioning = true;
       _waitForAvailability(info);
     }
+  }
+
+  /// Appka v telefonu přes veřejný přístup (Funnel): AVPlayer bere soubor po
+  /// kouscích a každý kus je na té cestě drahý -- 5 MB skladba u táty
+  /// startovala půl minuty (8. 10.), celá jedním požadavkem přijde za pár
+  /// sekund. Po klepnutí (ne při automatickém přechodu -- zamčený iPhone musí
+  /// navázat hned) proto nejdřív celý soubor do telefonu, nejvýš 10 s; když
+  /// se nestihne, obyčejný stream (stahování doběhne na pozadí pro příště).
+  Future<void> _startFromServer(NowPlayingInfo info, {required bool available}) async {
+    if (!kIsWeb && available && !_radioMode && !_switchTag.startsWith('auto') && _appVisible && PrefetchCache.supported) {
+      final gen = _sourceGen;
+      final local = await _wholeFile(info.recordingId, const Duration(seconds: 10));
+      if (gen != _sourceGen || state.nowPlaying?.recordingId != info.recordingId) return;
+      if (local != null) {
+        await _startStream(info, local, isProgressive: false, isLocal: true);
+        return;
+      }
+    }
+    await _startStream(info, _streamUrlFor(info.recordingId), isProgressive: !available);
+  }
+
+  /// Celý soubor skladby do telefonu (`_prefetchFile`), čeká nejvýš `limit`.
+  Future<String?> _wholeFile(String id, Duration limit) async {
+    if (_prefetched[id] != null) return _prefetched[id];
+    unawaited(_prefetchFile(id));
+    final until = DateTime.now().add(limit);
+    while (DateTime.now().isBefore(until)) {
+      final ready = _prefetched[id];
+      if (ready != null) return ready;
+      if (!_prefetching.contains(id)) return _prefetched[id]; // dopadlo (i chybou)
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    return _prefetched[id];
   }
 
   void _waitForAvailability(NowPlayingInfo info) {
@@ -2525,11 +2550,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _provisioningSub = null;
         // Stejný důvod jako v `_playCurrent` -- vlastní absolutní URL, ne
         // backendova relativní `result.streamUrl`.
-        unawaited(_startStream(
-          info,
-          _streamUrlFor(info.recordingId),
-          isProgressive: !result.isAvailable,
-        ));
+        unawaited(_startFromServer(info, available: result.isAvailable));
       }
     }
 
