@@ -376,3 +376,86 @@ def book_fields(rel: dict) -> dict[str, Any]:
         "kind": rel.get("kind") or "book",
         "description": rel.get("description"),
     }
+
+
+# --- Nově v rozhlase (volitelná sekce Domů, vypnutá) -------------------------
+# Pořady s hrami a četbou: jejich díly k poslechu, nejnovější napřed
+# (API neumí řadit podle data; `/shows/{id}/episodes` vrací dostupné díly).
+NEW_SHOWS = (
+    "Hra na neděli", "Hra na sobotu", "Rozhlasová hra", "Sobotní drama", "Večerní drama", "Současná hra",
+    "Hra pro pamětníky", "Rozhlasová hra pro celou rodinu", "Radioseriál", "Rozhlasový seriál",
+    "Četba na pokračování", "Čtení na pokračování", "Četba s hvězdičkou", "Povídka", "Čtenářský deník",
+)
+_NEW_TTL_S = 6 * 3600
+
+
+async def _show_ids(c: httpx.AsyncClient) -> dict[str, str]:
+    """Název pořadu -> id (týden v mezipaměti)."""
+    from app.redis_bus import get_redis
+
+    r = get_redis()
+    cached = await r.get("spoken:cro:newshows:v1")
+    if cached:
+        return json.loads(cached)
+    out: dict[str, str] = {}
+    for name in NEW_SHOWS:
+        try:
+            resp = await c.get(f"{API}/search", params={"query": name, "filter[type]": "show", "page[limit]": 10})
+            for d in resp.json().get("data") or []:
+                if (d.get("attributes") or {}).get("title") == name:
+                    out.setdefault(d["id"], name)
+        except (httpx.HTTPError, ValueError):
+            continue
+    if out:
+        await r.set("spoken:cro:newshows:v1", json.dumps(out), ex=_SHOW_TTL_S)
+    return out
+
+
+async def latest(limit: int = 20) -> list[dict]:
+    """Čerstvé hry a četba k poslechu (6 h v mezipaměti) -- vydání ve stejném
+    tvaru jako hledání (stáhne se stejně)."""
+    from app.redis_bus import get_redis
+
+    r = get_redis()
+    if (cached := await r.get("spoken:cro:latest:v1")) is not None:
+        return json.loads(cached)
+    found: list[tuple[str, dict]] = []
+    seen: set[str] = set()
+    async with _client() as c:
+        shows = await _show_ids(c)
+
+        async def show_items(show_id: str, show_title: str) -> list[tuple[str, dict]]:
+            items: list[tuple[str, dict]] = []
+            try:
+                resp = await c.get(f"{API}/shows/{show_id}/episodes", params={"page[limit]": 12})
+                data = resp.json().get("data") or []
+            except (httpx.HTTPError, ValueError):
+                return items
+            for e in data:
+                a = e.get("attributes") or {}
+                if not _mp3(a):
+                    continue
+                serial = (((e.get("relationships") or {}).get("serial") or {}).get("data") or {}).get("id")
+                ref = f"cro:s:{serial}" if serial else f"cro:e:{e['id']}"
+                items.append((str(a.get("since") or ""), {"ref": ref, "attrs": a, "show": show_title, "episode": e}))
+            return items
+
+        for chunk in await asyncio.gather(*(show_items(i, t) for i, t in shows.items())):
+            found.extend(chunk)
+        found.sort(key=lambda x: x[0], reverse=True)
+        out: list[dict] = []
+        for _since, item in found:
+            if item["ref"] in seen or len(out) >= limit:
+                continue
+            seen.add(item["ref"])
+            if item["ref"].startswith("cro:s:"):
+                rel = await release(item["ref"])
+            else:
+                a, e = item["attrs"], item["episode"]
+                ep = {"id": e["id"], "part": None, "title": a.get("title") or "", **_mp3(a)}  # type: ignore[dict-item]
+                rel = _release(item["ref"], a.get("title") or "", item["show"], [ep], a)
+                await _cache_release(rel)
+            if rel:
+                out.append(public(rel))
+    await r.set("spoken:cro:latest:v1", json.dumps(out), ex=_NEW_TTL_S)
+    return out

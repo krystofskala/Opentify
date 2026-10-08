@@ -666,6 +666,12 @@ Future<void> uploadBookCover(WidgetRef ref, String bookId, List<int> bytes, Stri
   ref.invalidate(spokenBooksProvider);
 }
 
+/// Domů › Nově v rozhlase (volitelné): čerstvé hry a četba k poslechu.
+final spokenRozhlasLatestProvider = FutureProvider.autoDispose<List<SpokenRelease>>((ref) async {
+  final json = await ref.watch(apiClientProvider).getJson('/spoken/rozhlas/latest');
+  return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
+});
+
 /// Audiokniha, nebo rozhlasová hra (ručně, platí pro všechny profily).
 Future<void> setSpokenKind(WidgetRef ref, String bookId, String kind) async {
   await ref.read(apiClientProvider).putJson('/spoken/books/$bookId/kind', body: {'kind': kind});

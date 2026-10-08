@@ -186,6 +186,8 @@ class SpokenHomeScreen extends ConsumerWidget {
 
           // Volitelná sekce (vypnutá, zapíná se v Upravit Domů): načíst jen když je zapnutá.
           final nextOn = layout?.any((e) => e.id == 'next_in_series' && e.visible) ?? false;
+          final croOn = layout?.any((e) => e.id == 'cro_new' && e.visible) ?? false;
+          final croNew = croOn ? ref.watch(spokenRozhlasLatestProvider).valueOrNull ?? const <SpokenRelease>[] : const <SpokenRelease>[];
           final nextParts = nextOn ? ref.watch(spokenNextInSeriesProvider).valueOrNull ?? const <SpokenNextPart>[] : const <SpokenNextPart>[];
           final newEpisodes = (podcasts?.latest ?? const <PodcastEpisodeItem>[])
               .where((e) => !e.finished && !e.started)
@@ -359,6 +361,23 @@ class SpokenHomeScreen extends ConsumerWidget {
                             onTap: () => context.push(n.bookId != null
                                 ? '/spoken/book/${n.bookId}'
                                 : spokenWorkPath(n.title, n.author ?? '')),
+                          ),
+                      ]),
+                    ],
+                  if (croNew.isNotEmpty)
+                    'cro_new': [
+                      const SectionHeader('Nově v rozhlase'),
+                      _Rail(children: [
+                        for (final r in croNew)
+                          MediaCard(
+                            title: r.title,
+                            subtitle: [
+                              r.kind == 'drama' ? 'hra' : 'četba',
+                              if (!r.complete && r.totalParts != null) '${r.files} z ${r.totalParts} dílů',
+                            ].join(' · '),
+                            imageUrl: r.coverUrl,
+                            placeholderIcon: Symbols.radio_rounded,
+                            onTap: () => r.bookId != null ? context.push('/spoken/book/${r.bookId}') : _download(context, ref, r),
                           ),
                       ]),
                     ],

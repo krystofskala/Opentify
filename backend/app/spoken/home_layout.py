@@ -34,10 +34,12 @@ SECTIONS: list[tuple[str, str]] = [
     ("dramas", "Rozhlasové hry"),
     # Po dočtené knize řady další díl (Wikidata, `/spoken/series/next`).
     ("next_in_series", "Další díl řady"),
+    # Čerstvé hry a četba z Českého rozhlasu k poslechu (vypnuté, Upravit Domů).
+    ("cro_new", "Nově v rozhlase"),
     ("downloading", "Stahuje se"),
 ]
 # Nové sekce, které by časem přibyly, si profil zapne sám.
-DEFAULT_OFF: set[str] = {"next_in_series"}
+DEFAULT_OFF: set[str] = {"next_in_series", "cro_new"}
 
 
 def layout_key(user_id: str) -> str:

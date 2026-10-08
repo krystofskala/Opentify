@@ -180,3 +180,20 @@ def test_manual_meta_edit_wins(monkeypatch):
         row = s.get(SpokenBook, "m")
         assert out["title"] == "Krev elfů" and row.author == "Andrzej Sapkowski" and row.narrator is None
         assert row.metadata_source == "manual" and row.series_name is None
+
+
+def test_rozhlas_latest_marks_known_books(monkeypatch):
+    e = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(e)
+
+    async def fake_latest():
+        return [{"source": "rozhlas", "ref": "cro:e:1", "title": "Žebrácká opera", "kind": "drama"},
+                {"source": "rozhlas", "ref": "cro:s:2", "title": "Čelisti", "kind": "book"}]
+
+    monkeypatch.setattr(rozhlas, "latest", fake_latest)
+    with Session(e) as s:
+        s.add(SpokenBook(id="k", source="rozhlas", source_ref="cro:s:2", release_title="x", title="Čelisti",
+                         requested_by_user_id="me", status="ready"))
+        s.commit()
+        out = asyncio.run(routes.rozhlas_latest(session=s, current=("me", "x")))
+    assert [r.get("bookId") for r in out["releases"]] == [None, "k"]

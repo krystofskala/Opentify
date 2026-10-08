@@ -140,6 +140,28 @@ async def search_rozhlas(q: str, session: Session = Depends(get_session)):
     return {"releases": releases}
 
 
+@spoken_router.get("/rozhlas/latest")
+async def rozhlas_latest(session: Session = Depends(get_session), current: tuple[str, str] = Depends(get_current_user)):
+    """Domů › Nově v rozhlase (volitelné): čerstvé hry a četba k poslechu."""
+    from app.spoken import rozhlas
+
+    try:
+        releases = await rozhlas.latest()
+    except Exception:  # noqa: BLE001 -- výpadek rozhlasu: sekce prostě prázdná
+        return {"releases": []}
+    known = {
+        b.source_ref: b
+        for b in session.exec(select(SpokenBook).where(SpokenBook.source_ref.in_([r["ref"] for r in releases]))).all()  # type: ignore[attr-defined]
+    }
+    out = []
+    for r in releases:
+        item = dict(r)
+        if book := known.get(r["ref"]):
+            item["bookId"], item["status"] = book.id, book.status
+        out.append(item)
+    return {"releases": out}
+
+
 @spoken_router.get("/releases/rozhlas/files")
 async def rozhlas_release_files(ref: str):
     """Obsah vydání z Českého rozhlasu: díly, které jdou stáhnout."""
