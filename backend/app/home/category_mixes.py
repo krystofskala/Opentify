@@ -95,7 +95,7 @@ _CLASSIFY_BUDGET_BACKGROUND = 250
 _CLASSIFY_BUDGET_PAGE = 25
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_VERSION = 7  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
+_VERSION = 8  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
 
 
 def _source(category_id: str) -> str:
@@ -362,17 +362,19 @@ async def _mood_mix(
     ev = await mood_tracks.evidence(pool, c.id, dz_track_ids, dz_keys, chart)
     target = round(MIX_SIZE * FAMILIAR_SHARE)
     familiar = _familiar_tracks(taste, [r for r in pool if ev.get(r, 0) >= 1], rng, target)
-    if len(familiar) < target:
-        # Málo doložených (štítky se teprve doplňují): postaru od interpretů
-        # nálady, ale bez skladeb, kterým odporuje zvuk.
-        extra = [
-            r for r in _familiar(taste, members, rng) + _familiar(taste, by_genre, rng)
-            if r not in familiar and ev.get(r, 0) >= 0
-        ]
-        familiar = pm._spread(familiar + list(dict.fromkeys(extra))[: target - len(familiar)], taste.artist_of)
+    if len(familiar) < target // 2:
+        # Málo doložených (knihovna takovou hudbu skoro nemá -- Párty u
+        # folkaře): postaru od interpretů z playlistů nálady, nejvýš do
+        # poloviny a bez skladeb, kterým odporuje zvuk; zbytek mixu doplní
+        # nové skladby nálady (lepší objevy než tvoje mimo náladu, 8. 10.).
+        extra = [r for r in _familiar(taste, members, rng) if r not in familiar and ev.get(r, 0) >= 0]
+        if not extra:
+            extra = [r for r in _familiar(taste, by_genre, rng) if r not in familiar and ev.get(r, 0) >= 0]
+        familiar = pm._spread(familiar + list(dict.fromkeys(extra))[: target // 2 - len(familiar)], taste.artist_of)
     mix_artists = list(dict.fromkeys(taste.artist_of[r] for r in familiar if r in taste.artist_of))
 
-    want = min(MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
+    # Mix má mít plnou délku -- co chybí do tvých, doplní nové.
+    want = min(MIX_SIZE - len(familiar), 30)
     # Nové 1: skladby z playlistů nálady na Deezeru od interpretů podobných tvým.
     near = set().union(*related.values()) if related else set()
     near |= {taste.artist_deezer[a] for a in [*mix_artists, *members] if a in taste.artist_deezer}
