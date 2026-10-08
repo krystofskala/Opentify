@@ -26,10 +26,7 @@ import 'glass/expressive_shapes.dart';
 
 enum TrackTileLayout { row, card }
 
-/// Jedna nahrávka -- nahrazuje dřívější `RecordingTile` (řádek), Home's
-/// `_TrackCard` (karta, jediné místo s `elevation: 2`) a Library's `_SongCard`
-/// (karta, `elevation: 0`), které se lišily poloměry/paddingem/přístupem k
-/// "elevaci" bez jednoho sdíleného důvodu. Teď jeden widget, dva `layout`y.
+/// Jedna nahrávka všude v appce -- řádek nebo karta (`layout`).
 ///
 /// Chování se odvíjí od živého provisioning stavu (`ProvisioningController`),
 /// ne jen od statického `availability` z katalogové odpovědi:

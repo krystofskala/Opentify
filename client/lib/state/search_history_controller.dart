@@ -7,11 +7,8 @@ import 'auth_controller.dart' show profilePrefsReady;
 const _prefsKey = 'search_history';
 const _maxEntries = 12;
 
-/// Poslední hledané dotazy, per-zařízení (`SharedPreferences`, ne server) --
-/// stejný UX vzor jako Musify's `searchHistoryNotifier` (`screens/search_page.dart`,
-/// github.com/gokadzev/Musify, GPL-3.0; tam přes Hive, tady žádná lokální DB
-/// v appce ještě neběží, takže `shared_preferences` stačí). Nejnovější
-/// dotaz vždy první, duplicity se přesunou navrch místo zdvojení.
+/// Poslední hledané dotazy v tomto zařízení (`SharedPreferences`). Nejnovější
+/// první, opakovaný dotaz se přesune navrch.
 class SearchHistoryController extends StateNotifier<List<String>> {
   SearchHistoryController(this._ref) : super(const []) {
     _loaded = _load().then<void>((_) {}, onError: (Object _) {});

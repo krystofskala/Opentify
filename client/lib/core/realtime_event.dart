@@ -5,11 +5,8 @@ import '../models/playback_model.dart';
 /// state/provisioning_controller.dart) exhaustivní `switch` bez `default`
 /// větve, kterou by šlo omylem zapomenout doplnit při rozšíření protokolu.
 ///
-/// Backend (app/realtime.py) k datu psaní tohoto klienta reálně posílá jen
-/// `TrackAvailableEvent`/`JobProgressEvent` (viz app/events.py) —
-/// `playback.*`/`queue.*` je na serveru zatím jen TODO. Klient je ale
-/// připraven na celý zdokumentovaný protokol, aby nemusel čekat na dopsání
-/// backendu.
+/// Server posílá hlavně obstarávání skladeb (`TrackAvailableEvent`,
+/// `JobProgressEvent`, app/events.py) a Opentify Connect (`ConnectEvent`).
 sealed class RealtimeEvent {
   const RealtimeEvent();
 

@@ -174,7 +174,7 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
   @override
   Widget build(BuildContext context) {
     // Přestavět jen při změně skladby/stavu, ne při každém posunu pozice
-    // (ten kreslí jen vlnovka níž, `_MiniSeek`).
+    // (ten kreslí jen vlnovka níž ve vlastním `Consumer`).
     ref.watch(audioPlayerControllerProvider.select(playerChromeKey));
     final playback = ref.read(audioPlayerControllerProvider);
     final nowPlaying = playback.nowPlaying;

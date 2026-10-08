@@ -5,9 +5,7 @@ import 'glass/glass.dart';
 
 enum ViewMode { list, grid }
 
-/// Přepínač seznam/karty -- dřív existoval jen jako `_SongsViewMode`
-/// inline v Library's Songs tabu; teď sdílený, aby ho šlo dát i na
-/// Albums/Artists taby (které byly natvrdo jen mřížkové).
+/// Přepínač seznam / karty (Skladby, Alba, Interpreti).
 class ViewModeToggle extends StatelessWidget {
   const ViewModeToggle({super.key, required this.mode, required this.onChanged});
 

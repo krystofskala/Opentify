@@ -307,8 +307,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   @override
   Widget build(BuildContext context) {
-    // Pozice (5x za vteřinu) přestavuje jen vlnovku a časy (`_SeekRow`),
-    // ne celý přehrávač.
+    // Pozice (5x za vteřinu) přestavuje jen vlnovku a časy (vlastní
+    // `Consumer` v `_controls`), ne celý přehrávač.
     ref.watch(audioPlayerControllerProvider.select(playerChromeKey));
     final playback = ref.read(audioPlayerControllerProvider);
     final nowPlaying = playback.nowPlaying;
