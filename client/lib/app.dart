@@ -92,7 +92,9 @@ class OpentifyApp extends ConsumerWidget {
       // Klepnutí mimo textové pole zavře klávesnici (iOS to samo nedělá --
       // živě: po chybě hledání nešla klávesnice zavřít vůbec).
       // Počítač (web i Windows): klik kolečkem = rychlý posun, PgUp/PgDn/Home/End.
-      builder: (context, child) => _desktopScroll(_DismissKeyboard(
+      builder: (context, child) => _desktopScroll(
+          () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
+          _DismissKeyboard(
           child: _maybeSimulatedInsets(
           context,
           ref.watch(reducedMotionProvider),
@@ -147,12 +149,12 @@ class OpentifyApp extends ConsumerWidget {
   }
 }
 
-Widget _desktopScroll(Widget child) {
+Widget _desktopScroll(VoidCallback onSpace, Widget child) {
   final desktop = kIsWeb ||
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.linux;
-  return desktop ? DesktopScrollAssist(child: child) : child;
+  return desktop ? DesktopScrollAssist(onSpace: onSpace, child: child) : child;
 }
 
 /// `--dart-define=SIMULATE_INSETS=true` (jen kontrolní buildy): iPhone-like

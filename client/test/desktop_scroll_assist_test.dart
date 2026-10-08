@@ -47,6 +47,24 @@ void main() {
     await mouse.removePointer();
   });
 
+  testWidgets('mezerník přepne přehrávání, v textovém poli píše mezeru', (tester) async {
+    var toggles = 0;
+    final text = TextEditingController();
+    await tester.pumpWidget(MaterialApp(
+      home: DesktopScrollAssist(
+        onSpace: () => toggles++,
+        child: Scaffold(body: Column(children: [TextField(controller: text), const Text('x')])),
+      ),
+    ));
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(toggles, 1);
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), '');
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    expect(toggles, 1);
+  });
+
   testWidgets('klik kolečkem: posun podle vzdálenosti kurzoru, další klik ho ukončí', (tester) async {
     final controller = await pump(tester);
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse, buttons: kMiddleMouseButton);

@@ -13,12 +13,14 @@ import 'package:material_symbols_icons/symbols.dart';
 ///   - klik prostředním tlačítkem = automatický posun jako v prohlížeči
 ///     (rychlost podle vzdálenosti kurzoru od místa kliknutí; další klik,
 ///     Esc nebo puštění po tažení ho ukončí),
-///   - PgUp / PgDn o stránku, Home / End na začátek / konec.
+///   - PgUp / PgDn o stránku, Home / End na začátek / konec,
+///   - mezerník = přehrát / pozastavit (`onSpace`; jako Spotify).
 /// Posouvá seznam pod kurzorem (bez fokusu -- Flutter by klávesy jinak
 /// poslal jen seznamu, který má fokus). V textovém poli klávesy nechává.
 class DesktopScrollAssist extends StatefulWidget {
-  const DesktopScrollAssist({super.key, required this.child});
+  const DesktopScrollAssist({super.key, required this.child, this.onSpace});
   final Widget child;
+  final VoidCallback? onSpace;
 
   @override
   State<DesktopScrollAssist> createState() => _DesktopScrollAssistState();
@@ -73,6 +75,13 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
   bool _onKey(KeyEvent event) {
     if (event is KeyUpEvent) return false;
     final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.space) {
+      // V textovém poli je mezera mezera; držení nepřepíná dokola.
+      if (event is KeyRepeatEvent || widget.onSpace == null) return false;
+      if (FocusManager.instance.primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() != null) return false;
+      widget.onSpace!();
+      return true;
+    }
     if (key == LogicalKeyboardKey.escape && _auto != null) {
       _stopAuto();
       return true;
