@@ -17,6 +17,8 @@ import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
 import 'podcast_data.dart';
+import '../../data/listen_later_repository.dart' show LaterKind;
+import '../../state/listen_later_controller.dart' show listenLaterProvider;
 import '../../state/offline_controller.dart';
 import 'spoken_data.dart' show formatHours;
 import '../../core/cz_plural.dart';
@@ -67,10 +69,12 @@ class PodcastEpisodeTile extends ConsumerWidget {
     final playing = ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying?.recordingId)) == 'pc:${episode.id}';
     final dur = episode.durationMs;
     final left = episode.started && dur != null ? 'zbývá ${formatHours(dur - episode.positionMs)}' : formatHours(dur);
+    final later = ref.watch(listenLaterProvider.select((s) => s.valueOrNull?.find(LaterKind.episode, episode.id))) != null;
     final meta = [
       if (showShowTitle && episode.showTitle != null) episode.showTitle!,
       episodeDate(episode.publishedAt, DateTime.now()),
       if (episode.finished) 'přehráno' else left,
+      if (later) 'na později',
     ].where((s) => s.isNotEmpty).join(' · ');
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -104,6 +108,8 @@ class PodcastEpisodeTile extends ConsumerWidget {
         ],
       ),
       onTap: () => playEpisode(ref, episode, showId: showId),
+      // Podržení: uložit na později / odebrat (jako u skladby; 8. 10.).
+      onLongPress: () => ref.read(listenLaterProvider.notifier).toggle(context, LaterKind.episode, episode.id),
     );
   }
 }

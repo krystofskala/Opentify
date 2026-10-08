@@ -20,7 +20,9 @@ from app.db import engine
 from app.models import Artist, Listen, ListenLater, Recording, Release
 from app.utils import utcnow
 
-KINDS = ("track", "album", "artist")
+# Epizoda podcastu (převzato z hudby do mluveného slova 8. 10.); poslechnuto
+# = epizoda doposlouchaná (`routes/podcasts.save_progress`).
+KINDS = ("track", "album", "artist", "episode")
 ALBUM_SHARE = 0.6
 ARTIST_TRACKS = 5
 REMIND_AFTER = timedelta(days=14)
@@ -57,6 +59,17 @@ def _payload(session: Session, item: ListenLater) -> dict[str, Any] | None:
             release_type=rel.release_type,
             images=rel.images or [],
         ).model_dump(mode="json", by_alias=True)
+    elif item.kind == "episode":
+        from app.models import PodcastEpisode, PodcastProgress, PodcastShow
+        from app.routes.podcasts import _episode_out
+
+        ep = session.get(PodcastEpisode, item.target_id)
+        if ep is None:
+            return None
+        progress = session.exec(
+            select(PodcastProgress).where(PodcastProgress.user_id == item.user_id, PodcastProgress.episode_id == ep.id)
+        ).first()
+        out["episode"] = _episode_out(ep, session.get(PodcastShow, ep.show_id), progress)
     else:
         artist = session.get(Artist, item.target_id)
         if artist is None:
@@ -84,7 +97,8 @@ def list_items(user_id: str) -> dict[str, Any]:
         old = [
             p
             for i, p in zip(active, (_payload(session, i) for i in active))
-            if p and now - i.added_at.replace(tzinfo=None) >= REMIND_AFTER
+            # Epizody podcastů na hudební Domů nepatří.
+            if p and i.kind != "episode" and now - i.added_at.replace(tzinfo=None) >= REMIND_AFTER
         ]
         reminder = old[date.today().toordinal() % len(old)] if old else None
         return {
@@ -102,7 +116,9 @@ def add(
     from app.locks import keyed
 
     with keyed(f"listen-later:{user_id}:{kind}:{target_id}"), Session(engine) as session:
-        model = {"track": Recording, "album": Release, "artist": Artist}[kind]
+        from app.models import PodcastEpisode
+
+        model = {"track": Recording, "album": Release, "artist": Artist, "episode": PodcastEpisode}[kind]
         if session.get(model, target_id) is None:
             return None
         item = session.exec(
@@ -164,6 +180,8 @@ def mix_candidates(user_id: str) -> list[tuple[str, str]]:
             select(ListenLater).where(ListenLater.user_id == user_id, ListenLater.listened_at.is_(None))  # type: ignore[union-attr]
         ).all()
         for item in items:
+            if item.kind == "episode":
+                continue  # epizoda do hudebních mixů nepatří
             if item.kind == "track":
                 rec = session.get(Recording, item.target_id)
                 if rec is not None and rec.artist_id:

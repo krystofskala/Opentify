@@ -41,6 +41,7 @@ class PodcastEpisodeItem {
   const PodcastEpisodeItem({
     required this.id,
     required this.title,
+    this.showId,
     this.showTitle,
     this.description,
     this.publishedAt,
@@ -54,6 +55,7 @@ class PodcastEpisodeItem {
   factory PodcastEpisodeItem.fromJson(Map<String, dynamic> j) => PodcastEpisodeItem(
         id: j['id'] as String,
         title: j['title'] as String? ?? '',
+        showId: j['showId'] as String?,
         showTitle: j['showTitle'] as String?,
         description: j['description'] as String?,
         publishedAt: j['publishedAt'] == null ? null : DateTime.tryParse(j['publishedAt'] as String)?.toLocal(),
@@ -67,6 +69,7 @@ class PodcastEpisodeItem {
   final DateTime? listenedAt;
   final String id;
   final String title;
+  final String? showId;
   final String? showTitle;
   final String? description;
   final DateTime? publishedAt;

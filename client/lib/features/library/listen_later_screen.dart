@@ -1,5 +1,7 @@
 import '../../routing/branches.dart';
 import 'package:flutter/material.dart';
+
+import '../spoken/podcast_screens.dart' show playEpisode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -101,6 +103,7 @@ class _ListenLaterScreenState extends ConsumerState<ListenLaterScreen> {
     final tracks = [for (final i in tracksItems) i.track!];
     final albums = data.active.where((i) => i.kind == LaterKind.album).toList();
     final artists = data.active.where((i) => i.kind == LaterKind.artist).toList();
+    final episodes = data.active.where((i) => i.kind == LaterKind.episode).toList();
     final notes = {for (final i in tracksItems) i.track!.id: i};
 
     if (data.active.isEmpty && data.listened.isEmpty) {
@@ -180,6 +183,13 @@ class _ListenLaterScreenState extends ConsumerState<ListenLaterScreen> {
                 itemBuilder: (context, i) => _LaterRow(item: artists[i]),
               ),
             ],
+            if (episodes.isNotEmpty) ...[
+              const SliverToBoxAdapter(child: SectionHeader('Epizody podcastů')),
+              SliverList.builder(
+                itemCount: episodes.length,
+                itemBuilder: (context, i) => _LaterRow(item: episodes[i]),
+              ),
+            ],
             if (data.listened.isNotEmpty)
               SliverToBoxAdapter(
                 child: Padding(
@@ -225,6 +235,12 @@ class _LaterRow extends ConsumerWidget {
           false,
         ),
       LaterKind.artist => (item.artist!.imageUrl, 'Interpret', '/artists/${item.artist!.id}', true),
+      LaterKind.episode => (
+          item.episode!.artworkUrl,
+          item.episode!.showTitle ?? 'Epizoda',
+          '/podcasts/show/${item.episode!.showId}',
+          false,
+        ),
       LaterKind.track => (
           null,
           item.track!.artistName,
@@ -240,6 +256,7 @@ class _LaterRow extends ConsumerWidget {
                 LaterKind.artist => item.artist!.id,
                 LaterKind.album => item.album!.artistId,
                 LaterKind.track => item.track!.artistId,
+                LaterKind.episode => null,
               },
             )))
             .valueOrNull;
@@ -265,7 +282,8 @@ class _LaterRow extends ConsumerWidget {
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall,
       ),
-      onTap: () => context.push(route),
+      // Epizoda se rovnou pustí (od místa, kde jsi skončil); ostatní se otevřou.
+      onTap: () => item.kind == LaterKind.episode ? playEpisode(ref, item.episode!, showId: item.episode!.showId) : context.push(route),
       onLongPress: () => _showActions(context, notifier, listened),
       trailing: IconButton(
         tooltip: 'Další možnosti',
@@ -340,6 +358,7 @@ class ListenLaterReminder extends ConsumerWidget {
     final route = switch (item.kind) {
       LaterKind.album => '/releases/${item.album!.id}',
       LaterKind.artist => '/artists/${item.artist!.id}',
+      LaterKind.episode => '/podcasts/show/${item.episode!.showId}',
       LaterKind.track => '/library/later',
     };
     return Padding(

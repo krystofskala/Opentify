@@ -365,6 +365,20 @@ class ProgressIn(BaseModel):
     finished: bool = False
 
 
+def _mark_later_listened(session: Session, user_id: str, episode_id: str) -> None:
+    """Doposlouchaná epizoda z "Na později" -> Poslechnuto (jako skladba)."""
+    from app.models import ListenLater
+
+    for item in session.exec(
+        select(ListenLater).where(
+            ListenLater.user_id == user_id, ListenLater.kind == "episode",
+            ListenLater.target_id == episode_id, ListenLater.listened_at.is_(None),  # type: ignore[union-attr]
+        )
+    ).all():
+        item.listened_at = utcnow()
+        session.add(item)
+
+
 @podcasts_router.put("/episodes/{episode_id}/progress")
 def save_progress(
     episode_id: str,
@@ -391,10 +405,14 @@ def save_progress(
         )
         if res.rowcount:
             history.record(session, current[0], "episode", episode_id, ms)
+        if body.finished:
+            _mark_later_listened(session, current[0], episode_id)
         session.commit()
         return {"ok": True}
     p = PodcastProgress(user_id=current[0], episode_id=episode_id, position_ms=max(0, body.positionMs),
                         finished=body.finished, updated_at=utcnow())
     session.add(p)
+    if body.finished:
+        _mark_later_listened(session, current[0], episode_id)
     session.commit()
     return {"ok": True}

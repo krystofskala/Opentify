@@ -1,14 +1,17 @@
 import '../core/api_client.dart';
 import '../core/media_url.dart';
 import '../models/recording_model.dart';
+import '../features/spoken/podcast_data.dart' show PodcastEpisodeItem;
 import 'home_repository.dart';
 
 /// Druh položky "Poslechnout později".
-enum LaterKind { track, album, artist }
+/// `episode` = epizoda podcastu (převzato do mluveného slova 8. 10.).
+enum LaterKind { track, album, artist, episode }
 
 LaterKind _kindFrom(String raw) => switch (raw) {
       'album' => LaterKind.album,
       'artist' => LaterKind.artist,
+      'episode' => LaterKind.episode,
       _ => LaterKind.track,
     };
 
@@ -32,6 +35,7 @@ class LaterItem {
     this.track,
     this.album,
     this.artist,
+    this.episode,
   });
 
   final String id;
@@ -45,11 +49,12 @@ class LaterItem {
   final RecordingModel? track;
   final HomeAlbumCard? album;
   final LaterArtist? artist;
+  final PodcastEpisodeItem? episode;
 
-  /// Id skladby / alba / interpreta, na které položka ukazuje.
-  String get targetId => track?.id ?? album?.id ?? artist!.id;
+  /// Id skladby / alba / interpreta / epizody, na které položka ukazuje.
+  String get targetId => track?.id ?? album?.id ?? episode?.id ?? artist!.id;
 
-  String get title => track?.title ?? album?.title ?? artist!.name;
+  String get title => track?.title ?? album?.title ?? episode?.title ?? artist!.name;
 
   bool get fromShazam => source == 'shazam';
 
@@ -64,6 +69,7 @@ class LaterItem {
       listenedAt: j['listenedAt'] == null ? null : DateTime.parse(j['listenedAt'] as String),
       track: j['track'] == null ? null : RecordingModel.fromJson(j['track'] as Map<String, dynamic>),
       album: j['album'] == null ? null : HomeAlbumCard.fromJson(j['album'] as Map<String, dynamic>),
+      episode: j['episode'] == null ? null : PodcastEpisodeItem.fromJson(j['episode'] as Map<String, dynamic>),
       artist: artist == null
           ? null
           : LaterArtist(
