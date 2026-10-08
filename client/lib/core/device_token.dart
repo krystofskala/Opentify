@@ -196,7 +196,10 @@ String withoutDeviceToken(String url) {
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.queryParameters.containsKey('t')) return url;
   final rest = {...uri.queryParameters}..remove('t');
-  return uri.replace(queryParameters: rest.isEmpty ? null : rest).toString();
+  // `replace(queryParameters: null)` dotaz NEodstraní (audit 8. 10.) -- bez
+  // zbylých parametrů adresa bez "?".
+  if (rest.isEmpty) return url.split('?').first;
+  return uri.replace(queryParameters: rest).toString();
 }
 
 String withDeviceToken(String url) {

@@ -57,6 +57,11 @@ class AutoContinue {
   Duration? _lastDur;
   int _skipsInRow = 0;
 
+  /// Skladby, které do fronty dal algoritmus (várky Pusť teď / nekonečného
+  /// hraní). Jiný směr maže jen ty -- ne vlastní album, playlist ani to, co
+  /// si uživatel přidal ručně (audit 8. 10.).
+  final Set<String> _algoIds = {};
+
   bool _wasSkip(AudioPlayerState s) {
     final dur = _lastDur;
     if (_lastIndex == null || s.queueIndex != _lastIndex! + 1 || dur == null || dur <= Duration.zero) return false;
@@ -75,6 +80,9 @@ class AutoContinue {
     needsStart = chunk.needsStart;
     if (chunk.tracks.isEmpty) return chunk.reason;
     final infos = [for (final r in chunk.tracks) nowPlayingInfoFor(r)];
+    _algoIds
+      ..clear()
+      ..addAll(infos.map((i) => i.recordingId));
     await _ref.read(audioPlayerControllerProvider.notifier).playQueue(infos, 0, sourceLabel: playNowLabel);
     return chunk.reason;
   }
@@ -85,7 +93,9 @@ class AutoContinue {
     final endless = s.repeatMode == RepeatMode.endless;
     final id = s.nowPlaying!.recordingId;
     if (id != _lastId) {
-      final skipped = (playNow || endless) && _wasSkip(s);
+      // Jen přeskočení skladby od algoritmu (v nekonečném hraní je napřed
+      // vlastní album/playlist -- jeho proklikávání není "nelíbí se").
+      final skipped = (playNow || endless) && _algoIds.contains(_lastId) && _wasSkip(s);
       _skipsInRow = skipped ? _skipsInRow + 1 : 0;
       _lastId = id;
       _lastIndex = s.queueIndex;
@@ -116,9 +126,11 @@ class AutoContinue {
     // Chvíli počkat, ať server dostane obě přeskočení (PlayEvent).
     await Future<void>.delayed(const Duration(milliseconds: 1500));
     final now = _ref.read(audioPlayerControllerProvider);
-    if (now.queueSourceLabel != s.queueSourceLabel || now.nowPlaying?.recordingId != s.nowPlaying?.recordingId) return;
+    if (_loading || now.queueSourceLabel != s.queueSourceLabel || now.nowPlaying?.recordingId != s.nowPlaying?.recordingId) {
+      return;
+    }
     for (var i = now.queue.length - 1; i > now.queueIndex; i--) {
-      ctrl.removeFromQueue(i);
+      if (_algoIds.contains(now.queue[i].recordingId)) ctrl.removeFromQueue(i);
     }
     await _refill(_ref.read(audioPlayerControllerProvider), fromSeeds);
   }
@@ -146,9 +158,9 @@ class AutoContinue {
           (fromSeeds && current.repeatMode != RepeatMode.endless)) {
         return;
       }
-      await _ref
-          .read(audioPlayerControllerProvider.notifier)
-          .addAllToQueue([for (final r in chunk.tracks) nowPlayingInfoFor(r)], sourceLabel: s.queueSourceLabel);
+      final infos = [for (final r in chunk.tracks) nowPlayingInfoFor(r)];
+      _algoIds.addAll(infos.map((i) => i.recordingId));
+      await _ref.read(audioPlayerControllerProvider.notifier).addAllToQueue(infos, sourceLabel: s.queueSourceLabel);
     } catch (e) {
       _failed();
       debugPrint('AutoContinue: doplnění fronty selhalo: $e');
