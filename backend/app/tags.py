@@ -329,6 +329,9 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
     mixed: list[dict[str, str]] = []
     for i in range(max(len(bridge), len(pool))):
         mixed += bridge[i : i + 1] + pool[i : i + 1]
+    # Objevy jen od interpretů, kteří styl opravdu hrají -- stejná kontrola
+    # jako u tvých (My Chemical Romance v Singer-songwriter, 8. 10.).
+    mixed = await taste_bridge.items_playing(mixed, [t])
     from app.home import novelty
 
     # Společný filtr nových (už slyšené i pod jiným id, nelíbí, míň, přeskočené).

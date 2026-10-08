@@ -230,6 +230,20 @@ async def artist_styles(artist_ids: list[str]) -> dict[str, dict[str, float]]:
     return out
 
 
+async def items_playing(items: list[dict[str, str]], styles: list[str]) -> list[dict[str, str]]:
+    """Objevy (interpret, název) jen od interpretů, kteří styl opravdu hrají
+    (silný štítek stylu nebo jeho jiného jména). Do „Singer-songwriter“ se
+    dřív dostali My Chemical Romance a Fall Out Boy, do Electronic Emma Ruth
+    Rundle -- tagové žebříčky Last.fm a podobní interpreti jsou hrubí (8. 10.).
+    Bez štítků projde (nic nevyřazovat jen kvůli chybějícím datům)."""
+    wanted = style_set([s.strip().lower() for s in styles if s])
+    sem = asyncio.Semaphore(6)
+    artists = list(dict.fromkeys(x.get("artist") or "" for x in items if x.get("artist")))
+    tag_lists = await asyncio.gather(*(_tags_of(n, sem) for n in artists))
+    ok = {n for n, tags in zip(artists, tag_lists) if not tags or any(strong(tags, s) for s in wanted)}
+    return [x for x in items if (x.get("artist") or "") in ok]
+
+
 async def not_playing(artist_ids: list[str], styles: list[str], limit: int = 120) -> set[str]:
     """Interpreti, kteří podle štítků Last.fm styl / žánr NEHRAJÍ -- pro
     kontrolu zařazení podle Deezeru (Kevin Morby v Rap / Hip Hop, Frankie
