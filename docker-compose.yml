@@ -120,6 +120,11 @@ services:
       # (viz app/providers.py). "placeholder" pro dev bez slskd/yt-dlp.
       MEDIA_PROVIDER: ${MEDIA_PROVIDER:-composite}
       TASTE_MODEL: ${TASTE_MODEL:-v2}
+      # Souběžná stahování na worker (3 workery): kliknutí na Přehrát / na
+      # pozadí. Dřív 4 -> 12 naráz; 8. 10. zvýšeno na 6 (18) s ohledem na víc
+      # lidí -- stahování je síťově vázané, CPU stačí.
+      WORKER_MAX_INTERACTIVE_JOBS: ${WORKER_MAX_INTERACTIVE_JOBS:-6}
+      WORKER_MAX_BACKGROUND_JOBS: ${WORKER_MAX_BACKGROUND_JOBS:-2}
       # `slskd` sdílí síťový stack s `gluetun` (viz níž) -- na Dockeru se pod
       # svým vlastním jménem už neresolvuje, port 5030 je ale dosažitelný
       # přes IP/jméno toho, kdo tu síť vlastní.
