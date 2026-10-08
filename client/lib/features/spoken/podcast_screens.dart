@@ -9,7 +9,10 @@ import '../../routing/home_shell.dart' show navBottomInset;
 import '../../state/audio_player_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../widgets/glass/glass_button.dart';
-import '../../widgets/media_card.dart' show ArtworkImage;
+import '../../widgets/glass/glass_search_field.dart';
+import '../../widgets/media_card.dart' show ArtworkImage, MediaCard;
+import '../../widgets/sort_button.dart';
+import '../../widgets/view_mode_toggle.dart';
 import '../../widgets/section_app_bar.dart';
 import '../../widgets/state_views.dart';
 import '../../widgets/toast.dart';
@@ -187,12 +190,53 @@ class PodcastSearchResults extends ConsumerWidget {
 }
 
 /// Odebírané pořady (Knihovna mluveného slova).
-class MyPodcastsList extends ConsumerWidget {
+/// Řazení odebíraných pořadů (jako knihovna knih).
+enum _ShowSort { added, title, author }
+
+const _showSortLabels = {
+  _ShowSort.added: 'Naposledy přidané',
+  _ShowSort.title: 'Název',
+  _ShowSort.author: 'Autor',
+};
+
+final _showSortProvider = StateProvider<_ShowSort>((ref) => _ShowSort.added);
+final _showViewProvider = StateProvider<ViewMode>((ref) => ViewMode.list);
+
+/// Odebírané pořady: hledání, řazení, seznam / karty (převzato z knihovny
+/// 8. 10.).
+class MyPodcastsList extends ConsumerStatefulWidget {
   const MyPodcastsList({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MyPodcastsList> createState() => _MyPodcastsListState();
+}
+
+class _MyPodcastsListState extends ConsumerState<MyPodcastsList> {
+  String _query = '';
+
+  List<PodcastShowItem> _visible(List<PodcastShowItem> shows, _ShowSort sort) {
+    final words = _query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final out = [
+      for (final s in shows)
+        if (words.every('${s.title} ${s.author ?? ''}'.toLowerCase().contains)) s,
+    ];
+    int byText(String a, String b) => a.toLowerCase().compareTo(b.toLowerCase());
+    switch (sort) {
+      case _ShowSort.added:
+        break; // pořadí ze serveru
+      case _ShowSort.title:
+        out.sort((a, b) => byText(a.title, b.title));
+      case _ShowSort.author:
+        out.sort((a, b) => byText(a.author ?? '~', b.author ?? '~'));
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(myPodcastsProvider);
+    final sort = ref.watch(_showSortProvider);
+    final view = ref.watch(_showViewProvider);
     final fromSpotify = ref.watch(podcastHistoryProvider).valueOrNull ?? const [];
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
@@ -224,22 +268,85 @@ class MyPodcastsList extends ConsumerWidget {
                 ref.invalidate(myPodcastsProvider);
                 ref.invalidate(podcastHistoryProvider);
               },
-              child: ListView(
-                padding:
-                    EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.lg + navBottomInset(context)),
-                children: [
-                  if (historyRow != null) historyRow,
-                  for (final s in shows)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: _Art(url: s.artworkUrl),
-                      title: Text(s.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-                      subtitle: s.author == null ? null : Text(s.author!, style: muted),
-                      trailing: const Icon(Symbols.chevron_right_rounded),
-                      onTap: () => context.push('/podcasts/show/${s.id}'),
+              child: Builder(builder: (context) {
+                final visible = _visible(shows, sort);
+                final bottom = AppSpacing.lg + navBottomInset(context);
+                return CustomScrollView(
+                  slivers: [
+                    SliverList(
+                      delegate: SliverChildListDelegate([
+                        if (shows.length > 4)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+                            child: GlassSearchField(
+                              hintText: 'Hledat v pořadech',
+                              onChanged: (q) => setState(() => _query = q.trim()),
+                              onCleared: () => setState(() => _query = ''),
+                            ),
+                          ),
+                        if (shows.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xs),
+                            child: Row(
+                              children: [
+                                SortButton<_ShowSort>(
+                                  value: sort,
+                                  labels: _showSortLabels,
+                                  onChanged: (v) => ref.read(_showSortProvider.notifier).state = v,
+                                ),
+                                const Spacer(),
+                                ViewModeToggle(mode: view, onChanged: (m) => ref.read(_showViewProvider.notifier).state = m),
+                              ],
+                            ),
+                          ),
+                        if (historyRow != null)
+                          Padding(padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md), child: historyRow),
+                      ]),
                     ),
-                ],
-              ),
+                    if (view == ViewMode.list)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, bottom),
+                        sliver: SliverList.builder(
+                          itemCount: visible.length,
+                          itemBuilder: (context, i) {
+                            final s = visible[i];
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: _Art(url: s.artworkUrl),
+                              title: Text(s.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                              subtitle: s.author == null ? null : Text(s.author!, style: muted),
+                              trailing: const Icon(Symbols.chevron_right_rounded),
+                              onTap: () => context.push('/podcasts/show/${s.id}'),
+                            );
+                          },
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, bottom),
+                        sliver: SliverGrid.builder(
+                          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 180,
+                            mainAxisSpacing: AppSpacing.sm,
+                            crossAxisSpacing: AppSpacing.sm,
+                            childAspectRatio: 0.72,
+                          ),
+                          itemCount: visible.length,
+                          itemBuilder: (context, i) {
+                            final s = visible[i];
+                            return MediaCard(
+                              title: s.title,
+                              subtitle: s.author,
+                              imageUrl: s.artworkUrl,
+                              placeholderIcon: Symbols.podcasts_rounded,
+                              onTap: () => context.push('/podcasts/show/${s.id}'),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                );
+              }),
             ),
     );
   }
