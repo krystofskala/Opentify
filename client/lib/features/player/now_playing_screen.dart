@@ -183,8 +183,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     }
   }
 
+  /// Kam se právě táhne po čáře průběhu (0..1) -- čas vlevo ukazuje cíl,
+  /// ne přehrávanou pozici (jako mini přehrávač; živě 8. 10.).
+  final _seekDrag = ValueNotifier<double?>(null);
+
   @override
   void dispose() {
+    _seekDrag.dispose();
     _sheet?.detach(_pop);
     _carousel.dispose();
     _lyricsAnim.dispose();
@@ -983,18 +988,28 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     inactiveColor: playerFg(context).withValues(alpha: 0.3),
                     progress: ms == 0 ? 0 : position.inMilliseconds.clamp(0, ms) / ms,
                     isPlaying: playback.isPlaying,
-                    onChangeEnd:
-                        ms == 0 ? null : (value) => controller.seek(Duration(milliseconds: (value * ms).round())),
+                    onChanged: ms == 0 ? null : (value) => _seekDrag.value = value,
+                    onChangeEnd: ms == 0
+                        ? null
+                        : (value) {
+                            _seekDrag.value = null;
+                            controller.seek(Duration(milliseconds: (value * ms).round()));
+                          },
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(_formatDuration(position),
-                            style: TextStyle(
-                                color: playerFg(context).withValues(alpha: 0.7),
-                                fontFeatures: const [FontFeature.tabularFigures()])),
+                        ValueListenableBuilder<double?>(
+                          valueListenable: _seekDrag,
+                          builder: (context, drag, _) => Text(
+                              _formatDuration(drag == null ? position : duration * drag),
+                              style: TextStyle(
+                                  // Při tažení plnou barvou -- je vidět, že jde o cíl.
+                                  color: playerFg(context).withValues(alpha: drag == null ? 0.7 : 1),
+                                  fontFeatures: const [FontFeature.tabularFigures()])),
+                        ),
                         abBadge,
                         Text(_formatDuration(duration),
                             style: TextStyle(
