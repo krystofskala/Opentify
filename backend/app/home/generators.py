@@ -137,17 +137,6 @@ GENRES: list[tuple[int, str]] = [
 ]
 
 
-def _genre_specs() -> list[DeezerPlaylistSpec]:
-    dz = get_deezer_client()
-    return [
-        DeezerPlaylistSpec(
-            f"deezer:chart:genre:{gid}", name, f"Žebříček žánru {name} podle Deezeru", PlaylistKind.GENRE, "genres",
-            (lambda gid=gid: dz.chart_tracks(gid, 50)),
-        )
-        for gid, name in GENRES
-    ]
-
-
 # --------------------------------------------------------------------------
 # Snapshot helpers
 # --------------------------------------------------------------------------

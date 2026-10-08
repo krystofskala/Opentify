@@ -228,17 +228,8 @@ class DeezerClient:
     async def chart_tracks(self, genre_id: int, limit: int = 50) -> list[dict[str, Any]] | None:
         return await self._cached_data(f"dz:chart:{genre_id}:tracks:{limit}", 60 * 60, f"/chart/{genre_id}/tracks", {"limit": limit})
 
-    async def chart_albums(self, genre_id: int, limit: int = 30) -> list[dict[str, Any]] | None:
-        return await self._cached_data(f"dz:chart:{genre_id}:albums:{limit}", 60 * 60, f"/chart/{genre_id}/albums", {"limit": limit})
 
-    async def chart_artists(self, genre_id: int, limit: int = 30) -> list[dict[str, Any]] | None:
-        return await self._cached_data(f"dz:chart:{genre_id}:artists:{limit}", 60 * 60, f"/chart/{genre_id}/artists", {"limit": limit})
 
-    async def editorial_releases(self, genre_id: int, limit: int = 30) -> list[dict[str, Any]] | None:
-        """Nová alba žánru vybraná redakcí Deezeru."""
-        return await self._cached_data(
-            f"dz:editorial:{genre_id}:releases:{limit}", 6 * 60 * 60, f"/editorial/{genre_id}/releases", {"limit": limit}
-        )
 
     async def chart_playlists(self, limit: int = 20) -> list[dict[str, Any]] | None:
         return await self._cached_data(f"dz:chart:0:playlists:{limit}", 60 * 60, "/chart/0/playlists", {"limit": limit})

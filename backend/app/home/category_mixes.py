@@ -30,7 +30,6 @@ from sqlmodel import Session, select
 
 from app import listen_later
 from app.browse import CATEGORIES, Category, _category_playlists, get_category
-from app.catalog.artwork import _names_match, primary_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.catalog.identity import is_own_artist
 from app.db import engine

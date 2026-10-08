@@ -20,7 +20,6 @@ přes `Depends`, takže samostatná service třída by byla jen obálka navíc.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import unicodedata
@@ -36,7 +35,7 @@ from sqlmodel import Session, select
 
 from app.auth import ADMIN_ID, get_current_user, require_admin
 from app.utils import utcnow
-from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name
 from app.catalog.schemas import Availability, CamelModel, RecordingOut
 from app.db import engine, get_session
 from app.library.scanner import ScanProgress, get_scan_progress, scan_library

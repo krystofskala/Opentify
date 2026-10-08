@@ -373,8 +373,6 @@ async def tag_page(tag: str, user_id: str | None = None) -> dict[str, Any]:
     """Stránka stylu: mix (náš playlist ze štítku), interpreti, alba, popis,
     příbuzné styly. Cache 12 h, mix se mění denně."""
     from app import browse
-    from app.home import generators as g
-    from app.models import GLOBAL_PLAYLIST_OWNER, PlaylistKind
 
     t = slug(tag)
     genre = genre_for_tag(t)

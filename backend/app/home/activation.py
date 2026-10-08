@@ -253,8 +253,6 @@ class TasteState:
     def ready(self) -> bool:
         return self.young <= 0 or len(self.confirmed) >= READY_CONFIRMED
 
-    def factors(self) -> dict[str, float]:
-        return tentative_factors(self.day_stats, self.explicit, self.listening_days)
 
 
 def explicit_artists(user_id: str) -> set[str]:

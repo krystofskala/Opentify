@@ -25,7 +25,7 @@ from __future__ import annotations
 import sys
 from collections import Counter, defaultdict
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import func, update
 from sqlmodel import Session, select
 
 from app.catalog.identity import is_own_artist

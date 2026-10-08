@@ -870,22 +870,6 @@ async def _resolve_albums(items: list[dict[str, str]], limit: int) -> list[str]:
     return ids
 
 
-def _ingest_dz_albums(albums: list[dict[str, Any]], limit: int) -> list[str]:
-    from app.catalog.deezer_ingest import ingest_album, ingest_artist
-
-    ids: list[str] = []
-    with Session(engine) as session:
-        for a in albums:
-            artist = ingest_artist(session, a.get("artist") or {})
-            release = ingest_album(session, a, artist) if artist else None
-            if release is not None and release.id not in ids:
-                ids.append(release.id)
-            if len(ids) >= limit:
-                break
-        session.commit()
-    return ids
-
-
 async def _first_release_year(artist: str, title: str) -> int | None:
     """Rok prvního vydání alba podle MusicBrainz (release group), nebo None."""
     from app.catalog.musicbrainz import MusicBrainzError, get_musicbrainz_client
@@ -993,7 +977,6 @@ async def genre_extras(c: Category) -> dict[str, Any]:
     interpreti, zásadní alba, popis žánru, podobné žánry. Deezer napřed,
     Last.fm doplní (štítky posluchačů). Cache 12 h."""
     from app.catalog import lastfm
-    from app.catalog.deezer_ingest import ingest_artist
 
     async def build() -> dict[str, Any]:
         dz = get_deezer_client()

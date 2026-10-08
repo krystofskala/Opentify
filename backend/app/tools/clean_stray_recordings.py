@@ -25,19 +25,7 @@ from app.catalog.musicbrainz import get_musicbrainz_client
 from app.catalog.service import CatalogService
 from app.db import engine
 from app.maintenance import dedupe
-from app.models import (
-    HeardFully,
-    LibraryEntry,
-    Listen,
-    ListenLater,
-    MediaAsset,
-    PlaylistItem,
-    ProvisioningJob,
-    ProvisioningJobStatus,
-    Recording,
-    RecordingDislike,
-    Release,
-)
+from app.models import ProvisioningJobStatus, Recording, Release
 
 _FINAL = (ProvisioningJobStatus.FAILED, ProvisioningJobStatus.SUCCEEDED)
 
@@ -60,23 +48,6 @@ def _candidates() -> list[str]:
         if known is None or n > known:
             out.append(rid)
     return out
-
-
-def _referenced(session: Session, rec_id: str) -> bool:
-    if session.get(MediaAsset, rec_id) is not None:
-        return True
-    for model, col in ((Listen, Listen.recording_id), (PlaylistItem, PlaylistItem.recording_id),
-                       (LibraryEntry, LibraryEntry.recording_id), (HeardFully, HeardFully.recording_id),
-                       (RecordingDislike, RecordingDislike.recording_id)):
-        if session.exec(select(func.count()).select_from(model).where(col == rec_id)).one():
-            return True
-    if session.exec(select(func.count()).select_from(ListenLater).where(ListenLater.target_id == rec_id)).one():
-        return True
-    open_jobs = session.exec(
-        select(func.count()).select_from(ProvisioningJob)
-        .where(ProvisioningJob.recording_id == rec_id, ProvisioningJob.status.not_in(_FINAL))  # type: ignore[attr-defined]
-    ).one()
-    return bool(open_jobs)
 
 
 async def main(dry: bool) -> None:

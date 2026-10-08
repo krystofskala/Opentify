@@ -25,10 +25,6 @@ _SC_URL = re.compile(r"https?://(?:www\.|m\.)?soundcloud\.com/[^\s?#]+", re.I)
 _SHORT_URL = re.compile(r"https?://on\.soundcloud\.com/[A-Za-z0-9]+", re.I)
 
 
-def is_soundcloud_url(text: str) -> bool:
-    return bool(_SC_URL.search(text or "") or _SHORT_URL.search(text or ""))
-
-
 def normalized_url(text: str) -> str | None:
     m = _SC_URL.search(text or "") or _SHORT_URL.search(text or "")
     if not m:

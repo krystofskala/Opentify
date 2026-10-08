@@ -22,7 +22,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.library.dislikes import disliked_artist_ids, disliked_ids
-from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name
 from app.catalog.cache import cached_json
 from app.catalog.schemas import ArtistOut, RecordingOut
 from app.catalog.upsert import upsert_artist, upsert_recording

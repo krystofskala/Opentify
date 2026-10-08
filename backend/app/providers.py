@@ -117,48 +117,6 @@ _GENERIC_QUALIFIER = {
 }
 
 
-def _qualifier_tokens(title: str) -> set[str]:
-    """Slova verze z názvu skladby -- obsah závorek a část za pomlčkou
-    ("Car Radio (Ned's Version)" -> {"ned"}, "Ride - Live in Mexico City"
-    -> {"live", "mexico", "city"}). Stahovaný soubor je MUSÍ obsahovat,
-    jinak je to jiná verze (živě: celé album "Ned's Version" se stáhlo
-    v původních verzích, "Trees" dokonce jako jiná píseň)."""
-    parts = re.findall(r"[\(\[]([^\)\]]*)[\)\]]", title)
-    dash = re.split(r"\s+[-–—]\s+", title, maxsplit=1)
-    if len(dash) == 2:
-        parts.append(dash[1])
-    words: set[str] = set()
-    for part in parts:
-        low = part.lower().strip()
-        if low.startswith(("feat", "ft.", "ft ", "with ", "from ")):
-            continue
-        words |= {w for w in _normalize(part).split() if len(w) >= 2 and not w.isdigit()}
-    # "ned's" -> "ned s" po normalizaci; jednopísmenné části odpadly výš.
-    return words - _GENERIC_QUALIFIER
-
-
-def _album_match(album_title: str | None, have: set[str]) -> bool:
-    """Kandidát nese název právě toho alba, ke kterému skladba patří."""
-    words = _title_tokens(album_title or "") - _GENERIC_QUALIFIER
-    return bool(words) and words <= have
-
-
-def _matches_title(title: str, candidate_text: str, album_title: str | None = None) -> bool:
-    """Přísná shoda: celý název skladby (bez závorek) i slova verze musí
-    v kandidátovi být; jiná verze, kterou název nenese, ne. Výjimka: soubor
-    přímo ze správného alba (složka/název alba) -- to je přesně ta skladba,
-    i když verzi v názvu souboru nemá ("Dance of the Dream Man
-    (Instrumental)" ze "Soundtrack From Twin Peaks")."""
-    have = set(_normalize(candidate_text).split())
-    core = _title_tokens(title)
-    if core and not core <= have:
-        return False
-    if not _qualifier_tokens(title) <= have and not _album_match(album_title, have):
-        return False
-    asked = set(_normalize(title).split())
-    return not any(m in have and m not in asked for m in _VERSION_MARKERS)
-
-
 _VERSION_MARKERS = (
     "live", "acoustic", "cover", "remix", "karaoke", "instrumental", "piano", "ukulele", "reaction", "sped",
     "slowed", "nightcore", "concert", "demo", "unplugged", "orchestral", "lullaby", "8bit", "tribute", "mashup",

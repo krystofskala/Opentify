@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 
 from sqlmodel import Session, select
 
-from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name
 from app.catalog.cache import CACHE_PREFIX, cached_json_swr
 from app.catalog.schemas import CamelModel, RecordingOut
 from app.db import engine
@@ -447,7 +447,7 @@ def _quick_picks(session: Session, user_id: str, by_section, cards_by_section, o
     (app/home/quick_picks.py); bez historie původní pořadí."""
     from app.home import quick_picks as qp
     from app.library.spotify_import import get_or_create_liked_songs_playlist
-    from app.models import PlaylistKind, PlaylistMember
+    from app.models import PlaylistKind
 
     liked = get_or_create_liked_songs_playlist(session, user_id)
     # Připínání je v "Tvoje výběry" (app/home/picks.py), tady jen chytré pořadí.

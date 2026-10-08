@@ -468,12 +468,6 @@ async def soundtracks(game: Game, cat: Catalog | None = None) -> list[dict[str, 
     return out
 
 
-async def soundtrack(game: Game, cat: Catalog | None = None) -> str | None:
-    """Hlavní album díla (score, jinak písně)."""
-    albums = await soundtracks(game, cat)
-    return albums[0]["id"] if albums else None
-
-
 # ----------------------------------------------------------------------
 # Stránka
 # ----------------------------------------------------------------------

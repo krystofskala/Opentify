@@ -46,10 +46,6 @@ class YoutubeLinkError(Exception):
     """Chyba s českou zprávou pro uživatele."""
 
 
-def is_youtube_url(text: str) -> bool:
-    return bool(re.search(r"(youtube\.com|youtu\.be)/", text or ""))
-
-
 def _clean_channel(name: str | None) -> str:
     # "Twenty One Pilots - Topic", "LanaDelReyVEVO" -> jméno interpreta.
     name = re.sub(r"\s*-\s*Topic$", "", name or "").strip()
