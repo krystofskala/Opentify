@@ -95,7 +95,7 @@ _CLASSIFY_BUDGET_BACKGROUND = 250
 _CLASSIFY_BUDGET_PAGE = 25
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_VERSION = 6  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
+_VERSION = 7  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
 
 
 def _source(category_id: str) -> str:
@@ -306,52 +306,116 @@ async def _related_sets(taste: pm.Taste, limit: int = 60) -> dict[str, set[str]]
     return out
 
 
+def _familiar_tracks(taste: pm.Taste, rids: list[str], rng: random.Random, target: int) -> list[str]:
+    """Tvoje skladby (už vybrané podle nálady) -- žijící / oblíbené napřed,
+    nejvýš 3 od interpreta, plynule seřazené (jako `_familiar`)."""
+    liked = set(taste.liked)
+    if taste.activation is not None:
+        ordered = pm._weighted_order(list(rids), lambda r: taste.track_score(r) + (0.05 if r in liked else 0.0), rng)
+    else:
+        ordered = list(rids)
+        rng.shuffle(ordered)
+    ordered = pm.prefer_unused(ordered, pm.used_today())
+    from app.home import energy_flow
+
+    spread = pm._spread(pm._cap_per_artist(ordered, taste.artist_of, 3)[:target], taste.artist_of)
+    return energy_flow.order(spread, taste.artist_of)
+
+
 async def _mood_mix(
     c: Category, taste: pm.Taste, shares: dict[str, dict[str, float]], rng: random.Random
 ) -> tuple[list[str], list[str], list[str]]:
-    dz = get_deezer_client()
-    mood_tracks: list[dict[str, Any]] = []
-    for playlist in (await _category_playlists(c))[:4]:
-        mood_tracks.extend(await dz.playlist_tracks(playlist["deezerId"], 100) or [])
-    mood_artists = Counter(str((t.get("artist") or {}).get("id") or "") for t in mood_tracks)
-    mood_artists.pop("", None)
+    """Nálada podle SKLADEB (app/home/mood_tracks.py): štítky skladby
+    z Last.fm, vlastní rozbor zvuku a redakční playlisty Deezeru. Dřív patřil
+    do nálady celý interpret (Angus & Julia Stone s čímkoli v Párty)."""
+    from app.catalog import lastfm
+    from app.catalog.artwork import _normalize
+    from app.home import lastfm_taste as lt
+    from app.home import mood_tracks
+    from app import tags as tagmod
 
+    dz = get_deezer_client()
+    mood_dz: list[dict[str, Any]] = []
+    for playlist in (await _category_playlists(c))[:4]:
+        mood_dz.extend(await dz.playlist_tracks(playlist["deezerId"], 100) or [])
+    # "Interpret" Deezer apod. (redakční vložky) pryč.
+    mood_dz = [t for t in mood_dz if str((t.get("artist") or {}).get("name") or "").strip().lower() not in mood_tracks.JUNK_ARTISTS]
+    mood_artists = Counter(str((t.get("artist") or {}).get("id") or "") for t in mood_dz)
+    mood_artists.pop("", None)
+    dz_track_ids = {str(t["id"]) for t in mood_dz if t.get("id")}
+
+    # Interpreti nálady postaru -- už jen záloha, když skladeb s doklady je málo.
     related = await _related_sets(taste)
     members: dict[str, float] = {}
     for artist_id, rel in related.items():
         dz_id = taste.artist_deezer.get(artist_id)
-        overlap = len(rel & set(mood_artists))
-        if dz_id in mood_artists or overlap >= 3:
+        if dz_id in mood_artists or len(rel & set(mood_artists)) >= 3:
             members[artist_id] = 1.0
-    # Interpreti ze žánrů, které k náladě sedí -- až po těch z playlistů.
     genres = _MOOD_GENRES.get(c.id, ())
-    by_genre = {
-        a: 0.5
-        for a, s in shares.items()
-        if a not in members and sum(s.get(x, 0) for x in genres) >= 0.5
-    }
-    familiar = _familiar(taste, members, rng)
-    if len(familiar) < round(MIX_SIZE * FAMILIAR_SHARE):
-        extra = [r for r in _familiar(taste, by_genre, rng) if r not in familiar]
-        familiar = pm._spread(familiar + extra[: round(MIX_SIZE * FAMILIAR_SHARE) - len(familiar)], taste.artist_of)
-        members |= by_genre
+    by_genre = {a: 0.5 for a, s in shares.items() if a not in members and sum(s.get(x, 0) for x in genres) >= 0.5}
 
-    # Nové: skladby z playlistů nálady od interpretů podobných tvým.
-    near = set().union(*related.values()) if related else set()
-    near |= {taste.artist_deezer[a] for a in members if a in taste.artist_deezer}
-    close = [t for t in mood_tracks if str((t.get("artist") or {}).get("id")) in near and not pm._is_junk(t)]
-    rng.shuffle(close)
+    # Tvoje skladby, které náladu opravdu mají.
+    liked_or_played = list(dict.fromkeys([*taste.liked, *(r for r, _c in taste.listen_counts.most_common())]))
+    pool = (liked_or_played + [r for r in taste.library if r not in set(liked_or_played)])[:2500]
+    ev = await mood_tracks.evidence(pool, c.id, dz_track_ids)
+    target = round(MIX_SIZE * FAMILIAR_SHARE)
+    familiar = _familiar_tracks(taste, [r for r in pool if ev.get(r, 0) >= 1], rng, target)
+    if len(familiar) < target:
+        # Málo doložených (štítky se teprve doplňují): postaru od interpretů
+        # nálady, ale bez skladeb, kterým odporuje zvuk.
+        extra = [
+            r for r in _familiar(taste, members, rng) + _familiar(taste, by_genre, rng)
+            if r not in familiar and ev.get(r, 0) >= 0
+        ]
+        familiar = pm._spread(familiar + list(dict.fromkeys(extra))[: target - len(familiar)], taste.artist_of)
+    mix_artists = list(dict.fromkeys(taste.artist_of[r] for r in familiar if r in taste.artist_of))
+
     want = min(MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
-    # Málo podobných -> doplnit ostatními skladbami nálady (pořád do nálady sedí).
-    rest = [t for t in mood_tracks if t not in close and not pm._is_junk(t)]
+    # Nové 1: skladby z playlistů nálady na Deezeru od interpretů podobných tvým.
+    near = set().union(*related.values()) if related else set()
+    near |= {taste.artist_deezer[a] for a in [*mix_artists, *members] if a in taste.artist_deezer}
+    close = [t for t in mood_dz if str((t.get("artist") or {}).get("id")) in near and not pm._is_junk(t)]
+    rest = [t for t in mood_dz if t not in close and not pm._is_junk(t)]
+    rng.shuffle(close)
     rng.shuffle(rest)
-    ids = [r for r in await asyncio.to_thread(g._ingest_tracks, (close + rest)[: want * 3]) if r not in taste.known]
+    close_ids = [r for r in await asyncio.to_thread(g._ingest_tracks, close[: want * 2]) if r not in taste.known]
+    rest_ids = [r for r in await asyncio.to_thread(g._ingest_tracks, rest[: want * 2]) if r not in taste.known]
+    # Nové 2: nejposlouchanější skladby štítků nálady (Last.fm) od tvých
+    # interpretů a jim podobných.
+    ok_names = {_normalize(taste.artist_name.get(a) or "") for a, _w in taste.artist_weight.most_common(300)}
+    for a in mix_artists[:5]:
+        try:
+            ok_names |= {_normalize(n) for n, _m in await lt.similar_artist_names(taste.artist_name.get(a) or "", 25)}
+        except Exception:  # noqa: BLE001 -- objevy navíc
+            pass
+    ok_names.discard("")
+    per_artist: Counter = Counter()
+    lfm_items: list[dict[str, str]] = []
+    for tag in mood_tracks.MOOD_TAGS.get(c.id, ())[:3]:
+        for x in await lastfm.tag_top_tracks(tag, 200):
+            name = _normalize(x["artist"])
+            if name in ok_names and per_artist[name] < 2 and x["artist"].strip().lower() not in mood_tracks.JUNK_ARTISTS:
+                per_artist[name] += 1
+                lfm_items.append(x)
+    rng.shuffle(lfm_items)
+    try:
+        lfm_ids = [r for r in await tagmod._resolve_tracks(lfm_items, want * 2) if r not in taste.known]
+    except Exception:  # noqa: BLE001
+        logger.exception("nálada %s: skladby z Last.fm", c.id)
+        lfm_ids = []
+    ids: list[str] = []
+    for i in range(max(len(close_ids), len(lfm_ids))):
+        ids += [x for x in close_ids[i : i + 1] + lfm_ids[i : i + 1] if x not in ids]
+    ids += [x for x in rest_ids if x not in ids]
+    # Co už máme rozebrané a zvukem náladě odporuje, pryč.
+    ev_new = await mood_tracks.evidence(ids, c.id, dz_track_ids)
+    ids = [r for r in ids if ev_new.get(r, 0) >= 0]
     artist_of = await asyncio.to_thread(pm._artists_of, ids)
     from app.home import novelty
 
     ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)  # společný filtr
     new = pm._cap_per_artist(ids, artist_of, 2)[:want]
-    top_artists = sorted(members, key=lambda a: (-members[a], -taste.artist_weight[a]))
+    top_artists = mix_artists or sorted(members, key=lambda a: (-members[a], -taste.artist_weight[a]))
     return familiar, new, top_artists
 
 

@@ -1281,6 +1281,15 @@ async def _spoken_series_tick(r) -> None:
         await covers.tick(r)
 
 
+async def _mood_tags_tick(r) -> None:
+    # Štítky skladeb z Last.fm pro mixy nálad (app/home/mood_tracks.py) --
+    # po kouscích každých 10 minut napříč replikami.
+    if await r.set("maintenance:mood-tags", CONSUMER_NAME, nx=True, ex=600):
+        from app.home import mood_tracks
+
+        await mood_tracks.warm()
+
+
 async def _vpn_port_tick(r) -> None:
     # Port z ProtonVPN do slskd (app/vpn_ports.py) -- jednou za minutu.
     if await r.set("maintenance:vpn-port", CONSUMER_NAME, nx=True, ex=60):
@@ -1331,6 +1340,7 @@ async def main() -> None:
             _housekeep("spoken-series", "řady audioknih selhaly", lambda: _spoken_series_tick(r))
             _housekeep("podcasts", "obnova podcastů selhala", lambda: _podcasts_tick(r))
             _housekeep("vpn-port", "port z VPN do slskd se nenastavil", lambda: _vpn_port_tick(r))
+            _housekeep("mood-tags", "štítky nálad skladeb selhaly", lambda: _mood_tags_tick(r))
 
         # Prioritní stream první (Redis vrací v pořadí klíčů); běžnou frontu
         # čteme jen s volnou kapacitou -- jinak by si worker zprávy

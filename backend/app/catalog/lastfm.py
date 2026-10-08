@@ -55,11 +55,15 @@ async def _call(params: dict[str, str]) -> dict[str, Any] | None:
     return data
 
 
+def _cache_key(params: dict[str, str]) -> str:
+    return "lastfm:" + "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+
+
 async def get(params: dict[str, str], ttl: int = DAY) -> dict[str, Any] | None:
     """Nepodepsané čtení s cache. Výpadek se necachuje na celé TTL."""
     if not api_key():
         return None
-    key = "lastfm:" + "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+    key = _cache_key(params)
 
     async def fetch() -> dict[str, Any]:
         return (await _call(params)) or {}
@@ -177,6 +181,32 @@ async def artist_top_tags(name: str, limit: int = 12) -> list[tuple[str, int]]:
     data = await get({"method": "artist.gettoptags", "artist": name, "autocorrect": "1"}, ttl=7 * DAY)
     tags = _as_list(((data or {}).get("toptags") or {}).get("tag"))
     return [(t["name"], _int(t.get("count")) or 0) for t in tags if t.get("name")][:limit]
+
+
+def _track_tags_params(artist: str, title: str) -> dict[str, str]:
+    return {"method": "track.gettoptags", "artist": artist, "track": title, "autocorrect": "1"}
+
+
+async def track_top_tags(artist: str, title: str, *, cached_only: bool = False) -> list[tuple[str, int]] | None:
+    """Štítky skladby s vahou 0-100 (nálady: sad, chill, workout…). Měsíc
+    v cache. `cached_only` = jen z cache, bez dotazu (skládání mixů nesmí
+    čekat na stovky dotazů; plní je `app/home/mood_tracks.warm`); `None` =
+    v cache ještě není."""
+    params = _track_tags_params(artist, title)
+    if cached_only:
+        import json
+
+        from app.catalog.cache import CACHE_PREFIX
+        from app.redis_bus import get_redis
+
+        raw = await get_redis().get(CACHE_PREFIX + _cache_key(params))
+        if raw is None:
+            return None
+        data = json.loads(raw) or {}  # uložené prázdné = zjišťovalo se, štítky nemá
+    else:
+        data = await get(params, ttl=30 * DAY)
+    tags = _as_list(((data or {}).get("toptags") or {}).get("tag"))
+    return [(t["name"], _int(t.get("count")) or 0) for t in tags if t.get("name")][:20]
 
 
 async def track_album(artist: str, title: str) -> str | None:
