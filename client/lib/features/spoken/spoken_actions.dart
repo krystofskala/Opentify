@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -232,6 +233,39 @@ class _BookActionsSheet extends ConsumerWidget {
                     if (context.mounted) close();
                   },
                 ),
+              if (book.isReady) ...[
+                _Row(
+                  icon: Symbols.add_photo_alternate_rounded,
+                  label: 'Nahrát vlastní obal',
+                  onTap: () async {
+                    final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+                    final file = picked?.files.firstOrNull;
+                    if (file?.bytes != null) {
+                      try {
+                        await uploadBookCover(ref, book.id, file!.bytes!, file.name);
+                        toast('Obal nastaven');
+                      } catch (_) {
+                        toast('Obal se nepodařilo nahrát');
+                      }
+                    }
+                    if (context.mounted) close();
+                  },
+                ),
+                if (book.coverUrl != null)
+                  _Row(
+                    icon: Symbols.hide_image_rounded,
+                    label: 'Nahlásit špatný obal',
+                    onTap: () async {
+                      try {
+                        final other = await reportWrongBookCover(ref, book.id);
+                        toast(other ? 'Obal vyměněn za jiný' : 'Obal odebrán – jiný se nenašel');
+                      } catch (_) {
+                        toast('Nepodařilo se, zkus to znovu');
+                      }
+                      if (context.mounted) close();
+                    },
+                  ),
+              ],
               const _MenuDivider(),
               // Jen v Opentify (odkaz na knihu v appce) -- zdroj (SkTorrent,
               // Soulseek) se ven neposílá.

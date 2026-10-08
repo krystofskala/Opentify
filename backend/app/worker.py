@@ -1272,9 +1272,15 @@ async def _spoken_tick(r) -> None:
 
 
 async def _spoken_series_tick(r) -> None:
-    from app.spoken import series_link
+    from app.spoken import covers, series_link
 
     await series_link.tick(r)
+    # Obaly knih: záložní řetěz (vložený, složka, Google Books).
+    if await r.set("spoken:cover:tick", "1", nx=True, ex=300):
+        try:
+            await covers.tick(r)
+        finally:
+            await r.delete("spoken:cover:tick")
 
 
 async def _vpn_port_tick(r) -> None:

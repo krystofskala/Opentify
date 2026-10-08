@@ -294,7 +294,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 800));
     for (final label in ['Pokračovat', 'Přejít na autora', 'Přejít na interpreta', 'Řada: Sága o zaklínači',
-        'Označit jako dočtené', 'Začít znovu od začátku', 'Uložit do mých knih', 'Je to rozhlasová hra', 'Sdílet…']) {
+        'Označit jako dočtené', 'Začít znovu od začátku', 'Uložit do mých knih', 'Je to rozhlasová hra', 'Nahrát vlastní obal', 'Sdílet…']) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
     expect(tester.takeException(), isNull);

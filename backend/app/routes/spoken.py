@@ -9,7 +9,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -861,6 +861,48 @@ def _failed_book(session: Session, book_id: str, user_id: str, partial: bool = F
     if book.status != "failed":
         raise HTTPException(status_code=409, detail="jde jen u knihy, jejíž stažení selhalo")
     return book
+
+
+@spoken_router.post("/books/{book_id}/wrong-cover")
+async def wrong_cover(
+    book_id: str,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+    _local_only: None = Depends(deny_public),
+):
+    """"Špatný obal": zahodit, zkusit další zdroj (vložený, složka, Google
+    Books), jinak bez obalu. Kniha je společná, platí pro všechny."""
+    from app.redis_bus import get_redis
+    from app.spoken import covers
+
+    if session.get(SpokenBook, book_id) is None:
+        raise HTTPException(status_code=404, detail="kniha nenalezena")
+    source = await covers.reject(get_redis(), book_id)
+    session.expire_all()
+    book = session.get(SpokenBook, book_id)
+    return {**book_out(book), "coverSource": source}
+
+
+@spoken_router.post("/books/{book_id}/cover")
+async def upload_book_cover(
+    book_id: str,
+    file: UploadFile,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+    _local_only: None = Depends(deny_public),
+):
+    """Vlastní obal knihy (automatika ho už nepřepíše)."""
+    from app.redis_bus import get_redis
+    from app.spoken import covers
+    from app.uploads import read_limited
+
+    if session.get(SpokenBook, book_id) is None:
+        raise HTTPException(status_code=404, detail="kniha nenalezena")
+    raw = await read_limited(file, 15 * 1024 * 1024, "Obrázek")
+    if not await covers.upload(get_redis(), book_id, raw):
+        raise HTTPException(status_code=400, detail="Tohle není obrázek (nebo je moc malý).")
+    session.expire_all()
+    return book_out(session.get(SpokenBook, book_id))
 
 
 class KindIn(BaseModel):

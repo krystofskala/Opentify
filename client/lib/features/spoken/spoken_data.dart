@@ -621,6 +621,22 @@ final spokenRozhlasSearchProvider = FutureProvider.autoDispose.family<List<Spoke
   return [for (final r in json['releases'] as List<dynamic>? ?? const []) SpokenRelease.fromJson(r as Map<String, dynamic>)];
 });
 
+/// "Špatný obal": server ho zahodí a zkusí další zdroj (vložený v souboru,
+/// obrázek ve složce, Google Books). `true` = našel jiný.
+Future<bool> reportWrongBookCover(WidgetRef ref, String bookId) async {
+  final json = await ref.read(apiClientProvider).postJson('/spoken/books/$bookId/wrong-cover');
+  ref.invalidate(spokenBookProvider(bookId));
+  ref.invalidate(spokenBooksProvider);
+  return json['coverSource'] != null;
+}
+
+/// Vlastní obal knihy (automatika ho už nepřepíše).
+Future<void> uploadBookCover(WidgetRef ref, String bookId, List<int> bytes, String filename) async {
+  await ref.read(apiClientProvider).postMultipart('/spoken/books/$bookId/cover', fieldName: 'file', bytes: bytes, filename: filename);
+  ref.invalidate(spokenBookProvider(bookId));
+  ref.invalidate(spokenBooksProvider);
+}
+
 /// Audiokniha, nebo rozhlasová hra (ručně, platí pro všechny profily).
 Future<void> setSpokenKind(WidgetRef ref, String bookId, String kind) async {
   await ref.read(apiClientProvider).putJson('/spoken/books/$bookId/kind', body: {'kind': kind});
