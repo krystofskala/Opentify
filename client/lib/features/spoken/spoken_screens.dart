@@ -29,6 +29,7 @@ import '../../widgets/glass/glass_segmented_control.dart';
 import '../../widgets/glass/glass_sheet.dart';
 import 'podcast_data.dart';
 import 'podcast_screens.dart';
+import 'spoken_actions.dart';
 import 'spoken_data.dart';
 import 'spoken_heart.dart';
 
@@ -127,6 +128,7 @@ class _BookTile extends ConsumerWidget {
             )
           : null,
       onTap: () => context.push('/spoken/book/${book.id}'),
+      onLongPress: () => showSpokenBookActions(context, book),
     );
   }
 }
@@ -290,6 +292,7 @@ class SpokenHomeScreen extends ConsumerWidget {
                             imageUrl: b.coverUrl,
                             placeholderIcon: Symbols.menu_book_rounded,
                             onTap: () => context.push('/spoken/book/${b.id}'),
+                            onLongPress: () => showSpokenBookActions(context, b),
                           ),
                       ]),
                     ],
@@ -319,6 +322,7 @@ class SpokenHomeScreen extends ConsumerWidget {
                             imageUrl: b.coverUrl,
                             placeholderIcon: Symbols.menu_book_rounded,
                             onTap: () => context.push('/spoken/book/${b.id}'),
+                            onLongPress: () => showSpokenBookActions(context, b),
                           ),
                       ]),
                     ],
@@ -333,6 +337,7 @@ class SpokenHomeScreen extends ConsumerWidget {
                             imageUrl: b.coverUrl,
                             placeholderIcon: Symbols.theater_comedy_rounded,
                             onTap: () => context.push('/spoken/book/${b.id}'),
+                            onLongPress: () => showSpokenBookActions(context, b),
                           ),
                       ]),
                     ],
@@ -349,6 +354,7 @@ class SpokenHomeScreen extends ConsumerWidget {
                               value: b.status == 'downloading' ? b.downloadProgress : null,
                             ),
                             onTap: () => context.push('/spoken/book/${b.id}'),
+                            onLongPress: () => showSpokenBookActions(context, b),
                           ),
                       ]),
                     ],
@@ -614,6 +620,7 @@ class _Results extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               onTap: () => context.push('/spoken/book/${b.id}'),
+              onLongPress: () => showSpokenBookActions(context, b),
             ),
         ],
         _Heading(cz != null && cz.releases.isNotEmpty && cz.releases.every((r) => r.isYoutube) ? 'Z YouTube' : 'Česky'),
@@ -1130,6 +1137,7 @@ class _BooksLibraryState extends ConsumerState<_BooksLibrary> {
                     imageUrl: b.coverUrl,
                     placeholderIcon: Symbols.menu_book_rounded,
                     onTap: () => context.push('/spoken/book/${b.id}'),
+                    onLongPress: () => showSpokenBookActions(context, b),
                   );
                 },
               ),
@@ -1151,7 +1159,14 @@ class SpokenBookScreen extends ConsumerWidget {
     final async = ref.watch(spokenBookProvider(bookId));
     final playing = ref.watch(audioPlayerControllerProvider.select((s) => s.nowPlaying?.recordingId));
     return Scaffold(
-      appBar: const SectionAppBar(''),
+      appBar: SectionAppBar('', actions: [
+        if (async.valueOrNull case final book?)
+          IconButton(
+            icon: const Icon(Symbols.more_horiz_rounded, semanticLabel: 'Možnosti'),
+            tooltip: 'Možnosti',
+            onPressed: () => showSpokenBookActions(context, book),
+          ),
+      ]),
       body: async.when(
         // Nové načtení (průběh stahování) nechá vidět původní obsah -- jinak bliklo načítání.
         skipLoadingOnReload: true,
@@ -1572,6 +1587,7 @@ class SpokenPersonScreen extends ConsumerWidget {
                       imageUrl: b.coverUrl,
                       placeholderIcon: Symbols.menu_book_rounded,
                       onTap: () => context.push('/spoken/book/${b.id}'),
+                      onLongPress: () => showSpokenBookActions(context, b),
                     ),
                 ]),
               ],

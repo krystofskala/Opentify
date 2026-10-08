@@ -273,6 +273,35 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('Menu knihy: dlouhý stisk v knihovně', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 1600 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final book = SpokenBook.fromJson({
+      'id': 'b1', 'title': 'Krev elfů', 'author': 'Andrzej Sapkowski', 'narrator': 'Jan Hyhlík', 'releaseTitle': 'x',
+      'status': 'ready', 'seriesName': 'Sága o zaklínači', 'seriesNumber': 3,
+      'progress': {'fileId': 'f', 'positionMs': 1000, 'finished': false},
+    });
+    await tester.pumpWidget(_app(const SpokenLibraryScreen(), [
+      spokenBooksProvider.overrideWith((ref) async => [book]),
+      spokenFavoritesProvider.overrideWith((ref) async => (books: <String>{}, people: <String>{})),
+      libraryScopeProvider.overrideWith((ref) => LibraryScopeController(ref)..state = LibraryScope.all),
+    ]));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.textContaining('Sága o zaklínači · díl 3'), findsOneWidget);
+    await tester.longPress(find.text('Krev elfů').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 800));
+    for (final label in ['Pokračovat', 'Přejít na autora', 'Přejít na interpreta', 'Řada: Sága o zaklínači',
+        'Označit jako dočtené', 'Začít znovu od začátku', 'Uložit do mých knih', 'Je to rozhlasová hra', 'Sdílet…']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
+
   test('díl řady podle názvu knihy', () {
     const s = (
       name: 'Sága o zaklínači',
