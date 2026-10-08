@@ -1591,8 +1591,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   /// Přeskočí přímo na `index` ve frontě (bez ohledu na shuffle pořadí) --
   /// pro `QueuePanel`, kde uživatel klepne na konkrétní řádek.
-  Future<void> skipToIndex(int index) async {
+  /// `position`: začít tam (kapitola v jiném souboru knihy).
+  Future<void> skipToIndex(int index, {Duration? position}) async {
     if (index < 0 || index >= state.queue.length) return;
+    if (position != null) {
+      _resumeAt = position;
+      _resumeFor = state.queue[index].recordingId;
+    }
     await _playAtIndex(index);
   }
 

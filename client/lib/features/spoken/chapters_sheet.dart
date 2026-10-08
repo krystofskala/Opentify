@@ -76,7 +76,16 @@ class _ChaptersList extends ConsumerWidget {
                         if (r.fileIndex == fileIndex) {
                           controller.seek(Duration(milliseconds: r.startMs));
                         } else {
-                          playBook(ref, book, fileIndex: r.fileIndex, position: Duration(milliseconds: r.startMs));
+                          // Soubor je ve frontě -> skočit na něj; fronta (i hudba
+                          // za knihou) zůstane. Jinak kniha znovu od té kapitoly.
+                          final at = Duration(milliseconds: r.startMs);
+                          final id = spokenQueueId(book.id, book.files[r.fileIndex].id);
+                          final index = ref.read(audioPlayerControllerProvider).queue.indexWhere((q) => q.recordingId == id);
+                          if (index >= 0) {
+                            controller.skipToIndex(index, position: at);
+                          } else {
+                            playBook(ref, book, fileIndex: r.fileIndex, position: at);
+                          }
                         }
                       },
                     );
