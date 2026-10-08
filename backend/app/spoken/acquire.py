@@ -150,8 +150,18 @@ async def _youtube_download(book_id: str, vid: str) -> None:
         asyncio.run_coroutine_threadsafe(_save(book_id, progress=round(share, 3)), loop)
         asyncio.run_coroutine_threadsafe(r.set(f"spoken:yt:lock:{book_id}", "1", ex=_YT_LOCK_S), loop)
 
+    async def heartbeat() -> None:
+        # Převod na MP3 po stažení (minuty) průběh nehlásí -- zámek obnovovat.
+        while True:
+            await asyncio.sleep(30)
+            await r.set(f"spoken:yt:lock:{book_id}", "1", ex=_YT_LOCK_S)
+
+    beat = asyncio.create_task(heartbeat())
     try:
-        await asyncio.to_thread(youtube.download, vid, dest, on_progress)
+        try:
+            await asyncio.to_thread(youtube.download, vid, dest, on_progress)
+        finally:
+            beat.cancel()
         await _save(book_id, status="importing", progress=1.0)
         count = await asyncio.to_thread(import_book, book_id, dest)
         meta = await youtube.info(vid) or {}

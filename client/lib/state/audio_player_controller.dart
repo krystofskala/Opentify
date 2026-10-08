@@ -433,7 +433,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Skrytý panel prohlížeče (jiný panel, minimalizované okno): Chrome tam
     // načtení zvuku odloží, dokud se panel neukáže -- nic se ještě nenačetlo
     // = čekat, ne hlásit zaseknutí (živě 8. 10.: „Nepodařilo se přehrát“).
-    if (kIsWeb && !_appVisible && _player.bufferedPosition == Duration.zero && _player.duration == null) {
+    // Totéž u knihy / epizody: dlouhý soubor se načítá déle (iPhone musí
+    // přečíst obsah souboru, než začne hrát) -- na to hlídá `_loadTimeout`.
+    if (((kIsWeb && !_appVisible) || (info != null && isSpokenId(info.recordingId))) &&
+        _player.bufferedPosition == Duration.zero &&
+        _player.duration == null) {
       _noSourceSince = null;
       _stallSince = now;
       return;
@@ -2611,12 +2615,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // spojení, iOS přehrávač čeká donekonečna), je chyba -- dřív se
       // kolečko točilo navždy. Rostoucí soubor může čekat na data déle.
       if (!isProgressive) {
+        // Kniha / epizoda: velký soubor, načtení může trvat déle (8. 10.:
+        // 2,5 h kniha z YouTube na iPhonu nestihla 15 s a točila se dokola).
+        final timeout = isSpokenId(info.recordingId) ? const Duration(seconds: 45) : _loadTimeout;
         void watchLoad() {
-          Timer(_loadTimeout, () {
+          Timer(timeout, () {
             if (gen != _sourceGen || _readyGen == gen || state.nowPlaying?.recordingId != info.recordingId) return;
             // Skrytý panel: prohlížeč načítání odložil -- počkat, až se ukáže.
             if (kIsWeb && !_appVisible && _player.bufferedPosition == Duration.zero) return watchLoad();
-            _handleStreamFailure(info, TimeoutException('zdroj se nenačetl', _loadTimeout), isProgressive: false);
+            _handleStreamFailure(info, TimeoutException('zdroj se nenačetl', timeout), isProgressive: false);
           });
         }
 

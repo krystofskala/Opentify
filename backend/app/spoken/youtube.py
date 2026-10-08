@@ -124,4 +124,51 @@ def download(vid: str, dest: Path, on_progress: Callable[[float], None]) -> Path
     files = [p for p in dest.iterdir() if p.is_file() and p.stem == vid and not p.name.endswith(".part")]
     if not files:
         raise RuntimeError("yt-dlp nevytvořil soubor")
-    return files[0]
+    return to_mp3_if_long(files[0])
+
+
+# Delší než 20 min -> MP3: m4a z YouTube má u 2,5 h knihy 1,5 MB obsahu na
+# začátku souboru, iPhone ho musí načíst celý, než začne hrát, a na pomalé
+# cestě to nestihl (8. 10.: Hobit nešel pustit). MP3 hraje hned a skáče se
+# v něm kamkoli (CBR).
+LONG_S = 20 * 60
+
+
+def _duration_s(path: Path) -> float | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True, text=True, timeout=60,
+        ).stdout.strip()
+        return float(out) if out else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def to_mp3_if_long(path: Path) -> Path:
+    """Dlouhý zvuk jiný než MP3 převede na MP3 128 kb/s (původní smaže);
+    krátký nebo při chybě vrátí původní."""
+    import subprocess
+
+    if path.suffix.lower() == ".mp3":
+        return path
+    duration = _duration_s(path)
+    if duration is None or duration < LONG_S:
+        return path
+    out = path.with_suffix(".mp3")
+    tmp = path.with_suffix(".mp3.part")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(path),
+             "-vn", "-map_metadata", "0", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", str(tmp)],
+            check=True, timeout=3600,
+        )
+        tmp.replace(out)
+        path.unlink(missing_ok=True)
+        return out
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("převod na MP3 selhal (%s): %s", path.name, exc)
+        tmp.unlink(missing_ok=True)
+        return path
