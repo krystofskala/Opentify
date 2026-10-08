@@ -1428,18 +1428,6 @@ class _HeroTeaserState extends State<HeroTeaser> {
   }
 }
 
-/// "42 min" / "5 h 25 min" -- jen když je délka známá aspoň u ~90 % skladeb
-/// (jinak by součet lhal); jinak `null`.
-String? heroTotalDuration(Iterable<int?> durationsMs) {
-  final list = durationsMs.toList();
-  if (list.isEmpty) return null;
-  final known = list.whereType<int>().toList();
-  if (known.length < list.length * 0.9) return null;
-  final minutes = (known.fold<int>(0, (a, b) => a + b) / 60000).round();
-  if (minutes <= 0) return null;
-  return minutes < 60 ? '$minutes min' : '${minutes ~/ 60} h ${minutes % 60} min';
-}
-
 /// "Aktualizováno dnes / včera / 28. 9."
 String heroUpdatedLabel(DateTime at) {
   final local = at.toLocal();

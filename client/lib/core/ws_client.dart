@@ -4,7 +4,6 @@ import 'dart:math';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../models/playback_model.dart';
 import 'realtime_event.dart';
 import 'device_token.dart';
 
@@ -192,18 +191,6 @@ class RealtimeClient {
   void playbackSeek(int positionMs) => _send({
         'type': 'playback.seek',
         'payload': {'positionMs': positionMs},
-      });
-
-  /// `expectedVersion` musí odpovídat serverové `PlaybackSession.version`,
-  /// jinak přijde `QueueConflictEvent` místo `QueueUpdatedEvent` — volající
-  /// (PlaybackController) se musí přihlásit k odběru `events` a na konflikt
-  /// zareagovat přepočtem + opakováním s novou verzí.
-  void queueSet(List<QueueItem> queue, int expectedVersion) => _send({
-        'type': 'queue.set',
-        'payload': {
-          'queue': queue.map((item) => item.toJson()).toList(),
-          'expectedVersion': expectedVersion,
-        },
       });
 
   void claimActiveDevice() => _send({'type': 'device.claim_active'});

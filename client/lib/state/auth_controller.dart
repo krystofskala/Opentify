@@ -133,6 +133,3 @@ final profilesProvider = FutureProvider.autoDispose<List<ProfileRow>>((ref) asyn
       ),
   ];
 });
-
-/// Pozvánkový odkaz pro kód.
-String inviteLink(String code) => '${appOrigin()}/?join=$code';

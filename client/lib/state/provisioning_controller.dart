@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/realtime_event.dart';
 import '../core/ws_client.dart';
 import '../data/provisioning_repository.dart';
-import '../models/availability.dart';
 import 'providers.dart';
 
 /// Odvozený stav jedné nahrávky v provisioning pipeline -- `status` sleduje
@@ -212,13 +211,6 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
     }
   }
 
-  TrackProvisioningState stateFor(String recordingId, Availability catalogAvailability) {
-    return state[recordingId] ??
-        TrackProvisioningState(
-          status: catalogAvailability == Availability.available ? 'AVAILABLE' : null,
-        );
-  }
-
   Future<void> provision(String recordingId, {bool interactive = false}) async {
     // Bez starého `streamUrl` (a chyby): přehrávač čekající v
     // `_waitForAvailability` by na něm jinak hned spustil stream starého
@@ -314,7 +306,7 @@ class ProvisioningController extends StateNotifier<Map<String, TrackProvisioning
       case QueueConflictEvent():
       case ConnectEvent():
       case UnknownEvent():
-        break; // mimo scope provisioning controlleru, viz PlaybackController
+        break; // obstarávání se netýká
     }
   }
 

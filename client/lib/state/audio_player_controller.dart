@@ -314,14 +314,8 @@ class AudioPlayerState {
   }
 }
 
-/// Skutečné (lokální) přehrávání zvuku přes `just_audio` -- na rozdíl od
-/// `state/playback_controller.dart` (který jen zrcadlí `playback.*`/`queue.*`
-/// WS protokol pro budoucí multi-device sync, viz jeho dokumentační komentář)
-/// tenhle kontroler je to, co dnes skutečně pouští zvuk v prohlížeči/na
-/// zařízení. Zůstává informovat `RealtimeClient` o play/pause/seek, aby
-/// ostatní zařízení -- až server `playback.*` doimplementuje -- viděla
-/// stejný stav; dokud server tyhle zprávy nezpracovává, jde jen o no-op
-/// odeslání navíc.
+/// Přehrávání zvuku (`just_audio`). Play / pauza / posun hlásí přes
+/// `RealtimeClient` -- z toho žije Opentify Connect (ostatní zařízení profilu).
 class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   AudioPlayerController(this._realtime, this._ref) : super(const AudioPlayerState.idle()) {
     _configureSession();

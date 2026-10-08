@@ -1,7 +1,7 @@
 import '../models/playback_model.dart';
 
 /// 1:1 s `channels./ws.subscribe` v docs/asyncapi.yaml — server->klient
-/// zprávy. `sealed` umožňuje volajícím (viz state/playback_controller.dart,
+/// zprávy. `sealed` umožňuje volajícím (viz
 /// state/provisioning_controller.dart) exhaustivní `switch` bez `default`
 /// větve, kterou by šlo omylem zapomenout doplnit při rozšíření protokolu.
 ///
@@ -74,7 +74,7 @@ final class QueueUpdatedEvent extends RealtimeEvent {
 
 /// Klientův `queue.set` byl odmítnut kvůli zastaralé `expectedVersion` —
 /// server posílá aktuální stav, na který si musí volající přepočítat svou
-/// změnu a poslat `queue.set` znovu (viz PlaybackController.setQueue).
+/// změnu a poslat `queue.set` znovu.
 final class QueueConflictEvent extends RealtimeEvent {
   const QueueConflictEvent({
     required this.reason,
