@@ -71,6 +71,8 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
   late final AnimationController _interactionController;
 
   bool _dragging = false;
+  final _labelLink = LayerLink();
+  final _labelPortal = OverlayPortalController();
   double? _dragValue;
 
   // Po puštění drží puk na nové poloze, dokud ji přehrávání nedožene (rádio
@@ -149,6 +151,7 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
       _dragging = true;
       _dragValue = _valueForLocalX(localX, width);
     });
+    if (widget.dragLabel != null) _labelPortal.show();
     _interactionController.forward();
     _syncAmplitudeTarget();
     widget.onChanged?.call(_dragValue!);
@@ -167,12 +170,50 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
     setState(() {
       _dragging = false;
       _dragValue = null;
+      if (_labelPortal.isShowing) _labelPortal.hide();
       _pendingValue = widget.onChangeEnd == null ? null : value;
       _pendingSince = DateTime.now();
     });
     _interactionController.reverse();
     _syncAmplitudeTarget();
     widget.onChangeEnd?.call(value);
+  }
+
+  Widget _dragBubble(BuildContext context, double progress) {
+    final theme = Theme.of(context);
+    final box = this.context.findRenderObject() as RenderBox?;
+    final width = box?.hasSize == true ? box!.size.width : 0.0;
+    // U krajů posunout dovnitř, ať bublina nevyjede z displeje.
+    final x = width <= 48 ? width / 2 : (progress.clamp(0.0, 1.0) * width).clamp(24.0, width - 24);
+    return Positioned(
+      left: 0,
+      top: 0,
+      child: CompositedTransformFollower(
+        link: _labelLink,
+        // Střed bubliny nad místem prstu, kousek nad čárou.
+        targetAnchor: Alignment.topLeft,
+        followerAnchor: Alignment.bottomCenter,
+        offset: Offset(x, -4),
+        child: IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.inverseSurface,
+              borderRadius: BorderRadius.circular(Expressive.cornerSmall),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
+              child: Text(
+                widget.dragLabel!(progress),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onInverseSurface,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -233,45 +274,18 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
         },
         onHorizontalDragEnd: (_) => _handleDragEnd(),
         onHorizontalDragCancel: _handleDragEnd,
-        child: widget.dragLabel == null || !_dragging
+        child: widget.dragLabel == null
             ? bar
-            : LayoutBuilder(builder: (context, constraints) {
-                final theme = Theme.of(context);
-                final x = (displayedProgress.clamp(0.0, 1.0) * constraints.maxWidth);
-                const bubbleWidth = 120.0;
-                final left = (x - bubbleWidth / 2).clamp(0.0, math.max(0.0, constraints.maxWidth - bubbleWidth)).toDouble();
-                return Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    bar,
-                    Positioned(
-                      left: left,
-                      bottom: widget.height + 4,
-                      width: bubbleWidth,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.inverseSurface,
-                              borderRadius: BorderRadius.circular(Expressive.cornerSmall),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
-                              child: Text(
-                                widget.dragLabel!(displayedProgress),
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: theme.colorScheme.onInverseSurface,
-                                  fontFeatures: const [FontFeature.tabularFigures()],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              }),
+            // Bublina v Overlay, ne ve Stacku: mini přehrávač je sklo s
+            // ořezem a bublina nad čárou se v něm ořízla (živě 8. 10.).
+            : CompositedTransformTarget(
+                link: _labelLink,
+                child: OverlayPortal(
+                  controller: _labelPortal,
+                  overlayChildBuilder: (context) => _dragBubble(context, displayedProgress),
+                  child: bar,
+                ),
+              ),
       ),
     );
   }
