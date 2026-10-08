@@ -25,6 +25,7 @@ import '../../widgets/toast.dart';
 import '../../state/liked_songs_controller.dart' show dislikedProvider;
 import '../../state/library_scope.dart' show addTrackToLibrary, libraryIdsProvider;
 import '../../state/offline_controller.dart';
+import '../../state/pip_player_service.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -172,6 +173,20 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               showPlayerButtonsSheet(host);
                             },
                           ),
+                          // Chrome / Edge na počítači: malé okno nad ostatními okny
+                          // (Michael, 8. 10.). Jinde se řádek neukáže.
+                          if (kIsWeb && nowPlaying != null && ProviderScope.containerOf(context, listen: false).read(pipPlayerProvider).supported)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Symbols.picture_in_picture_alt_rounded),
+                              title: const Text('Plovoucí přehrávač'),
+                              subtitle: const Text('Malé okno nad ostatními okny'),
+                              onTap: () {
+                                // Otevřít ještě v gestu klepnutí (prohlížeč jinak okno nedovolí).
+                                unawaited(ProviderScope.containerOf(context, listen: false).read(pipPlayerProvider).open());
+                                Navigator.of(context).pop();
+                              },
+                            ),
                           // Poslouchá polohu jen tenhle řádek, ne celý sheet.
                           if (nowPlaying != null)
                             Consumer(

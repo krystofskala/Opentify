@@ -22,6 +22,7 @@ import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
 import 'widgets/toast.dart';
 import 'state/connect_controller.dart';
+import 'state/pip_player_service.dart';
 import 'features/spoken/spoken_queue_sync.dart';
 import 'state/auto_continue.dart';
 import 'state/server_notice.dart';
@@ -49,6 +50,8 @@ class OpentifyApp extends ConsumerWidget {
     ref.watch(appearanceSyncProvider);
     // Opentify Connect: ostatní zařízení profilu (seznam, povely, převzetí).
     ref.watch(connectProvider);
+    // Plovoucí mini přehrávač (web, Chrome / Edge): i samo při přepnutí panelu.
+    ref.watch(pipPlayerProvider);
     // Pusť teď / nekonečné hraní: doplňuje frontu, když dochází.
     ref.watch(autoContinueProvider);
     // Díly knihy dostažené během poslechu se doplní do fronty.
