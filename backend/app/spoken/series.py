@@ -52,8 +52,11 @@ def _ids(entity: dict[str, Any], prop: str) -> list[str]:
     return out
 
 
-async def _find_series(title: str, author: str) -> tuple[str, str] | None:
-    """(id řady, id díla) pro knihu -- jen dílo se stejným názvem a autorem."""
+async def _find_series(title: str, author: str) -> tuple[str, str, str] | None:
+    """(id řady, id díla, autor) pro knihu -- jen dílo se stejným názvem a
+    autorem. Bez autora (kniha ho nemá) jen u dlouhého názvu (3+ slova) a
+    jediné řady mezi kandidáty ("Harry Potter a Vězeň z Azkabanu" ano,
+    "Zaklínač" ne); autor se pak vezme z Wikidat."""
     hits = (await _wd({"action": "wbsearchentities", "search": title, "language": "cs", "uselang": "cs",
                        "limit": 10, "type": "item"})).get("search") or []
     if not hits:
@@ -72,10 +75,20 @@ async def _find_series(title: str, author: str) -> tuple[str, str] | None:
     people = (await _wd({"action": "wbgetentities", "ids": "|".join(author_ids[:50]), "props": "labels",
                          "languages": "cs|sk|en"})).get("entities") or {}
     want = _surname(author)
+
+    def author_label(e: dict) -> str:
+        return next((lbl for a in _ids(e, "P50") if (lbl := _label(people.get(a) or {}))), "")
+
+    if not want:
+        if len(fold(title).split()) < 3 or len({_ids(e, "P179")[0] for _, e in candidates}) != 1:
+            return None
+        qid, e = candidates[0]
+        name = author_label(e)
+        return (_ids(e, "P179")[0], qid, name) if name else None
     for qid, e in candidates:
         names = {fold(v["value"]) for a in _ids(e, "P50") for v in ((people.get(a) or {}).get("labels") or {}).values()}
-        if want and any(want in n.split() for n in names):
-            return _ids(e, "P179")[0], qid
+        if any(want in n.split() for n in names):
+            return _ids(e, "P179")[0], qid, author_label(e) or author
     return None
 
 
@@ -181,13 +194,14 @@ async def lookup(title: str, author: str) -> dict[str, Any] | None:
         found = await _find_series(title, author)
         if found is None:
             return {}
-        series_id, work_id = found
+        series_id, work_id, found_author = found
         parts, loose = order_parts(_series_rows(await _series_entities(series_id), series_id))
         if len(parts) + len(loose) < 2:
             return {}
         name = _label(((await _wd({"action": "wbgetentities", "ids": series_id, "props": "labels",
                                    "languages": "cs|sk|en"})).get("entities") or {}).get(series_id) or {})
-        return {"id": series_id, "name": name or common_prefix([w["title"] for w in parts]), "workId": work_id, "author": author, "parts": parts, "loose": loose}
+        return {"id": series_id, "name": name or common_prefix([w["title"] for w in parts]), "workId": work_id,
+                "author": author or found_author, "parts": parts, "loose": loose}
 
     data = await cached_json(f"spoken:series:v1:{fold(title)}|{_surname(author)}", TTL_S, build, is_empty=lambda d: False)
     return data or None

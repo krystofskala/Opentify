@@ -74,6 +74,8 @@ async def link(book: SpokenBook) -> dict:
         if part is None:
             continue
         fields: dict = {"series_name": found["name"] or "Řada", "series_number": part["number"]}
+        if not book.author and found.get("author"):
+            fields["author"] = found["author"]  # kniha bez autora: z Wikidat
         # "kniha 1.posledni prani" -> "Poslední přání" (název z katalogu
         # audioknihy.cz se nepřepisuje).
         if book.metadata_source != "audioknihy.cz" and book.title != part["title"]:
@@ -84,7 +86,7 @@ async def link(book: SpokenBook) -> dict:
 
             dest = SPOKEN_ROOT / "covers" / f"{book.id}.jpg"
             try:
-                if await cover_image(part["title"], book.author or "", dest):
+                if await cover_image(part["title"], book.author or fields.get("author") or "", dest):
                     fields["cover_url"] = f"spoken/books/{book.id}/cover"
             except Exception as e:  # noqa: BLE001 -- obal je bonus; chyba Google Books nesmí zastavit řady (audit 8. 10.)
                 logger.info("obal knihy %s z Google Books: %s", book.id, e)
@@ -112,7 +114,6 @@ async def _tick(r, limit: int) -> None:
             books = list(session.exec(
                 select(SpokenBook).where(
                     SpokenBook.status == "ready",
-                    SpokenBook.author.is_not(None),  # type: ignore[union-attr]
                     SpokenBook.series_name.is_(None),  # type: ignore[union-attr]
                 ).limit(limit)
             ).all())

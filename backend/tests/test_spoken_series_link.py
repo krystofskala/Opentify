@@ -76,3 +76,22 @@ def test_pick_cover_strict():
     ]
     assert describe.pick_cover(items, "Krev elfů", "Andrzej Sapkowski") == "https://x/l.jpg"
     assert describe.pick_cover(items, "Věž vlaštovky", "Andrzej Sapkowski") is None
+
+
+def test_book_without_author_gets_author_from_series(monkeypatch):
+    _engine(monkeypatch)
+
+    async def fake_lookup(title, author):
+        assert author == ""
+        return {"name": "Harry Potter", "author": "Joanne Rowlingová",
+                "parts": [{"title": "Harry Potter a vězeň z Azkabanu", "number": 3}], "loose": []}
+
+    async def no_cover(*a):
+        return False
+
+    monkeypatch.setattr(series, "lookup", fake_lookup)
+    monkeypatch.setattr(describe, "cover_image", no_cover)
+    book = SpokenBook(id="hp", source_ref="hp", release_title="x", title="Harry Potter a Vězeň z Azkabanu",
+                      cover_url="spoken/books/hp/cover", requested_by_user_id="me")
+    fields = asyncio.run(series_link.link(book))
+    assert fields["author"] == "Joanne Rowlingová" and fields["series_number"] == 3
