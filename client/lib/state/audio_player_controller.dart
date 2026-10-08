@@ -1330,8 +1330,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
     final parts = spokenParts(id);
     if (parts == null) return;
+    // Poslední díl KNIHY (za ním může ve frontě být hudba -- dřív se kniha
+    // pak nikdy neoznačila jako dočtená; audit 8. 10.).
+    final next = s.nextIndex;
+    final nextPart = next == null ? null : spokenParts(s.queue[next].recordingId);
+    final lastPart = nextPart == null || nextPart.bookId != parts.bookId;
     final finished =
-        !s.hasNext && duration != null && duration > Duration.zero && s.position >= duration - const Duration(seconds: 30);
+        lastPart && duration != null && duration > Duration.zero && s.position >= duration - const Duration(seconds: 30);
     unawaited(_ref
         .read(apiClientProvider)
         .putJson('/spoken/books/${parts.bookId}/progress', body: {
