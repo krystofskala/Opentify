@@ -286,9 +286,10 @@ def rozhlas_finish(book_id: str, dest: Path, data: dict) -> None:
         for f in session.exec(select(SpokenFile).where(SpokenFile.book_id == book_id)).all():
             f.title = titles.get(Path(f.path).name, f.title)
             session.add(f)
-        book.title = fields["title"]
-        book.author = fields["author"] or book.author
-        book.narrator = fields["narrator"] or book.narrator
+        if book.metadata_source != "manual":  # ruční úprava má přednost
+            book.title = fields["title"]
+            book.author = fields["author"] or book.author
+            book.narrator = fields["narrator"] or book.narrator
         book.description = fields["description"] or book.description
         # Ručně přepnutý druh (rozhlasová hra / kniha) se nepřepisuje.
         book.kind = book.kind or fields["kind"]

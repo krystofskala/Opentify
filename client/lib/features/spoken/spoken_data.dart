@@ -630,6 +630,17 @@ Future<bool> reportWrongBookCover(WidgetRef ref, String bookId) async {
   return json['coverSource'] != null;
 }
 
+/// Ruční úprava názvu, autora a interpreta (import ani katalog ji nepřepíšou).
+Future<void> setBookMeta(WidgetRef ref, String bookId, {required String title, String? author, String? narrator}) async {
+  await ref.read(apiClientProvider).putJson('/spoken/books/$bookId/meta', body: {
+    'title': title,
+    'author': author,
+    'narrator': narrator,
+  });
+  ref.invalidate(spokenBookProvider(bookId));
+  ref.invalidate(spokenBooksProvider);
+}
+
 /// Vlastní obal knihy (automatika ho už nepřepíše).
 Future<void> uploadBookCover(WidgetRef ref, String bookId, List<int> bytes, String filename) async {
   await ref.read(apiClientProvider).postMultipart('/spoken/books/$bookId/cover', fieldName: 'file', bytes: bytes, filename: filename);

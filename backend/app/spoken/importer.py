@@ -174,7 +174,8 @@ def import_book(book_id: str, root: Path, only: list[Path] | None = None) -> int
         # Album v tagu = název knihy (čistší než název vydání na trackeru).
         where = str(rows[0][0])
         album = tidy_tag(_tag(first, "album"), where)
-        if album and len(album) <= 200 and book.metadata_source != CATALOG:
+        # Název z katalogu i ruční úprava (Upravit knihu) mají přednost před tagem.
+        if album and len(album) <= 200 and book.metadata_source not in (CATALOG, "manual"):
             book.title = album
         book.author = book.author or tidy_tag(_tag(first, "albumartist", "artist"), where, person=True)
         book.narrator = book.narrator or tidy_tag(_tag(first, "performer", "composer"), where, person=True)

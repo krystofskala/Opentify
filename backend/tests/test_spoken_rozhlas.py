@@ -159,3 +159,24 @@ def test_download_skips_failed_part_and_keeps_others(tmp_path: Path, monkeypatch
     again = []
     rozhlas.download(eps, tmp_path, lambda s: None, again.append)
     assert [p.name for p in again] == ["001.mp3", "003.mp3"]
+
+
+def test_manual_meta_edit_wins(monkeypatch):
+    e = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(e)
+
+    async def no_event(*a, **k):
+        return None
+
+    import app.events
+
+    monkeypatch.setattr(app.events, "publish_event", no_event)
+    with Session(e) as s:
+        s.add(SpokenBook(id="m", source_ref="m", release_title="x", title="01 - Krev elfu", author="Harry",
+                         requested_by_user_id="me", series_name=""))
+        s.commit()
+        out = asyncio.run(routes.set_book_meta("m", routes.BookMetaIn(title=" Krev  elfů ", author="Andrzej Sapkowski", narrator=""),
+                                               session=s, current=("me", "x"), _local_only=None))
+        row = s.get(SpokenBook, "m")
+        assert out["title"] == "Krev elfů" and row.author == "Andrzej Sapkowski" and row.narrator is None
+        assert row.metadata_source == "manual" and row.series_name is None

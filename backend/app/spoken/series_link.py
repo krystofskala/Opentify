@@ -90,11 +90,11 @@ async def link(book: SpokenBook) -> dict:
         if part is None:
             continue
         fields: dict = {"series_name": found["name"] or "Řada", "series_number": part["number"]}
-        if found.get("author") and junk_author(book.author, book.title) and fold(found["author"]) != fold(book.author or ""):
+        if found.get("author") and book.metadata_source != "manual" and junk_author(book.author, book.title) and fold(found["author"]) != fold(book.author or ""):
             fields["author"] = found["author"]  # bez autora / nesmysl z tagů: z Wikidat
         # "kniha 1.posledni prani" -> "Poslední přání" (název z katalogu
         # audioknihy.cz se nepřepisuje).
-        if book.metadata_source != "audioknihy.cz" and book.title != part["title"]:
+        if book.metadata_source not in ("audioknihy.cz", "manual") and book.title != part["title"]:
             fields["title"] = part["title"]
         if await asyncio.to_thread(_shared_cover, book):
             from app.spoken.acquire import SPOKEN_ROOT

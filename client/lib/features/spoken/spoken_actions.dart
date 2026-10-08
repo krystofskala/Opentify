@@ -235,6 +235,15 @@ class _BookActionsSheet extends ConsumerWidget {
                 ),
               if (book.isReady) ...[
                 _Row(
+                  icon: Symbols.edit_rounded,
+                  label: 'Upravit název a autora',
+                  onTap: () async {
+                    // Dialog nad menu, zavřít až potom (`ref` zavřeného sheetu nejde použít).
+                    await _editMeta(context, ref, book);
+                    if (context.mounted) close();
+                  },
+                ),
+                _Row(
                   icon: Symbols.add_photo_alternate_rounded,
                   label: 'Nahrát vlastní obal',
                   onTap: () async {
@@ -283,6 +292,42 @@ class _BookActionsSheet extends ConsumerWidget {
       ),
       ),
     );
+  }
+}
+
+/// Název, autor, interpret -- jednoduchý dialog jako úprava playlistu.
+Future<void> _editMeta(BuildContext context, WidgetRef ref, SpokenBook book) async {
+  final title = TextEditingController(text: book.title);
+  final author = TextEditingController(text: book.author ?? '');
+  final narrator = TextEditingController(text: book.narrator ?? '');
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Upravit knihu'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(controller: title, decoration: const InputDecoration(labelText: 'Název')),
+          TextField(controller: author, decoration: const InputDecoration(labelText: 'Autor')),
+          TextField(controller: narrator, decoration: const InputDecoration(labelText: 'Čte (interpret)')),
+        ],
+      ),
+      actions: [
+        GlassButton(label: 'Zrušit', style: GlassButtonStyle.plain, compact: true, onPressed: () => Navigator.of(context).pop(false)),
+        GlassButton(label: 'Uložit', style: GlassButtonStyle.prominent, compact: true, onPressed: () => Navigator.of(context).pop(true)),
+      ],
+    ),
+  );
+  if (ok != true || title.text.trim().isEmpty) return;
+  try {
+    await setBookMeta(ref, book.id,
+        title: title.text.trim(),
+        author: author.text.trim().isEmpty ? null : author.text.trim(),
+        narrator: narrator.text.trim().isEmpty ? null : narrator.text.trim());
+    showToast(messenger, 'Uloženo');
+  } catch (_) {
+    showToast(messenger, 'Nepodařilo se uložit');
   }
 }
 

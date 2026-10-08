@@ -905,6 +905,43 @@ async def upload_book_cover(
     return book_out(session.get(SpokenBook, book_id))
 
 
+class BookMetaIn(BaseModel):
+    title: str
+    author: str | None = None
+    narrator: str | None = None
+
+
+@spoken_router.put("/books/{book_id}/meta")
+async def set_book_meta(
+    book_id: str,
+    body: BookMetaIn,
+    session: Session = Depends(get_session),
+    current: tuple[str, str] = Depends(get_current_user),
+    _local_only: None = Depends(deny_public),
+):
+    """Ruční úprava názvu, autora a interpreta (z torrentu / tagů bývají
+    špatně). Import, katalog ani řady ji pak nepřepíšou. Kniha je společná."""
+    title = " ".join(body.title.split())[:300]
+    if len(title) < 1:
+        raise HTTPException(status_code=400, detail="Chybí název.")
+    book = session.get(SpokenBook, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="kniha nenalezena")
+    book.title = title
+    book.author = " ".join((body.author or "").split())[:200] or None
+    book.narrator = " ".join((body.narrator or "").split())[:200] or None
+    book.metadata_source = "manual"
+    book.series_name = None  # řada podle nového názvu / autora znovu
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    from app.events import publish_event
+
+    out = book_out(book)
+    await publish_event(current[0], "spoken.book", out)
+    return out
+
+
 class KindIn(BaseModel):
     kind: str  # book | drama
 
