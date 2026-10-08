@@ -1186,6 +1186,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // dřívějšího přehrání téže skladby (viz `_announceStart`).
     _scrobbleId = null;
     _rememberProgress = rememberProgress;
+    // Nová fronta: pozice zapamatované pro díly ze staré fronty neplatí
+    // (jinak by "Začít znovu" a Přehrát skočilo do půlky dílu; audit 8. 10.).
+    _pendingResume.clear();
     // "Pokračovat" v albu/playlistu: skladba začne tam, kde uživatel skončil.
     _resumeAt = startPosition;
     _resumeFor = startPosition == null ? null : items[index].recordingId;

@@ -539,12 +539,17 @@ async def next_in_series(session: Session = Depends(get_session), current: tuple
     by_series: dict[tuple[str, float], SpokenBook] = {
         (b.series_name, b.series_number): b for b in books if b.series_name and b.series_number is not None
     }
+    # Díl rozečtený / dočtený v JAKÉMKOLI vydání se nenabízí (audit 8. 10.).
+    touched = {(b.series_name, b.series_number) for b in books if b.id in started and b.series_name}
+    from app.redis_bus import get_redis
+
+    wikidata_ok = not await get_redis().get("spoken:series:backoff")
     out, seen = [], set()
     for b in books:
         if b.id not in finished or not b.series_name or b.series_number is None or not b.author:
             continue
         nxt = b.series_number + 1
-        if (b.series_name, nxt) in seen:
+        if (b.series_name, nxt) in seen or (b.series_name, nxt) in touched:
             continue
         seen.add((b.series_name, nxt))
         on_server = by_series.get((b.series_name, nxt))
@@ -554,10 +559,12 @@ async def next_in_series(session: Session = Depends(get_session), current: tuple
             out.append({"seriesName": b.series_name, "number": nxt, "title": on_server.title, "author": on_server.author,
                         "bookId": on_server.id, "coverUrl": on_server.cover_url})
             continue
-        try:
-            found = await series_mod.lookup(b.title, b.author)
-        except Exception:  # noqa: BLE001 -- bez Wikidat jen díly na serveru
-            found = None
+        found = None
+        if wikidata_ok:
+            try:
+                found = await series_mod.lookup(b.title, b.author)
+            except Exception:  # noqa: BLE001 -- bez Wikidat jen díly na serveru
+                found = None
         part = next((p for p in (found or {}).get("parts") or [] if p.get("number") == nxt), None)
         if part:
             out.append({"seriesName": b.series_name, "number": nxt, "title": part["title"], "author": b.author,
@@ -908,13 +915,26 @@ def save_progress(
     p = session.exec(
         select(SpokenProgress).where(SpokenProgress.user_id == current[0], SpokenProgress.book_id == book_id)
     ).first()
+    from sqlalchemy import update as sa_update
+
     from app.spoken import history
 
-    # Historie po dnech: poslouchaný čas z posunu pozice (ne pro úplně první uložení).
-    history.record(session, current[0], "book", book_id,
-                   history.listened_ms(p.file_id if p else None, p.position_ms if p else None, body.fileId, body.positionMs))
-    p = p or SpokenProgress(user_id=current[0], book_id=book_id, file_id=body.fileId)
-    p.file_id, p.position_ms, p.finished, p.updated_at = body.fileId, max(0, body.positionMs), body.finished, utcnow()
+    ms = history.listened_ms(p.file_id if p else None, p.position_ms if p else None, body.fileId, body.positionMs,
+                             history.elapsed_since(p.updated_at) if p else None)
+    if p is not None:
+        # Podmíněně podle staré pozice: dvě souběžná uložení (pauza + skrytí
+        # appky) by jinak obě započetla tentýž úsek (audit 8. 10.).
+        res = session.exec(
+            sa_update(SpokenProgress)
+            .where(SpokenProgress.id == p.id, SpokenProgress.position_ms == p.position_ms, SpokenProgress.file_id == p.file_id)
+            .values(file_id=body.fileId, position_ms=max(0, body.positionMs), finished=body.finished, updated_at=utcnow())
+        )
+        if res.rowcount:
+            history.record(session, current[0], "book", book_id, ms)
+        session.commit()
+        return {"ok": True}
+    p = SpokenProgress(user_id=current[0], book_id=book_id, file_id=body.fileId,
+                       position_ms=max(0, body.positionMs), finished=body.finished, updated_at=utcnow())
     session.add(p)
     session.commit()
     return {"ok": True}
@@ -1000,7 +1020,7 @@ async def set_book_meta(
     book.author = " ".join((body.author or "").split())[:200] or None
     book.narrator = " ".join((body.narrator or "").split())[:200] or None
     book.metadata_source = "manual"
-    book.series_name = None  # řada podle nového názvu / autora znovu
+    book.series_name, book.series_number = None, None  # řada podle nového názvu / autora znovu
     session.add(book)
     session.commit()
     session.refresh(book)

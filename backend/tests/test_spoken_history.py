@@ -14,6 +14,9 @@ def test_listened_ms():
     assert history.listened_ms("f1", 9000, "f1", 2000) == 0           # zpět
     assert history.listened_ms("f1", 3000000, "f2", 20000) == 20000   # další díl
     assert history.listened_ms("f1", 3000000, "f2", 999999) == history.MAX_STEP_MS
+    # S uběhlým časem: výpadek 10 min a 10 min poslechu se započte, skok ne.
+    assert history.listened_ms("f1", 0, "f1", 600000, elapsed_ms=600000) == 600000
+    assert history.listened_ms("f1", 0, "f1", 600000, elapsed_ms=15000) == 0
 
 
 def test_progress_saves_build_daily_history():
@@ -24,8 +27,17 @@ def test_progress_saves_build_daily_history():
                          requested_by_user_id="me"))
         s.add(SpokenFile(id="f1", book_id="b", position=0, path="/x/1.mp3"))
         s.commit()
+        from datetime import timedelta
+
+        from app.models import SpokenProgress
+
         for pos in (0, 15000, 30000, 45000):
             routes.save_progress("b", routes.ProgressIn(fileId="f1", positionMs=pos, finished=False), session=s, current=("me", "x"))
+            # Mezi uloženími uběhne 20 s (strop poslechu = uběhlý čas × rychlost).
+            for prog in s.exec(select(SpokenProgress)).all():
+                prog.updated_at = prog.updated_at - timedelta(seconds=20)
+                s.add(prog)
+            s.commit()
         rows = s.exec(select(SpokenListenDay)).all()
         assert len(rows) == 1 and rows[0].seconds == 45 and rows[0].day == history.today()
         out = routes.spoken_history(session=s, current=("me", "x"))

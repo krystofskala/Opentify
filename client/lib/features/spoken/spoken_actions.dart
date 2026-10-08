@@ -25,13 +25,30 @@ Future<void> showSpokenBookActions(BuildContext context, SpokenBook book) {
   return showGlassSheet<void>(context, builder: (_) => _BookActionsSheet(hostContext: context, book: book));
 }
 
-class _BookActionsSheet extends ConsumerWidget {
+class _BookActionsSheet extends ConsumerStatefulWidget {
   const _BookActionsSheet({required this.hostContext, required this.book});
   final BuildContext hostContext;
   final SpokenBook book;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_BookActionsSheet> createState() => _BookActionsSheetState();
+}
+
+class _BookActionsSheetState extends ConsumerState<_BookActionsSheet> {
+  // Menu se zavírá až po dokončení požadavku -- druhé klepnutí mezitím
+  // (dvakrát do fronty, zamítnutí i nového obalu) se ignoruje (audit 8. 10.).
+  bool _busy = false;
+
+  VoidCallback _guard(Future<void> Function() action) => () {
+        if (_busy) return;
+        _busy = true;
+        action().whenComplete(() => _busy = false);
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final hostContext = widget.hostContext;
+    final book = widget.book;
     final theme = Theme.of(context);
     final messenger = ScaffoldMessenger.maybeOf(hostContext);
     final favs = ref.watch(spokenFavoritesProvider).valueOrNull;
@@ -74,6 +91,7 @@ class _BookActionsSheet extends ConsumerWidget {
         });
         ref.invalidate(spokenBookProvider(b.id));
         ref.invalidate(spokenBooksProvider);
+        ref.invalidate(spokenNextInSeriesProvider);
         toast(finished ? 'Označeno jako dočtené' : 'Kniha začne znovu od začátku');
       } catch (_) {
         toast('Nepodařilo se uložit');
@@ -124,38 +142,38 @@ class _BookActionsSheet extends ConsumerWidget {
                 _Row(
                   icon: Symbols.play_arrow_rounded,
                   label: book.inProgress ? 'Pokračovat' : 'Přehrát',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     // Síť dřív, zavřít až potom -- `ref` zavřeného sheetu už
                     // nejde použít (audit 8. 10.: nic se nestalo).
                     final b = await full();
                     if (b != null) playBook(ref, b);
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
               if (book.canPlay && playing) ...[
                 _Row(
                   icon: Symbols.playlist_play_rounded,
                   label: 'Přehrát jako další',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     final b = await full();
                     if (b != null) {
                       await controller.playNextAll(fromSaved(b), sourceLabel: b.title);
                       toast('Kniha hraje jako další');
                     }
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
                 _Row(
                   icon: Symbols.queue_music_rounded,
                   label: 'Přidat do fronty',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     final b = await full();
                     if (b != null) {
                       await controller.addAllToQueue(fromSaved(b), sourceLabel: b.title);
                       toast('Přidáno do fronty');
                     }
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
               ],
               const _MenuDivider(),
@@ -191,25 +209,25 @@ class _BookActionsSheet extends ConsumerWidget {
                 _Row(
                   icon: Symbols.check_circle_rounded,
                   label: 'Označit jako dočtené',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     await progress(finished: true);
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
               if (book.progress != null)
                 _Row(
                   icon: Symbols.restart_alt_rounded,
                   label: 'Začít znovu od začátku',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     await progress(finished: false);
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
               if (favs != null)
                 _Row(
                   icon: Symbols.favorite_rounded,
                   label: saved ? 'Odebrat z mých knih' : 'Uložit do mých knih',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     try {
                       await setSpokenFavorite(ref, bookId: book.id, on: !saved);
                       toast(saved ? 'Odebráno z mých knih' : 'Uloženo do mých knih');
@@ -217,13 +235,13 @@ class _BookActionsSheet extends ConsumerWidget {
                       toast('Nepodařilo se uložit');
                     }
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
               if (book.isReady)
                 _Row(
                   icon: book.isDrama ? Symbols.menu_book_rounded : Symbols.theater_comedy_rounded,
                   label: book.isDrama ? 'Je to audiokniha' : 'Je to rozhlasová hra',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     try {
                       await setSpokenKind(ref, book.id, book.isDrama ? 'book' : 'drama');
                       toast(book.isDrama ? 'Přesunuto mezi audioknihy' : 'Přesunuto mezi rozhlasové hry');
@@ -231,22 +249,22 @@ class _BookActionsSheet extends ConsumerWidget {
                       toast('Nepodařilo se uložit');
                     }
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
               if (book.isReady) ...[
                 _Row(
                   icon: Symbols.edit_rounded,
                   label: 'Upravit název a autora',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     // Dialog nad menu, zavřít až potom (`ref` zavřeného sheetu nejde použít).
                     await _editMeta(context, ref, book);
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
                 _Row(
                   icon: Symbols.add_photo_alternate_rounded,
                   label: 'Nahrát vlastní obal',
-                  onTap: () async {
+                  onTap: _guard(() async {
                     final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
                     final file = picked?.files.firstOrNull;
                     if (file?.bytes != null) {
@@ -258,13 +276,13 @@ class _BookActionsSheet extends ConsumerWidget {
                       }
                     }
                     if (context.mounted) close();
-                  },
+                  }),
                 ),
                 if (book.coverUrl != null)
                   _Row(
                     icon: Symbols.hide_image_rounded,
                     label: 'Nahlásit špatný obal',
-                    onTap: () async {
+                    onTap: _guard(() async {
                       try {
                         final other = await reportWrongBookCover(ref, book.id);
                         toast(other ? 'Obal vyměněn za jiný' : 'Obal odebrán – jiný se nenašel');
@@ -272,7 +290,7 @@ class _BookActionsSheet extends ConsumerWidget {
                         toast('Nepodařilo se, zkus to znovu');
                       }
                       if (context.mounted) close();
-                    },
+                    }),
                   ),
               ],
               const _MenuDivider(),

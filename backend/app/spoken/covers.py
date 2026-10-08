@@ -166,10 +166,21 @@ async def reject(r, book_id: str) -> str | None:
 
     source = await r.get(f"spoken:cover:src:{book_id}")
     source = source.decode() if isinstance(source, bytes) else source
+    path = own_path(book_id)
+    had_own = path.is_file()
     if source and source != "custom":
         await r.sadd(f"spoken:cover:rejected:{book_id}", source)
-    path = own_path(book_id)
-    if path.is_file():
+    elif not source and not had_own:
+        # Původní obal knihy z rozhlasu / YouTube = cover.jpg ve složce knihy
+        # -- zdroj "složka" by vrátil tentýž obrázek (audit 8. 10.).
+        def own_folder_cover() -> bool:
+            with Session(engine) as session:
+                b = session.get(SpokenBook, book_id)
+                return bool(b and (b.cover_url or "").startswith(f"spoken/books/{book_id}/cover"))
+
+        if await asyncio.to_thread(own_folder_cover):
+            await r.sadd(f"spoken:cover:rejected:{book_id}", "folder")
+    if had_own:
         path.unlink()
     await r.delete(f"spoken:cover:src:{book_id}")
 

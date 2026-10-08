@@ -50,8 +50,8 @@ def test_link_sets_part_title_and_own_cover_for_collection(monkeypatch, tmp_path
         book = s.get(SpokenBook, "b0")
         s.expunge(book)
     fields = asyncio.run(series_link.link(book))
-    assert fields == {"series_name": "Sága o zaklínači", "series_number": 1, "title": "Poslední přání",
-                      "cover_url": "spoken/books/b0/cover"}
+    assert fields.pop("cover_url").startswith("spoken/books/b0/cover?v=")
+    assert fields == {"series_name": "Sága o zaklínači", "series_number": 1, "title": "Poslední přání"}
     assert (tmp_path / "covers" / "b0.jpg").is_file()
 
 

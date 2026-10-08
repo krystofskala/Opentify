@@ -1276,11 +1276,9 @@ async def _spoken_series_tick(r) -> None:
 
     await series_link.tick(r)
     # Obaly knih: záložní řetěz (vložený, složka, Google Books).
-    if await r.set("spoken:cover:tick", "1", nx=True, ex=300):
-        try:
-            await covers.tick(r)
-        finally:
-            await r.delete("spoken:cover:tick")
+    # Nejvýš jednou za 10 minut (prochází všechny knihy; audit 8. 10.).
+    if await r.set("spoken:cover:tick", "1", nx=True, ex=600):
+        await covers.tick(r)
 
 
 async def _vpn_port_tick(r) -> None:

@@ -75,7 +75,7 @@ def junk_author(author: str | None, title: str) -> bool:
     return not a or any(ch.isdigit() for ch in a) or len(a.split()) < 2 or a in fold(title)
 
 
-async def link(book: SpokenBook) -> dict:
+async def link(book: SpokenBook, r=None) -> dict:
     """Řada a díl jedné knihy -> pole k uložení (vyhazuje při 429)."""
     for cand in title_candidates(book.title):
         found = await series.lookup(cand, book.author or "")
@@ -96,14 +96,22 @@ async def link(book: SpokenBook) -> dict:
         # audioknihy.cz se nepřepisuje).
         if book.metadata_source not in ("audioknihy.cz", "manual") and book.title != part["title"]:
             fields["title"] = part["title"]
-        if await asyncio.to_thread(_shared_cover, book):
-            from app.spoken.acquire import SPOKEN_ROOT
+        rejected: set = set()
+        if r is not None:
+            rejected = {x.decode() if isinstance(x, bytes) else x for x in await r.smembers(f"spoken:cover:rejected:{book.id}")}
+        own = await r.get(f"spoken:cover:src:{book.id}") if r is not None else None
+        # Obal z Google Books (název dílu) -- jen když ho uživatel nezamítl a
+        # nemá vlastní; evidence zdroje jako u `covers` (Špatný obal pak funguje).
+        if "google" not in rejected and not own and await asyncio.to_thread(_shared_cover, book):
+            from app.spoken import covers
             from app.spoken.describe import cover_image
 
-            dest = SPOKEN_ROOT / "covers" / f"{book.id}.jpg"
+            dest = covers.own_path(book.id)
             try:
                 if await cover_image(part["title"], book.author or fields.get("author") or "", dest):
-                    fields["cover_url"] = f"spoken/books/{book.id}/cover"
+                    fields["cover_url"] = covers.cover_url(book.id)
+                    if r is not None:
+                        await r.set(f"spoken:cover:src:{book.id}", "google")
             except Exception as e:  # noqa: BLE001 -- obal je bonus; chyba Google Books nesmí zastavit řady (audit 8. 10.)
                 logger.info("obal knihy %s z Google Books: %s", book.id, e)
         return fields
@@ -141,7 +149,7 @@ async def _tick(r, limit: int) -> None:
 
     for book in await asyncio.to_thread(todo):
         try:
-            fields = await link(book)
+            fields = await link(book, r)
         except Exception as e:  # noqa: BLE001 -- 429 / výpadek: 15 min pauza, nic se neuloží
             logger.info("řada knihy %s: %s", book.id, e)
             await r.set("spoken:series:backoff", "1", ex=900)

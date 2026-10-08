@@ -222,6 +222,7 @@ class SpokenHomeScreen extends ConsumerWidget {
               ref.invalidate(spokenBooksProvider);
               ref.invalidate(podcastHomeProvider);
               ref.invalidate(spokenHomeLayoutProvider);
+              ref.invalidate(spokenNextInSeriesProvider);
             },
             // Sekce jako na hudebním Domů: nadpis a vodorovná řada karet.
             child: ListView(

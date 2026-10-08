@@ -23,6 +23,7 @@ from app.models import SpokenListenDay
 from app.utils import utcnow
 
 MAX_STEP_MS = 3 * 60 * 1000
+MAX_SPEED = 3.0  # nejvyšší rychlost přehrávání v appce (a rezerva)
 _TZ = ZoneInfo("Europe/Prague")
 
 
@@ -30,14 +31,28 @@ def today() -> str:
     return datetime.now(_TZ).date().isoformat()
 
 
-def listened_ms(prev_file: str | None, prev_pos: int | None, file_id: str | None, pos: int) -> int:
-    """Kolik se poslouchalo mezi dvěma uloženími pozice."""
+def listened_ms(
+    prev_file: str | None, prev_pos: int | None, file_id: str | None, pos: int, elapsed_ms: float | None = None
+) -> int:
+    """Kolik se poslouchalo mezi dvěma uloženími pozice. Strop je čas, který
+    od minulého uložení opravdu uběhl (× nejvyšší rychlost) -- výpadek signálu
+    v autě se tak nezahodí a skok dopředu se nepočítá (audit 8. 10.). Bez
+    známého času (starší řádek) pevné 3 minuty."""
     if prev_pos is None:
         return 0  # první uložení -- není s čím porovnat
+    cap = MAX_STEP_MS if elapsed_ms is None else max(0.0, elapsed_ms) * MAX_SPEED + 5000
     if file_id is not None and prev_file is not None and file_id != prev_file:
-        return min(max(pos, 0), MAX_STEP_MS)  # další díl knihy
+        return int(min(max(pos, 0), cap, MAX_STEP_MS if elapsed_ms is None else cap))  # další díl knihy
     delta = pos - prev_pos
-    return delta if 0 < delta <= MAX_STEP_MS else 0
+    return delta if 0 < delta <= cap else 0
+
+
+def elapsed_since(updated_at) -> float | None:
+    if updated_at is None:
+        return None
+    from app.auth import aware
+
+    return (utcnow() - aware(updated_at)).total_seconds() * 1000
 
 
 def record(session: Session, user_id: str, kind: str, ref: str, ms: int) -> None:
@@ -61,9 +76,15 @@ def days(session: Session, user_id: str, limit_days: int = 60) -> list[dict[str,
     rows = session.exec(
         select(SpokenListenDay).where(SpokenListenDay.user_id == user_id).order_by(SpokenListenDay.day.desc())  # type: ignore[attr-defined]
     ).all()
-    out: dict[str, list[dict[str, Any]]] = {}
+    out: dict[str, dict[tuple[str, str], float]] = {}
     for r in rows:
         if r.day not in out and len(out) >= limit_days:
             break
-        out.setdefault(r.day, []).append({"kind": r.kind, "ref": r.ref, "seconds": round(r.seconds or 0)})
-    return [{"day": d, "items": sorted(items, key=lambda i: -i["seconds"])} for d, items in out.items()]
+        # Souběžné první uložení mohlo založit dva řádky -- sečíst.
+        day = out.setdefault(r.day, {})
+        day[(r.kind, r.ref)] = day.get((r.kind, r.ref), 0) + (r.seconds or 0)
+    return [
+        {"day": d, "items": sorted(({"kind": k, "ref": ref, "seconds": round(sec)} for (k, ref), sec in items.items()),
+                                   key=lambda i: -i["seconds"])}
+        for d, items in out.items()
+    ]

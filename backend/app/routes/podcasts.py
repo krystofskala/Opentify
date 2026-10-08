@@ -377,12 +377,24 @@ def save_progress(
     p = session.exec(
         select(PodcastProgress).where(PodcastProgress.user_id == current[0], PodcastProgress.episode_id == episode_id)
     ).first()
+    from sqlalchemy import update as sa_update
+
     from app.spoken import history
 
-    history.record(session, current[0], "episode", episode_id,
-                   history.listened_ms(None, p.position_ms if p else None, None, body.positionMs))
-    p = p or PodcastProgress(user_id=current[0], episode_id=episode_id)
-    p.position_ms, p.finished, p.updated_at = max(0, body.positionMs), body.finished, utcnow()
+    if p is not None:
+        ms = history.listened_ms(None, p.position_ms, None, body.positionMs, history.elapsed_since(p.updated_at))
+        # Podmíněně podle staré pozice -- souběžná uložení nezapočtou úsek dvakrát.
+        res = session.exec(
+            sa_update(PodcastProgress)
+            .where(PodcastProgress.id == p.id, PodcastProgress.position_ms == p.position_ms)
+            .values(position_ms=max(0, body.positionMs), finished=body.finished, updated_at=utcnow())
+        )
+        if res.rowcount:
+            history.record(session, current[0], "episode", episode_id, ms)
+        session.commit()
+        return {"ok": True}
+    p = PodcastProgress(user_id=current[0], episode_id=episode_id, position_ms=max(0, body.positionMs),
+                        finished=body.finished, updated_at=utcnow())
     session.add(p)
     session.commit()
     return {"ok": True}

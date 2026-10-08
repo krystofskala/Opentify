@@ -117,5 +117,7 @@ async def cover_image(title: str, author: str, dest: Path) -> bool:
     if img.status_code != 200 or len(img.content) < 2000 or not img.headers.get("content-type", "").startswith("image/"):
         return False
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(img.content)
+    tmp = dest.with_suffix(".part")
+    tmp.write_bytes(img.content)
+    tmp.replace(dest)  # nikdy napůl zapsaný obal
     return True
