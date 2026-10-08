@@ -134,6 +134,7 @@ void main() {
     ]));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100)); // vrstvy Domů, pak sekce
     expect(find.text('Další díl řady'), findsOneWidget);
     expect(find.text('Sága o zaklínači · díl 4 · ke stažení'), findsOneWidget);
     expect(tester.takeException(), isNull);
