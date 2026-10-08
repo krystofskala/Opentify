@@ -1721,6 +1721,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     unawaited(_ref.read(provisioningControllerProvider.notifier).provision(info.recordingId));
   }
 
+  final Map<String, Duration> _pendingResume = {};
+
+  /// Až položka `recordingId` začne hrát (i automaticky), naváže od `position`.
+  void rememberStartPosition(String recordingId, Duration position) {
+    if (position > Duration.zero) _pendingResume[recordingId] = position;
+  }
+
   /// Vloží položky na pozici `at` (díly knihy dostažené během poslechu, viz
   /// `spokenQueueSyncProvider`); právě hrající ani pořadí ostatních se nemění.
   void insertQueueItems(int at, List<NowPlayingInfo> infos) {
@@ -2305,12 +2312,20 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final info = state.nowPlaying!;
     _applySpeedFor(info);
     // Zamčená obrazovka u knihy: ±30 s (web; převzato z hudby 8. 10.).
-    _mediaSession.setSpokenSkip(spoken: isSpokenId(info.recordingId) && !_radioMode, onSkip: (d) => unawaited(seekBy(d)));
+    // Knihy rádiem nikdy nehrají -- podmínka na rádio by to na iPhonu vypnula.
+    _mediaSession.setSpokenSkip(spoken: isSpokenId(info.recordingId), onSkip: (d) => unawaited(seekBy(d)));
     // Pozice k navázání patří jiné skladbě (chyba A, pak přeskočeno) --
     // jinak by A příště začala uprostřed.
     if (_resumeFor != info.recordingId) {
       _resumeAt = null;
       _resumeFor = null;
+      // Díl knihy zařazený do fronty od uloženého místa (menu knihy): naváže
+      // i při automatickém přechodu (audit 8. 10.: hrál od 0:00).
+      final pending = _pendingResume.remove(info.recordingId);
+      if (pending != null) {
+        _resumeAt = pending;
+        _resumeFor = info.recordingId;
+      }
     }
     unawaited(_resolveArtworkAndAccent(info));
     _provisioningSub?.close();

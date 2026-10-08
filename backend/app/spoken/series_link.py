@@ -79,7 +79,9 @@ async def link(book: SpokenBook) -> dict:
     """Řada a díl jedné knihy -> pole k uložení (vyhazuje při 429)."""
     for cand in title_candidates(book.title):
         found = await series.lookup(cand, book.author or "")
-        if not found and book.author and len(fold(cand).split()) >= 3:
+        # Jen nesmyslný autor -- u skutečného (na Wikidatech jinak psaného)
+        # by řada vedla na prázdnou stránku (audit 8. 10.).
+        if not found and book.author and junk_author(book.author, book.title) and len(fold(cand).split()) >= 3:
             # Autor nesedí (z tagů bývá nesmysl): jednoznačný dlouhý název stačí.
             found = await series.lookup(cand, "")
         if not found:

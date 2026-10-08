@@ -49,13 +49,17 @@ class _BookActionsSheet extends ConsumerWidget {
       }
     }
 
-    /// Díly od uloženého místa (rozposlouchaná kniha), jinak celá.
+    /// Díly od uloženého místa (rozposlouchaná kniha), jinak celá; první díl
+    /// naváže na uloženou pozici, až začne hrát.
     List<NowPlayingInfo> fromSaved(SpokenBook b) {
       final queue = spokenQueue(b);
       final p = b.progress;
       if (p == null || p.finished) return queue;
       final i = b.files.indexWhere((f) => f.id == p.fileId);
-      return i > 0 ? queue.sublist(i) : queue;
+      if (i < 0) return queue;
+      ref.read(audioPlayerControllerProvider.notifier)
+          .rememberStartPosition(queue[i].recordingId, Duration(milliseconds: p.positionMs));
+      return queue.sublist(i);
     }
 
     Future<void> progress({required bool finished}) async {
@@ -120,9 +124,11 @@ class _BookActionsSheet extends ConsumerWidget {
                   icon: Symbols.play_arrow_rounded,
                   label: book.inProgress ? 'Pokračovat' : 'Přehrát',
                   onTap: () async {
-                    close();
+                    // Síť dřív, zavřít až potom -- `ref` zavřeného sheetu už
+                    // nejde použít (audit 8. 10.: nic se nestalo).
                     final b = await full();
                     if (b != null) playBook(ref, b);
+                    if (context.mounted) close();
                   },
                 ),
               if (book.canPlay && playing) ...[
@@ -130,23 +136,24 @@ class _BookActionsSheet extends ConsumerWidget {
                   icon: Symbols.playlist_play_rounded,
                   label: 'Přehrát jako další',
                   onTap: () async {
-                    close();
                     final b = await full();
-                    if (b == null) return;
-                    final s = ref.read(audioPlayerControllerProvider);
-                    controller.insertQueueItems(s.queueIndex + 1, fromSaved(b));
-                    toast('Kniha hraje jako další');
+                    if (b != null) {
+                      await controller.playNextAll(fromSaved(b), sourceLabel: b.title);
+                      toast('Kniha hraje jako další');
+                    }
+                    if (context.mounted) close();
                   },
                 ),
                 _Row(
                   icon: Symbols.queue_music_rounded,
                   label: 'Přidat do fronty',
                   onTap: () async {
-                    close();
                     final b = await full();
-                    if (b == null) return;
-                    await controller.addAllToQueue(fromSaved(b), sourceLabel: b.title);
-                    toast('Přidáno do fronty');
+                    if (b != null) {
+                      await controller.addAllToQueue(fromSaved(b), sourceLabel: b.title);
+                      toast('Přidáno do fronty');
+                    }
+                    if (context.mounted) close();
                   },
                 ),
               ],
@@ -183,18 +190,18 @@ class _BookActionsSheet extends ConsumerWidget {
                 _Row(
                   icon: Symbols.check_circle_rounded,
                   label: 'Označit jako dočtené',
-                  onTap: () {
-                    close();
-                    progress(finished: true);
+                  onTap: () async {
+                    await progress(finished: true);
+                    if (context.mounted) close();
                   },
                 ),
               if (book.progress != null)
                 _Row(
                   icon: Symbols.restart_alt_rounded,
                   label: 'Začít znovu od začátku',
-                  onTap: () {
-                    close();
-                    progress(finished: false);
+                  onTap: () async {
+                    await progress(finished: false);
+                    if (context.mounted) close();
                   },
                 ),
               if (favs != null)
@@ -202,13 +209,13 @@ class _BookActionsSheet extends ConsumerWidget {
                   icon: Symbols.favorite_rounded,
                   label: saved ? 'Odebrat z mých knih' : 'Uložit do mých knih',
                   onTap: () async {
-                    close();
                     try {
                       await setSpokenFavorite(ref, bookId: book.id, on: !saved);
                       toast(saved ? 'Odebráno z mých knih' : 'Uloženo do mých knih');
                     } catch (_) {
                       toast('Nepodařilo se uložit');
                     }
+                    if (context.mounted) close();
                   },
                 ),
               if (book.isReady)
@@ -216,13 +223,13 @@ class _BookActionsSheet extends ConsumerWidget {
                   icon: book.isDrama ? Symbols.menu_book_rounded : Symbols.theater_comedy_rounded,
                   label: book.isDrama ? 'Je to audiokniha' : 'Je to rozhlasová hra',
                   onTap: () async {
-                    close();
                     try {
                       await setSpokenKind(ref, book.id, book.isDrama ? 'book' : 'drama');
                       toast(book.isDrama ? 'Přesunuto mezi audioknihy' : 'Přesunuto mezi rozhlasové hry');
                     } catch (_) {
                       toast('Nepodařilo se uložit');
                     }
+                    if (context.mounted) close();
                   },
                 ),
               const _MenuDivider(),
