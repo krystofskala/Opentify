@@ -200,7 +200,7 @@ class PodcastSearchResults extends ConsumerWidget {
 enum _ShowSort { added, title, author }
 
 const _showSortLabels = {
-  _ShowSort.added: 'Naposledy přidané',
+  _ShowSort.added: 'Nové díly',  // pořadí ze serveru: nejnovější epizoda
   _ShowSort.title: 'Název',
   _ShowSort.author: 'Autor',
 };
@@ -221,7 +221,10 @@ class _MyPodcastsListState extends ConsumerState<MyPodcastsList> {
   String _query = '';
 
   List<PodcastShowItem> _visible(List<PodcastShowItem> shows, _ShowSort sort) {
-    final words = _query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    // Filtr jen když je vidět hledací pole (od 5 pořadů) -- jinak by po
+    // odhlášení odběru zůstal seznam zúžený bez možnosti to zrušit.
+    final query = shows.length > 4 ? _query : '';
+    final words = query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     final out = [
       for (final s in shows)
         if (words.every('${s.title} ${s.author ?? ''}'.toLowerCase().contains)) s,
@@ -309,7 +312,14 @@ class _MyPodcastsListState extends ConsumerState<MyPodcastsList> {
                           Padding(padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md), child: historyRow),
                       ]),
                     ),
-                    if (view == ViewMode.list)
+                    if (visible.isEmpty && shows.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          child: Text('Nic neodpovídá.', style: muted, textAlign: TextAlign.center),
+                        ),
+                      )
+                    else if (view == ViewMode.list)
                       SliverPadding(
                         padding: EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, bottom),
                         sliver: SliverList.builder(

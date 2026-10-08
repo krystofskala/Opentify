@@ -104,9 +104,13 @@ class ListenLaterRepository {
   final ApiClient _api;
 
   Future<LaterList> list() async {
-    final j = await _api.getJson('/listen-later');
-    List<LaterItem> items(String key) =>
-        (j[key] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>().map(LaterItem.fromJson).toList();
+    final j = await _api.getJson('/listen-later', query: {'episodes': '1'});
+    // Neznámý druh (novější server) vynechat -- ne brát jako skladbu.
+    List<LaterItem> items(String key) => (j[key] as List<dynamic>? ?? const [])
+        .cast<Map<String, dynamic>>()
+        .where((e) => const {'track', 'album', 'artist', 'episode'}.contains(e['kind']))
+        .map(LaterItem.fromJson)
+        .toList();
     return LaterList(
       active: items('active'),
       listened: items('listened'),

@@ -78,7 +78,7 @@ def _payload(session: Session, item: ListenLater) -> dict[str, Any] | None:
     return out
 
 
-def list_items(user_id: str) -> dict[str, Any]:
+def list_items(user_id: str, episodes: bool = False) -> dict[str, Any]:
     with Session(engine) as session:
         active = session.exec(
             select(ListenLater)
@@ -91,6 +91,9 @@ def list_items(user_id: str) -> dict[str, Any]:
             .order_by(ListenLater.listened_at.desc())  # type: ignore[union-attr]
             .limit(LISTENED_SHOWN)
         ).all()
+        if not episodes:
+            active = [i for i in active if i.kind != "episode"]
+            listened = [i for i in listened if i.kind != "episode"]
         active_out = [p for p in (_payload(session, i) for i in active) if p]
         # Připomínka na Domů: něco, co tu leží přes 2 týdny -- každý den jiné.
         now = utcnow().replace(tzinfo=None)  # SQLite vrací časy bez zóny

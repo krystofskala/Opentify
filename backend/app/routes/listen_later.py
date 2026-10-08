@@ -25,8 +25,10 @@ class UpdateBody(BaseModel):
 
 
 @listen_later_router.get("")
-async def items(current: tuple[str, str] = Depends(get_current_user)):
-    return await asyncio.to_thread(listen_later.list_items, current[0])
+async def items(episodes: bool = False, current: tuple[str, str] = Depends(get_current_user)):
+    """`episodes=1`: i epizody podcastů -- jen nová appka; starší verze by
+    neznámý druh vzala jako skladbu a spadla (audit 8. 10.)."""
+    return await asyncio.to_thread(listen_later.list_items, current[0], episodes)
 
 
 @listen_later_router.post("")

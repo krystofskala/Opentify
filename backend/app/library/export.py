@@ -144,8 +144,19 @@ def _spoken(session: Session, user_id: str) -> tuple[dict, str]:
             "progress": None if p is None else {"positionMs": p.position_ms, "finished": p.finished,
                                                 "updatedAt": p.updated_at.isoformat() if p.updated_at else None},
         })
+    from app.models import PodcastEpisode
+
+    def label(kind: str, ref: str) -> dict:
+        if kind == "book":
+            b = session.get(SpokenBook, ref)
+            return {"title": b.title if b else None, "author": b.author if b else None}
+        ep = session.get(PodcastEpisode, ref)
+        show = session.get(PodcastShow, ep.show_id) if ep else None
+        return {"title": ep.title if ep else None, "podcast": show.title if show else None}
+
+    # S názvy -- čitelné i mimo Opentify (audit 8. 10.).
     history = [
-        {"day": r.day, "kind": r.kind, "ref": r.ref, "seconds": round(r.seconds or 0)}
+        {"day": r.day, "kind": r.kind, **label(r.kind, r.ref), "seconds": round(r.seconds or 0)}
         for r in session.exec(select(SpokenListenDay).where(SpokenListenDay.user_id == user_id).order_by(SpokenListenDay.day)).all()
     ]
     shows = [
