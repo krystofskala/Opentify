@@ -267,6 +267,9 @@ class _PlayerBarState extends ConsumerState<PlayerBar> with TickerProviderStateM
                                         .read(audioPlayerControllerProvider.notifier)
                                         .seek(Duration(milliseconds: (value * ms).round())),
                                     height: 26,
+                                    // Čas při ručním posuvu (dlouhé věci se na čáře
+                                    // nedají odhadnout; Adam, 8. 10.).
+                                    dragLabel: (v) => '${_clock(duration * v)} / ${_clock(duration)}',
                                     strokeWidth: 2.5,
                                     waveAmplitude: 2.5,
                                     activeColor: fg,
@@ -479,4 +482,11 @@ class _TrackInfo extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 1:02:03 / 4:05 (hodiny jen když jsou).
+String _clock(Duration d) {
+  final h = d.inHours, m = d.inMinutes % 60, sec = d.inSeconds % 60;
+  final ss = sec.toString().padLeft(2, '0');
+  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$ss' : '$m:$ss';
 }

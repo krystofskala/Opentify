@@ -3,6 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../theme/design_tokens.dart' show AppSpacing;
+import '../theme/glass_tokens.dart' show Expressive;
+
 /// Vlnovkový seek bar podle PixelPlayeru (github.com/brendmung/PixelPlayer,
 /// `WavySliderExpressive.kt` + `PlayerSeekBar.kt`) -- vlastní port do Dartu,
 /// protože Kotlin/Jetpack Compose (`LinearWavyProgressIndicator` z Material3
@@ -32,6 +35,7 @@ class WavySeekBar extends StatefulWidget {
     this.thumbRadius = 6,
     this.wavelength = 22,
     this.waveAmplitude = 3.5,
+    this.dragLabel,
   });
 
   /// 0..1, poloha přehrávání.
@@ -52,6 +56,10 @@ class WavySeekBar extends StatefulWidget {
   final double thumbRadius;
   final double wavelength;
   final double waveAmplitude;
+
+  /// Při tažení bublina s textem nad prstem (čas, kam se přetočí) -- mini
+  /// přehrávač u dlouhých věcí (Adam, 8. 10.: "aspoň při ručním posuvu").
+  final String Function(double value)? dragLabel;
 
   @override
   State<WavySeekBar> createState() => _WavySeekBarState();
@@ -225,7 +233,45 @@ class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin
         },
         onHorizontalDragEnd: (_) => _handleDragEnd(),
         onHorizontalDragCancel: _handleDragEnd,
-        child: bar,
+        child: widget.dragLabel == null || !_dragging
+            ? bar
+            : LayoutBuilder(builder: (context, constraints) {
+                final theme = Theme.of(context);
+                final x = (displayedProgress.clamp(0.0, 1.0) * constraints.maxWidth);
+                const bubbleWidth = 120.0;
+                final left = (x - bubbleWidth / 2).clamp(0.0, math.max(0.0, constraints.maxWidth - bubbleWidth)).toDouble();
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    bar,
+                    Positioned(
+                      left: left,
+                      bottom: widget.height + 4,
+                      width: bubbleWidth,
+                      child: IgnorePointer(
+                        child: Center(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.inverseSurface,
+                              borderRadius: BorderRadius.circular(Expressive.cornerSmall),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
+                              child: Text(
+                                widget.dragLabel!(displayedProgress),
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.onInverseSurface,
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }),
       ),
     );
   }
