@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +17,7 @@ import 'theme/app_theme.dart';
 import 'theme/selected_accent.dart';
 import 'widgets/app_background.dart';
 import 'widgets/auth_gate.dart';
+import 'widgets/desktop_scroll_assist.dart';
 import 'state/offline_controller.dart';
 import 'widgets/now_playing_sheet.dart';
 import 'widgets/top_fade_scroll_behavior.dart';
@@ -90,7 +91,8 @@ class OpentifyApp extends ConsumerWidget {
       // (pozadí appky pod hustě namrzlým sklem), takže se nikdy nezastavuje.
       // Klepnutí mimo textové pole zavře klávesnici (iOS to samo nedělá --
       // živě: po chybě hledání nešla klávesnice zavřít vůbec).
-      builder: (context, child) => _DismissKeyboard(
+      // Počítač (web i Windows): klik kolečkem = rychlý posun, PgUp/PgDn/Home/End.
+      builder: (context, child) => _desktopScroll(_DismissKeyboard(
           child: _maybeSimulatedInsets(
           context,
           ref.watch(reducedMotionProvider),
@@ -140,9 +142,17 @@ class OpentifyApp extends ConsumerWidget {
                 ),
               ),
             ),
-          )))),
+          ))))),
     );
   }
+}
+
+Widget _desktopScroll(Widget child) {
+  final desktop = kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.linux;
+  return desktop ? DesktopScrollAssist(child: child) : child;
 }
 
 /// `--dart-define=SIMULATE_INSETS=true` (jen kontrolní buildy): iPhone-like
