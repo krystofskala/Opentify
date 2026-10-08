@@ -131,7 +131,7 @@ class _WebPipPlayer implements PipPlayer {
     if (pip == null || _win != null) return;
     final web.Window win;
     try {
-      win = await pip.requestWindow(_PipOptions(width: 380, height: 84)).toDart;
+      win = await pip.requestWindow(_PipOptions(width: 400, height: 150)).toDart;
     } catch (_) {
       return; // bez gesta uživatele / zamítnuto
     }
