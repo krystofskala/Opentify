@@ -176,7 +176,15 @@
       };
       window.addEventListener('error', function (e) {
         window.__opentifyNote('error ' + e.message);
-        window.__opentifyReport('js-error', { msg: String(e.message).slice(0, 500), src: e.filename, line: e.lineno });
+        // Samotné „Uncaught“ nic neřeklo (8. 10.) -- přiložit i vyhozenou
+        // hodnotu a stack (main.dart.js:řádek:sloupec).
+        var err = e.error;
+        var what = '';
+        try { what = err && (err.stack || String(err)) || ''; } catch (x) {}
+        window.__opentifyReport('js-error', {
+          msg: (String(e.message) + (what ? ' | ' + what : '')).slice(0, 1500),
+          src: e.filename, line: e.lineno, col: e.colno
+        });
       });
       window.addEventListener('unhandledrejection', function (e) {
         var r = e.reason;
