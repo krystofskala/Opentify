@@ -16,7 +16,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
-import '../core/device_token.dart' show authHeaders, withDeviceToken;
+import '../core/config.dart' show AppConfig;
+import '../core/device_token.dart' show authHeaders, withDeviceToken, withoutDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
 import '../core/prefetch_cache.dart';
 import '../core/media_session.dart';
@@ -498,11 +499,19 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         if (i.artistName != null) 'a': i.artistName,
         if (i.artistId != null) 'ai': i.artistId,
         if (i.releaseId != null) 'r': i.releaseId,
-        if (i.artworkUrl != null) 'art': i.artworkUrl,
+        // Bez tokenu zařízení -- snímek fronty jde i na jiná zařízení (předání).
+        if (i.artworkUrl != null) 'art': withoutDeviceToken(i.artworkUrl!),
         if (i.groupId != null) 'g': i.groupId,
         if (i.groupLabel != null) 'gl': i.groupLabel,
         if (i.durationMs != null) 'd': i.durationMs,
       };
+
+  /// Obal z našeho serveru s tokenem TOHOTO zařízení: fronta převzatá z webu
+  /// (bez tokenu) nebo z jiného zařízení se na iPhonu načítala s 401 (log 8. 10.).
+  static String? _localArt(String? url) {
+    if (url == null || !url.startsWith(AppConfig.apiBaseUrl)) return url;
+    return withDeviceToken(withoutDeviceToken(url));
+  }
 
   static NowPlayingInfo _infoFromJson(Map<String, dynamic> j) => NowPlayingInfo(
         recordingId: j['id'] as String,
@@ -510,7 +519,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         artistName: j['a'] as String?,
         artistId: j['ai'] as String?,
         releaseId: j['r'] as String?,
-        artworkUrl: j['art'] as String?,
+        artworkUrl: _localArt(j['art'] as String?),
         groupId: j['g'] as String?,
         groupLabel: j['gl'] as String?,
         durationMs: (j['d'] as num?)?.toInt(),
