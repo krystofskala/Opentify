@@ -51,7 +51,12 @@ async def _wd(params: dict[str, Any]) -> dict[str, Any]:
         finally:
             _last = time.monotonic()
     resp.raise_for_status()  # 429 -> chyba, výsledek se neuloží
-    return resp.json()
+    data = resp.json()
+    if isinstance(data, dict) and data.get("error"):
+        # Chyba API v odpovědi 200 (maxlag, špatný dotaz) -- dřív se uložila
+        # jako "kniha bez řady" na 30 dní (audit 8. 10.).
+        raise RuntimeError(f"wikidata: {data['error'].get('code') if isinstance(data['error'], dict) else data['error']}")
+    return data
 
 # Povolání (P106). Autor: spisovatel, romanopisec, básník, autor, dramatik,
 # scenárista, novinář, překladatel, autor dětské literatury, esejista,

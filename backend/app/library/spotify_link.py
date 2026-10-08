@@ -126,7 +126,7 @@ def is_compilation(owner: str | None, rows: list[TrackRow]) -> bool:
     from collections import Counter
 
     who = (owner or "").casefold()
-    if any(w in who for w in ("various artists", "různí interpreti", "rôzni interpreti", "various")):
+    if who.strip() in ("various artists", "various", "různí interpreti", "rôzni interpreti", "va"):
         return True
     counts = Counter(fold_name(a) for a, *_ in rows if a)
     return len(counts) >= 3 and max(counts.values()) * 2 < sum(counts.values())

@@ -146,7 +146,8 @@ async def _show_title(c: httpx.AsyncClient, show_id: str | None) -> str | None:
 
 
 def _show_id(item: dict) -> str | None:
-    return ((item.get("relationships") or {}).get("show") or {}).get("data", {}).get("id")
+    # "data": null u pořadu bez přiřazení (audit 8. 10.: pád hledání na 502).
+    return (((item.get("relationships") or {}).get("show") or {}).get("data") or {}).get("id")
 
 
 async def _serial_episodes(c: httpx.AsyncClient, serial_id: str) -> list[dict]:
@@ -295,34 +296,55 @@ def part_titles(release_title: str, episodes: list[dict]) -> list[str]:
     ]
 
 
-def download(episodes: list[dict], dest: Path, on_progress: Callable[[float], None], on_file: Callable[[Path], None]) -> None:
-    """Díly postupně do `dest` (synchronní, ve vlákně). Hotový soubor
-    (stejná velikost) se znovu nestahuje -- po restartu se pokračuje."""
+def download(
+    episodes: list[dict], dest: Path, on_progress: Callable[[float], None], on_file: Callable[[Path], None]
+) -> list[int]:
+    """Díly postupně do `dest` (synchronní, ve vlákně); vrací indexy dílů,
+    které se stáhnout nepodařilo (ostatní jdou poslouchat). Hotový soubor se
+    znovu nestahuje -- vzniká až přejmenováním úplného `.part`, takže po
+    restartu se pokračuje i bez známé velikosti."""
     import os
 
     dest.mkdir(parents=True, exist_ok=True)
     proxy = os.environ.get("YTDLP_PROXY") or None
-    total = sum(int(e.get("size") or 0) for e in episodes) or 1
+    sizes = [int(e.get("size") or 0) for e in episodes]
+    # Bez velikostí průběh po dílech (dřív hned 0,99 a zámek se neobnovoval).
+    known = all(sizes)
+    total = sum(sizes) or 1
     done = 0
+    failed: list[int] = []
+
+    def share(i: int, extra: int = 0) -> float:
+        return min(0.99, (done + extra) / total) if known else min(0.99, i / max(1, len(episodes)))
+
     with httpx.Client(proxy=proxy, timeout=60, headers=_UA, follow_redirects=True) as c:
         for i, ep in enumerate(episodes):
             path = dest / file_name(i, ep)
-            size = int(ep.get("size") or 0)
-            if path.is_file() and size and path.stat().st_size == size:
-                done += size
-                on_progress(min(0.99, done / total))
+            if path.is_file():
+                done += sizes[i] or path.stat().st_size
+                on_progress(share(i + 1))
                 on_file(path)
                 continue
             tmp = path.with_suffix(".part")
-            with c.stream("GET", ep["url"]) as resp:
-                resp.raise_for_status()
-                with tmp.open("wb") as fh:
-                    for chunk in resp.iter_bytes(1 << 16):
-                        fh.write(chunk)
-                        done += len(chunk)
-                        on_progress(min(0.99, done / total))
+            got = 0
+            try:
+                with c.stream("GET", ep["url"]) as resp:
+                    resp.raise_for_status()
+                    with tmp.open("wb") as fh:
+                        for chunk in resp.iter_bytes(1 << 16):
+                            fh.write(chunk)
+                            got += len(chunk)
+                            on_progress(share(i, got))
+            except httpx.HTTPError as e:
+                logger.info("rozhlas díl %d: %s", i + 1, e)
+                tmp.unlink(missing_ok=True)
+                failed.append(i)
+                continue
+            done += got
             tmp.replace(path)
+            on_progress(share(i + 1))
             on_file(path)
+    return failed
 
 
 def fetch_cover(url: str, dest: Path) -> bool:
@@ -332,8 +354,8 @@ def fetch_cover(url: str, dest: Path) -> bool:
     try:
         with httpx.Client(proxy=proxy, timeout=20, headers=_UA, follow_redirects=True) as c:
             resp = c.get(url)
-        if resp.status_code != 200 or not resp.content:
-            return False
+        if resp.status_code != 200 or not resp.content or not resp.headers.get("content-type", "").startswith("image/"):
+            return False  # ne chybová stránka v HTML jako obal
         dest.write_bytes(resp.content)
         return True
     except httpx.HTTPError:

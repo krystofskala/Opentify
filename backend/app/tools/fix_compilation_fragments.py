@@ -21,6 +21,7 @@ import sys
 from sqlmodel import Session, select
 
 from app.db import engine
+from app.library.matching import fold_name
 from app.maintenance.dedupe import _move_later, find_twin, merge_recording, remap_release_refs, same_length, track_key
 from app.models import Artist, Recording, Release
 
@@ -64,6 +65,12 @@ def run(apply: bool) -> None:
                     twin = find_twin(rec.title, twins)
                     if twin is not None and (twin.id == rec.id or not same_length(rec.duration_ms, twin.duration_ms)):
                         twin = None
+                    # Slučovat jen stejného interpreta (stejný název jiného
+                    # interpreta = jiná nahrávka; audit 8. 10.).
+                    if twin is not None:
+                        twin_artist = session.get(Artist, twin.artist_id) if twin.artist_id else None
+                        if not artist or not twin_artist or fold_name(twin_artist.name) != fold_name(artist.name):
+                            twin = None
                     print(f"   {artist.name if artist else '?'} – {rec.title}: "
                           + (f"sloučit se skladbou alba ({twin.title})" if twin else "přesunout na album"))
                     if not apply:

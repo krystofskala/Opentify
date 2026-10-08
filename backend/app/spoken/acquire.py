@@ -223,27 +223,43 @@ async def _rozhlas_download(book_id: str, data: dict) -> None:
     last = [0.0]
     done: list[Path] = []
 
+    lock = f"spoken:cro:lock:{book_id}"
+
     def on_progress(share: float) -> None:
         if share - last[0] < 0.01:
             return
         last[0] = share
         asyncio.run_coroutine_threadsafe(_save(book_id, progress=round(share, 3)), loop)
-        asyncio.run_coroutine_threadsafe(r.set(f"spoken:cro:lock:{book_id}", "1", ex=_YT_LOCK_S), loop)
 
     def on_file(path: Path) -> None:
         done.append(path)
         import_book(book_id, dest, list(done))
         rozhlas_finish(book_id, dest, data)
 
+    async def heartbeat() -> None:
+        # Zámek obnovovat pravidelně, ne jen průběhem -- dlouhý díl přes pomalou
+        # proxy jinak zámek pustil a druhé stahování psalo do stejných
+        # souborů (audit 8. 10.).
+        while True:
+            await asyncio.sleep(30)
+            await r.set(lock, "1", ex=_YT_LOCK_S)
+
+    beat = asyncio.create_task(heartbeat())
     try:
-        await asyncio.to_thread(rozhlas.download, episodes, dest, on_progress, on_file)
-        logger.info("kniha %s připravená z Českého rozhlasu (%d dílů)", book_id, len(episodes))
-        await _save(book_id, status="ready", progress=1.0, error=None, finished_at=utcnow(), storage_dir=str(dest))
+        failed = await asyncio.to_thread(rozhlas.download, episodes, dest, on_progress, on_file)
+        if failed and len(failed) == len(episodes):
+            await _save(book_id, status="failed", error="Český rozhlas: díly se nepodařilo stáhnout")
+        else:
+            logger.info("kniha %s z Českého rozhlasu: %d dílů, %d nevyšlo", book_id, len(episodes), len(failed))
+            # Jeden nedostupný díl neshodí celou knihu -- ostatní jdou poslouchat.
+            note = f"{len(failed)} z {len(episodes)} dílů se nepodařilo stáhnout" if failed else None
+            await _save(book_id, status="ready", progress=1.0, error=note, finished_at=utcnow(), storage_dir=str(dest))
     except Exception as e:  # noqa: BLE001
         logger.warning("rozhlas kniha %s: %s", book_id, e)
         await _save(book_id, status="failed", error="Český rozhlas: díl se nepodařilo stáhnout")
     finally:
-        await r.delete(f"spoken:cro:lock:{book_id}")
+        beat.cancel()
+        await r.delete(lock)
 
 
 def rozhlas_finish(book_id: str, dest: Path, data: dict) -> None:
@@ -281,12 +297,28 @@ def rozhlas_finish(book_id: str, dest: Path, data: dict) -> None:
 async def _start_rozhlas(book: SpokenBook) -> None:
     from app.redis_bus import get_redis
 
-    data = book.source_files or {}
-    if not data.get("episodes"):
-        await _save(book.id, status="failed", error="Český rozhlas: chybí díly")
-        return
+    from app.spoken import rozhlas
+
+    running = _yt_tasks.get(book.id)
+    if running is not None and not running.done():
+        return  # už stahuje tenhle worker
     if not await get_redis().set(f"spoken:cro:lock:{book.id}", "1", nx=True, ex=_YT_LOCK_S):
         return  # stahuje jiný worker
+    data = dict(book.source_files or {})
+    if book.status == "pending":
+        # Nové / znovu zkoušené stažení: čerstvé odkazy z rozhlasu (staré mohly
+        # zmizet -- dřív "Zkusit znovu" selhávalo pořád stejně).
+        try:
+            rel = await rozhlas.release(book.source_ref)
+        except Exception:  # noqa: BLE001
+            rel = None
+        if rel and rel.get("episodes"):
+            data["episodes"] = rel["episodes"]
+            await _save(book.id, source_files=data)
+    if not data.get("episodes"):
+        await get_redis().delete(f"spoken:cro:lock:{book.id}")
+        await _save(book.id, status="failed", error="Český rozhlas: chybí díly")
+        return
     await _save(book.id, status="downloading", error=None)
     _yt_tasks[book.id] = asyncio.create_task(_rozhlas_download(book.id, data))
 
@@ -443,8 +475,8 @@ async def tick(r) -> None:
                 logger.warning("kniha %s: %s", book.id, e)
                 await _save(book.id, error=str(e)[:300])
         await enrich(r)
-        from app.spoken import series_link
-
-        await series_link.tick(r)
     finally:
         await r.delete("spoken:tick")
+    from app.spoken import series_link
+
+    await series_link.tick(r)

@@ -78,20 +78,34 @@ async def link(book: SpokenBook) -> dict:
         # audioknihy.cz se nepřepisuje).
         if book.metadata_source != "audioknihy.cz" and book.title != part["title"]:
             fields["title"] = part["title"]
-        if _shared_cover(book):
+        if await asyncio.to_thread(_shared_cover, book):
             from app.spoken.acquire import SPOKEN_ROOT
             from app.spoken.describe import cover_image
 
             dest = SPOKEN_ROOT / "covers" / f"{book.id}.jpg"
-            if await cover_image(part["title"], book.author or "", dest):
-                fields["cover_url"] = f"spoken/books/{book.id}/cover"
+            try:
+                if await cover_image(part["title"], book.author or "", dest):
+                    fields["cover_url"] = f"spoken/books/{book.id}/cover"
+            except Exception as e:  # noqa: BLE001 -- obal je bonus; chyba Google Books nesmí zastavit řady (audit 8. 10.)
+                logger.info("obal knihy %s z Google Books: %s", book.id, e)
         return fields
     return {"series_name": ""}
 
 
 async def tick(r, limit: int = 2) -> None:
+    """Vlastní zámek (ne `spoken:tick`): Wikidata může trvat déle a stahování
+    knih na ni nemá čekat (audit 8. 10.)."""
     if await r.get("spoken:series:backoff"):
         return
+    if not await r.set("spoken:series:tick", "1", nx=True, ex=300):
+        return
+    try:
+        await _tick(r, limit)
+    finally:
+        await r.delete("spoken:series:tick")
+
+
+async def _tick(r, limit: int) -> None:
 
     def todo() -> list[SpokenBook]:
         with Session(engine) as session:

@@ -129,3 +129,33 @@ def test_set_kind():
             assert out["kind"] == "drama" and published == ["drama"]
     finally:
         app.events.publish_event = orig
+
+
+def test_show_id_survives_null_data():
+    assert rozhlas._show_id({"relationships": {"show": {"data": None}}}) is None
+    assert rozhlas._show_id({}) is None
+
+
+def test_download_skips_failed_part_and_keeps_others(tmp_path: Path, monkeypatch):
+    import httpx
+
+    def handler(request):
+        if request.url.path.endswith("/2.mp3"):
+            return httpx.Response(404)
+        return httpx.Response(200, content=b"x" * 10)
+
+    real = httpx.Client
+
+    def fake_client(*a, **kw):
+        kw.pop("proxy", None)
+        return real(transport=httpx.MockTransport(handler), **kw)
+
+    monkeypatch.setattr(httpx, "Client", fake_client)
+    eps = [{"url": "https://e/1.mp3", "size": 10}, {"url": "https://e/2.mp3", "size": 10}, {"url": "https://e/3.mp3"}]
+    files = []
+    failed = rozhlas.download(eps, tmp_path, lambda s: None, files.append)
+    assert failed == [1] and [p.name for p in files] == ["001.mp3", "003.mp3"]
+    # Po restartu se hotové díly nestahují znovu (i bez známé velikosti).
+    again = []
+    rozhlas.download(eps, tmp_path, lambda s: None, again.append)
+    assert [p.name for p in again] == ["001.mp3", "003.mp3"]
