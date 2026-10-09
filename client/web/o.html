@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Opentify</title>
-<!-- Lehká přesměrovací stránka pro sdílené odkazy "Poslat v Opentify":
-     o.html#/releases/<id>. Na telefonu zkusí nejdřív aplikaci
-     (opentify:///<cesta>, iOS má FlutterDeepLinkingEnabled), když se do
-     ~1,5 s neotevře, pokračuje do webové appky. Počítač rovnou na web.
+<!-- Lehká přesměrovací stránka pro sdílené odkazy „Poslat v Opentify“:
+     o.html#/releases/<id>. Počítač rovnou na web. Telefon: tlačítka
+     „Otevřít v aplikaci“ (opentify:///<cesta>) / „Otevřít na webu“ --
+     vestavěné prohlížeče chatů (Mattermost, Messenger…) dovolí otevřít
+     appku jen po klepnutí, samovolný pokus potichu selhal a stránka
+     přepnula na web (9. 10.). Volba se pamatuje a příště se použije sama.
      Žádné skripty ani styly zvenku. -->
 <style>
   :root { color-scheme: light dark; --bg: #f6f4f1; --fg: #1b1a19; --muted: #6b6762; --accent: #1db954; }
@@ -18,7 +20,7 @@
     gap: 14px; padding: 24px 16px; box-sizing: border-box; text-align: center; }
   h1 { font-size: 20px; margin: 0; }
   p { margin: 0; color: var(--muted); }
-  a.btn { display: block; width: min(320px, 100%); padding: 14px 18px; border-radius: 999px; text-decoration: none;
+  a.btn { display: block; width: min(340px, 100%); padding: 18px 20px; font-size: 17px; border-radius: 999px; text-decoration: none;
     font-weight: 600; box-sizing: border-box; }
   a.primary { background: var(--accent); color: #fff; }
   a.secondary { color: var(--fg); border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent); }
@@ -26,10 +28,10 @@
 </head>
 <body>
 <main>
-  <h1>Otevírám Opentify…</h1>
-  <p id="hint">Když se nic nestane, vyber:</p>
+  <h1>Otevřít v Opentify</h1>
   <a class="btn primary" id="app" href="#">Otevřít v aplikaci</a>
   <a class="btn secondary" id="web" href="./">Otevřít na webu</a>
+  <p id="hint">Volbu si zapamatuji – příště se otevře sama.</p>
 </main>
 <script>
   (function () {
@@ -38,14 +40,23 @@
     var path = /^\/[A-Za-z0-9\/_\-.~%]*$/.test(raw) ? raw : "/";
     var appUrl = "opentify://" + path;
     var webUrl = "./#" + path;
-    document.getElementById("app").href = appUrl;
-    document.getElementById("web").href = webUrl;
+    var app = document.getElementById("app");
+    var web = document.getElementById("web");
+    app.href = appUrl;
+    web.href = webUrl;
     var mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (!mobile) { location.replace(webUrl); return; }
-    var left = false;
-    document.addEventListener("visibilitychange", function () { if (document.hidden) left = true; });
-    location.href = appUrl;
-    setTimeout(function () { if (!left && !document.hidden) location.replace(webUrl); }, 1500);
+    function remember(choice) { try { localStorage.setItem("opentify-open", choice); } catch (e) {} }
+    app.addEventListener("click", function () { remember("app"); });
+    web.addEventListener("click", function () { remember("web"); });
+    var pref = null;
+    try { pref = localStorage.getItem("opentify-open"); } catch (e) {}
+    if (pref === "web") { location.replace(webUrl); return; }
+    if (pref === "app") {
+      // Zkusit appku; kdyby to prohlížeč nepustil, tlačítka zůstávají.
+      document.getElementById("hint").textContent = "Neotevřela se aplikace? Klepni na tlačítko.";
+      location.href = appUrl;
+    }
   })();
 </script>
 </body>
