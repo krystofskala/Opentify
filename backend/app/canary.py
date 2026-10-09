@@ -52,6 +52,13 @@ def check_request(request: Request) -> bool:
     return False
 
 
+def is_trap_username(username: str) -> bool:
+    """Jméno z pasti (bez poplachu) -- nesmí si ho nikdo vybrat, jinak by se
+    sám zamkl a každé jeho přihlášení spustilo poplach."""
+    wanted = _hashes("LOGIN_DENY_SHA256")
+    return bool(wanted) and _sha(username.strip().lower()) in wanted
+
+
 def check_username(request: Request, username: str) -> bool:
     wanted = _hashes("LOGIN_DENY_SHA256")
     if wanted and _sha(username.strip().lower()) in wanted:

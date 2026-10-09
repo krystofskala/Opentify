@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import secrets
+import unicodedata
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -263,18 +264,46 @@ class NewUserIn(BaseModel):
     username: str | None = None
 
 
+# Přihlašovací jméno (8. 10.): jen písmena (i s diakritikou), číslice a . _ -
+# -- žádné emoji (jiná klávesnice je zapíše jinak) ani neviditelné znaky
+# (jméno by vypadalo jako cizí), vyhrazená jména ani jména z pasti. Platí
+# pro nová a měněná jména, stávající zůstávají.
+_RESERVED_USERNAMES = {"admin", "root", "administrator", "opentify", "system", "support", "moderator", "superuser", "sysadmin"}
+
+
+def normalize_username(value: str) -> str:
+    """Jeden zápis pro stejně vypadající jméno („é“ složené / rozložené,
+    široké znaky)."""
+    return unicodedata.normalize("NFKC", value.strip())
+
+
+def username_skeleton(value: str) -> str:
+    """Pro porovnání „vypadá stejně“: bez diakritiky a velikosti písmen."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+
+
 def _clean_username(value: str | None) -> str | None:
-    value = (value or "").strip()
+    from app import canary
+
+    value = normalize_username(value or "")
     if not value:
         return None
-    if len(value) < 3 or len(value) > 32 or any(ch.isspace() for ch in value):
-        raise HTTPException(status_code=400, detail="Přihlašovací jméno: 3–32 znaků, bez mezer.")
+    if not 3 <= len(value) <= 32 or not all(ch.isalnum() or ch in "._-" for ch in value):
+        raise HTTPException(
+            status_code=400,
+            detail="Přihlašovací jméno: 3–32 znaků – písmena, číslice, tečka, podtržítko nebo pomlčka.",
+        )
+    if username_skeleton(value) in _RESERVED_USERNAMES or canary.is_trap_username(value):
+        raise HTTPException(status_code=400, detail="Tohle jméno je vyhrazené, zvol jiné.")
     return value
 
 
 def _username_taken(session: Session, username: str, except_id: str | None = None) -> bool:
+    """Obsazené i jméno, které vypadá stejně (jiná velikost, diakritika)."""
     rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
-    return any(u.username.lower() == username.lower() and u.id != except_id for u in rows)
+    wanted = username_skeleton(username)
+    return any(username_skeleton(u.username) == wanted and u.id != except_id for u in rows)
 
 
 @auth_router.post("/users")
@@ -593,7 +622,7 @@ async def login(body: LoginIn, request: Request, response: Response):
     """Jméno + heslo -> klíč zařízení (appka si ho pamatuje, web v cookie).
     Profil bez hesla se tu přihlásit nedá -- heslo si nastaví jen přes
     pozvánku (`/claim`), jinak by si ho mohl zvolit kdokoli, kdo zná jméno."""
-    username = body.username.strip()
+    username = normalize_username(body.username)
     await _login_throttle(request, username)
     from app import canary
 
@@ -611,7 +640,7 @@ async def login(body: LoginIn, request: Request, response: Response):
         )
     with Session(engine) as session:
         rows = session.exec(select(AppUser).where(AppUser.username.is_not(None))).all()  # type: ignore[union-attr]
-        user = next((u for u in rows if u.username.lower() == username.lower()), None)
+        user = next((u for u in rows if normalize_username(u.username).casefold() == username.casefold()), None)
         # scrypt mimo event loop -- jinak by každý pokus zastavil celé API.
         ok = await asyncio.to_thread(_check_password, body.password, user.password_hash if user else None)
         if ok and need_code:
