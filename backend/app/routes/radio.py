@@ -28,6 +28,11 @@ class QueueBody(BaseModel):
     upcoming: list[str]
 
 
+class SkipBody(BaseModel):
+    direction: int  # +1 další, -1 předchozí, 0 od začátku
+    fromMs: float  # kde klient ve streamu právě je
+
+
 def _check_id(session_id: str) -> None:
     if not _ID.match(session_id):
         raise HTTPException(status_code=400, detail="neplatné id relace")
@@ -119,6 +124,22 @@ def hls_segment(session_id: str, name: str):
     if path is None:
         raise HTTPException(status_code=404, detail="úsek neexistuje")
     return FileResponse(path, media_type="video/mp2t", headers={"Cache-Control": "public, max-age=3600"})
+
+
+@radio_router.post("/{session_id}/skip")
+async def skip(session_id: str, body: SkipBody, _current=Depends(get_current_user)):
+    """Přeskočení ve stejném streamu (zamčený iPhone): klient se posune na
+    vrácený čas streamu, žádný nový zdroj zvuku."""
+    s = radio.get_session(session_id)
+    if s is None or s.user_id != _current[0]:
+        raise HTTPException(status_code=404, detail="relace neexistuje")
+    if body.direction not in (-1, 0, 1):
+        raise HTTPException(status_code=400, detail="neplatný směr")
+    out = await radio.skip(s, body.direction, max(0.0, body.fromMs))
+    if out is None:
+        raise HTTPException(status_code=409, detail="není kam přeskočit")
+    start_ms, recording_id = out
+    return {"startMs": start_ms, "recordingId": recording_id}
 
 
 @radio_router.put("/{session_id}/queue")

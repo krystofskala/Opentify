@@ -79,6 +79,13 @@ class RadioSession:
     # bez nového streamu při každém opakování).
     ab_start_ms: float | None = None
     ab_end_ms: float | None = None
+    # Přeskočení ve stejném streamu (zamčený iPhone nesmí spustit nový zdroj,
+    # 9. 10.): výroba HLS přeruší aktuální skladbu a pokračuje `skip_to`;
+    # klient se posune na její začátek. `skew_ms` = o kolik klient skočil
+    # dopředu -- náskok výroby se počítá od jeho nové pozice.
+    skip_to: int | None = None
+    skip_cut_ms: float | None = None
+    skew_ms: float = 0.0
 
 
 _sessions: dict[str, RadioSession] = {}
@@ -186,10 +193,10 @@ async def _run_hls(s: RadioSession) -> None:
     logger.info("rádio %s HLS start", s.id[:6])
     try:
         assert proc.stdin is not None
-        async for data, written_ms in _produce(s, 0, s.start_offset_ms, 0.0, timeline):
+        async for data, written_ms in _produce(s, 0, s.start_offset_ms, 0.0, timeline, hls=True):
             proc.stdin.write(data)
             await proc.stdin.drain()
-            ahead = written_ms / 1000 - (time.monotonic() - started)
+            ahead = (written_ms - s.skew_ms) / 1000 - (time.monotonic() - started)
             if ahead > LEAD_S:
                 await asyncio.sleep(ahead - LEAD_S)
             if time.monotonic() - s.hls_touched > HLS_IDLE_STOP_S:
@@ -394,7 +401,16 @@ async def stream(s: RadioSession, start_byte: int = 0, label: str = ""):
         logger.info("rádio %s spojení #%d konec po %.1f s (%d kB)", s.id[:6], me, time.monotonic() - started, sent // 1024)
 
 
-async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, timeline: list[Segment]):
+def _take_skip(s: RadioSession, hls: bool, written_ms: float) -> int | None:
+    """Požadované přeskočení (jen výroba HLS -- ta patří relaci)."""
+    if not hls or s.skip_to is None:
+        return None
+    target, s.skip_to = s.skip_to, None
+    s.skip_cut_ms = written_ms
+    return target
+
+
+async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, timeline: list[Segment], hls: bool = False):
     """Vyrábí MP3 bajty od pozice `pos` ve frontě; yielduje (data, čas streamu po nich)."""
     while pos < len(s.queue):
         rid = s.queue[pos]
@@ -410,6 +426,8 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
             await _request_provision(s, rid)
             waited = 0.0
             while path is None and pending and waited < PROVISION_WAIT_S:
+                if hls and s.skip_to is not None:
+                    break
                 chunk = await _silence(1000)
                 # Délka z bajtů jako všude jinde -- "1 s" ticha je v MP3
                 # kvůli rámcům/paddingu ~1045 ms a časová osa by ujížděla.
@@ -417,6 +435,10 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
                 yield chunk, written_ms
                 waited += 1.0
                 path, gain, pending = await asyncio.to_thread(_asset_path_and_gain, rid)
+        target = _take_skip(s, hls, written_ms)
+        if target is not None:
+            pos, offset = target, 0.0
+            continue
         if path is None:
             logger.info("rádio: %s nejde přehrát, přeskakuji", rid)
             pos += 1
@@ -439,9 +461,13 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
             *_ffmpeg_cmd(path, offset, gain, length), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
         )
         seg_bytes = 0
+        skipped: int | None = None
         try:
             assert proc.stdout is not None
             while True:
+                skipped = _take_skip(s, hls, written_ms)
+                if skipped is not None:
+                    break
                 data = await proc.stdout.read(CHUNK)
                 if not data:
                     break
@@ -456,7 +482,46 @@ async def _produce(s: RadioSession, pos: int, offset: float, written_ms: float, 
                     pass
             await proc.wait()
         seg.duration_ms = seg_bytes / BYTES_PER_MS
+        if skipped is not None:
+            pos, offset = skipped, 0.0
+            continue
         if looping and seg_bytes > 0:
             continue  # A-B: stejný úsek znovu (pos zůstává 0)
         pos += 1
         offset = 0.0
+
+
+async def skip(s: RadioSession, direction: int, from_ms: float, wait_s: float = 4.0) -> tuple[float, str | None] | None:
+    """Přeskočení ve stejném streamu: `direction` +1 další, -1 předchozí,
+    0 aktuální od začátku. Vrací (čas streamu, kam se má klient posunout,
+    id skladby) nebo None (není kam). Další skladba, kterou výroba už začala
+    psát, se jen najde -- nic se nepřerušuje."""
+    if not s.timeline:
+        return None
+    played = next((seg for seg in reversed(s.timeline) if seg.start_ms <= from_ms), s.timeline[0])
+    target = played.queue_pos + direction
+    if target < 0 or target >= len(s.queue):
+        return None
+    found = None
+    if direction > 0:
+        found = next((seg for seg in s.timeline if seg.queue_pos == target and seg.start_ms > played.start_ms), None)
+    if found is None:
+        known = len(s.timeline)
+        s.skip_cut_ms = None
+        s.skip_to = target
+        waited = 0.0
+        while waited < wait_s:
+            await asyncio.sleep(0.05)
+            waited += 0.05
+            found = next((seg for seg in s.timeline[known:] if seg.queue_pos == target), None)
+            if found is not None:
+                break
+        if found is None:
+            # Skladba se ještě stahuje -- server mezitím posílá ticho od místa
+            # přerušení; klient se posune tam a skladba naváže sama.
+            if s.skip_cut_ms is None:
+                return None
+            s.skew_ms += max(0.0, s.skip_cut_ms - from_ms)
+            return s.skip_cut_ms, s.queue[target]
+    s.skew_ms += max(0.0, found.start_ms - from_ms)
+    return found.start_ms, found.recording_id

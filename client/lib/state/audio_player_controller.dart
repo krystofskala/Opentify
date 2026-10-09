@@ -1085,6 +1085,35 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _maybeLoopAb(trackPos);
   }
 
+  /// Rádio (iPhone na webu): přeskočení ve STEJNÉM streamu -- server přeruší
+  /// skladbu a pokračuje cílovou, přehrávač se jen posune na její začátek.
+  /// Zamčený iPhone nový zdroj zvuku nespustí, posun ve stávajícím ano (9. 10.).
+  /// `direction`: +1 další, -1 předchozí, 0 aktuální od začátku. `false` =
+  /// server neměl kam (začátek relace / konec fronty) -> postaru.
+  Future<bool> _radioSkip(int direction) async {
+    final sid = _radioSession;
+    if (sid == null || !_nativeHls || _loadingTrack) return false;
+    try {
+      final json = await _ref.read(apiClientProvider).postJson('/radio/$sid/skip', body: {
+        'direction': direction,
+        'fromMs': _player.position.inMilliseconds,
+      });
+      if (_radioSession != sid) return true;
+      final startMs = (json['startMs'] as num).round();
+      final rid = json['recordingId'] as String?;
+      if (rid != null && rid != state.nowPlaying?.recordingId) _radioSwitchTo(rid);
+      _radioLastRaw = Duration(milliseconds: startMs);
+      _radioLastRawAt = DateTime.now();
+      state = state.copyWith(position: Duration.zero);
+      await _player.seek(Duration(milliseconds: startMs));
+      unawaited(_pollRadio());
+      return true;
+    } catch (e) {
+      debugPrint('AudioPlayerController: přeskočení v rádiu nešlo ($e), postaru');
+      return false;
+    }
+  }
+
   /// Server přešel na další skladbu -- přepnout `nowPlaying` bez nového zdroje.
   void _radioSwitchTo(String recordingId) {
     var idx = -1;
@@ -1575,6 +1604,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (!auto && current != null && !isSpokenId(current) && state.position < const Duration(seconds: 30)) {
       _hints.signal(Hint.dislike);
     }
+    if (!auto && _radioActive && await _radioSkip(1)) return;
     _switchKind = auto ? 'auto' : 'manual';
     await _playAtIndex(index);
   }
@@ -1622,6 +1652,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// dvě skladby zpátky místo restartu poslouchané.
   Future<void> previous() async {
     if (_skipChapter(forward: false)) return;
+    if (_radioActive) {
+      final restart = state.position > const Duration(seconds: 3) || state.previousIndex == null;
+      if (await _radioSkip(restart ? 0 : -1)) return;
+    }
     if (state.position > const Duration(seconds: 3) || state.previousIndex == null) {
       await seek(Duration.zero);
       return;
