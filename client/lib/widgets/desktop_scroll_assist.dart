@@ -17,9 +17,15 @@ import 'package:flutter/material.dart' show Theme;
 /// Posouvá seznam pod kurzorem (bez fokusu -- Flutter by klávesy jinak
 /// poslal jen seznamu, který má fokus). V textovém poli klávesy nechává.
 class DesktopScrollAssist extends StatefulWidget {
-  const DesktopScrollAssist({super.key, required this.child, this.onSpace});
+  const DesktopScrollAssist({super.key, required this.child, this.onSpace, this.onUsed, this.onLongWheel});
   final Widget child;
   final VoidCallback? onSpace;
+
+  /// Použita klávesa (PgUp/PgDn/Home/End) nebo klik kolečkem (tipy k funkcím).
+  final VoidCallback? onUsed;
+
+  /// Dlouhé točení kolečkem v dlouhém seznamu (tipy k funkcím).
+  final VoidCallback? onLongWheel;
 
   @override
   State<DesktopScrollAssist> createState() => _DesktopScrollAssistState();
@@ -110,6 +116,7 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     if (FocusManager.instance.primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() != null) return false;
     final position = _scrollTarget();
     if (position == null) return false;
+    widget.onUsed?.call();
     final page = position.viewportDimension * 0.85;
     final to = switch (key) {
       LogicalKeyboardKey.pageDown => position.pixels + page,
@@ -138,6 +145,7 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     if (event.kind != PointerDeviceKind.mouse || event.buttons & kMiddleMouseButton == 0) return;
     final position = _scrollTarget();
     if (position == null) return;
+    widget.onUsed?.call();
     setState(() {
       _auto = position;
       _origin = event.position;
@@ -146,6 +154,22 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     });
     _lastTick = Duration.zero;
     _ticker.start();
+  }
+
+  final List<DateTime> _wheel = [];
+
+  /// Hodně kolečka za minutu v seznamu delším než ~20 obrazovek.
+  void _onWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || widget.onLongWheel == null) return;
+    final now = DateTime.now();
+    _wheel.add(now);
+    _wheel.removeWhere((t) => now.difference(t) > const Duration(minutes: 1));
+    if (_wheel.length < 150) return;
+    final position = _positionAt(event.position);
+    if (position != null && position.maxScrollExtent > position.viewportDimension * 20) {
+      _wheel.clear();
+      widget.onLongWheel!();
+    }
   }
 
   void _onPointerUp(PointerUpEvent event) {
@@ -196,6 +220,7 @@ class _DesktopScrollAssistState extends State<DesktopScrollAssist> with SingleTi
     final theme = Theme.of(context);
     return Listener(
       behavior: HitTestBehavior.translucent,
+      onPointerSignal: _onWheel,
       onPointerDown: _onPointerDown,
       onPointerUp: _onPointerUp,
       onPointerMove: (e) => _onMove(e.position, pressed: true),

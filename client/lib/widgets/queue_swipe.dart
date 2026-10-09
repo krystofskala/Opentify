@@ -3,7 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
+
+import '../state/hints.dart';
 
 import '../theme/glass_tokens.dart';
 
@@ -64,12 +67,22 @@ class _QueueSwipeState extends State<QueueSwipe> with SingleTickerProviderStateM
     }
   }
 
+  HintsController? get _hints {
+    try {
+      return ProviderScope.containerOf(context, listen: false).read(hintsProvider.notifier);
+    } catch (_) {
+      return null; // mimo ProviderScope (testy widgetu)
+    }
+  }
+
   void _end(DragEndDetails d) {
     switch (_stage) {
       case _Stage.later:
         widget.onLater?.call();
+        _hints?.used(Hint.laterSwipe);
       case _Stage.queue:
         _dx.value > 0 ? widget.onPlayNext() : widget.onPlayLast();
+        _hints?.used(Hint.queueSwipe);
       case _Stage.none:
         break;
     }

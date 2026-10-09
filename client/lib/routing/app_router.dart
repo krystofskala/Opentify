@@ -23,6 +23,7 @@ import '../features/shazam/shazam_screen.dart';
 import '../features/tuner/tuner_screen.dart';
 import '../features/profile/discoveries_screen.dart';
 import '../features/profile/history_screen.dart';
+import '../features/profile/features_screen.dart';
 import '../features/spoken/spoken_collections.dart' show SpokenCollectionScreen;
 import '../features/spoken/podcast_screens.dart';
 import '../features/spoken/spoken_screens.dart';
@@ -104,6 +105,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: '/history',
           builder: (context, state) => const HistoryScreen(),
+        ),
+        GoRoute(
+          path: '/features',
+          builder: (context, state) => const FeaturesScreen(),
         ),
         GoRoute(
           path: '/now-playing',

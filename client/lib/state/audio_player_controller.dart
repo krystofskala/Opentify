@@ -21,6 +21,7 @@ import '../core/device_token.dart' show authHeaders, withDeviceToken, withoutDev
 import '../core/diagnostics.dart' show diagReport;
 import '../core/prefetch_cache.dart';
 import '../core/media_session.dart';
+import 'hints.dart';
 import '../core/profile_prefs.dart';
 import '../core/radio_mode.dart';
 import '../core/ws_client.dart';
@@ -1569,6 +1570,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (!auto && _skipChapter(forward: true)) return;
     final index = state.nextIndex;
     if (index == null) return;
+    // Přeskočeno hned na začátku -> tip „podrž srdce = nelíbí se mi“.
+    final current = state.nowPlaying?.recordingId;
+    if (!auto && current != null && !isSpokenId(current) && state.position < const Duration(seconds: 30)) {
+      _hints.signal(Hint.dislike);
+    }
     _switchKind = auto ? 'auto' : 'manual';
     await _playAtIndex(index);
   }
@@ -1876,6 +1882,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   void setRepeatMode(RepeatMode mode) {
     if (mode == state.repeatMode) return;
+    if (mode == RepeatMode.endless) _hints.used(Hint.endless);
     state = state.copyWith(repeatMode: mode);
     _radioSyncUpcoming();
   }
@@ -2177,6 +2184,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// zastavení -- `_sleepTimer` proto vyprší `fadeDuration` PŘED
   /// `sleepTimerEndAt`, ať fade doběhne přesně na uživatelem zvolený čas.
   void startSleepTimer(Duration duration) {
+    _hints.used(Hint.sleepTimer);
     _sleepTimer?.cancel();
     _cancelFade();
     state = state.withSleepTimerEndAt(DateTime.now().add(duration));
@@ -2358,6 +2366,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Mluvené slovo: nic se neobstarává (kniha je na serveru celá, podcast
     // server přeposílá). Epizoda stažená do telefonu hraje odtud.
     if (isSpokenId(info.recordingId)) {
+      _maybeSleepHint(info.recordingId);
       // Díl knihy puštěný z fronty (klepnutí ve Frontě, Další, Předchozí) bez
       // pozice: navázat na uloženou -- dřív začal od 0:00 a za 15 s tu nulu
       // uložil na server (audit 8. 10.).
@@ -2463,6 +2472,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _awaitingProvisioning = false;
       _priming = false;
       state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
+      if (info.releaseId != null) _hints.signal(Hint.albumDownload);
     } else {
       // HTTP 202 -- soubor se teprve stahuje/frontí. `isBuffering` už je
       // `true` z playQueue/_playAtIndex, `ProvisioningController` navíc nese
@@ -2537,6 +2547,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _awaitingProvisioning = false;
         _priming = false;
         state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
+        if (info.releaseId != null) _hints.signal(Hint.albumDownload);
         return;
       }
       if (result.streamUrl != null) {
@@ -2813,6 +2824,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         } else if (result.isFailed) {
           done();
           state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
+          if (info.releaseId != null) _hints.signal(Hint.albumDownload);
         }
       },
     );
@@ -3199,6 +3211,43 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
   }
 
+  HintsController get _hints => _ref.read(hintsProvider.notifier);
+
+  Timer? _sleepHintTimer;
+
+  /// Kniha / podcast v noci: po 20 minutách poslechu tip na uspávač.
+  void _maybeSleepHint(String id) {
+    final hour = DateTime.now().hour;
+    if (hour < 23 && hour >= 4) return;
+    _sleepHintTimer?.cancel();
+    _sleepHintTimer = Timer(const Duration(minutes: 20), () {
+      if (state.isPlaying && isSpokenId(state.nowPlaying?.recordingId ?? '') && state.sleepTimerEndAt == null) {
+        _hints.signal(Hint.sleepTimer);
+      }
+    });
+  }
+
+  bool _bySkip = false;
+  Duration? _lastBackTarget;
+
+  /// Tipy podle posunů: kniha posouvaná ručně po čáře (-> ±30 s), skoky
+  /// zpět na stejné místo (-> A-B opakování).
+  void _hintOnSeek(Duration to) {
+    final viaSkip = _bySkip;
+    _bySkip = false;
+    final id = state.nowPlaying?.recordingId ?? '';
+    if (id.isEmpty) return;
+    if (isSpokenId(id)) {
+      if (!viaSkip) _hints.signal(Hint.spokenControls);
+      return;
+    }
+    if (to < state.position - const Duration(seconds: 2)) {
+      final last = _lastBackTarget;
+      if (last != null && (to - last).abs() < const Duration(seconds: 4)) _hints.signal(Hint.abRepeat);
+      _lastBackTarget = to;
+    }
+  }
+
   /// Cíl posledního skoku, dokud ho přehrávač nedožene (viz positionStream).
   Duration? _seekTarget;
   DateTime _seekAt = DateTime.now();
@@ -3206,6 +3255,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Posun o kus (audiokniha +-30 s): od cíle předchozího skoku, když ho
   /// přehrávač ještě nedohnal -- dvě rychlá klepnutí = 60 s, ne 30.
   Future<void> seekBy(Duration delta) {
+    if (isSpokenId(state.nowPlaying?.recordingId ?? '')) _hints.used(Hint.spokenControls);
+    _bySkip = true;
     final base = _seekTarget ?? state.position;
     var to = base + delta;
     if (to < Duration.zero) to = Duration.zero;
@@ -3215,6 +3266,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   Future<void> seek(Duration position) async {
+    _hintOnSeek(position);
     if (!_radioActive) {
       // Lišta a čas hned na novém místě, ne až po hlášení přehrávače.
       _seekTarget = position;
@@ -3307,6 +3359,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
           unawaited(_continueSpokenBook());
           return;
         }
+        // Fronta dohrála do ticha -> tip na nekonečné hraní.
+        if (state.nextIndex == null && state.repeatMode == RepeatMode.off) _hints.signal(Hint.endless);
         unawaited(next(auto: true));
       }
     }
@@ -3420,6 +3474,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _lifecycle?.dispose();
     _stallWatch?.cancel();
     _sleepTimer?.cancel();
+    _sleepHintTimer?.cancel();
     _fadeTimer?.cancel();
     _gainRampTimer?.cancel();
     _radioPoll?.cancel();

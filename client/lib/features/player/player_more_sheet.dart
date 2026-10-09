@@ -26,6 +26,7 @@ import '../../state/liked_songs_controller.dart' show dislikedProvider;
 import '../../state/library_scope.dart' show addTrackToLibrary, libraryIdsProvider;
 import '../../state/offline_controller.dart';
 import '../../state/pip_player_service.dart';
+import '../../state/hints.dart';
 
 /// Přehled méně častých ovladačů (rychlost, hlasitost, uspávač, fronta) --
 /// jeden overflow sheet místo cpaní dalších tlačítek do `NowPlayingScreen`
@@ -476,6 +477,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
       onTap: () {
         final notifier = ref.read(abRepeatProvider.notifier);
         if (active == null) {
+          ref.read(hintsProvider.notifier).used(Hint.abRepeat);
           notifier.state = (recordingId: id, a: position, b: null);
         } else if (active.b == null) {
           if (position <= active.a + const Duration(seconds: 1)) {
