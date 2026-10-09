@@ -24,6 +24,7 @@ import 'widgets/top_fade_scroll_behavior.dart';
 import 'widgets/toast.dart';
 import 'state/connect_controller.dart';
 import 'state/pip_player_service.dart';
+import 'state/hints.dart';
 import 'features/spoken/spoken_queue_sync.dart';
 import 'state/auto_continue.dart';
 import 'state/server_notice.dart';
@@ -94,6 +95,7 @@ class OpentifyApp extends ConsumerWidget {
       // Počítač (web i Windows): klik kolečkem = rychlý posun, PgUp/PgDn/Home/End.
       builder: (context, child) => _desktopScroll(
           () => ref.read(audioPlayerControllerProvider.notifier).togglePlayPause(),
+          ref.read(hintsProvider.notifier),
           _DismissKeyboard(
           child: _maybeSimulatedInsets(
           context,
@@ -149,12 +151,19 @@ class OpentifyApp extends ConsumerWidget {
   }
 }
 
-Widget _desktopScroll(VoidCallback onSpace, Widget child) {
+Widget _desktopScroll(VoidCallback onSpace, HintsController hints, Widget child) {
   final desktop = kIsWeb ||
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.linux;
-  return desktop ? DesktopScrollAssist(onSpace: onSpace, child: child) : child;
+  return desktop
+      ? DesktopScrollAssist(
+          onSpace: onSpace,
+          onUsed: () => hints.used(Hint.desktopKeys),
+          onLongWheel: () => hints.signal(Hint.desktopKeys),
+          child: child,
+        )
+      : child;
 }
 
 /// `--dart-define=SIMULATE_INSETS=true` (jen kontrolní buildy): iPhone-like

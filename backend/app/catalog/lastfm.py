@@ -151,16 +151,6 @@ async def search_artists(query: str, limit: int = 10) -> list[dict[str, Any]]:
     ]
 
 
-async def search_tracks(query: str, limit: int = 10) -> list[dict[str, Any]]:
-    data = await get({"method": "track.search", "track": query.strip(), "limit": str(limit)}, ttl=DAY)
-    matches = ((data or {}).get("results") or {}).get("trackmatches") or {}
-    return [
-        {"title": t.get("name"), "artist": t.get("artist"), "listeners": _int(t.get("listeners"))}
-        for t in _as_list(matches.get("track"))
-        if t.get("name") and t.get("artist")
-    ]
-
-
 async def artist_info(name: str) -> dict[str, Any] | None:
     data = await get({"method": "artist.getinfo", "artist": name, "autocorrect": "1"}, ttl=DAY)
     artist = (data or {}).get("artist")

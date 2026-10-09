@@ -96,8 +96,3 @@ class ArtistBioOut(CamelModel):
     bands: list[ArtistOut] = []
     members: list[ArtistOut] = []
 
-
-class SearchResponse(CamelModel):
-    query: str
-    total: int
-    results: list[dict]  # entityType + zploštělé pole z Artist/Release/RecordingOut

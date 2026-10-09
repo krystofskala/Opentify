@@ -339,18 +339,6 @@ class LibraryRepository {
     final json = await _api.getJsonList('/library/genres');
     return json.map((e) => LocalGenre.fromJson(e as Map<String, dynamic>)).toList();
   }
-
-  Future<LocalTracksPage> tracksByGenre(String genre) async {
-    final json = await _api.getJson('/library/by-genre/${Uri.encodeComponent(genre)}');
-    return LocalTracksPage.fromJson(json);
-  }
-
-  /// Skladby interpretů s MusicBrainz `country == "CZ"` -- pohání "Česká
-  /// hudba" na Home.
-  Future<LocalTracksPage> czechMusic() async {
-    final json = await _api.getJson('/library/czech');
-    return LocalTracksPage.fromJson(json);
-  }
 }
 
 

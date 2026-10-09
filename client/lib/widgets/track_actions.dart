@@ -27,6 +27,7 @@ import 'toast.dart';
 import 'state_views.dart' show humanError;
 import '../state/auto_continue.dart' show playNowRepositoryProvider;
 import '../state/taste_exclusions.dart';
+import '../state/hints.dart';
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -207,6 +208,7 @@ class _TrackActionsSheet extends ConsumerWidget {
                 onTap: () => run(() {
                   controller.playNext(info);
                   toast('Jako další: ${recording.title}');
+                  ref.read(hintsProvider.notifier).signal(Hint.queueSwipe);
                 }),
               ),
               _Item(
@@ -215,6 +217,7 @@ class _TrackActionsSheet extends ConsumerWidget {
                 onTap: () => run(() {
                   controller.addToQueue(info);
                   toast('Do fronty: ${recording.title}');
+                  ref.read(hintsProvider.notifier).signal(Hint.queueSwipe);
                 }),
               ),
               const _Divider(),
@@ -231,9 +234,10 @@ class _TrackActionsSheet extends ConsumerWidget {
               _Item(
                 icon: isLater ? Symbols.event_busy_rounded : Symbols.schedule_rounded,
                 label: isLater ? 'Odebrat z „Na později“' : 'Uložit na později',
-                onTap: () => run(
-                  () => ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id),
-                ),
+                onTap: () => run(() {
+                  ref.read(listenLaterProvider.notifier).toggle(hostContext, LaterKind.track, recording.id);
+                  if (!isLater) ref.read(hintsProvider.notifier).signal(Hint.laterSwipe);
+                }),
               ),
               if (!inLibrary)
                 _Item(

@@ -112,11 +112,6 @@ def _covered(word: str, pool) -> bool:
     return any(_same(word, p) for p in pool)
 
 
-def _covered_joined(word: str, seq: list[str]) -> bool:
-    """"Lenslife" = "Lens Life"."""
-    return _covered(word, seq) or any(_same(word, a + b) for a, b in zip(seq, seq[1:]))
-
-
 def core_title(title: str) -> str:
     """Název bez závorek, bez části za pomlčkou a bez "feat. X"."""
     core = _BRACKETS.sub(" ", title or "")

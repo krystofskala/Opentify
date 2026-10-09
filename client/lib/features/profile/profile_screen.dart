@@ -35,6 +35,7 @@ import '../../core/now_playing_activity.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 import '../../state/pip_player_service.dart' show pipAutoOpenProvider, pipPlayerProvider;
+import '../../state/hints.dart' show hintsProvider;
 import '../../widgets/toast.dart';
 import '../../widgets/state_views.dart' show humanError;
 import '../artist/artist_support.dart' show openExternal;
@@ -161,6 +162,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     summary: 'Pořadí sekcí, skryté sekce, žánry, mluvené slovo',
                     child: Column(
                       children: [
+                        _ActionRow(
+                          icon: Symbols.lightbulb_rounded,
+                          title: 'Co Opentify umí',
+                          description: 'Všechny funkce a gesta s krátkým návodem.',
+                          buttonLabel: 'Otevřít',
+                          onPressed: () => context.push('/features'),
+                        ),
                         _ActionRow(
                           icon: Symbols.tune_rounded,
                           title: 'Upravit Domů',
@@ -562,6 +570,13 @@ class _AppearanceSettings extends ConsumerWidget {
             ),
           ),
         ],
+        const SizedBox(height: 12),
+        _SwitchRow(
+          title: 'Tipy k funkcím',
+          subtitle: 'Když něco děláš zdlouhavě, appka občas nabídne rychlejší cestu (nejvýš jednou denně).',
+          value: ref.watch(hintsProvider.select((s) => s.enabled)),
+          onChanged: ref.read(hintsProvider.notifier).setEnabled,
+        ),
         // Web v Chrome / Edge na počítači: plovoucí okno samo při přepnutí panelu.
         if (kIsWeb && ref.read(pipPlayerProvider).supported) ...[
           const SizedBox(height: 12),

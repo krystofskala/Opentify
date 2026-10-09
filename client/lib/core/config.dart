@@ -49,11 +49,6 @@ class AppConfig {
     return Uri.parse(url).replace(scheme: scheme, host: page.host).toString();
   }
 
-  /// Backend (app/auth.py) má zatím jen zjednodušenou auth přes hlavičky
-  /// `X-User-Id`/`X-Device-Id` — TODO tamtéž počítá s náhradou za device
-  /// JWT. Klient se tomu drží 1:1, dokud auth vrstva nedoběhne.
-  static const userId = String.fromEnvironment('VAULT_USER_ID', defaultValue: 'demo-user');
-
   /// Web build v Chrome nemá stabilní zařízení identitu jako mobil/desktop
   /// — vygenerujeme ji jednou při startu procesu, aby šlo v devu otestovat
   /// multi-device sync mezi dvěma taby/okny s různým `VAULT_DEVICE_ID`.

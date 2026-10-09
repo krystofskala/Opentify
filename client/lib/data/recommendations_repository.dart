@@ -1,5 +1,4 @@
 import '../core/api_client.dart';
-import '../models/playlist_model.dart';
 import '../models/recording_model.dart';
 import '../models/year_in_review_model.dart';
 
@@ -15,11 +14,6 @@ class RecommendationsRepository {
   Future<List<RecordingModel>> discover({int limit = 20}) async {
     final json = await _api.getJsonList('/recommendations/discover', query: {'limit': '$limit'});
     return json.map((e) => RecordingModel.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<PlaylistDetailModel> dailyJams() async {
-    final json = await _api.getJson('/recommendations/daily-jams');
-    return PlaylistDetailModel.fromJson(json);
   }
 
   /// Sitewide žebříček veřejné komunity ListenBrainz, ne dat téhle instance

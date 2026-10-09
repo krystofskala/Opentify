@@ -9,10 +9,7 @@ import '../theme/shapes.dart';
 import 'glass/expressive_shapes.dart';
 import 'glass/glass.dart';
 
-/// Jednotné stavové widgety (nadpis sekce, prázdno, chyba, načítání) pro
-/// celou appku -- dřív si každá obrazovka psala vlastní `_SectionHeader`/
-/// `_EmptyState`/holý `CircularProgressIndicator`/`Text('Nepodařilo se...')`
-/// s mírně odlišnými paddingy, styly i texty.
+/// Jednotné stavové widgety celé appky: nadpis sekce, prázdno, chyba, načítání.
 
 /// Chyba lidsky (do toastu / chybového stavu) -- nikdy surové
 /// "ApiException(500): {...}". Neznámá chyba = obecná věta.

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
 from app.auth import get_current_user, require_admin
-from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name
 from app.catalog.deezer import DeezerClient, get_deezer_client
 from app.catalog.musicbrainz import MusicBrainzClient, MusicBrainzError, get_musicbrainz_client
 from app.catalog.service import CatalogService

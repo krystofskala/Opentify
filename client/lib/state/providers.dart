@@ -27,7 +27,6 @@ import 'liked_songs_controller.dart' show likedSongsControllerProvider;
 final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
     baseUrl: AppConfig.apiBaseUrl,
-    userId: AppConfig.userId,
     deviceId: AppConfig.deviceId,
   );
   // 401 mimo přihlašování -> znovu `/auth/me` (AuthGate ukáže přihlášení).
@@ -159,7 +158,6 @@ final gonePlaylistsProvider = StateProvider<Set<String>>((ref) => const {});
 final realtimeClientProvider = Provider<RealtimeClient>((ref) {
   final client = RealtimeClient(
     wsUrl: AppConfig.wsBaseUrl,
-    userId: AppConfig.userId,
     deviceId: AppConfig.deviceId,
     deviceName: deviceName(),
   );

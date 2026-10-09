@@ -277,23 +277,3 @@ def work_out(record: dict[str, Any]) -> dict[str, Any]:
         "summary": next((s for s in record.get("summary") or [] if s), None),
     }
 
-
-async def match_release(title: str) -> dict[str, Any] | None:
-    """Kniha pro vydání, nebo None. Dotaz = všechna slova obou stran."""
-    parsed = parse_release(title)
-    if parsed["collection"] or not parsed["parts"]:
-        return None  # sbírka není jedna kniha (fáze 2: rozpis obsahu)
-    lookfor = " ".join(parsed["parts"])[:200]
-    record = match_record(parsed, await _search(lookfor))
-    if record is None and len(parsed["parts"]) > 2:
-        # Interpret / název řady v dotazu hledání zúžil ("Babička - Jiří
-        # Štědroň"): ještě dvojice stran (název + autor), nejvýš tři dotazy.
-        tried = 0
-        for i in range(len(parsed["parts"])):
-            for j in range(i + 1, len(parsed["parts"])):
-                if tried >= 3 or record is not None:
-                    break
-                tried += 1
-                pair = f"{parsed['parts'][i]} {parsed['parts'][j]}"
-                record = match_record(parsed, await _search(pair))
-    return work_out(record) if record else None

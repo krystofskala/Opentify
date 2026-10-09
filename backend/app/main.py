@@ -247,9 +247,8 @@ def health() -> dict:
 
 
 @app.websocket("/ws")
-async def ws_route(websocket: WebSocket, user_id: str = "demo-user") -> None:
-    # Profil podle klíče zařízení (cookie jde s WS handshakem), ne podle
-    # `user_id` z URL -- ten by šel podvrhnout.
+async def ws_route(websocket: WebSocket) -> None:
+    # Profil podle klíče zařízení (`?t=` / cookie s WS handshakem).
     from app.auth import resolve_user
 
     _user, acting = resolve_user(websocket)  # type: ignore[arg-type]

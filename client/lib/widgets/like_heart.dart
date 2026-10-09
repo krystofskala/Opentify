@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../state/hints.dart';
 import '../state/liked_songs_controller.dart';
 import 'toast.dart';
 
@@ -47,6 +48,7 @@ class LikeHeart extends ConsumerWidget {
         },
         onLongPress: () async {
           HapticFeedback.mediumImpact();
+          ref.read(hintsProvider.notifier).used(Hint.dislike);
           final messenger = ScaffoldMessenger.maybeOf(context);
           final wasDisliked = disliked;
           final notifier = ref.read(dislikedProvider.notifier);

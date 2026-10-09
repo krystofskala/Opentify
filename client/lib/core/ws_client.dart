@@ -4,7 +4,6 @@ import 'dart:math';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../models/playback_model.dart';
 import 'realtime_event.dart';
 import 'device_token.dart';
 
@@ -12,14 +11,11 @@ import 'device_token.dart';
 /// zařízení, s exponenciálním backoffem při výpadku a broadcast Streamem
 /// pro dekódované `RealtimeEvent`.
 ///
-/// Backend zatím ověřuje identitu jen přes `?user_id=` query param
-/// (app/main.py má TODO na náhradu za `?token=<device_jwt>` z asyncapi.yaml)
-/// — klient posílá obojí, aby fungoval s dnešním i budoucím backendem.
+/// Profil server pozná podle klíče zařízení (`?t=`, na webu i cookie).
 class RealtimeClient {
-  RealtimeClient({required this.wsUrl, required this.userId, required this.deviceId, this.deviceName = 'Zařízení'});
+  RealtimeClient({required this.wsUrl, required this.deviceId, this.deviceName = 'Zařízení'});
 
   final String wsUrl;
-  final String userId;
   final String deviceId;
 
   /// Jméno pro ostatní zařízení profilu (Opentify Connect).
@@ -59,7 +55,6 @@ class RealtimeClient {
     // `act_as`: admin jednající za jiný profil -- nativní WebSocket hlavičku
     // neumí a bez toho by Connect skončil v jiném profilu než zbytek appky.
     final uri = Uri.parse(withDeviceToken(Uri.parse(wsUrl).replace(queryParameters: {
-      'user_id': userId,
       if (actAsProfile != null) 'act_as': actAsProfile!,
     }).toString()));
     try {
@@ -192,18 +187,6 @@ class RealtimeClient {
   void playbackSeek(int positionMs) => _send({
         'type': 'playback.seek',
         'payload': {'positionMs': positionMs},
-      });
-
-  /// `expectedVersion` musí odpovídat serverové `PlaybackSession.version`,
-  /// jinak přijde `QueueConflictEvent` místo `QueueUpdatedEvent` — volající
-  /// (PlaybackController) se musí přihlásit k odběru `events` a na konflikt
-  /// zareagovat přepočtem + opakováním s novou verzí.
-  void queueSet(List<QueueItem> queue, int expectedVersion) => _send({
-        'type': 'queue.set',
-        'payload': {
-          'queue': queue.map((item) => item.toJson()).toList(),
-          'expectedVersion': expectedVersion,
-        },
       });
 
   void claimActiveDevice() => _send({'type': 'device.claim_active'});

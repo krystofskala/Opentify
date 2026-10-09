@@ -94,10 +94,6 @@ def measure(path: str) -> tuple[float | None, bytes | None]:
     return lufs, pcm
 
 
-def measure_integrated_lufs(path: str) -> float | None:
-    return measure(path)[0]
-
-
 def gain_for_lufs(lufs: float) -> float:
     return round(max(-MAX_GAIN_DB, min(MAX_GAIN_DB, TARGET_LUFS - lufs)), 2)
 

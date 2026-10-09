@@ -40,13 +40,11 @@ const _defaultTimeout = Duration(seconds: 45);
 class ApiClient {
   ApiClient({
     required this.baseUrl,
-    required this.userId,
     required this.deviceId,
     http.Client? httpClient,
   }) : _http = httpClient ?? http.Client();
 
   final String baseUrl;
-  final String userId;
   final String deviceId;
   final http.Client _http;
 
@@ -55,7 +53,6 @@ class ApiClient {
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
-        'X-User-Id': userId,
         'X-Device-Id': deviceId,
         ...authHeaders(),
         ...extraHeaders,

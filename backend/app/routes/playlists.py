@@ -9,7 +9,6 @@ Dart straně je pro oba stejný typ)."""
 
 from __future__ import annotations
 
-from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel

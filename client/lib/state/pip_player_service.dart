@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/pip_player.dart';
 import 'artwork_provider.dart';
 import 'audio_player_controller.dart';
+import 'hints.dart';
 import 'liked_songs_controller.dart';
 
 /// Otevřít plovoucí přehrávač samo při přepnutí panelu (výchozí ano, jako
@@ -88,7 +90,10 @@ final pipPlayerProvider = Provider<PipPlayer>((ref) {
       final liked = ref.read(likedSongsControllerProvider).valueOrNull?.contains(id) ?? false;
       unawaited(ref.read(likedSongsControllerProvider.notifier).setLiked(id, !liked));
     },
-    onOpened: push,
+    onOpened: () {
+      ref.read(hintsProvider.notifier).used(Hint.floatingPlayer);
+      push();
+    },
   );
   ref.listen(pipAutoOpenProvider, (_, on) => pip.setAutoOpen(on), fireImmediately: true);
 
@@ -108,6 +113,13 @@ final pipPlayerProvider = Provider<PipPlayer>((ref) {
   ref.listen(likedSongsControllerProvider, (_, __) {
     if (pip.isOpen) push();
   });
+  // Přepnutí panelu během hraní -> tip na plovoucí přehrávač.
+  final lifecycle = AppLifecycleListener(onHide: () {
+    if (ref.read(audioPlayerControllerProvider).isPlaying && !pip.isOpen) {
+      ref.read(hintsProvider.notifier).signal(Hint.floatingPlayer);
+    }
+  });
+  ref.onDispose(lifecycle.dispose);
   ref.onDispose(pip.close);
   return pip;
 });

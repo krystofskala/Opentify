@@ -19,14 +19,7 @@ from datetime import datetime, timedelta
 from sqlmodel import Session, delete, select
 
 from app.db import engine
-from app.models import (
-    PodcastEpisode,
-    PodcastListenHistory,
-    PodcastNameMatch,
-    PodcastProgress,
-    PodcastShow,
-    PodcastSubscription,
-)
+from app.models import PodcastEpisode, PodcastListenHistory, PodcastNameMatch, PodcastProgress, PodcastShow
 from app.utils import utcnow
 
 SOURCE = "spotify"
@@ -219,7 +212,3 @@ def mark_finished_from_history(user_id: str, show_id: str) -> int:
         session.commit()
         return marked
 
-
-def subscribed_show_ids(user_id: str) -> set[str]:
-    with Session(engine) as session:
-        return set(session.exec(select(PodcastSubscription.show_id).where(PodcastSubscription.user_id == user_id)).all())

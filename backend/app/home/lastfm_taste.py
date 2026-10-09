@@ -11,7 +11,6 @@ import asyncio
 import re
 import random
 from collections import Counter
-from typing import Any
 
 from sqlmodel import Session
 
@@ -171,16 +170,3 @@ async def user_styles_weighted(
             score[tag] += weight * (count / 100) * (0.5 if tag in _BROAD else 1.0)
     return [t for t, _ in score.most_common(limit)]
 
-
-async def user_styles(top_artists: list[tuple[str, float]], limit: int = 12) -> list[str]:
-    """Nejposlouchanější styly profilu: štítky jeho interpretů vážené tím,
-    jak moc je poslouchá."""
-    score: Counter = Counter()
-    for name, weight in top_artists:
-        for i, tag in enumerate((await artist_tags(name))[:5]):
-            score[tag] += weight * max(0.2, 1.0 - i * 0.2)
-    return [t for t, _ in score.most_common(limit)]
-
-
-def any_name(names: list[Any]) -> list[str]:  # pragma: no cover -- drobnost pro typy
-    return [str(n) for n in names]

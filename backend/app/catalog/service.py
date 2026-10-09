@@ -37,7 +37,7 @@ from app.catalog.identity import is_own_artist, is_own_id
 
 from app.catalog.artwork import clean_album_title, fill_artist, fill_release
 from app.catalog.cache import CACHE_PREFIX
-from app.catalog.availability import compute_availability, recording_artist_name, resolve_artist_name
+from app.catalog.availability import compute_availability, recording_artist_name
 from app.catalog.deezer import DeezerClient
 from app.catalog.deezer_ingest import deezer_image, ingest_album, ingest_artist, ingest_track, ingest_track_with_context, norm
 from app.catalog.fanart import fill_artist_banner

@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from app.models import HomeSnapshot, Listen, Playlist, PlaylistItem, Recording
+from app.models import Listen, Playlist, PlaylistItem, Recording
 from app.utils import utcnow
 
 MAX_PINS = 6
@@ -33,25 +33,6 @@ QUICK_SIZE = 6
 # jako jedno místo ho neodradí, třeba zaujme").
 WIDE_SLOTS = 1
 _TZ = ZoneInfo("Europe/Prague")
-
-
-def pins_key(user_id: str) -> str:
-    return f"quick_pins:{user_id}"
-
-
-def get_pins(session: Session, user_id: str) -> list[str]:
-    row = session.get(HomeSnapshot, pins_key(user_id))
-    return list((row.payload or {}).get("ids") or []) if row else []
-
-
-def set_pins(session: Session, user_id: str, ids: list[str]) -> list[str]:
-    ids = list(dict.fromkeys(ids))[:MAX_PINS]
-    row = session.get(HomeSnapshot, pins_key(user_id)) or HomeSnapshot(key=pins_key(user_id))
-    row.payload = {"ids": ids}
-    row.generated_at = utcnow()
-    session.add(row)
-    session.commit()
-    return ids
 
 
 def _aware(dt):
