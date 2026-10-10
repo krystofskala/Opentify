@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../models/recording_model.dart';
+import '../../routing/branches.dart';
 import '../../state/audio_player_controller.dart';
 import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
@@ -39,6 +40,7 @@ class TrackLinkScreen extends ConsumerWidget {
     final track = ref.watch(_sharedTrackProvider(recordingId));
     return Scaffold(
       appBar: const SectionAppBar('Poslaná skladba'),
+      bottomNavigationBar: const ShellBarSpace(),
       body: track.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => const Center(child: Text('Skladbu se nepodařilo najít.')),
