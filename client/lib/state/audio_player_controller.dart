@@ -464,7 +464,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       if (_resumeFor == info.recordingId) _resumeAt = from;
       return;
     }
-    if (!watched || position != _stallPosition) {
+    // Zdroj se ještě načítá (`setUrl` neskončil): pozice 0:00 stojí, protože
+    // nic nehraje, ne kvůli zaseknutí -- na načítání hlídá `_loadTimeout`.
+    // Dřív to po 12 s rozehrané načítání zahodilo a začalo znovu od nuly, na
+    // pomalých datech dokola (táta, 11. 10.: minuta na každou skladbu).
+    if (!watched || position != _stallPosition || _readyGen != _sourceGen) {
       _stallPosition = position;
       _stallSince = now;
       return;
@@ -2067,6 +2071,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final current = state.nowPlaying;
     final duration = state.duration;
     if (current == null || duration == null || duration == Duration.zero) return;
+    _maybePrefetchNextEarly(current, position);
     if (_warmedUpAfter == current.recordingId) return;
     final remaining = duration - position;
     if (position < duration * 0.8 && remaining > const Duration(seconds: 20)) return;
@@ -2091,6 +2096,25 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Jen naplní `_artworkCache`/`_accentColorCache` -- stav mění, jen když
     // `nowPlaying` odpovídá, což tu ještě neplatí.
     unawaited(_resolveArtworkAndAccent(next));
+    unawaited(_prefetchFile(next.recordingId));
+  }
+
+  /// Nativní appka: DALŠÍ skladbu, kterou server už má celou, stáhnout do
+  /// telefonu hned po 10 s hraní, ne až v 80 % -- na pomalých datech (táta)
+  /// se 5 MB za posledních pár desítek vteřin nemusí stihnout a přechod pak
+  /// čeká na síť. Nic se neobstarává (to dál až v 80 %), jen hotový soubor.
+  String? _earlyPrefetchAfter;
+
+  void _maybePrefetchNextEarly(NowPlayingInfo current, Duration position) {
+    if (!PrefetchCache.supported || _radioMode || _earlyPrefetchAfter == current.recordingId) return;
+    if (position < const Duration(seconds: 10)) return;
+    _earlyPrefetchAfter = current.recordingId;
+    final nextIndex = state.nextIndex;
+    if (nextIndex == null || nextIndex >= state.queue.length) return;
+    final next = state.queue[nextIndex];
+    if (next.recordingId == current.recordingId || isSpokenId(next.recordingId)) return;
+    final s = _ref.read(provisioningControllerProvider)[next.recordingId];
+    if (s == null || !s.isAvailable || s.streamUrl == null) return;
     unawaited(_prefetchFile(next.recordingId));
   }
 
@@ -2146,12 +2170,26 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       }
       final bytes = await _ref.read(apiClientProvider).getBytes(path, timeout: const Duration(minutes: 5));
       final url = await PrefetchCache.put(id, bytes);
-      if (url != null) _prefetched[id] = url;
+      if (url != null) {
+        _prefetched[id] = url;
+        _playPrefetchedIfWaiting(id, url);
+      }
     } catch (e) {
       debugPrint('AudioPlayerController: předem stáhnout $id nešlo ($e)');
     } finally {
       _prefetching.remove(id);
     }
+  }
+
+  /// Celý soubor dorazil do telefonu, zatímco se stream téže skladby pořád
+  /// načítá (pomalá data -- `_startFromServer` přestal po 10 s čekat): pustit
+  /// hotový soubor hned. Dřív se stažený soubor použil až příště.
+  void _playPrefetchedIfWaiting(String id, String url) {
+    final info = state.nowPlaying;
+    if (info == null || info.recordingId != id) return;
+    if (_readyGen == _sourceGen || _currentLocal || _radioActive || _currentProgressive) return;
+    debugPrint('AudioPlayerController: soubor v telefonu dřív než stream, hraju z něj');
+    unawaited(_startStream(info, url, isProgressive: false, isLocal: true));
   }
 
   /// Zamčený iPhone: když skladba dohraje, audio prvek "skončí", iOS uspí
@@ -2678,11 +2716,21 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         // Kniha / epizoda: velký soubor, načtení může trvat déle (8. 10.:
         // 2,5 h kniha z YouTube na iPhonu nestihla 15 s a točila se dokola).
         final timeout = isSpokenId(info.recordingId) ? const Duration(seconds: 45) : _loadTimeout;
+        final loadStarted = DateTime.now();
         void watchLoad() {
           Timer(timeout, () {
             if (gen != _sourceGen || _readyGen == gen || state.nowPlaying?.recordingId != info.recordingId) return;
             // Skrytý panel: prohlížeč načítání odložil -- počkat, až se ukáže.
             if (kIsWeb && !_appVisible && _player.bufferedPosition == Duration.zero) return watchLoad();
+            // Celý soubor se do telefonu ještě stahuje (`_startFromServer`):
+            // pomalá data, ne mrtvé spojení -- počkat, hotový soubor se pustí
+            // sám (`_playPrefetchedIfWaiting`). Nový pokus by jen zahodil, co
+            // už přišlo. Nejdéle `_slowLoadLimit`, pak normálně chyba.
+            if (!isLocal &&
+                _prefetching.contains(info.recordingId) &&
+                DateTime.now().difference(loadStarted) < _slowLoadLimit) {
+              return watchLoad();
+            }
             _handleStreamFailure(info, TimeoutException('zdroj se nenačetl', timeout), isProgressive: false);
           });
         }
@@ -2773,6 +2821,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   static const _loadTimeout = Duration(seconds: 15);
+
+  /// Jak dlouho nejvýš čekat na načtení, dokud se celý soubor ještě stahuje
+  /// do telefonu (pomalá mobilní data).
+  static const _slowLoadLimit = Duration(seconds: 90);
 
   /// Běží test přehrávání (`features/profile/playback_test_screen.dart`):
   /// skladby se nezapočítají do poslechů / historie / ListenBrainz.
