@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/diagnostics.dart';
 import 'core/safe_area_insets.dart';
+import 'widgets/net_image.dart' show noteImageCacheFailure;
 
 /// Vstupní bod. Primárně cílíme na `flutter run -d chrome` pro rychlé
 /// testování proti lokálnímu backendu (viz README.md v tomhle adresáři pro
@@ -34,6 +35,7 @@ Future<void> main() async {
   }
   // Chyby Dartu do "černé skříňky" (diagnostika zamrzání, viz index.html).
   var reports = 0;
+  var imageCacheReported = 0;
   String short(Object error, StackTrace? stack) =>
       '$error\n${(stack?.toString() ?? '').split('\n').take(14).join('\n')}';
   final previous = FlutterError.onError;
@@ -43,6 +45,8 @@ Future<void> main() async {
     previous?.call(details);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
+    // Plný telefon: obaly dál bez mezipaměti, ne prázdné (a jedno hlášení).
+    if (noteImageCacheFailure(error) && imageCacheReported++ > 0) return true;
     diagNote('dart error: $error');
     if (reports++ < 20) diagReport('dart-error', short(error, stack));
     return false;

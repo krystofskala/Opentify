@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:cached_network_image/cached_network_image.dart';
+import '../widgets/net_image.dart' show cachedImageProvider;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:palette_generator/palette_generator.dart';
@@ -64,7 +64,7 @@ final Map<String, Future<PaletteGenerator>> _paletteFutures = {};
 @visibleForTesting
 ImageProvider Function(String url)? debugCoverProvider;
 
-ImageProvider _providerFor(String url) => debugCoverProvider?.call(url) ?? CachedNetworkImageProvider(url);
+ImageProvider _providerFor(String url) => debugCoverProvider?.call(url) ?? cachedImageProvider(url);
 
 /// Jemnější rozbor obalu pro pozadí "Nové": vlastní průchod pixely
 /// zmenšeného obalu (64×64), ne median-cut palety -- ta drobné výrazné

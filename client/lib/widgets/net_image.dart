@@ -61,7 +61,12 @@ class _NetImageState extends State<NetImage> {
         final bucket = decodeBucket(longest * dpr);
         if (_decodeSize == null || bucket > _decodeSize!) _decodeSize = bucket;
       }
-      return _image(fallback, _decodeSize);
+      // Plný disk -> obrázky jdou bez mezipaměti (`imageDiskCacheBroken`);
+      // ty, co se zasekly na zápisu do ní, se tím načtou znovu.
+      return ValueListenableBuilder<bool>(
+        valueListenable: imageDiskCacheBroken,
+        builder: (context, _, __) => _image(fallback, _decodeSize),
+      );
     });
   }
 
@@ -103,7 +108,10 @@ class _NetImageState extends State<NetImage> {
       },
       // Obal z Cover Art Archive nepřišel (archive.org občas neodpovídá,
       // audit 7. 10.: Creep / Pablo Honey bez obalu) -> náhradní z Deezeru.
-      errorBuilder: (context, _, __) {
+      errorBuilder: (context, error, __) {
+        // Chyba mezipaměti (plný telefon), ne obrázku: přepne se na načítání
+        // bez ní a `ValueListenableBuilder` výš obrázek načte znovu.
+        if (noteImageCacheFailure(error)) return fallback;
         final mbid = caaMbid(url);
         if (mbid == null) return fallback;
         return FutureBuilder<String?>(
@@ -153,11 +161,33 @@ Future<String?> _caaFallback(BuildContext context, String mbid) {
 /// diskografií jich načte desítky a iPhone (Safari) pak appku při otevření
 /// interpreta zamrazil (podezření, viz web/index.html "černá skříňka").
 ImageProvider netImageProvider(String url, {int? decodeSize}) {
-  ImageProvider inner = CachedNetworkImageProvider(url);
+  ImageProvider inner = cachedImageProvider(url);
   if (decodeSize != null) {
     inner = ResizeImage(inner, width: decodeSize, height: decodeSize, policy: ResizeImagePolicy.fit);
   }
   return kIsWeb ? RasterizedImage(inner) : inner;
+}
+
+/// Mezipaměť obrázků na disku nejde použít (telefon nemá místo, 12. 10.:
+/// „No space left on device“ a žádné obaly). Pak se obrázky do konce běhu
+/// appky načítají jen ze sítě -- radši znovu stáhnout než nic neukázat.
+final ValueNotifier<bool> imageDiskCacheBroken = ValueNotifier(false);
+
+/// Obrázek z URL s mezipamětí na disku, bez ní po [imageDiskCacheBroken].
+ImageProvider cachedImageProvider(String url) {
+  if (imageDiskCacheBroken.value) return NetworkImage(url);
+  return CachedNetworkImageProvider(url, errorListener: noteImageCacheFailure);
+}
+
+/// Chyba zápisu do mezipaměti (ne chyba obrázku)? Pak ji přestat používat.
+/// Volá to i globální obsluha chyb (main.dart) -- `flutter_cache_manager`
+/// ji hází mimo načítání obrázku, který pak jen visí.
+bool noteImageCacheFailure(Object error) {
+  final text = error.toString();
+  final cacheFailure = text.contains('FileSystemException') &&
+      (text.contains('libCachedImageData') || text.contains('No space left'));
+  if (cacheFailure && !imageDiskCacheBroken.value) imageDiskCacheBroken.value = true;
+  return cacheFailure;
 }
 
 /// Velikost dekódování zaokrouhlená nahoru na pár stupňů -- při animaci
