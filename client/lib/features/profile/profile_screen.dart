@@ -21,6 +21,7 @@ import '../../state/theme_mode_controller.dart';
 import '../../theme/design_tokens.dart';
 import '../../theme/shapes.dart';
 import '../../theme/glass_tokens.dart' show Expressive, Motion;
+import '../../widgets/discovery_picker.dart' show DiscoverySetting;
 import '../../widgets/glass/glass.dart';
 import '../../widgets/surface_card.dart';
 import '../../widgets/section_app_bar.dart';
@@ -213,6 +214,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           buttonLabel: 'Otevřít',
                           onPressed: () => context.push('/discoveries'),
                         ),
+                        const _DiscoveryRow(),
                         _ActionRow(
                           icon: Symbols.history_rounded,
                           title: 'Historie',
@@ -903,6 +905,32 @@ final tasteSourcesProvider = FutureProvider.autoDispose<Map<String, bool>>((ref)
   final json = await ref.read(apiClientProvider).getJson('/library/taste-sources');
   return {for (final e in json.entries) e.key: e.value as bool};
 });
+
+/// Objevování v Pusť teď (Profil › Moje hudba) -- totéž jako v menu Pusť teď.
+class _DiscoveryRow extends StatelessWidget {
+  const _DiscoveryRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Kolik nového v Pusť teď', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 2),
+          Text(
+            'Málo = hlavně to, co znáš. Hodně = zhruba polovina skladeb, které jsi ještě neslyšel.',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const DiscoverySetting(),
+        ],
+      ),
+    );
+  }
+}
 
 /// Nahraná historie po službách, u každé přepínač „Do vkusu“ -- vypnutý zdroj
 /// se nepočítá do doporučování (Wrapped a historie ho počítají dál).

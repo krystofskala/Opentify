@@ -31,6 +31,19 @@ from app.models import Listen, PlayEvent, Recording, SkipStreak
 from app.utils import utcnow
 
 NEW_SHARE = 0.2
+# Objevování (nastavení profilu, 12. 10.): podíl nových skladeb ve várce.
+# Výchozí "low" = dosavadní NEW_SHARE, ostatním se nic nemění.
+DISCOVERY = {"low": NEW_SHARE, "mid": 0.35, "high": 0.5}
+DISCOVERY_DEFAULT = "low"
+# Různorodost známých (12. 10., simulace: dva interpreti ve 20 várkách z 20):
+# oblíbenost se zplošťuje (víc celé knihovny), interpret s mnoha skladbami
+# nemá úměrně víc losů a bývalé lásky dostanou šanci jako běžná oblíbená.
+FLATTEN = 0.75
+ARTIST_TICKETS = 0.25
+# Skladba slyšená jen jednou (náhodou, u někoho) není "známá oblíbená".
+ONE_OFF = 0.35
+FORMER_LOVE_BASE = 0.5
+FORMER_LOVES = 150
 _CACHE_SECONDS = 600
 logger = logging.getLogger(__name__)
 # Strop interpreta pro celou relaci (návrh 1): každé zahrání v posledních
@@ -330,11 +343,14 @@ def pick(
     user_id: str, seeds: list[str], played: list[str], size: int, rng: random.Random,
     mood: str | None = None, moods: dict[str, float] | None = None, new_share: float = NEW_SHARE,
     session_counts: Counter | None = None, ctx: dict[str, Any] | None = None,
+    exposure: dict[str, float] | None = None,
 ) -> tuple[list[str], list[str], str]:
     """Známé skladby + semínka pro nové. Vrací (známé, semínka_pro_nové, důvod).
     `session_counts`: interpreti z poslední části fronty (strop relace);
-    `ctx` (je-li dané) dostane filtry pro nové skladby."""
+    `ctx` (je-li dané) dostane filtry pro nové skladby; `exposure`: paměť
+    interpretů napříč dny (app/home/exposure.py)."""
     session_counts = session_counts or Counter()
+    exposure = exposure or {}
     from app.home.quick_picks import time_profile
     from app.library.dislikes import disliked_artist_ids
 
@@ -449,6 +465,9 @@ def pick(
         tentative = av.tentative_factors(act.artist_days(), av.explicit_artists(user_id), act.listening_days())
 
     rotation = rotation_factors(act, small)
+    # Losy podle interpreta: kdo má ve vkusu 80 skladeb, nemá 80× víc šancí.
+    tracks_per_artist = Counter(act.artist_of.get(r) for r in act.total)
+    former = set(act.former_loves()[:FORMER_LOVES]) if not seeds else set()
 
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
@@ -461,6 +480,13 @@ def pick(
             base = max(base, 0.6)  # srdíčko / knihovna = "mám rád", i neslyšené
         if seed_artists:
             base = base ** 0.5  # navazování: podobnost víc než oblíbenost (návrh 2)
+        else:
+            base = base ** FLATTEN
+            if rid in former:
+                base = max(base, FORMER_LOVE_BASE)  # dlouho neslyšená oblíbená
+            base /= max(1, tracks_per_artist.get(artist, 1)) ** ARTIST_TICKETS
+            if act.total.get(rid, 0) < 2 and rid not in chosen_set and rid not in former:
+                base *= ONE_OFF
         f = fit.get(artist, 0.01 if moods is not None and mood != "prekvap" else
                     (0.05 if seed_artists else (default_time_fit if time_artists else 1.0)))
         if skipped_artists.get(artist):
@@ -473,6 +499,10 @@ def pick(
             f *= SESSION_DECAY ** session_counts[artist]
         if rid in recent_batches:
             f *= RECENT_BATCH_PENALTY
+        if not seed_artists and artist in exposure:
+            from app.home.exposure import factor as exposure_factor
+
+            f *= exposure_factor(exposure[artist])  # nabídnutý v posledních dnech
         f *= rotation.get(rid, 1.0)
         if rid in muted_offers:
             f *= 0.3  # nabídnutá a nepuštěná -- týden méně často
@@ -485,6 +515,9 @@ def pick(
         return base * f
 
     from app.home.personal_mixes import _cap_per_artist, _spread, _weighted_order
+
+    def exposure_ok(artist: str | None) -> bool:
+        return exposure.get(artist or "", 0.0) < 1.0
 
     ordered = _weighted_order(list(dict.fromkeys([*act.total, *chosen])), score, rng)
     seen_titles: set[str] = set()
@@ -534,8 +567,18 @@ def pick(
                 moods is not None and mood != "prekvap" and sum(1 for m in moods.values() if m >= 0.3) < 3
             ),
         )
-    # Semínka pro nové: semínka nekonečného hraní, jinak první známé.
+    # Semínka pro nové: semínka nekonečného hraní, jinak dvě známé z várky
+    # a dvě z JINÝCH interpretů celého vkusu (losované podle zploštělé
+    # oblíbenosti) -- jinak se objevy točily kolem toho, co už hraje.
     new_seeds = (seeds[-2:] if seeds else []) + familiar[:2]
+    if not seeds and not small:
+        batch_artists = {act.artist_of.get(r) for r in familiar}
+        wide = [
+            r for r in _weighted_order(list(act.total), lambda r: (act.long.get(r, 0.0) / max_long) ** 0.3, rng)
+            if act.artist_of.get(r) not in batch_artists and act.artist_of.get(r) not in banned
+            and exposure_ok(act.artist_of.get(r))
+        ]
+        new_seeds += _distinct_artist_seeds(wide, act.artist_of, 2)
     if small and not seeds:
         # Malý profil: z RŮZNÝCH interpretů všeho, co slyšel a co má rád --
         # jinak by po jedné písničce uvízl v jedné škatulce.
@@ -822,19 +865,21 @@ async def next_chunk(
     if mood and mood != "prekvap":
         moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
     weak_mood = bool(moods is not None and sum(1 for m in moods.values() if m >= 0.3) < 3)
-    new_share = 0.5 if mood == "prekvap" else (0.6 if weak_mood else NEW_SHARE)
+    level_share = DISCOVERY[await asyncio.to_thread(discovery_level, user_id)]
+    new_share = max(0.5, level_share) if mood == "prekvap" else (max(0.6, level_share) if weak_mood else level_share)
     if mood != "prekvap" and len((await asyncio.to_thread(_activation, user_id)).total) < SMALL_PROFILE:
         new_share = max(new_share, SMALL_NEW_SHARE)  # čistý start: není co opakovat
     # Po přeskočení bezpečněji, po dohrání víc riskovat (rešerše C2).
     last = await asyncio.to_thread(_last_outcome, user_id)
     if mood != "prekvap" and last == "skipped":
-        new_share *= 0.5
+        new_share *= 0.75  # dřív polovina: z 10 skladeb pak zbyla 1 nová (12. 10.)
     elif mood != "prekvap" and last == "completed":
-        new_share = min(0.6, new_share * 1.25)
+        new_share = min(max(0.6, level_share + 0.1), new_share * 1.25)
     session_counts = await session_artist_counts(played)
+    exposure = await _exposure(user_id)
     ctx: dict[str, Any] = {}
     familiar, new_seeds, reason = await asyncio.to_thread(
-        pick, user_id, seeds, played, size, rng, mood, moods, new_share, session_counts, ctx
+        pick, user_id, seeds, played, size, rng, mood, moods, new_share, session_counts, ctx, exposure
     )
     if weak_mood and mood:
         reason = f"{MOODS[mood][2]} – u tebe toho na tohle moc není, zkouším i nové"
@@ -852,7 +897,11 @@ async def next_chunk(
                 pass
         if new_seeds:
             try:
-                cands += await asyncio.wait_for(lt.similar_track_ids(new_seeds, exclude, rng, want_new * 2), timeout=12)
+                # Rezerva: filtry (interpret už ve várce, přeskočení...) a plynulé
+                # řazení část vyřadí -- dřív 2 kandidáti na 1 místo a nové chyběly.
+                cands += await asyncio.wait_for(
+                    lt.similar_track_ids(new_seeds, exclude, rng, max(8, want_new * 4)), timeout=12
+                )
             except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
                 pass
         # Odložené z minulé várky napřed (projdou znovu filtry i plynulostí).
@@ -953,6 +1002,49 @@ async def next_chunk(
 
 
 _prefetching: set[asyncio.Task] = set()
+
+
+async def _exposure(user_id: str) -> dict[str, float]:
+    """Paměť interpretů napříč dny i přes sólo projekty / kapely."""
+    from app.home import exposure
+
+    try:
+        weights = await asyncio.to_thread(exposure.artist_weights, user_id)
+        act = await asyncio.to_thread(_activation, user_id)
+        top = [a for a, _ in act.blend(av.ARTIST_BLEND).most_common(200)]
+        links = await _band_links(list(dict.fromkeys([*weights, *top])))
+        return exposure.with_links(weights, links)
+    except Exception:  # noqa: BLE001 -- bez paměti je to pořád dobrá várka
+        logger.exception("pusť teď: paměť interpretů")
+        return {}
+
+
+def _discovery_key(user_id: str) -> str:
+    return f"discovery:{user_id}"
+
+
+def discovery_level(user_id: str) -> str:
+    """Objevování profilu: low / mid / high (Profil i menu Pusť teď)."""
+    from app.models import HomeSnapshot
+
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, _discovery_key(user_id))
+    level = (row.payload or {}).get("level") if row else None
+    return level if level in DISCOVERY else DISCOVERY_DEFAULT
+
+
+def set_discovery_level(user_id: str, level: str) -> str:
+    from app.models import HomeSnapshot
+
+    if level not in DISCOVERY:
+        raise ValueError(level)
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, _discovery_key(user_id)) or HomeSnapshot(key=_discovery_key(user_id), payload={})
+        row.payload = {"level": level}
+        row.generated_at = utcnow()
+        session.add(row)
+        session.commit()
+    return level
 
 
 async def warm_mood_tags_loop(hour: int = 4, top: int = 80) -> None:

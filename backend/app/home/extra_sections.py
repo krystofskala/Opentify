@@ -206,7 +206,10 @@ async def build_now_mix(user_id: str) -> int:
     in_style = [r for r in top if fits(r)] if style else top
     if len(in_style) < 8:
         in_style, style = top, None
-    own = in_style[:40]
+    from app.home.personal_mixes import _artists_of, _cap_per_artist
+
+    # Nejvýš 3 skladby od interpreta (12. 10.: Vypsaná fiXa 8× ze 40).
+    own = _cap_per_artist(in_style[:80], await asyncio.to_thread(_artists_of, in_style[:80]), 3)[:40]
     rng.shuffle(own)
     own = own[:24]
     similar = await lt.similar_track_ids(in_style[:6], set(top), rng, 32 if style else 16)
