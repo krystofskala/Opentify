@@ -42,11 +42,29 @@ class PlayNowIn(BaseModel):
 
 
 @home_router.get("/play-now/moods")
-def play_now_moods(_current=Depends(get_current_user)):
-    """Čipy nálad pro Pusť teď (pořadí = jak se ukážou)."""
-    from app.home.play_now import MOODS
+def play_now_moods(current: tuple[str, str] = Depends(get_current_user)):
+    """Čipy nálad pro Pusť teď (pořadí = jak se ukážou) + úroveň objevování."""
+    from app.home.play_now import MOODS, discovery_level
 
-    return {"moods": [{"id": k, "title": v[2]} for k, v in MOODS.items()]}
+    return {
+        "moods": [{"id": k, "title": v[2]} for k, v in MOODS.items()],
+        "discovery": discovery_level(current[0]),
+    }
+
+
+class DiscoveryIn(BaseModel):
+    level: str  # low | mid | high
+
+
+@home_router.put("/play-now/discovery")
+def set_play_now_discovery(body: DiscoveryIn, current: tuple[str, str] = Depends(get_current_user)):
+    """Objevování v Pusť teď: kolik nového ve várce (málo / středně / hodně)."""
+    from app.home.play_now import set_discovery_level
+
+    try:
+        return {"discovery": set_discovery_level(current[0], body.level)}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Neznámá úroveň.") from None
 
 
 @home_router.post("/play-now")

@@ -13,7 +13,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/browse_repository.dart' show BrowseArtist;
 import '../../data/home_repository.dart';
-import '../../data/play_now_repository.dart' show PlayNowMood;
+import '../../data/play_now_repository.dart' show PlayNowOptions;
 import '../../state/auto_continue.dart';
 import '../../widgets/toast.dart' show showToast;
 import '../../models/availability.dart';
@@ -23,6 +23,7 @@ import '../../state/providers.dart';
 import '../../theme/design_tokens.dart';
 import '../../theme/glass_tokens.dart';
 import '../../theme/shapes.dart';
+import '../../widgets/discovery_picker.dart';
 import '../../widgets/glass/glass.dart';
 import '../../widgets/media_card.dart';
 import '../../widgets/mix_artwork.dart';
@@ -704,7 +705,8 @@ class _PlayNowTileState extends ConsumerState<_PlayNowTile> {
   }
 
   Future<void> _pickMood() async {
-    final moods = ref.read(playNowRepositoryProvider).moods();
+    final repo = ref.read(playNowRepositoryProvider);
+    final options = repo.options();
     final picked = await showGlassSheet<String>(
       context,
       builder: (sheet) => GlassSheet(
@@ -716,19 +718,28 @@ class _PlayNowTileState extends ConsumerState<_PlayNowTile> {
             children: [
               Text('Pusť teď – na jakou náladu?', style: Theme.of(sheet).textTheme.titleMedium),
               const SizedBox(height: AppSpacing.md),
-              FutureBuilder<List<PlayNowMood>>(
-                future: moods,
+              FutureBuilder<PlayNowOptions>(
+                future: options,
                 builder: (context, snap) {
                   if (snap.hasError) return Text(humanError(snap.error!));
                   if (!snap.hasData) {
                     return const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.md), child: CircularProgressIndicator()));
                   }
-                  return Wrap(
-                    spacing: AppSpacing.xs,
-                    runSpacing: AppSpacing.xs,
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final m in snap.data!)
-                        ActionChip(label: Text(m.title), onPressed: () => Navigator.of(sheet).pop(m.id)),
+                      Wrap(
+                        spacing: AppSpacing.xs,
+                        runSpacing: AppSpacing.xs,
+                        children: [
+                          for (final m in snap.data!.moods)
+                            ActionChip(label: Text(m.title), onPressed: () => Navigator.of(sheet).pop(m.id)),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      Text('Kolik nového', style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: AppSpacing.xs),
+                      DiscoveryPicker(initial: snap.data!.discovery, onChanged: repo.setDiscovery),
                     ],
                   );
                 },

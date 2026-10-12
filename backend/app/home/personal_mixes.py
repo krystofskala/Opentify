@@ -54,6 +54,9 @@ MAX_DAILY_MIXES = 6
 DAILY_MIX_SIZE = 40
 FAMILIAR_SHARE = 0.7
 MIN_MIX_SIZE = 15
+# Strop skladeb jednoho interpreta v Denním mixu (12. 10.: dřív 5, mixy
+# měly 11 interpretů na 31 skladeb, jeden interpret 7× i s novými).
+DAILY_MIX_ARTIST_CAP = 3
 _TOP_ARTISTS = 30
 _EXTRA_ARTISTS = 200
 _JUNK = ("karaoke", "originally performed", "in the style of", "made famous by", "tribute to", "instrumental version")
@@ -688,7 +691,7 @@ async def build_daily_mixes() -> int:
             rng.shuffle(preferred)
         rng.shuffle(fallback)
         familiar_target = round(DAILY_MIX_SIZE * FAMILIAR_SHARE)
-        familiar = _cap_per_artist(preferred + fallback, taste.artist_of, 5)[:familiar_target]
+        familiar = _cap_per_artist(preferred + fallback, taste.artist_of, DAILY_MIX_ARTIST_CAP)[:familiar_target]
         familiar = _spread(familiar, taste.artist_of)
         # Plynulé navazování energie (P3) -- konec skladby k začátku další.
         from app.home import energy_flow
@@ -698,23 +701,39 @@ async def build_daily_mixes() -> int:
         # + vzdálenost stylů (bod 4): v jedné skupině bývají i dost odlišné věci.
         styles = await artist_styles(list({taste.artist_of[r] for r in familiar if r in taste.artist_of}))
         familiar = await asyncio.to_thread(energy_flow.order, familiar, taste.artist_of, None, styles)
-        # Poměr ~70/30 drží i u menších skupin -- málo známých skladeb se
-        # nezaplácne novými (dřív tak vznikaly mixy s 85 % neznámé hudby).
-        new_target = min(DAILY_MIX_SIZE - len(familiar), max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE)))
+        # Poměr ~70/30, u menších skupin nejvýš půl na půl -- málo známých
+        # skladeb se nezaplácne novými (dřív mixy s 85 % neznámé hudby), ale
+        # se stropem 3 na interpreta se malá skupina nescvrkne na 19 skladeb.
+        new_target = min(
+            DAILY_MIX_SIZE - len(familiar),
+            max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE), min(len(familiar), DAILY_MIX_SIZE - len(familiar))),
+        )
         # Půlka nových z Last.fm (co posluchači pouštějí spolu s tvými
         # nejhranějšími ze skupiny), půlka z Deezer rádia interpretů.
         seed_tracks = sorted(
             (r for r in familiar if r in liked_or_played),
             key=lambda r: -(taste.listen_counts.get(r, 0) + (3 if r in set(taste.liked) else 0)),
         )[:4]
-        from_lastfm = await lt.similar_track_ids(seed_tracks, known, rng, new_target // 2 + 1)
+        from_lastfm = await lt.similar_track_ids(seed_tracks, known, rng, new_target)
         new = from_lastfm + [
-            r for r in await _new_tracks_from(cluster.radio_seeds, known | set(from_lastfm), rng, new_target)
+            r for r in await _new_tracks_from(cluster.radio_seeds, known | set(from_lastfm), rng, new_target * 2)
             if r not in from_lastfm
-        ][: new_target - len(from_lastfm)]
+        ]
         from app.home import novelty
 
         new = await asyncio.to_thread(novelty.filter_new, g.home_user(), new, taste.activation)
+        # Strop interpreta platí pro celý mix -- nové od interpreta, který už
+        # má mezi známými 3 skladby, se nepřidají (dřív 3 známé + 2 nové).
+        new_artist = await asyncio.to_thread(_artists_of, new)
+        per_artist = Counter(taste.artist_of.get(r) for r in familiar)
+        capped_new: list[str] = []
+        for r in new:
+            a = new_artist.get(r, r)
+            if per_artist[a] >= DAILY_MIX_ARTIST_CAP:
+                continue
+            per_artist[a] += 1
+            capped_new.append(r)
+        new = capped_new[:new_target]
         tracks = _interleave(familiar, new)
         if len(tracks) < MIN_MIX_SIZE:
             continue
@@ -877,20 +896,32 @@ async def build_discover_weekly() -> int:
     exclude = taste.known | recent
     known_names = {primary_artist_name(n).casefold() for n in taste.artist_name.values()}
     known_dz = set(taste.artist_deezer.values())
-    seeds = _transient_seeds(taste, 15)
+    # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
+    # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
+    transient = _transient_seeds(taste, 10)
+    lasting = [
+        a for a, w in taste.artist_weight.most_common(60) if w > 0 and a not in transient
+    ]
+    rng.shuffle(lasting)
+    seeds = transient + lasting[:8]
 
-    # Kandidáti = "related" interpreti tvých top interpretů, které neznáš;
-    # čím víc tvých interpretů je doporučuje, tím výš.
+    # Kandidáti = "related" interpreti tvých interpretů, které neznáš. Každé
+    # semínko přispěje svými nejbližšími rovnoměrně (dřív vyhrávala shoda
+    # víc semínek = vždy střed nejsilnějšího žánru).
     candidates: Counter = Counter()
+    per_seed: list[list[str]] = []
     for artist_id in seeds:
         dz = await _deezer_id(taste, artist_id)
         if dz is None:
             continue
+        mine: list[str] = []
         for rel in await _related(dz):
             rid, name = str(rel.get("id") or ""), rel.get("name") or ""
             if not rid or rid in known_dz or primary_artist_name(name).casefold() in known_names:
                 continue
             candidates[rid] += 1
+            mine.append(rid)
+        per_seed.append(mine)
         await asyncio.sleep(0.05)
     # + podobní podle posluchačů Last.fm (shoda váží; víc tvých interpretů =
     # výš), převedení na Deezer přes přesné jméno.
@@ -911,10 +942,18 @@ async def build_discover_weekly() -> int:
         rid = str(hit["id"]) if hit and hit.get("id") else ""
         if rid and rid not in known_dz:
             candidates[rid] += 2 * score
-    ranked = [rid for rid, _ in candidates.most_common(40)]
-    tail = ranked[10:]
-    rng.shuffle(tail)  # nejdoporučovanější napřed, zbytek každý týden jinak
-    ranked = ranked[:10] + tail
+    # Po kolech: z každého semínka jeho nejbližší dosud nevybraný (pořadí
+    # semínek každý týden jinak), pak kandidáti Last.fm podle skóre.
+    rng.shuffle(per_seed)
+    ranked: list[str] = []
+    for depth in range(4):
+        for mine in per_seed:
+            if depth < len(mine) and mine[depth] not in ranked:
+                ranked.append(mine[depth])
+    for rid, _ in candidates.most_common(60):
+        if rid not in ranked:
+            ranked.append(rid)
+    ranked = ranked[:60]
 
     dzc = get_deezer_client()
     picked: list[str] = []

@@ -20,6 +20,14 @@ class PlayNowMood {
   final String title;
 }
 
+/// Nabídka Pusť teď (dlouhý stisk): nálady + úroveň objevování profilu
+/// (`low` / `mid` / `high` = kolik nového ve várce).
+class PlayNowOptions {
+  const PlayNowOptions(this.moods, this.discovery);
+  final List<PlayNowMood> moods;
+  final String discovery;
+}
+
 class PlayNowRepository {
   PlayNowRepository(this._api);
   final ApiClient _api;
@@ -50,13 +58,18 @@ class PlayNowRepository {
     );
   }
 
-  Future<List<PlayNowMood>> moods() async {
+  Future<PlayNowOptions> options() async {
     final json = await _api.getJson('/home/play-now/moods');
-    return [
-      for (final m in (json['moods'] as List<dynamic>? ?? const []))
-        PlayNowMood((m as Map<String, dynamic>)['id'] as String, m['title'] as String),
-    ];
+    return PlayNowOptions(
+      [
+        for (final m in (json['moods'] as List<dynamic>? ?? const []))
+          PlayNowMood((m as Map<String, dynamic>)['id'] as String, m['title'] as String),
+      ],
+      json['discovery'] as String? ?? 'low',
+    );
   }
+
+  Future<void> setDiscovery(String level) => _api.putJson('/home/play-now/discovery', body: {'level': level});
 
   /// "Víc / míň takových" -- vrací novou hodnotu (−15..15).
   Future<double> feedback(String recordingId, {required bool more}) async {
