@@ -1,30 +1,25 @@
-import 'package:figma_squircle/figma_squircle.dart';
+import 'package:flutter/painting.dart';
 
 import 'design_tokens.dart';
 
-/// "Squircle" (kontinuální zaoblení rohů, ne kruhový oblouk) -- PixelPlayerův
-/// `AbsoluteSmoothCornerShape` ekvivalent přes `figma_squircle`. Tohle je
-/// jeden z hlavních vizuálních signálů "vypadá jako PixelPlay, ne jako
-/// obecná Material appka" -- plain `RoundedRectangleBorder` má ostrý přechod
-/// mezi rovnou hranou a obloukem, squircle je plynulý po celé délce.
+/// "Squircle" (kontinuální zaoblení rohů, ne kruhový oblouk) přes vestavěný
+/// `RoundedSuperellipseBorder` Flutteru -- plain `RoundedRectangleBorder` má
+/// ostrý přechod mezi rovnou hranou a obloukem, superelipsa je plynulá po
+/// celé délce (stejný princip jako „continuous corners“ v iOS).
 class AppShapes {
   const AppShapes._();
 
-  static const double smoothing = 0.6;
-
-  static SmoothRectangleBorder of(double radius, {double smoothing = AppShapes.smoothing}) {
-    return SmoothRectangleBorder(
-      borderRadius: SmoothBorderRadius(cornerRadius: radius, cornerSmoothing: smoothing),
-    );
+  static RoundedSuperellipseBorder of(double radius) {
+    return RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(radius));
   }
 
-  static final SmoothRectangleBorder xs = of(AppRadii.xs);
-  static final SmoothRectangleBorder sm = of(AppRadii.sm);
-  static final SmoothRectangleBorder md = of(AppRadii.md);
-  static final SmoothRectangleBorder lg = of(AppRadii.lg);
-  static final SmoothRectangleBorder xl = of(AppRadii.xl);
+  static final RoundedSuperellipseBorder xs = of(AppRadii.xs);
+  static final RoundedSuperellipseBorder sm = of(AppRadii.sm);
+  static final RoundedSuperellipseBorder md = of(AppRadii.md);
+  static final RoundedSuperellipseBorder lg = of(AppRadii.lg);
+  static final RoundedSuperellipseBorder xl = of(AppRadii.xl);
 
-  /// Plně kulatý/kapslový tvar -- `cornerRadius` větší než polovina kratší
-  /// strany se stejně jako u `BorderRadius.circular` vyklipuje na maximum.
-  static final SmoothRectangleBorder pill = of(AppRadii.pill);
+  /// Plně kulatý/kapslový tvar -- poloměr větší než polovina kratší strany
+  /// se stejně jako u `BorderRadius.circular` omezí na maximum.
+  static final RoundedSuperellipseBorder pill = of(AppRadii.pill);
 }

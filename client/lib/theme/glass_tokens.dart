@@ -139,9 +139,8 @@ class GlassTokens {
 
   // --- Tvar ----------------------------------------------------------------
 
-  /// Plynulé (squircle) rohy všude -- `AppShapes` (figma_squircle).
-  /// Kapsle = poloměr >= polovina výšky.
-  static const double smoothing = 0.6;
+  // Plynulé (squircle) rohy všude -- `AppShapes` (RoundedSuperellipseBorder).
+  // Kapsle = poloměr >= polovina výšky.
 
   // --- Rozměry (HIG Buttons / Accessibility) --------------------------------
 

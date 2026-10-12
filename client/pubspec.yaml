@@ -37,14 +37,10 @@ dependencies:
   shared_preferences: ^2.3.2
   web: ^1.1.0
 
-  # Vizuální jazyk PixelPlayeru (github.com/brendmung/PixelPlayer) přenesený
-  # do Flutteru přes reálné, udržované balíčky místo dalších ručně psaných
-  # widgetů -- ikony (Material Symbols Rounded, přesně stejná rodina, co
-  # PixelPlayer používá jako exportované `rounded_<name>_24` vektory),
-  # "squircle" tvary (`AbsoluteSmoothCornerShape` ekvivalent) a lehké
-  # staggered entrance animace.
+  # Ikony Material Symbols Rounded (Google, Apache 2.0) a lehké staggered
+  # entrance animace. Squircle tvary jsou vestavěné ve Flutteru
+  # (`RoundedSuperellipseBorder`, viz lib/theme/shapes.dart).
   material_symbols_icons: ^4.2960.0
-  figma_squircle: ^0.6.3
   flutter_animate: ^4.5.2
   url_launcher: ^6.3.2
   path_provider: ^2.1.6
@@ -68,7 +64,7 @@ flutter:
     - shaders/chroma_grain.frag
     - shaders/liquid_glass.frag
 
-  # PixelPlay-inspired jednotný zaoblený typeface napříč appkou (viz
+  # Jednotný zaoblený typeface napříč appkou (viz
   # lib/theme/app_theme.dart) -- bundlovaný OFL soubor, ne `google_fonts`
   # balíček s běhovým fetchem, ať appka zůstane funkční čistě self-hosted
   # bez závislosti na Google serverech. Jeden variabilní soubor pokrývá

@@ -59,7 +59,7 @@ final _localArtistsProvider = FutureProvider.autoDispose((ref) {
 });
 
 /// Knihovna -- všechno, co je na disku k okamžitému přehrání, v pilulkových
-/// tabech Skladby/Alba/Interpreti/Playlisty (PixelPlayer styl). Karty
+/// tabech Skladby/Alba/Interpreti/Playlisty. Karty
 /// alb/interpretů vedou na sdílené Album/Interpret obrazovky.
 class LocalLibraryScreen extends ConsumerStatefulWidget {
   const LocalLibraryScreen({super.key});

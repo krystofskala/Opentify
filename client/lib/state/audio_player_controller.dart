@@ -154,8 +154,8 @@ class AudioPlayerState {
   final String? error;
 
   /// Dominantní/vibrantní barva z obalu právě hrající skladby (viz
-  /// `AudioPlayerController._extractAccentColor`) -- pohání "PixelPlay"
-  /// dynamické zabarvení `PlayerBar` a M3 seed appky v `app.dart`. `null`,
+  /// `AudioPlayerController._extractAccentColor`) -- pohání dynamické
+  /// zabarvení `PlayerBar` a M3 seed appky v `app.dart`. `null`,
   /// dokud se obal nestáhne/nezanalyzuje, nebo když skladba žádný obal nemá.
   final Color? accentColor;
 
@@ -201,8 +201,8 @@ class AudioPlayerState {
   /// sekundový tik přes celý stavový strom appky.
   final DateTime? sleepTimerEndAt;
 
-  /// Naposledy přehrané skladby, nejnovější první, bez duplicit -- pohání
-  /// PixelPlayerovu "bublinovou" `RecentlyPlayedPill` řadu na Home. Jen v
+  /// Naposledy přehrané skladby, nejnovější první, bez duplicit (dnes je
+  /// žádná obrazovka nečte -- bublinová řada na Domů byla odstraněna). Jen v
   /// paměti (resetuje se s obnovením stránky), stejně jako uspávač -- appka
   /// nikde jinde stav mezi relacemi neukládá.
   final List<NowPlayingInfo> recentlyPlayed;
@@ -3063,7 +3063,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     state = state.copyWith(recentlyPlayed: updated.take(20).toList());
   }
 
-  /// Vibrantní/dominantní barva obalu pro "PixelPlay" dynamické zabarvení UI
+  /// Vibrantní/dominantní barva obalu pro dynamické zabarvení UI
   /// (viz `AudioPlayerState.accentColor`, extrakce sdílená s
   /// `theme/accent_color.dart` pro per-obrazovkové barvení Release/Artist).
   /// Kontroluje `recordingId` proti aktuálnímu stavu, aby pozdě doběhnuvší

@@ -2,8 +2,7 @@
 /// `BorderRadius.circular(n)` s hodnotami 8/10/12/14/16/18/20/22/24/28/100
 /// roztroušenými po jednotlivých obrazovkách (viz konzistenční audit).
 /// Konvence: náhledový obrázek dlaždice bere o úroveň menší poloměr než
-/// dlaždice samotná (typicky `tile - 4`, ne níž než [xs]) -- stejný poměr
-/// jako PixelPlayerův řádek(22)/náhled(10).
+/// dlaždice samotná (typicky `tile - 4`, ne níž než [xs]).
 /// Jediná škála poloměrů = M3 Expressive (`Expressive.corner*` v
 /// glass_tokens.dart): 8 / 12 / 16 / 20 / 28. Jiné hodnoty (14, 22, 24) se
 /// nepoužívají -- dřív se dvě škály míchaly (design audit).

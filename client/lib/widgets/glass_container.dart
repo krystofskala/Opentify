@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:figma_squircle/figma_squircle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
@@ -240,7 +239,7 @@ class GlassContainer extends StatelessWidget {
   /// s okrajem v `outlineVariant`, ať je hrana vidět i na podobném pozadí.
   /// Obsah zůstává v motivu appky (plochy jsou z jeho palety), text
   /// a ikony tak mají plný kontrast.
-  Widget _solid(BuildContext context, SmoothRectangleBorder shape) {
+  Widget _solid(BuildContext context, RoundedSuperellipseBorder shape) {
     final scheme = Theme.of(context).colorScheme;
     final Color? color = emphasis > 0
         ? scheme.secondaryContainer
@@ -354,18 +353,7 @@ const List<BoxShadow> glassShadow = [
 ];
 
 /// Squircle tvar z běžného `BorderRadius` (plynulé rohy, HIG/iOS styl).
-SmoothRectangleBorder glassShape(BorderRadius radius) {
-  SmoothRadius r(Radius corner) =>
-      SmoothRadius(cornerRadius: corner.x, cornerSmoothing: corner.x == 0 ? 0 : GlassTokens.smoothing);
-  return SmoothRectangleBorder(
-    borderRadius: SmoothBorderRadius.only(
-      topLeft: r(radius.topLeft),
-      topRight: r(radius.topRight),
-      bottomLeft: r(radius.bottomLeft),
-      bottomRight: r(radius.bottomRight),
-    ),
-  );
-}
+RoundedSuperellipseBorder glassShape(BorderRadius radius) => RoundedSuperellipseBorder(borderRadius: radius);
 
 /// Přirozený odlesk skla: JEDNA tenká linka po obvodu, jejíž jas závisí na
 /// tom, kam hrana míří vůči světlu (shora zleva) -- zaoblené konce a rohy

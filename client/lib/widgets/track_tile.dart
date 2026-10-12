@@ -36,9 +36,8 @@ enum TrackTileLayout { row, card }
 ///   - `FAILED`            -> ikona chyby, klik zkusí provisioning znovu.
 ///
 /// Dlaždice právě hrající skladby morphuje poloměr směrem k plné pilulce a
-/// podbarví se `primaryContainer` -- PixelPlayerův motiv (`row`: 22dp->50dp,
-/// `thumb`: 10dp->50dp), teď navíc dává appce stav "tohle právě hraje", který
-/// dřív nikde neexistoval.
+/// podbarví se `primaryContainer` (vzhled inspirovaný aplikací PixelPlay) --
+/// dává appce stav "tohle právě hraje", který dřív nikde neexistoval.
 class TrackTile extends ConsumerWidget {
   const TrackTile({
     super.key,

@@ -77,10 +77,8 @@ ThemeData buildAppTheme({required Color seed, required Brightness brightness}) {
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
     ),
     // "Squircle" (kontinuální zaoblení, ne kruhový oblouk) na všech
-    // interaktivních plochách -- PixelPlayerovo `AbsoluteSmoothCornerShape`
-    // přes `figma_squircle` (viz theme/shapes.dart), jeden z hlavních
-    // vizuálních signálů, že appka vypadá jako PixelPlay a ne jako obecná
-    // Material appka s obyčejnými zaoblenými rohy.
+    // interaktivních plochách (viz theme/shapes.dart) -- appka tím nevypadá
+    // jako obecná Material appka s obyčejnými zaoblenými rohy.
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(shape: WidgetStatePropertyAll(AppShapes.pill)),
     ),
@@ -280,11 +278,9 @@ class _SoftRisePageTransitionsBuilder extends PageTransitionsBuilder {
 }
 
 /// Jednotný zaoblený typeface (Nunito, viz `pubspec.yaml`) napříč celou
-/// appkou -- PixelPlay používá jedno "Google Sans Flex" písmo se stejnou
-/// rolí (přátelský, ne systémový/výchozí vzhled), Nunito je nejbližší
-/// veřejně bundlovatelná OFL náhrada se srovnatelnou váhovou škálou.
-/// Nadpisy dostávají mírně záporný `letterSpacing`, stejně jako PixelPlayerův
-/// mini-player titulek.
+/// appkou -- přátelský, ne systémový/výchozí vzhled; Nunito je veřejně
+/// bundlovatelné OFL písmo se srovnatelnou váhovou škálou jako Google Sans
+/// Flex. Nadpisy dostávají mírně záporný `letterSpacing`.
 TextTheme _buildTextTheme(TextTheme base) {
   // M3 Expressive "emphasized" typografie: nadpisy větší, těžší a s
   // užším prostrkáním -- editoriální hierarchie; tělo textu beze změny.

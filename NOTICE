@@ -1,0 +1,35 @@
+Opentify
+Copyright (c) 2026 Krystof Skala
+
+This product includes or is based on the following third-party work.
+Licenses of the Dart/Flutter and Python packages the apps and the server
+depend on are shipped with those packages.
+
+--------------------------------------------------------------------------
+AndroidX Compose Material 3 (Jetpack Compose, Material 3 Expressive)
+Copyright 2024 The Android Open Source Project
+Licensed under the Apache License, Version 2.0
+https://www.apache.org/licenses/LICENSE-2.0
+
+Used for: the wavy seek bar (client/lib/widgets/wavy_seek_bar.dart) follows
+the wave model of LinearWavyProgressIndicator / LinearWavyProgressModifiers
+(quadratic half-wave arcs, phase moving one wavelength per second, amplitude
+transition timings, active/track gap), and design token values from
+LinearProgressIndicatorTokens, ShapeTokens and ExpressiveMotionTokens
+(client/lib/theme/glass_tokens.dart). Re-implemented in Dart; no Kotlin
+source is included.
+Source: https://github.com/androidx/androidx/tree/androidx-main/compose/material3
+
+--------------------------------------------------------------------------
+Material Symbols (Google)
+Copyright Google LLC
+Licensed under the Apache License, Version 2.0
+https://www.apache.org/licenses/LICENSE-2.0
+
+Used for: icons, via the material_symbols_icons package.
+
+--------------------------------------------------------------------------
+Nunito (font)
+Copyright 2014 The Nunito Project Authors (https://github.com/googlefonts/nunito)
+Licensed under the SIL Open Font License, Version 1.1
+Full license: client/assets/fonts/Nunito/OFL.txt

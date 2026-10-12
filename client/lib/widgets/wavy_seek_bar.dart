@@ -1,23 +1,24 @@
-import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import '../theme/design_tokens.dart' show AppSpacing;
-import '../theme/glass_tokens.dart' show Expressive;
+import '../theme/design_tokens.dart' show AppFontSize;
 
-/// Vlnovkový seek bar podle PixelPlayeru (github.com/brendmung/PixelPlayer,
-/// `WavySliderExpressive.kt` + `PlayerSeekBar.kt`) -- vlastní port do Dartu,
-/// protože Kotlin/Jetpack Compose (`LinearWavyProgressIndicator` z Material3
-/// Expressive) nejde s Flutterem/Skiou sdílet přímo, žádný cross-framework
-/// mechanismus neexistuje. Chová se stejně jako originál:
-///   - odehraná část vlní (sinusoida, u puku plynule doběhne do roviny),
-///     zbytek je vždy rovná čára,
-///   - amplituda vlnění doběhne na 0, když nic nehraje nebo se zrovna táhne,
-///   - "puk" uprostřed se při tažení protáhne ze kolečka do svislé čárky.
-/// `interactive: false` (viz `PlayerBar`) vypne gesta úplně -- jen vizuál,
-/// žádné kradení tapů určených pro rozbalení Now Playing (viz
-/// `AudioPlayerController`/`PlayerBar` dokumentační komentáře k tomuhle bugu).
+/// Vlnovkový posuvník přehrávání podle Material 3 Expressive
+/// `LinearWavyProgressIndicator` (AndroidX Compose Material 3, Apache 2.0,
+/// viz NOTICE): vlna z kvadratických Bézierových oblouků po půlvlnách, fáze
+/// posouvaná o jednu vlnovou délku za sekundu, náběh amplitudy 500 ms
+/// (standardní křivka) a doběh 500 ms (zdůrazněné zrychlení), mezera mezi
+/// průběhem a stopou. Vlastní doplňky: vlna u puku plynule doběhne do roviny
+/// a puk se při tažení protáhne z kolečka do svislé čárky.
+///
+/// - Vlní se jen odehraná část, zbytek je vždy rovná čára.
+/// - Amplituda doběhne na nulu, když nic nehraje nebo se táhne.
+/// - `interactive: false` (mini přehrávač) vypne všechna gesta -- jen
+///   vizuál, klepnutí patří rodiči (rozbalení přehrávače).
+/// - Kreslí `CustomPainter` napojený na animace (`repaint`), takže animace
+///   nepřestavují strom widgetů.
 class WavySeekBar extends StatefulWidget {
   const WavySeekBar({
     super.key,
@@ -66,369 +67,413 @@ class WavySeekBar extends StatefulWidget {
 }
 
 class _WavySeekBarState extends State<WavySeekBar> with TickerProviderStateMixin {
-  late final _SteppedPhase _phaseController;
-  late final AnimationController _ampController;
-  late final AnimationController _interactionController;
+  // Tokeny M3 Expressive (MotionTokens): DurationLong2 = 500 ms,
+  // EasingStandard (0.2, 0, 0, 1), EasingEmphasizedAccelerate (0.3, 0, 0.8, 0.15).
+  static const _amplitudeDuration = Duration(milliseconds: 500);
+  static const _standard = Cubic(0.2, 0, 0, 1);
+  static const _emphasizedAccelerate = Cubic(0.3, 0, 0.8, 0.15);
+  static const _thumbMorph = Duration(milliseconds: 200);
 
-  bool _dragging = false;
+  late final AnimationController _amplitude = AnimationController(vsync: this, duration: _amplitudeDuration);
+  late final CurvedAnimation _amplitudeCurve = CurvedAnimation(
+    parent: _amplitude,
+    curve: _standard,
+    reverseCurve: _emphasizedAccelerate.flipped,
+  );
+  late final AnimationController _dragging = AnimationController(vsync: this, duration: _thumbMorph);
+
+  /// Fáze vlny 0..1 (jedna vlnová délka); posouvá ji ticker, jen když se
+  /// vlní -- v klidu žádné snímky.
+  final ValueNotifier<double> _phase = ValueNotifier(0);
+  late final _ticker = createTicker(_onTick);
+  Duration _lastTick = Duration.zero;
+
+  /// Poloha prstu během tažení (a chvíli po něm, než přehrávač ohlásí novou
+  /// pozici -- jinak by puk na okamžik skočil zpátky).
+  double? _dragValue;
+  double? _pendingValue;
+  DateTime _pendingSince = DateTime.now();
+
   final _labelLink = LayerLink();
   final _labelPortal = OverlayPortalController();
-  double? _dragValue;
 
-  // Po puštění drží puk na nové poloze, dokud ji přehrávání nedožene (rádio
-  // navazuje nový stream chvíli) -- dřív skočil zpátky na starou polohu a
-  // pak zase dopředu ("blbne", živě nahlášeno).
-  double? _pendingValue;
-  DateTime? _pendingSince;
+  bool get _isDragging => _dragValue != null;
+
+  double get _shownValue => (_dragValue ?? _pendingValue ?? widget.progress).clamp(0.0, 1.0);
 
   @override
   void initState() {
     super.initState();
-    // Nekonečná fáze vlny -- běží pořád, ale je vidět jen když amplituda > 0,
-    // stejně jako originální `SineWaveLine`/`WavySliderExpressive` (fáze
-    // lineárně roste 0..2π, `animationDurationMillis`/`waveSpeed` v originále).
-    // Fáze vlny časovačem ~24x/s, ne každým snímkem: AnimationController
-    // .repeat() si říkal o snímek při každém vsyncu a tím držel celou appku
-    // (rozmazání, sklo, pozadí) na 60/120 fps po celou dobu přehrávání --
-    // na starším iPhonu hlavní zdroj zasekávání (audit výkonu).
-    _phaseController = _SteppedPhase(
-      // Omezení pohybu: vlna stojí (amplituda zůstává, jen neplyne).
-      // + jen s appkou na obrazovce (zamčený telefon s hudbou: nebudit CPU 24x/s).
-      () =>
-          mounted &&
-          TickerMode.valuesOf(context).enabled &&
-          !MediaQuery.disableAnimationsOf(context) &&
-          (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) == AppLifecycleState.resumed,
-    )..repeat();
-    _ampController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-      value: widget.isPlaying && !_dragging ? 1 : 0,
-    );
-    _interactionController = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
-    // Rovná čára (pauza) nemá co vlnit -- fáze stojí, ať se nepřekresluje
-    // 60x za vteřinu naprázdno.
-    _ampController.addStatusListener((status) {
-      if (status == AnimationStatus.dismissed) _phaseController.stop();
-    });
-    if (_ampController.value == 0) _phaseController.stop();
-    _syncAmplitudeTarget();
+    _amplitude.value = _wantsWave ? 1 : 0;
+    _amplitude.addStatusListener((_) => _syncTicker());
   }
 
   @override
-  void didUpdateWidget(covariant WavySeekBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isPlaying != widget.isPlaying) _syncAmplitudeTarget();
-    final pending = _pendingValue;
-    if (pending != null &&
-        ((widget.progress - pending).abs() < 0.015 ||
-            DateTime.now().difference(_pendingSince!) > const Duration(seconds: 4))) {
-      _pendingValue = null;
-    }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncTicker(); // i po změně „omezit pohyb“ v systému
   }
 
-  void _syncAmplitudeTarget() {
-    final target = widget.isPlaying && !_dragging ? 1.0 : 0.0;
-    if (target > 0 && !_phaseController.isAnimating) _phaseController.repeat();
-    if ((_ampController.value - target).abs() > 0.001) {
-      _ampController.animateTo(target, curve: Curves.easeInOut);
+  @override
+  void didUpdateWidget(WavySeekBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final pending = _pendingValue;
+    if (pending != null &&
+        ((widget.progress - pending).abs() < 0.02 ||
+            DateTime.now().difference(_pendingSince) > const Duration(milliseconds: 1500))) {
+      _pendingValue = null;
     }
+    _updateAmplitudeTarget();
   }
 
   @override
   void dispose() {
-    _phaseController.dispose();
-    _ampController.dispose();
-    _interactionController.dispose();
+    _ticker.dispose();
+    _amplitudeCurve.dispose();
+    _amplitude.dispose();
+    _dragging.dispose();
+    _phase.dispose();
     super.dispose();
   }
 
-  double _valueForLocalX(double localX, double width) => (localX / width).clamp(0.0, 1.0);
+  bool get _wantsWave => widget.isPlaying && !_isDragging && widget.waveAmplitude > 0;
 
-  void _handleDragStart(double localX, double width) {
-    if (!widget.interactive) return;
+  void _updateAmplitudeTarget() {
+    if (_wantsWave) {
+      if (_amplitude.status != AnimationStatus.forward && _amplitude.value < 1) _amplitude.forward();
+    } else {
+      if (_amplitude.status != AnimationStatus.reverse && _amplitude.value > 0) _amplitude.reverse();
+    }
+    _syncTicker();
+  }
+
+  /// Ticker běží, jen když je co vlnit (hraje, nebo amplituda ještě dobíhá)
+  /// a pohyb není v systému vypnutý.
+  void _syncTicker() {
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final needed = !reduceMotion && (widget.isPlaying || _amplitude.value > 0) && widget.wavelength > 0;
+    if (needed && !_ticker.isActive) {
+      _lastTick = Duration.zero;
+      _ticker.start();
+    } else if (!needed && _ticker.isActive) {
+      _ticker.stop();
+    }
+  }
+
+  void _onTick(Duration elapsed) {
+    final dt = (elapsed - _lastTick).inMicroseconds / Duration.microsecondsPerSecond;
+    _lastTick = elapsed;
+    // Rychlost = jedna vlnová délka za sekundu (výchozí `waveSpeed` M3).
+    if (widget.isPlaying && !_isDragging) _phase.value = (_phase.value + dt) % 1.0;
+    if (!widget.isPlaying && _amplitude.value == 0) _syncTicker();
+  }
+
+  // --- Gesta ---------------------------------------------------------------
+
+  double _valueAt(Offset local, double width) {
+    final inset = _inset;
+    final usable = width - inset * 2;
+    if (usable <= 0) return 0;
+    return ((local.dx - inset) / usable).clamp(0.0, 1.0);
+  }
+
+  /// Čára vede skoro k okrajům (zarovnání s časy pod ní); puk smí na
+  /// krajích lehce přesahovat -- `CustomPaint` neořezává.
+  double get _inset => widget.strokeWidth / 2;
+
+  void _startDrag(Offset local, double width) {
     setState(() {
-      _dragging = true;
-      _dragValue = _valueForLocalX(localX, width);
+      _dragValue = _valueAt(local, width);
+      _pendingValue = null;
     });
+    _dragging.forward();
+    _updateAmplitudeTarget();
     if (widget.dragLabel != null) _labelPortal.show();
-    _interactionController.forward();
-    _syncAmplitudeTarget();
     widget.onChanged?.call(_dragValue!);
   }
 
-  void _handleDragUpdate(double localX, double width) {
-    if (!widget.interactive || !_dragging) return;
-    final value = _valueForLocalX(localX, width);
-    setState(() => _dragValue = value);
-    widget.onChanged?.call(value);
+  void _updateDrag(Offset local, double width) {
+    setState(() => _dragValue = _valueAt(local, width));
+    widget.onChanged?.call(_dragValue!);
   }
 
-  void _handleDragEnd() {
-    if (!widget.interactive || !_dragging) return;
-    final value = _dragValue ?? widget.progress;
+  void _endDrag() {
+    final value = _dragValue;
+    if (value == null) return;
     setState(() {
-      _dragging = false;
       _dragValue = null;
-      if (_labelPortal.isShowing) _labelPortal.hide();
-      _pendingValue = widget.onChangeEnd == null ? null : value;
+      _pendingValue = value;
       _pendingSince = DateTime.now();
     });
-    _interactionController.reverse();
-    _syncAmplitudeTarget();
+    _dragging.reverse();
+    if (_labelPortal.isShowing) _labelPortal.hide();
+    _updateAmplitudeTarget();
     widget.onChangeEnd?.call(value);
   }
 
-  Widget _dragBubble(BuildContext context, double progress) {
-    final theme = Theme.of(context);
-    final box = this.context.findRenderObject() as RenderBox?;
-    final width = box?.hasSize == true ? box!.size.width : 0.0;
-    // U krajů posunout dovnitř, ať bublina nevyjede z displeje.
-    final x = width <= 48 ? width / 2 : (progress.clamp(0.0, 1.0) * width).clamp(24.0, width - 24);
-    return Positioned(
-      left: 0,
-      top: 0,
-      child: CompositedTransformFollower(
-        link: _labelLink,
-        // Střed bubliny nad místem prstu, kousek nad čárou.
-        targetAnchor: Alignment.topLeft,
-        followerAnchor: Alignment.bottomCenter,
-        offset: Offset(x, -4),
-        child: IgnorePointer(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.inverseSurface,
-              borderRadius: BorderRadius.circular(Expressive.cornerSmall),
+  void _tap(Offset local, double width) {
+    final value = _valueAt(local, width);
+    setState(() {
+      _pendingValue = value;
+      _pendingSince = DateTime.now();
+    });
+    widget.onChanged?.call(value);
+    widget.onChangeEnd?.call(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth.isFinite ? constraints.maxWidth : 300.0;
+      Widget bar = CustomPaint(
+        size: Size(width, widget.height),
+        painter: _WavyPainter(
+          value: _shownValue,
+          phase: _phase,
+          amplitude: _amplitudeCurve,
+          dragging: _dragging,
+          activeColor: widget.activeColor,
+          inactiveColor: widget.inactiveColor,
+          thumbColor: widget.thumbColor,
+          strokeWidth: widget.strokeWidth,
+          thumbRadius: widget.thumbRadius,
+          wavelength: widget.wavelength,
+          waveAmplitude: widget.waveAmplitude,
+          inset: _inset,
+        ),
+      );
+      bar = Semantics(
+        slider: true,
+        value: '${(_shownValue * 100).round()} %',
+        child: SizedBox(width: width, height: widget.height, child: bar),
+      );
+      if (!widget.interactive || (widget.onChanged == null && widget.onChangeEnd == null)) {
+        return ExcludeSemantics(excluding: !widget.interactive, child: bar);
+      }
+      bar = RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: {
+          HorizontalDragGestureRecognizer: GestureRecognizerFactoryWithHandlers<HorizontalDragGestureRecognizer>(
+            HorizontalDragGestureRecognizer.new,
+            (r) => r
+              ..onStart = ((d) => _startDrag(d.localPosition, width))
+              ..onUpdate = ((d) => _updateDrag(d.localPosition, width))
+              ..onEnd = ((_) => _endDrag())
+              ..onCancel = _endDrag,
+          ),
+          if (widget.tapToSeek)
+            TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              TapGestureRecognizer.new,
+              (r) => r..onTapUp = ((d) => _tap(d.localPosition, width)),
             ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xxs),
-              child: Text(
-                widget.dragLabel!(progress),
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onInverseSurface,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
+        },
+        child: bar,
+      );
+      final label = widget.dragLabel;
+      if (label == null) return bar;
+      return CompositedTransformTarget(
+        link: _labelLink,
+        child: OverlayPortal(
+          controller: _labelPortal,
+          overlayChildBuilder: (context) {
+            final value = _dragValue ?? _shownValue;
+            final x = _inset + (width - _inset * 2) * value;
+            return Positioned(
+              left: 0,
+              top: 0,
+              child: CompositedTransformFollower(
+                link: _labelLink,
+                showWhenUnlinked: false,
+                offset: Offset(x, -6),
+                followerAnchor: Alignment.bottomCenter,
+                child: _DragBubble(text: label(value), color: widget.activeColor),
               ),
+            );
+          },
+          child: bar,
+        ),
+      );
+    });
+  }
+}
+
+class _DragBubble extends StatelessWidget {
+  const _DragBubble({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final onColor = ThemeData.estimateBrightnessForColor(color) == Brightness.dark ? Colors.white : Colors.black;
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 2))],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          child: Text(
+            text,
+            style: TextStyle(
+              color: onColor,
+              fontSize: AppFontSize.small,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              decoration: TextDecoration.none,
             ),
           ),
         ),
       ),
     );
   }
-
-  @override
-  Widget build(BuildContext context) {
-    final displayedProgress = _dragging ? (_dragValue ?? widget.progress) : (_pendingValue ?? widget.progress);
-
-    Widget bar = LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        return RepaintBoundary(
-          child: AnimatedBuilder(
-            animation: Listenable.merge([_phaseController, _ampController, _interactionController]),
-            builder: (context, _) => CustomPaint(
-              size: Size(width, widget.height),
-              painter: _WavySeekBarPainter(
-                progress: displayedProgress,
-                phase: _phaseController.value * 2 * math.pi,
-                amplitudeFraction: _ampController.value,
-                interactionFraction: _interactionController.value,
-                activeColor: widget.activeColor,
-                inactiveColor: widget.inactiveColor,
-                thumbColor: widget.thumbColor,
-                strokeWidth: widget.strokeWidth,
-                thumbRadius: widget.thumbRadius,
-                wavelength: widget.wavelength,
-                maxAmplitude: widget.waveAmplitude,
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
-    if (!widget.interactive) {
-      return SizedBox(height: widget.height, child: bar);
-    }
-
-    return SizedBox(
-      height: widget.height,
-      child: GestureDetector(
-        // Bez klepnutí na posun průhledné -- klepnutí projde k rodiči.
-        behavior: widget.tapToSeek ? HitTestBehavior.opaque : HitTestBehavior.translucent,
-        onTapDown: widget.tapToSeek
-            ? (details) {
-                final box = context.findRenderObject() as RenderBox;
-                _handleDragStart(details.localPosition.dx, box.size.width);
-              }
-            : null,
-        onTapUp: widget.tapToSeek ? (_) => _handleDragEnd() : null,
-        onTapCancel: widget.tapToSeek ? _handleDragEnd : null,
-        onHorizontalDragStart: (details) {
-          final box = context.findRenderObject() as RenderBox;
-          _handleDragStart(details.localPosition.dx, box.size.width);
-        },
-        onHorizontalDragUpdate: (details) {
-          final box = context.findRenderObject() as RenderBox;
-          _handleDragUpdate(details.localPosition.dx, box.size.width);
-        },
-        onHorizontalDragEnd: (_) => _handleDragEnd(),
-        onHorizontalDragCancel: _handleDragEnd,
-        child: widget.dragLabel == null
-            ? bar
-            // Bublina v Overlay, ne ve Stacku: mini přehrávač je sklo s
-            // ořezem a bublina nad čárou se v něm ořízla (živě 8. 10.).
-            : CompositedTransformTarget(
-                link: _labelLink,
-                child: OverlayPortal(
-                  controller: _labelPortal,
-                  overlayChildBuilder: (context) => _dragBubble(context, displayedProgress),
-                  child: bar,
-                ),
-              ),
-      ),
-    );
-  }
 }
 
-class _WavySeekBarPainter extends CustomPainter {
-  _WavySeekBarPainter({
-    required this.progress,
+class _WavyPainter extends CustomPainter {
+  _WavyPainter({
+    required this.value,
     required this.phase,
-    required this.amplitudeFraction,
-    required this.interactionFraction,
+    required this.amplitude,
+    required this.dragging,
     required this.activeColor,
     required this.inactiveColor,
     required this.thumbColor,
     required this.strokeWidth,
     required this.thumbRadius,
     required this.wavelength,
-    required this.maxAmplitude,
-  });
+    required this.waveAmplitude,
+    required this.inset,
+  }) : super(repaint: Listenable.merge([phase, amplitude, dragging]));
 
-  final double progress;
-  final double phase;
-  final double amplitudeFraction;
-  final double interactionFraction;
+  final double value;
+  final ValueNotifier<double> phase;
+  final Animation<double> amplitude;
+  final Animation<double> dragging;
   final Color activeColor;
   final Color inactiveColor;
   final Color thumbColor;
   final double strokeWidth;
   final double thumbRadius;
   final double wavelength;
-  final double maxAmplitude;
+  final double waveAmplitude;
+  final double inset;
+
+  /// Mezera mezi koncem průběhu (puk) a stopou -- M3 `TrackActiveSpace` 4 dp.
+  static const _trackGap = 4.0;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final centerY = size.height / 2;
-    final amplitude = amplitudeFraction * maxAmplitude;
+    final cy = size.height / 2;
+    final start = inset;
+    final end = size.width - inset;
+    if (end <= start) return;
+    final head = start + (end - start) * value;
+    final drag = Curves.easeOutCubic.transform(dragging.value);
 
-    // Puk uprostřed morphuje z kolečka (idle) do svislé čárky (tažení) --
-    // stejný lerp jako `currentWidth`/`currentHeight` ve `WavySliderExpressive`.
-    final thumbWidth = _lerp(thumbRadius * 2, strokeWidth * 1.4, interactionFraction);
-    final thumbHeight = _lerp(thumbRadius * 2, size.height * 0.85, interactionFraction);
-    final rawThumbX = progress * size.width;
-    final minCenter = thumbWidth / 2;
-    final maxCenter = (size.width - thumbWidth / 2).clamp(minCenter, size.width);
-    final thumbX = rawThumbX.clamp(minCenter, maxCenter);
+    // Puk: kolečko -> svislá čárka (šířka tahu, výška ~2,6× poloměr).
+    final thumbW = _lerp(thumbRadius * 2, math.max(strokeWidth, 3.0), drag);
+    final thumbH = math.min(size.height, _lerp(thumbRadius * 2, thumbRadius * 5.2, drag));
 
-    // Mezera kolem puku, ať vlna/linka nekreslí přes něj -- roste s
-    // interactionFraction stejně jako `dynamicGapSize` v originále.
-    final gap = _lerp(thumbRadius + 3, thumbWidth / 2 + 4, interactionFraction);
-
-    // Vlní JEN odehraná část (Android 13 / PixelPlay styl) -- zbytek je vždy
-    // rovná čára, nezávisle na tom, jestli se hraje.
-    // Vlna vede AŽ DO puku (jako Google/Android 13): její konec se s vlnou
-    // hýbe a puk se kreslí přes něj -- dřív se před pukem srovnala do čáry.
-    _drawWave(canvas, 0, thumbX.clamp(0.0, size.width), centerY, amplitude, activeColor);
-    _drawFlat(canvas, (thumbX + gap).clamp(0.0, size.width), size.width, centerY, inactiveColor);
-
-    final thumbPaint = Paint()..color = thumbColor;
-    final rect = Rect.fromCenter(center: Offset(thumbX, centerY), width: thumbWidth, height: thumbHeight);
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(thumbWidth / 2)), thumbPaint);
-  }
-
-  Paint _strokePaint(Color color) => Paint()
-    ..color = color
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = strokeWidth
-    ..strokeCap = StrokeCap.round
-    ..strokeJoin = StrokeJoin.round;
-
-  void _drawFlat(Canvas canvas, double startX, double endX, double centerY, Color color) {
-    if (endX - startX < 1) return;
-    canvas.drawLine(Offset(startX, centerY), Offset(endX, centerY), _strokePaint(color));
-  }
-
-  void _drawWave(Canvas canvas, double startX, double endX, double centerY, double amplitude, Color color) {
-    if (endX - startX < 1) return;
-    final paint = _strokePaint(color);
-    if (amplitude < 0.05) {
-      canvas.drawLine(Offset(startX, centerY), Offset(endX, centerY), paint);
-      return;
+    // Stopa: rovná čára od puku dál.
+    final trackFrom = head + thumbW / 2 + _trackGap + strokeWidth / 2;
+    if (trackFrom < end) {
+      canvas.drawLine(
+        Offset(trackFrom, cy),
+        Offset(end, cy),
+        Paint()
+          ..color = inactiveColor
+          ..strokeWidth = strokeWidth
+          ..strokeCap = StrokeCap.round,
+      );
     }
 
-    // Plná amplituda po celé délce (Google styl) -- začátek ani konec u puku
-    // se nesrovnávají do středu (živě nahlášeno). `x` je absolutní, ať vlna
-    // při posunu playheadu "neplave" spolu s ním.
-    double yAt(double x) => centerY + amplitude * math.sin((x / wavelength) * 2 * math.pi + phase);
-
-    final path = Path()..moveTo(startX, yAt(startX));
-    const sampleStep = 2.0;
-    for (double x = startX + sampleStep; x < endX; x += sampleStep) {
-      path.lineTo(x, yAt(x));
+    // Průběh: vlna z kvadratických oblouků po půlvlnách (jako M3), amplituda
+    // u puku plynule klesá k nule na posledních `taper` pixelech.
+    final amp = waveAmplitude * amplitude.value;
+    final active = Paint()
+      ..color = activeColor
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    final waveEnd = head - thumbW / 2;
+    if (waveEnd > start) {
+      if (amp <= 0.01 || wavelength <= 0) {
+        canvas.drawLine(Offset(start, cy), Offset(waveEnd, cy), active);
+      } else {
+        canvas.drawPath(_wavePath(start, head, waveEnd, cy, amp), active);
+      }
     }
-    path.lineTo(endX, yAt(endX));
-    canvas.drawPath(path, paint);
+
+    // Puk nakonec, přes začátek stopy i konec vlny.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(head, cy), width: thumbW, height: thumbH),
+        Radius.circular(thumbW / 2),
+      ),
+      Paint()..color = thumbColor,
+    );
   }
 
-  double _lerp(double a, double b, double t) => a + (b - a) * t;
+  /// Vlna od `start` do `waveEnd`. Oblouky jdou po půlvlnách s kontrolním
+  /// bodem ve výšce 2× amplitudy (kvadratický oblouk tak vrcholí přesně na
+  /// amplitudě), posunuté o fázi; obálka u puku je smoothstep.
+  Path _wavePath(double start, double head, double waveEnd, double cy, double amp) {
+    final half = wavelength / 2;
+    final taper = math.min(wavelength, (head - start) * 0.5).clamp(1.0, double.infinity);
+    final shift = phase.value * wavelength;
+    double envelope(double x) {
+      final t = ((head - x) / taper).clamp(0.0, 1.0);
+      return t * t * (3 - 2 * t);
+    }
+
+    final path = Path();
+    // Začátek oblouků zarovnaný na půlvlny posunuté o fázi; kreslí se jen
+    // úsek od `start`, oblouky před ním se oříznou rozdělením prvního.
+    var anchor = start - ((start + shift) % half);
+    var sign = (((start + shift) / half).floor() % 2 == 0) ? -1.0 : 1.0;
+    var first = true;
+    while (anchor < waveEnd) {
+      final next = anchor + half;
+      final segStart = math.max(anchor, start);
+      final segEnd = math.min(next, waveEnd);
+      // Body oblouku vzorkované (oříznutí na začátku/konci a obálka by se
+      // jedním kvadratickým obloukem nedaly přesně vyjádřit).
+      const steps = 6;
+      for (var i = 0; i <= steps; i++) {
+        final x = segStart + (segEnd - segStart) * i / steps;
+        final u = (x - anchor) / half; // 0..1 v rámci půlvlny
+        // Kvadratický oblouk (0 -> 2·amp -> 0): y = 2·amp·2u(1-u) = 4·amp·u(1-u),
+        // vrchol přesně na amplitudě.
+        final y = cy + sign * amp * 4 * u * (1 - u) * envelope(x);
+        if (first) {
+          path.moveTo(x, y);
+          first = false;
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      anchor = next;
+      sign = -sign;
+    }
+    return path;
+  }
+
+  static double _lerp(double a, double b, double t) => a + (b - a) * t;
 
   @override
-  bool shouldRepaint(covariant _WavySeekBarPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.phase != phase ||
-        oldDelegate.amplitudeFraction != amplitudeFraction ||
-        oldDelegate.interactionFraction != interactionFraction ||
-        oldDelegate.activeColor != activeColor ||
-        oldDelegate.inactiveColor != inactiveColor;
-  }
-}
-
-
-/// Fáze vlny 0..1 (perioda 3 s), posouvaná časovačem ~24x za sekundu.
-class _SteppedPhase extends ChangeNotifier {
-  _SteppedPhase(this._visible);
-
-  final bool Function() _visible;
-  Timer? _timer;
-  double _value = 0;
-  DateTime _last = DateTime.now();
-
-  double get value => _value;
-  bool get isAnimating => _timer != null;
-
-  void repeat() {
-    if (_timer != null) return;
-    _last = DateTime.now();
-    _timer = Timer.periodic(const Duration(milliseconds: 42), (_) {
-      final now = DateTime.now();
-      final dt = now.difference(_last).inMicroseconds / 1e6;
-      _last = now;
-      if (!_visible()) return;
-      _value = (_value + dt / 3.0) % 1.0;
-      notifyListeners();
-    });
-  }
-
-  void stop() {
-    _timer?.cancel();
-    _timer = null;
-  }
-
-  @override
-  void dispose() {
-    stop();
-    super.dispose();
-  }
+  bool shouldRepaint(_WavyPainter old) =>
+      old.value != value ||
+      old.activeColor != activeColor ||
+      old.inactiveColor != inactiveColor ||
+      old.thumbColor != thumbColor ||
+      old.strokeWidth != strokeWidth ||
+      old.thumbRadius != thumbRadius ||
+      old.wavelength != wavelength ||
+      old.waveAmplitude != waveAmplitude ||
+      old.inset != inset ||
+      old.phase != phase ||
+      old.amplitude != amplitude ||
+      old.dragging != dragging;
 }
