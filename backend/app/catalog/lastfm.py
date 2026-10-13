@@ -175,7 +175,18 @@ async def artist_info(name: str) -> dict[str, Any] | None:
         "listeners": _int(stats.get("listeners")),
         "playcount": _int(stats.get("playcount")),
         "tags": [t.get("name") for t in _as_list((artist.get("tags") or {}).get("tag")) if t.get("name")],
+        "bio": _bio_summary((artist.get("bio") or {}).get("summary")),
     }
+
+
+def _bio_summary(text: str | None) -> str | None:
+    """Krátký text o interpretovi z Last.fm (píšou posluchači) bez odkazu
+    "Read more on Last.fm"."""
+    import re
+
+    text = re.sub(r"<a [^>]*>.*?</a>", "", text or "").strip()
+    text = re.sub(r"<[^>]+>", "", text).strip()
+    return text if len(text) >= 40 else None
 
 
 async def artist_top_tags(name: str, limit: int = 12) -> list[tuple[str, int]]:
