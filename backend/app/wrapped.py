@@ -318,6 +318,18 @@ def _decade_playlists(ranked: list[str], evergreens: list[str], year_track: dict
     return out
 
 
+async def invalidate(user_id: str) -> None:
+    """Po importu historie: spočítané roky profilu zahodit (uzavřený rok se
+    jinak drží týden -- 13. 10. Míša viděl stav z půlky importu)."""
+    from app.catalog.cache import CACHE_PREFIX
+    from app.redis_bus import get_redis
+
+    r = get_redis()
+    keys = [k async for k in r.scan_iter(f"{CACHE_PREFIX}wrapped:v4:{user_id}:*")]
+    if keys:
+        await r.delete(*keys)
+
+
 async def period_stats(user_id: str, period: str) -> dict[str, Any] | None:
     """`None` = neexistující období. Zamčené vrací jen `{"locked": True}`."""
     if period != DECADE and not (period.isdigit() and FIRST_YEAR <= int(period) <= 2100):

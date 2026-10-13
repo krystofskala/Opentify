@@ -37,6 +37,7 @@ import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, Tar
 
 import '../../state/pip_player_service.dart' show pipAutoOpenProvider, pipPlayerProvider;
 import '../../state/hints.dart' show hintsProvider;
+import '../../state/server_notice.dart' show localImportsRunning;
 import '../../widgets/toast.dart';
 import '../../widgets/state_views.dart' show humanError;
 import '../artist/artist_support.dart' show openExternal;
@@ -322,7 +323,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    showToast(messenger, 'Importuji…');
+    // Velká historie se zpracovává i několik minut (13. 10.: bez hlášky
+    // Míša nahrál podruhé a importy se přepsaly). Výsledek ohlásí toast níže.
+    showToast(
+      messenger,
+      'Importuji… U velké historie to může trvat i několik minut. Aplikaci můžeš dál používat, dám vědět, až bude hotovo.',
+      duration: const Duration(seconds: 10),
+    );
+    localImportsRunning++;
     try {
       final imported = await ref.read(libraryRepositoryProvider).importSpotifyLibrary(bytes, file.name);
       ref.invalidate(likedSongsProvider);
@@ -360,6 +368,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       final detail = e is ApiException ? e.detail : null;
       showToast(messenger,
           detail ?? 'Import se nepodařil. Zkontroluj, že je to export ze Spotify nebo z Google Takeoutu (JSON).');
+    } finally {
+      localImportsRunning--;
     }
   }
 
