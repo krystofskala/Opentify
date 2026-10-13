@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 SESSION_GAP_S = 30 * 60
 NEIGHBOURS = 15
-RESOLUTION = 8.0  # vyšší = víc menších scén (5 dalo 41 scén, cíl 60–80)
+RESOLUTION = 8.0
+VERSION = 2  # 13. 10.: dělení scén podle stylu  # vyšší = víc menších scén (5 dalo 41 scén, cíl 60–80)
 MIN_SCENE = 4  # menší skupina se přidá k nejbližší scéně
 DORMANT_RATIO = 0.5  # podíl "teď" proti "dlouhodobě" pod tím = scéna spí
 SHOWN_COOLDOWN_DAYS = 10
@@ -194,7 +195,7 @@ async def build() -> int:
     from app.home.personal_mixes import _week_key
 
     user_id = g.home_user()
-    week = _week_key()
+    week = f"{_week_key()}:v{VERSION}"  # nová verze výpočtu = přepočet hned
     if await asyncio.to_thread(_stamp, user_id) == week:
         return len(await asyncio.to_thread(lambda: load(user_id).scenes))
     smap = await compute(user_id)
@@ -248,6 +249,13 @@ async def compute(user_id: str, resolution: float = RESOLUTION) -> SceneMap:
     for a, c in node_of.items():
         groups[c].add(a)
     groups = _merge_small(groups, adj)
+    _debug_stage("louvain+merge", groups, names)
+    groups = _split_by_style(groups, tags, long_art)
+    _debug_stage("split", groups, names)
+    groups = _purify(groups, tags, long_art)
+    # Vyhnanci mohli skončit ve scéně s pestrým stylem -- ještě jednou rozdělit.
+    groups = _split_by_style(groups, tags, long_art)
+    _debug_stage("purify+split", groups, names)
     scene_of = {a: c for c, ms in groups.items() for a in ms}
     # Ocas: interpret z jediného dne -> scéna, se kterou se nejčastěji poslouchal.
     votes: dict[str, Counter] = defaultdict(Counter)
@@ -458,6 +466,135 @@ def _merge_small(groups: dict[str, set[str]], adj: dict[str, dict[str, float]]) 
             target = links.most_common(1)[0][0]
             groups[target] |= ms
             del groups[c]
+    return groups
+
+
+def _debug_stage(stage, groups, names) -> None:
+    import os
+
+    probe = os.environ.get("SCENES_PROBE")
+    if not probe:
+        return
+    for c, ms in groups.items():
+        if any(names.get(a) == probe for a in ms):
+            print(stage, len(ms), sorted(names.get(a, "?") for a in ms)[:40])
+
+
+PURE_MIN = 0.15  # interpret se stylem tak vzdáleným od své scény jde jinam
+PURE_GAIN = 0.15
+PURE_GROUP = 0.4
+
+
+def _centroid(members, tags, long_art, skip=None) -> dict[str, float]:
+    acc: Counter = Counter()
+    for a in members:
+        if a == skip:
+            continue
+        w = long_art.get(a, 0.0) ** 0.5 + 1e-3
+        for t, v in (tags.get(a) or {}).items():
+            acc[t] += v * w
+    return dict(acc)
+
+
+SPLIT_EDGE = 0.35  # podobnost štítků pro rozdělení scény podle stylu
+
+
+def _split_by_style(groups: dict[str, set[str]], tags, long_art) -> dict[str, set[str]]:
+    """Scéna, ve které jsou stylem oddělené skupiny (twenty one pilots,
+    bluegrass a hip-hop v jedné -- střídaly se v jednom roce), se rozdělí:
+    souvislé skupiny podle podobnosti štítků uvnitř scény; části s aspoň MIN_SCENE
+    interprety jsou samostatné scény, menší a bez štítků zůstanou největší."""
+    out: dict[str, set[str]] = {}
+    for c, ms in groups.items():
+        tagged = [a for a in ms if a in tags]
+        if len(tagged) < 2 * MIN_SCENE:
+            out[c] = set(ms)
+            continue
+        adj: dict[str, dict[str, float]] = {a: {} for a in tagged}
+        for i, a in enumerate(tagged):
+            for b in tagged[i + 1:]:
+                v = _cos(tags[a], tags[b]) or 0.0
+                if v >= SPLIT_EDGE:
+                    adj[a][b] = adj[b][a] = v
+        # Souvislé skupiny podobných stylů (Louvain je drobil pod MIN_SCENE).
+        parts: dict[str, set[str]] = defaultdict(set)
+        seen: set[str] = set()
+        for a in tagged:
+            if a in seen or not adj[a]:
+                continue
+            stack, comp = [a], set()
+            while stack:
+                x = stack.pop()
+                if x in comp:
+                    continue
+                comp.add(x)
+                stack.extend(y for y in adj[x] if y not in comp)
+            seen |= comp
+            parts[a] = comp
+        big = sorted((p for p in parts.values() if len(p) >= MIN_SCENE), key=lambda p: -sum(long_art.get(a, 0.0) for a in p))
+        if len(big) < 2:
+            out[c] = set(ms)
+            continue
+        cents = [_centroid(p, tags, long_art) for p in big]
+        homes = [set(p) for p in big]
+        for a in ms:
+            if any(a in h for h in homes):
+                continue
+            i = max(range(len(homes)), key=lambda i: _cos(tags.get(a), cents[i]) or 0.0) if a in tags else 0
+            homes[i].add(a)
+        for h in homes:
+            out[max(h, key=lambda a: long_art.get(a, 0.0))] = h
+    return out
+
+
+def _purify(groups: dict[str, set[str]], tags, long_art, rounds: int = 2) -> dict[str, set[str]]:
+    """Styl uvnitř scény (13. 10.: XXXTENTACION a Eminem v bossa nově,
+    twenty one pilots s bluegrassem -- společné relace z míchání celé
+    knihovny je slepily). Interpret, jehož štítky skoro nesedí na zbytek
+    scény, přejde do scény, kam stylem patří; když taková není, vytvoří
+    s podobnými "vyhnanci" novou, a zbytek přejde k nejbližší."""
+    groups = {c: set(ms) for c, ms in groups.items()}
+    for _ in range(rounds):
+        cents = {c: _centroid(ms, tags, long_art) for c, ms in groups.items()}
+        moves: list[tuple[str, str, str | None]] = []
+        for c, ms in groups.items():
+            if len(ms) <= MIN_SCENE:
+                continue
+            for a in ms:
+                if a not in tags:
+                    continue
+                own = _cos(tags[a], _centroid(ms, tags, long_art, skip=a)) or 0.0
+                if own >= PURE_MIN:
+                    continue
+                best, best_c = own, None
+                for cc, cent in cents.items():
+                    if cc != c:
+                        v = _cos(tags[a], cent) or 0.0
+                        if v > best:
+                            best, best_c = v, cc
+                moves.append((a, c, best_c if best >= own + PURE_GAIN else None))
+        if not moves:
+            break
+        exiles = []
+        for a, src, dst in moves:
+            groups[src].discard(a)
+            if dst is not None:
+                groups[dst].add(a)
+            else:
+                exiles.append(a)
+        # Vyhnanci bez domova: podobní spolu (nová scéna), jinak k nejbližší.
+        while exiles:
+            seed = max(exiles, key=lambda a: long_art.get(a, 0.0))
+            mates = [a for a in exiles if (_cos(tags[a], tags[seed]) or 0.0) >= PURE_GROUP]
+            if len(mates) >= MIN_SCENE:
+                groups[seed] = set(mates)
+            else:
+                cents = {c: _centroid(ms, tags, long_art) for c, ms in groups.items() if ms}
+                for a in mates:
+                    target = max(cents, key=lambda c: _cos(tags[a], cents[c]) or 0.0)
+                    groups[target].add(a)
+            exiles = [a for a in exiles if a not in mates]
+        groups = {c: ms for c, ms in groups.items() if ms}
     return groups
 
 
