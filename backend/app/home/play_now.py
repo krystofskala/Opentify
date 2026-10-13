@@ -73,7 +73,12 @@ MOODS: dict[str, tuple[str | None, tuple[str, ...], str]] = {
     "melancholie": ("sad", ("sad", "melancholic", "melancholy", "mellow", "singer-songwriter", "slowcore"), "Melancholie"),
     "party": ("party", ("dance", "party", "upbeat", "funk", "disco", "pop"), "Párty"),
     "prekvap": (None, (), "Překvap mě"),
+    "objevuj": (None, (), "Objevuj"),
 }
+# Bez nálady zvuku a denní doby. "objevuj" (13. 10., 7t bod 5): nekonečná
+# stanice jen z neslyšených skladeb napříč scénami celé historie, navazuje
+# na to, co v ní právě hrálo (králičí nory), a po Objevech týdne.
+FREE_MOODS = ("prekvap", "objevuj")
 
 
 async def mood_fit(act: av.Activation, mood: str, limit: int = 80) -> dict[str, float]:
@@ -426,9 +431,9 @@ def pick(
         shrink = len(act.timeline) / (len(act.timeline) + TIME_SHRINK_K)
         fit = {a: (1 - shrink) + shrink * (TIME_FLOOR + (1 - TIME_FLOOR) * w / top) for a, w in time_artists.items()}
         reason = "Podle toho, co posloucháš v tuhle dobu" if shrink >= 0.5 else "Podle toho, co posloucháš"
-    if mood == "prekvap":
+    if mood in FREE_MOODS:
         fit, time_artists = {}, Counter()  # bez denní doby -- celý vkus
-        reason = "Překvap mě – víc nového"
+        reason = "Objevuj – jen to, co jsi ještě neslyšel" if mood == "objevuj" else "Překvap mě – víc nového"
     elif mood and moods is not None:
         label = MOODS[mood][2]
         fit = {a: fit.get(a, 0.3) * (0.08 + m) for a, m in moods.items()}
@@ -458,7 +463,7 @@ def pick(
             act.artist_of.setdefault(rid, aid)
             act.title_of.setdefault(rid, title)
     chosen_set = set(chosen)
-    audio = _features_map() if moods is not None and mood not in (None, "prekvap") else {}
+    audio = _features_map() if moods is not None and mood not in (None, *FREE_MOODS) else {}
     # Mladý profil: interpret jen z jednoho dne (zkoušení, puštěné pro
     # někoho) má malý vliv, dokud se nevrátí jiný den nebo nedostane srdíčko.
     tentative: dict[str, float] = {}
@@ -488,7 +493,7 @@ def pick(
             base /= max(1, tracks_per_artist.get(artist, 1)) ** ARTIST_TICKETS
             if act.total.get(rid, 0) < 2 and rid not in chosen_set and rid not in former:
                 base *= ONE_OFF
-        f = fit.get(artist, 0.01 if moods is not None and mood != "prekvap" else
+        f = fit.get(artist, 0.01 if moods is not None and mood not in FREE_MOODS else
                     (0.05 if seed_artists else (default_time_fit if time_artists else 1.0)))
         if skipped_artists.get(artist):
             f *= 0.1 if turn else (0.3 if small else 0.4)
@@ -529,12 +534,12 @@ def pick(
             seen_titles.add(key)
             unique.append(r)
     ordered = unique
-    known_target = max(1, round(size * (1 - new_share)))
+    known_target = max(0 if new_share >= 1 else 1, round(size * (1 - new_share)))
     from app.home import energy_flow
 
     capped = _cap_per_artist(ordered, act.artist_of, 1)
     familiar = _spread(capped[:known_target], act.artist_of)
-    if not seeds and not small and mood in (None, "prekvap") and len(familiar) >= 3:
+    if not seeds and not small and mood in (None, *FREE_MOODS) and len(familiar) >= 3:
         # Scéna, která se dlouho neozvala (mapa scén, 13. 10.): 1–2 známé
         # odtamtud místo posledních -- deset let historie se tak postupně
         # prostřídá (dřív hrálo skoro jen posledních pár měsíců).
@@ -577,7 +582,7 @@ def pick(
             # Záloha známých, když nové nevyjdou (audit G) -- várka se nezkrátí.
             spare_familiar=[r for r in capped[known_target:] if r not in familiar][: size],
             weak_mood=bool(
-                moods is not None and mood != "prekvap" and sum(1 for m in moods.values() if m >= 0.3) < 3
+                moods is not None and mood not in FREE_MOODS and sum(1 for m in moods.values() if m >= 0.3) < 3
             ),
         )
     # Semínka pro nové: semínka nekonečného hraní, jinak jedna známá z várky
@@ -605,6 +610,11 @@ def pick(
         new_seeds += _distinct_artist_seeds(
             [r for r in wide if r not in new_seeds], act.artist_of, 2 if caught else 3
         )
+    if mood == "objevuj" and not small:
+        # Navázat na poslední skladby stanice (králičí nora) + 2 scény celé
+        # historie pro šíři.
+        tail = [r for r in played[-2:] if r not in new_seeds]
+        new_seeds = list(dict.fromkeys(tail + new_seeds[:3] + _scene_seed_tracks(user_id, act, rng, 2, banned)))
     if small and not seeds:
         # Malý profil: z RŮZNÝCH interpretů všeho, co slyšel a co má rád --
         # jinak by po jedné písničce uvízl v jedné škatulce.
@@ -630,7 +640,7 @@ def pick(
 # (decily 0,08 ... 0,88), tempo jen se spolehlivým odhadem.
 def track_mood_fit(mood: str | None, energy: float | None, bpm: float | None = None) -> float:
     """Násobek pro skladbu v náladě (1 = beze změny / bez rozboru)."""
-    if energy is None or mood in (None, "prekvap"):
+    if energy is None or mood in (None, *FREE_MOODS):
         return 1.0
     e = energy
     if mood == "klid":
@@ -730,7 +740,7 @@ async def _smooth(
         styles = await asyncio.wait_for(asyncio.shield(styles_task), timeout=1.0)
     except asyncio.TimeoutError:
         styles = {}  # štítky se dotáhnou do cache na pozadí
-    if mood not in (None, "prekvap") and new_ids:
+    if mood not in (None, *FREE_MOODS) and new_ids:
         global _feat_cache
         _feat_cache = None  # právě rozebrané ukázky
         audio = await asyncio.to_thread(_features_map)
@@ -817,6 +827,28 @@ def _familiar_first(out: list[str], new_ids: set[str], first: int = 2) -> list[s
     až od dalšího; jinak pořadí beze změny."""
     head = [r for r in out if r not in new_ids][:first]
     return head + [r for r in out if r not in head]
+
+
+def _scene_seed_tracks(user_id: str, act, rng: random.Random, n: int, banned: set) -> list[str]:
+    """Po jedné oblíbené skladbě z `n` scén losovaných podle váhy (i spících)."""
+    from app.home import scenes
+    from app.home.personal_mixes import _weighted_order
+
+    try:
+        smap = scenes.load(user_id)
+    except Exception:  # noqa: BLE001
+        return []
+    keyed = sorted(
+        ((rng.random() ** (1.0 / max(sc.weight ** 0.6, 1e-9)), sc) for sc in smap.scenes if sc.artists),
+        key=lambda x: x[0], reverse=True,
+    )
+    out: list[str] = []
+    for _k, sc in keyed[:n]:
+        members = set(sc.artists) - banned
+        pool = [r for r in act.total if act.artist_of.get(r) in members]
+        pick_ = _weighted_order(pool, lambda r: act.long.get(r, 0.0) ** 0.5 + 1e-6, rng)[:1]
+        out += pick_
+    return out
 
 
 def _no_new_in_a_row(out: list[str], new_ids: set[str]) -> list[str]:
@@ -940,21 +972,21 @@ async def next_chunk(
     mood = mood if mood in MOODS else None
     seeds = await asyncio.to_thread(_clean_seeds, user_id, seeds)
     moods = None
-    if mood and mood != "prekvap":
+    if mood and mood not in FREE_MOODS:
         moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
     weak_mood = bool(moods is not None and sum(1 for m in moods.values() if m >= 0.3) < 3)
     from app.home import ratio
 
     level = await asyncio.to_thread(discovery_level, user_id)
     level_share = await asyncio.to_thread(ratio.new_share, DISCOVERY[level], user_id)
-    new_share = max(0.5, level_share) if mood == "prekvap" else (max(0.6, level_share) if weak_mood else level_share)
-    if mood != "prekvap" and len((await asyncio.to_thread(_activation, user_id)).total) < SMALL_PROFILE:
+    new_share = 1.0 if mood == "objevuj" else max(0.5, level_share) if mood == "prekvap" else (max(0.6, level_share) if weak_mood else level_share)
+    if mood not in FREE_MOODS and len((await asyncio.to_thread(_activation, user_id)).total) < SMALL_PROFILE:
         new_share = max(new_share, SMALL_NEW_SHARE)  # čistý start: není co opakovat
     # Po přeskočení bezpečněji, po dohrání víc riskovat (rešerše C2).
     last = await asyncio.to_thread(_last_outcome, user_id)
-    if mood != "prekvap" and last == "skipped":
+    if mood not in FREE_MOODS and last == "skipped":
         new_share *= 0.75  # dřív polovina: z 10 skladeb pak zbyla 1 nová (12. 10.)
-    elif mood != "prekvap" and last == "completed":
+    elif mood not in FREE_MOODS and last == "completed":
         new_share = min(max(0.6, level_share + 0.1), new_share * 1.25)
     session_counts = await session_artist_counts(played)
     exposure = await _exposure(user_id)
@@ -1036,7 +1068,7 @@ async def next_chunk(
         pool = kept[want_new:]
         # Druhá šance nové skladby (7t): dohraná, bez návratu -- 1 místo.
         chances = await asyncio.to_thread(ratio.second_chances, user_id, set(played) | set(familiar) | set(seeds))
-        if chances and not (mood and mood != "prekvap"):
+        if chances and not (mood and mood not in FREE_MOODS):
             if len(new) >= want_new and new:
                 pool.insert(0, new.pop())
             new.append(chances[0])
@@ -1097,7 +1129,7 @@ async def next_chunk(
     # Začátek relace a po 2 přeskočených nových 3 jisté (7t), jinak 2.
     cautious = not played or await asyncio.to_thread(_new_skip_streak, user_id)
     out = _familiar_first(out, new_ids, first=3 if cautious else 2)
-    if level == "low" and mood != "prekvap":
+    if level == "low" and mood not in FREE_MOODS:
         out = _no_new_in_a_row(out, new_ids)
     available = await asyncio.to_thread(_available, out)
     out = _safe_start(out, available)
