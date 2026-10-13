@@ -779,12 +779,42 @@ def remove_track(
     return _remove_for(session, current[0], recording_id)
 
 
+IMPORT_LOCK_TTL_S = 3600
+
+
 @library_router.post("/import/spotify")
 async def import_spotify(
     file: UploadFile,
     session: Session = Depends(get_session),
     current: tuple[str, str] = Depends(get_current_user),
 ):
+    """Jeden import na profil najednou (13. 10.: Míša nahrál historii dvakrát
+    po sobě, oba importy běžely souběžně a přepsaly se -- ~600 zdvojených
+    poslechů). Po doběhnutí smazat spočítaný Wrapped (jinak týden starý stav)
+    a dát vědět i zařízením, která import nespustila / mezitím obnovila stránku."""
+    from app.events import publish_event
+    from app.redis_bus import get_redis
+
+    user_id = current[0]
+    lock = f"import:running:{user_id}"
+    if not await get_redis().set(lock, "1", nx=True, ex=IMPORT_LOCK_TTL_S):
+        raise HTTPException(status_code=409, detail="Import už běží – počkej, až doběhne, dám vědět.")
+    try:
+        out = await _import_spotify(file, session, current)
+    finally:
+        await get_redis().delete(lock)
+    if isinstance(out, dict) and out.get("kind") == "history":
+        from app import wrapped
+
+        await wrapped.invalidate(user_id)
+        try:
+            await publish_event(user_id, "import.done", {"platform": out.get("platform") or "spotify", "listens": out.get("listens", 0)})
+        except Exception:  # noqa: BLE001 -- jen oznámení
+            pass
+    return out
+
+
+async def _import_spotify(file: UploadFile, session: Session, current: tuple[str, str]):
     from app.uploads import read_limited
 
     user_id, _device_id = current
