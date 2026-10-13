@@ -18,6 +18,7 @@ Sekce:
 - shazam           Z tvého Shazamu
 - soundcloud       Na SoundCloudu od tvých interpretů (věci, které jinde nejsou)
 - family           Co poslouchá rodina (jen profily, které sdílení povolí)
+- caught           Protože tě chytla <skladba> -- podobné k nedávno chycené skladbě
 """
 
 from __future__ import annotations
@@ -327,6 +328,40 @@ async def build_forgotten(user_id: str) -> int:
         {"title": "Zapomenuté poklady", "kind": "albums", "ids": [r for _s, r, _a in top], "badges": {r: f"naposledy {a}" for _s, r, a in top}},
     )
     return len(top)
+
+
+async def build_caught(user_id: str) -> int:
+    """Podobné skladby k té, která tě nedávno chytla (nová, nebo návrat po
+    dlouhé pauze; app/home/caught.py) + neslyšené od jejího interpreta.
+    Denně jiná z chycených (13. 10.: "když objevím super skladbu, ať mi to
+    ukáže podobné")."""
+    from app.home import activation as av
+    from app.home import lastfm_taste as lt
+    from app.home import novelty
+    from app.home.caught import caught_tracks
+    from app.home.play_now import _artist_unheard
+
+    act = await asyncio.to_thread(av.cached, user_id)
+    hooks = (await asyncio.to_thread(caught_tracks, user_id, act))[:5]
+    if not hooks:
+        _clear(user_id, "caught")
+        return 0
+    rng = random.Random(f"caught:{user_id}:{utcnow().date().isoformat()}")
+    hook = rng.choice(hooks)
+    known = set(act.total)
+    ids = await _artist_unheard(hook, known, rng)
+    ids += [r for r in await lt.similar_track_ids([hook], known | set(ids), rng, 24) if r not in ids]
+    ids = await asyncio.to_thread(novelty.filter_new, user_id, ids, act)
+    if len(ids) < 6:
+        _clear(user_id, "caught")
+        return 0
+    with Session(engine) as s:
+        rec = s.get(Recording, hook)
+        title = rec.title if rec else "tahle skladba"
+    label = f"Protože tě chytla {title}"
+    pid = _save_playlist(user_id, "personal:caught", label, f"Podobné skladby k {title}", ids, timedelta(days=1))
+    _save(user_id, "caught", {"title": label, "kind": "tracks", "ids": ids[:20], "playlistId": pid})
+    return len(ids)
 
 
 async def build_unfinished(user_id: str) -> int:
@@ -821,6 +856,7 @@ SPECS: list[Spec] = [
     Spec("shazam", "Z tvého Shazamu", timedelta(hours=1), None),
     Spec("soundcloud", "Na SoundCloudu od tvých interpretů", timedelta(days=1), build_soundcloud),
     Spec("family", "Co poslouchá rodina", timedelta(hours=1), None),
+    Spec("caught", "Protože tě chytla…", timedelta(hours=6), build_caught),
 ]
 _BY_ID = {s.id: s for s in SPECS}
 
