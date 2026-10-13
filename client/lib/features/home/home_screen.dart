@@ -75,7 +75,8 @@ class HomeScreen extends ConsumerWidget {
             children: [
               // "Pokračovat v poslechu" posílá server vždy (jako zástupce) --
               // prázdný Domů = nic jiného než ten, a ještě bez historie.
-              if (sections.every((s) => s.type == HomeSectionType.continueListening) && recent.isEmpty)
+              if (sections.every((s) => s.type == HomeSectionType.continueListening || s.type == HomeSectionType.listenLater) &&
+                  recent.isEmpty)
                 const EmptyState(
                   icon: Symbols.home_rounded,
                   message: 'Tady zatím nic není. Najdi si hudbu v Hledat – z toho, co posloucháš, se Domů poskládá '
@@ -83,13 +84,14 @@ class HomeScreen extends ConsumerWidget {
                 ),
               // Pozvánka do společného mixu (Blend), čeká na mě.
               const BlendInviteBanner(),
-              // Něco, co v "Poslechnout později" leží přes 2 týdny.
-              const ListenLaterReminder(),
               // Pořadí a skrytí sekcí podle profilu (Domů › Upravit); "Pokračovat
               // v poslechu" je mezi nimi jako zástupce (data z /home/recent).
               for (final section in sections)
                 if (section.type == HomeSectionType.continueListening)
                   if (recent.isNotEmpty) _ContinueListening(items: recent) else const SizedBox.shrink()
+                // Něco, co v "Poslechnout později" leží přes 2 týdny (volitelná sekce).
+                else if (section.type == HomeSectionType.listenLater)
+                  const ListenLaterReminder()
                 else
                   _HomeSectionView(section: section),
             ],
@@ -576,6 +578,7 @@ class _HomeSectionView extends StatelessWidget {
       case HomeSectionType.newcomerSetup:
         return NewcomerSetupCards(cards: section.setupCards);
       case HomeSectionType.continueListening: // vykresluje HomeScreen (data z /home/recent)
+      case HomeSectionType.listenLater: // vykresluje HomeScreen (ListenLaterReminder)
       case HomeSectionType.unknown:
         return const SizedBox.shrink();
     }
