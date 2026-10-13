@@ -870,9 +870,23 @@ async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple
     stable = clusters[:STABLE_MIXES]
     taken = {a for c in stable for a in c.artists[:15]}
     rng = random.Random(f"{g.home_user()}:{day}:scenes")
-    picked = scenes.pick_dormant(
-        smap, MAX_DAILY_MIXES - len(stable), rng, today=day, shown=shown, exclude_artists=taken
-    )
+    # Doprovodné scény k běžící vlně (co profil hrál u dřívějších vln téže
+    # scény, 13. 10.) napřed -- nejvýš 2, aspoň jedno místo zůstane spícím.
+    by_id = smap.by_id()
+    try:
+        from app.home import kam_dal
+
+        comp = [by_id[s] for s in await asyncio.to_thread(kam_dal.companions, g.home_user()) if s in by_id]
+    except Exception:  # noqa: BLE001
+        comp = []
+    comp = [s for s in comp if not ({*s.artists[:15]} & taken)]
+    first = rng.sample(comp, min(2, len(comp)))
+    picked = first + [
+        s for s in scenes.pick_dormant(
+            smap, MAX_DAILY_MIXES - len(stable), rng, today=day, shown=shown,
+            exclude_artists=taken | {a for s in first for a in s.artists[:15]},
+        ) if s not in first
+    ][: MAX_DAILY_MIXES - len(stable) - len(first)]
     out = list(stable)
     info: dict[int, object] = {}
     for scene in picked:
