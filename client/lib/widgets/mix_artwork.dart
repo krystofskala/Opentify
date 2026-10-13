@@ -9,7 +9,7 @@ import '../data/home_repository.dart';
 import 'media_card.dart' show ArtworkImage;
 
 /// Styl generativního obalu vlastního mixu (backend `PlaylistCardOut.art_style`).
-enum MixArtStyle { daily, genre, mood, year }
+enum MixArtStyle { daily, genre, mood, year, discover }
 
 /// Co obal potřebuje: styl, stálý seed (stejný mix = pořád stejný obrázek),
 /// barvu, velký text (číslo mixu / žánr / rok) a fotky interpretů.
@@ -95,7 +95,7 @@ MixArtSpec? mixArtForSource({
   // Ostatní vlastní mixy -- styly, které unesou delší název (2 řádky).
   if (s.startsWith('personal:discover-weekly')) {
     return MixArtSpec(
-      style: MixArtStyle.mood,
+      style: MixArtStyle.mood, // discover až po výběru tvaru
       seed: s,
       headline: 'Objevy týdne',
       color: const Color(0xFF12B5CB),
@@ -182,6 +182,7 @@ class MixArtwork extends StatelessWidget {
           MixArtStyle.daily => _WavesPainter(hue, seed),
           MixArtStyle.genre => _GroovesPainter(hue, seed),
           MixArtStyle.mood => _AuroraPainter(hue, seed),
+          MixArtStyle.discover => const _BeamPainter(),
           MixArtStyle.year => _BarsPainter(hue, seed),
         };
         return Stack(
@@ -275,6 +276,29 @@ class MixArtwork extends StatelessWidget {
             ),
           ),
         ];
+      case MixArtStyle.discover:
+        if (compact) return const [];
+        // Rovné tučné písmo na dva řádky -- ne kurzíva mixů nálad, Objevy
+        // mají být na první pohled jiné (13. 10.).
+        return [
+          if (label != null) label,
+          Positioned(
+            left: side * 0.08,
+            right: side * 0.08,
+            bottom: side * 0.08,
+            child: Text(
+              spec.headline.replaceFirst(' ', '\n'),
+              maxLines: 2,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: side * 0.16,
+                fontWeight: FontWeight.w800,
+                height: 1.0,
+                shadows: shadow,
+              ),
+            ),
+          ),
+        ];
       case MixArtStyle.genre:
       case MixArtStyle.mood:
         if (compact) return const [];
@@ -329,6 +353,7 @@ class MixBackground extends StatelessWidget {
       MixArtStyle.daily => _WavesPainter(hue, s),
       MixArtStyle.genre => _GroovesPainter(hue, s),
       MixArtStyle.mood => _AuroraPainter(hue, s),
+      MixArtStyle.discover => const _BeamPainter(),
       MixArtStyle.year => _BarsPainter(hue, s),
     };
     return Stack(
@@ -495,6 +520,50 @@ class _AuroraPainter extends CustomPainter {
   bool shouldRepaint(_AuroraPainter old) => old.hue != hue || old.seed != seed;
 }
 
+/// Objevy týdne: tyrkysová aurora se světelným kuželem zprava zdola
+/// (13. 10., vybráno z nákresů). Kužel = dvoubodový radiální přechod, jehož
+/// ohnisko leží mimo cílový kruh -- stejně jako `createRadialGradient`
+/// v prohlížeči, ze kterého nákres vznikl. Pevná paleta, ne odstín mixu.
+class _BeamPainter extends CustomPainter {
+  const _BeamPainter();
+
+  // (ohnisko x, y, střed x, y, poloměr, odstín, jas, krytí) jako podíl strany.
+  static const _layers = [
+    [0.237, 0.551, 0.874, 0.779, 0.653, 214.6, 0.646, 0.75],
+    [0.388, 0.034, 0.754, 0.158, 0.817, 201.8, 0.661, 0.75],
+    [0.692, 0.913, 0.167, 0.357, 0.612, 192.2, 0.640, 0.75],
+    [0.230, 0.411, 0.462, 0.365, 0.736, 211.3, 0.687, 0.75],
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    final rect = Offset.zero & size;
+    canvas.drawRect(rect, Paint()..color = const Color(0xFF0D4D57));
+    final edge = const HSLColor.fromAHSL(0, 190, 0.8, 0.4).toColor();
+    for (final l in _layers) {
+      final color = HSLColor.fromAHSL(l[7], l[5], 0.8, l[6]).toColor();
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..shader = ui.Gradient.radial(
+            Offset(l[2] * s, l[3] * s),
+            l[4] * s,
+            [color, edge],
+            null,
+            TileMode.clamp,
+            null,
+            Offset(l[0] * s, l[1] * s),
+            0,
+          ),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BeamPainter old) => false;
+}
+
 /// Rok: sloupce ekvalizéru ve spodní polovině, střídavě dva tóny.
 class _BarsPainter extends CustomPainter {
   _BarsPainter(this.hue, this.seed);
@@ -536,37 +605,45 @@ class _BarsPainter extends CustomPainter {
   bool shouldRepaint(_BarsPainter old) => old.hue != hue || old.seed != seed;
 }
 
-/// Jemné husté zrno jako pozadí appky: dlaždice 128×128 (ve dvojnásobném
-/// rozlišení, ať je ostré i na retině) spočítaná jednou a opakovaná přes
-/// celou plochu. Dřív řídké silné tečky působily jako fleky (živě nahlášeno).
+/// Zrno jako pozadí appky a obalů: dlaždice spočítaná jednou a opakovaná.
+/// 14. 10. (maminka: zrno působí nekvalitně): dřív tečky 1,5 px v poloviční
+/// mřížce, na telefonu zvětšené a rozmazané jako špína/komprese. Teď každý
+/// pixel displeje vlastní hodnota (jemný šum kolem nuly), bílá zesvětlí,
+/// černá ztmaví -- jako soft-light šum, jen bez režimu prolnutí (ten by
+/// v RepaintBoundary prolínal s průhlednem).
 class GrainPainter extends CustomPainter {
   const GrainPainter();
 
-  static const _tile = 128.0;
+  static const _tilePx = 192; // pixelů displeje
+  static const _amp = 9.0; // síla jako v nákresu (zrno C), z 255
   static ui.Image? _image;
 
   static ui.Image _build() {
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder)..scale(2);
-    final rnd = math.Random(3);
-    final buckets = List.generate(6, (_) => <double>[]);
-    final count = (_tile * _tile * 1.4).toInt();
-    for (var i = 0; i < count; i++) {
-      final g = rnd.nextDouble() + rnd.nextDouble() - 1; // -1..1, trojúhelníkové
-      if (g.abs() < 0.15) continue;
-      final level = math.min(2, (g.abs() * 3).floor());
-      buckets[level + (g > 0 ? 0 : 3)]
-        ..add(rnd.nextDouble() * _tile)
-        ..add(rnd.nextDouble() * _tile);
+    final canvas = Canvas(recorder);
+    final rnd = math.Random(11);
+    const levels = 6;
+    final buckets = List.generate(levels * 2, (_) => <double>[]);
+    for (var y = 0; y < _tilePx; y++) {
+      for (var x = 0; x < _tilePx; x++) {
+        // Součet tří rovnoměrných = skoro normální rozdělení, -1.5..1.5.
+        final v = (rnd.nextDouble() + rnd.nextDouble() + rnd.nextDouble() - 1.5) * _amp * 2 / 255;
+        final level = math.min(levels - 1, (v.abs() / 0.02).floor());
+        if (level == 0 && v.abs() < 0.01) continue;
+        buckets[level + (v > 0 ? 0 : levels)]
+          ..add(x + 0.5)
+          ..add(y + 0.5);
+      }
     }
     final paint = Paint()
-      ..strokeWidth = 0.75
+      ..strokeWidth = 1
       ..strokeCap = StrokeCap.square;
-    for (var i = 0; i < 6; i++) {
-      paint.color = (i < 3 ? Colors.white : Colors.black).withValues(alpha: 0.05 + 0.045 * (i % 3));
+    for (var i = 0; i < levels * 2; i++) {
+      final alpha = 0.02 * (i % levels) + 0.01;
+      paint.color = (i < levels ? Colors.white : Colors.black).withValues(alpha: alpha);
       canvas.drawRawPoints(ui.PointMode.points, Float32List.fromList(buckets[i]), paint);
     }
-    return recorder.endRecording().toImageSync((_tile * 2).toInt(), (_tile * 2).toInt());
+    return recorder.endRecording().toImageSync(_tilePx, _tilePx);
   }
 
   /// Zrno jako opakovaná dlaždice (výplň pro `Paint.shader`) -- sdílí ji
@@ -576,12 +653,15 @@ class GrainPainter extends CustomPainter {
 
   static Shader _makeShader() {
     final image = _image ??= _build();
+    // Jeden pixel dlaždice = jeden pixel displeje (ostré, nerozmazané).
+    final views = ui.PlatformDispatcher.instance.views;
+    final dpr = views.isEmpty ? 2.0 : views.first.devicePixelRatio;
     final matrix = Float64List(16)
-      ..[0] = 0.5
-      ..[5] = 0.5
+      ..[0] = 1 / dpr
+      ..[5] = 1 / dpr
       ..[10] = 1
       ..[15] = 1;
-    return ImageShader(image, TileMode.repeated, TileMode.repeated, matrix);
+    return ImageShader(image, TileMode.repeated, TileMode.repeated, matrix, filterQuality: FilterQuality.none);
   }
 
   @override
