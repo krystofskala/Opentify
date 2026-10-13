@@ -799,8 +799,6 @@ async def build_daily_mixes() -> int:
             description = " · ".join(
                 x for x in (label, f"{', '.join(names)} a další", f"naposledy {scene.last_year}" if scene.last_year else "") if x
             )
-            if getattr(scene, "kam_dal", ""):
-                description = f"Kam dál po {scene.kam_dal} · {description}"
         else:
             genre = _genre_label(taste, cluster, familiar)
             description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
@@ -875,16 +873,6 @@ async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple
     picked = scenes.pick_dormant(
         smap, MAX_DAILY_MIXES - len(stable), rng, today=day, shown=shown, exclude_artists=taken
     )
-    try:
-        from app.home import kam_dal
-
-        path = await asyncio.to_thread(kam_dal.path_scene, g.home_user(), day)
-    except Exception:  # noqa: BLE001
-        path = None
-    if path and path[0] in smap.by_id():
-        scene = smap.by_id()[path[0]]
-        scene.kam_dal = path[2]  # type: ignore[attr-defined]  # popis mixu
-        picked = [scene] + [s for s in picked if s.id != scene.id][: max(0, len(picked) - 1)]
     out = list(stable)
     info: dict[int, object] = {}
     for scene in picked:

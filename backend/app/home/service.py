@@ -297,7 +297,9 @@ _BADGES = {
 }
 
 
-_MIX_ORDER = ["personal:daily-mix:", "personal:discover-weekly", "personal:on-repeat", "personal:throwback", "home:mix:"]
+# Kam dál (7v) hned za Objevy: Vedle, Návrat, Skok -- jen při opadající vlně.
+_MIX_ORDER = ["personal:daily-mix:", "personal:discover-weekly", "personal:kamdal-vedle", "personal:kamdal-navrat",
+              "personal:kamdal-skok", "personal:on-repeat", "personal:throwback", "home:mix:"]
 
 
 def _mix_order(playlist: Playlist) -> tuple[int, str]:
