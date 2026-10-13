@@ -170,7 +170,10 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   final _page = PageController();
   late final AnimationController _progress = AnimationController(vsync: this, duration: _slideDuration)
     ..addStatusListener((status) {
-      if (status == AnimationStatus.completed) _go(_index + 1);
+      if (status == AnimationStatus.completed) {
+        _autoAdvance = true;
+        _go(_index + 1);
+      }
     });
   final Map<int, Uint8List> _rendered = {};
   Timer? _renderTimer;
@@ -182,6 +185,11 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   // doznívá (prolnutí). iOS hlasitost webu měnit nedovolí a každý <audio>
   // musí zvlášť odemknout klepnutím -- tam jen jeden přehrávač a střih.
   static const _crossfade = Duration(milliseconds: 2500);
+  // Při ručním přeskočení (klepnutí, tah) jen krátce -- 2,5 s znělo jako dvě
+  // skladby přes sebe (Míša, 13. 10.).
+  static const _skipFade = Duration(milliseconds: 300);
+  bool _autoAdvance = false;
+  Duration _fade = _crossfade;
   static const _tailFade = Duration(milliseconds: 2500);
   static const _snippetLength = Duration(seconds: 30);
   late final bool _canFade = !shouldUseRadioStream();
@@ -296,6 +304,8 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
   }
 
   void _onPage(int index) {
+    _fade = _autoAdvance ? _crossfade : _skipFade;
+    _autoAdvance = false;
     setState(() => _index = index);
     _scheduleRender();
     unawaited(_startSlide(index));
@@ -403,7 +413,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
     if (!mounted || token != _audioToken) return;
     _activePlayer = _players.indexOf(next);
     if (_canFade && previous != next && previous.playing) {
-      unawaited(_fadeTo(previous, 0, _crossfade).then((_) {
+      unawaited(_fadeTo(previous, 0, _fade).then((_) {
         if (_audio != previous) previous.pause();
       }));
     }
@@ -413,7 +423,7 @@ class _StoryState extends ConsumerState<_Story> with SingleTickerProviderStateMi
       // Autoplay odmítnut (iOS) -- odemkne se prvním klepnutím.
       _audioUnlocked = false;
     }));
-    if (_canFade) unawaited(_fadeTo(next, 1, _crossfade));
+    if (_canFade) unawaited(_fadeTo(next, 1, _fade));
     _watchTail(next, snippet.start);
     // Hotovo, až zvuk opravdu běží (pozice se hýbe) -- pak se pustí obraz.
     // Odmítnuté přehrávání (`_audioUnlocked` zpět na false) nečekat.
