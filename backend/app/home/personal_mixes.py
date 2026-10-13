@@ -1150,14 +1150,6 @@ def _scene_seeds(user_id: str, rng: random.Random, skip: set[str], n: int) -> li
     return out
 
 
-async def _artist_of_rec(recording_id: str) -> str | None:
-    from app.models import Recording
-
-    with Session(engine) as session:
-        rec = session.get(Recording, recording_id)
-    return rec.artist_id if rec else None
-
-
 async def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str], rng: random.Random) -> list[str]:
     """Objevy v blocích podle scény, ze které vzešly (13. 10.: pop-punk,
     pak jazzová zpěvačka, pak zase pop-punk -- dřív se vše zamíchalo).
@@ -1312,36 +1304,20 @@ async def build_discover_weekly() -> int:
         return 0
     rng = random.Random(f"discover:{week}")
     recent = {r for r, t in taste.last_played.items() if utcnow() - t <= timedelta(days=60)}
-    exclude = taste.known | recent | await asyncio.to_thread(_discover_ignored, g.home_user())
-    known_names, known_dz = _known_for_discover(taste)
+    exclude = taste.known | recent
+    # Výběr jako před 13. 10. (pokus na kopii DB 13. 10.: nové pravidlo
+    # "známý až po 2 dnech" pustilo do Objevů kdysi slyšené velké kapely a
+    # semínka ze scén celé historie staré velké scény -- medián fanoušků
+    # 12 tis. -> 45 tis., Objevy se nelíbily). Známý = kdokoli kdy slyšený.
+    # Měnit dál po jednom kroku a s týdnem na vyzkoušení.
+    known_names = {primary_artist_name(n).casefold() for n in taste.artist_name.values()}
+    known_dz = set(taste.artist_deezer.values())
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
     transient = _transient_seeds(taste, 10)
-    lasting = _scene_seeds(g.home_user(), rng, set(transient), 8)
-    if not lasting:
-        lasting = [a for a, w in taste.artist_weight.most_common(60) if w > 0 and a not in transient]
-        rng.shuffle(lasting)
-    # Interpreti skladeb, které tě nedávno chytly, napřed (13. 10.).
-    from app.home.caught import caught_tracks
-
-    hooks = []
-    if taste.activation is not None:
-        for rid in await asyncio.to_thread(caught_tracks, g.home_user(), taste.activation):
-            a = taste.artist_of.get(rid)
-            if a and a not in hooks and a not in transient:
-                hooks.append(a)
-    seeds = list(dict.fromkeys(hooks[:4] + transient + lasting[:8]))
-    try:
-        from app.home import kam_dal
-
-        share = await asyncio.to_thread(kam_dal.dose, g.home_user())
-        if share > 0:
-            tracks = await asyncio.to_thread(kam_dal.path_tracks, g.home_user(), ("vedle", "skok"))
-            artists = [taste.artist_of.get(r) or _artist_of_rec(r) for r in tracks["vedle"][:6] + tracks["skok"][:6]]
-            extra = [a for a in dict.fromkeys(artists) if a and a not in seeds][: max(1, round(len(seeds) * share / 2))]
-            seeds = list(dict.fromkeys(seeds[: len(seeds) - len(extra) // 2] + extra))
-    except Exception:  # noqa: BLE001 -- Kam dál je doplněk
-        logger.exception("objevy týdne: kam dál")
+    lasting = [a for a, w in taste.artist_weight.most_common(60) if w > 0 and a not in transient]
+    rng.shuffle(lasting)
+    seeds = transient + lasting[:8]
 
     # Kandidáti = "related" interpreti tvých interpretů, které neznáš. Každé
     # semínko přispěje svými nejbližšími rovnoměrně (dřív vyhrávala shoda
