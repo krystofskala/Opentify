@@ -87,7 +87,7 @@ IconData browseIcon(String? name) => switch (name) {
 
 /// Žánry mají ze serveru všechny stejnou ikonu (notu) -- vlastní symbol
 /// podle id, ať se od sebe dají rozeznat.
-IconData _genreIcon(String id) => switch (id) {
+IconData genreIcon(String id) => switch (id) {
       'pop' => Symbols.mic_external_on_rounded,
       'hiphop' => Symbols.mic_rounded,
       'rock' => Symbols.electric_bolt_rounded,
@@ -113,7 +113,7 @@ IconData _genreIcon(String id) => switch (id) {
       _ => Symbols.music_note_rounded,
     };
 
-IconData categoryIcon(BrowseCategory c) => c.group == 'genre' ? _genreIcon(c.id) : browseIcon(c.icon);
+IconData categoryIcon(BrowseCategory c) => c.group == 'genre' ? genreIcon(c.id) : browseIcon(c.icon);
 
 /// Dlaždice kategorie (varianta "Tvar"): tmavý tón barvy kategorie, jeden
 /// velký M3 Expressive tvar se zrnitým gradientem, vyjíždějící zprava dole,
