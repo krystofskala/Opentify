@@ -249,7 +249,12 @@ async def _wikidata_image(artist_mbid: str) -> str | None:
 
 
 async def resolve_artist_image(
-    name: str, artist_mbid: str | None, *, allow_musicbrainz: bool = True, deezer_id: str | None = None
+    name: str,
+    artist_mbid: str | None,
+    *,
+    allow_musicbrainz: bool = True,
+    deezer_id: str | None = None,
+    rejected: frozenset[str] | set[str] = frozenset(),
 ) -> str | None:
     # Známe-li Deezer id, fotka přesně toho interpreta -- hledání podle jména
     # dalo Chrisi Thileovi fotku Meshell Ndegeocello.
@@ -259,12 +264,13 @@ async def resolve_artist_image(
         except Exception:  # noqa: BLE001
             dz = None
         picture = deezer_image((dz or {}).get("picture_xl") or (dz or {}).get("picture_big"))
-        if picture and not _is_deezer_placeholder(picture):
+        if picture and not _is_deezer_placeholder(picture) and picture not in rejected:
             return picture
         if dz:
             # Interpret na Deezeru bez fotky -- hledání podle jména by vrátilo
             # cizího jmenovce; jen Wikidata (podle MBID) je pořád ten pravý.
-            return await _wikidata_image(artist_mbid) if artist_mbid and allow_musicbrainz else None
+            image = await _wikidata_image(artist_mbid) if artist_mbid and allow_musicbrainz else None
+            return image if image not in rejected else None
     wanted = primary_artist_name(name)
     try:
         artists = await get_deezer_client().search_artist(wanted, trust_name=False)
@@ -272,13 +278,14 @@ async def resolve_artist_image(
         artists = []
     for candidate in artists:
         picture = deezer_image(candidate.get("picture_xl") or candidate.get("picture_big"))
-        if same_artist_name(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture):
+        if same_artist_name(candidate.get("name", ""), wanted) and not _is_deezer_placeholder(picture) and picture not in rejected:
             return picture
     # Wikidata fallback potřebuje MusicBrainz (1 req/s sdílený s hledáním) --
     # jen na vyžádání (otevřený detail), nikdy z backfill smyčky, jinak ta
     # smyčka zabere MB frontu a uživatelské požadavky čekají.
     if artist_mbid and allow_musicbrainz:
-        return await _wikidata_image(artist_mbid)
+        image = await _wikidata_image(artist_mbid)
+        return image if image not in rejected else None
     return None
 
 
@@ -382,6 +389,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
         if has_real_image or (not force and _recently_checked(artist.external_refs)):
             return False
         name, mbid, deezer_id = artist.name, artist.mbid, artist.deezer_id
+        rejected = frozenset((artist.external_refs or {}).get("rejectedPhotos") or [])
 
     from app.catalog.identity import is_own_id, local_only_artist
 
@@ -397,7 +405,7 @@ async def fill_artist(artist_id: str, *, force: bool = False) -> bool:
                 session.add(artist)
                 session.commit()
         return False
-    picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force, deezer_id=deezer_id)
+    picture = await resolve_artist_image(name, mbid, allow_musicbrainz=force, deezer_id=deezer_id, rejected=rejected)
 
     with Session(engine) as session:
         artist = session.get(Artist, artist_id)
