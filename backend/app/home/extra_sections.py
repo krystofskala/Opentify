@@ -219,10 +219,16 @@ async def build_now_mix(user_id: str) -> int:
     similar = await asyncio.to_thread(novelty.filter_new, user_id, similar)  # společný filtr nových
     if style:
         similar = [r for r in similar if await _has_style(r, style)][:16]
+    # Podíl nových podle Kolik nového (7t): Málo 1 ze 4 (25 %), jinak 1 ze 3.
+    from app.home import ratio
+    from app.home.play_now import DISCOVERY, discovery_level
+
+    share = await asyncio.to_thread(ratio.new_share, DISCOVERY[await asyncio.to_thread(discovery_level, user_id)], user_id)
+    run = 3 if share < 0.3 else 2
     ids: list[str] = []
     while own or similar:
-        ids += own[:2]
-        own = own[2:]
+        ids += own[:run]
+        own = own[run:]
         ids += similar[:1]
         similar = similar[1:]
     ids = list(dict.fromkeys(ids))[:40]

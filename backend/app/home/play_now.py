@@ -32,8 +32,9 @@ from app.utils import utcnow
 
 NEW_SHARE = 0.2
 # Objevování (nastavení profilu, 12. 10.): podíl nových skladeb ve várce.
-# Výchozí "low" = dosavadní NEW_SHARE, ostatním se nic nemění.
-DISCOVERY = {"low": NEW_SHARE, "mid": 0.35, "high": 0.5}
+# Výchozí "low" = dosavadní NEW_SHARE. "high" 0,45 (rešerše 7t: objevitelé
+# 35-45 %, nad tím u Spotify roste přeskakování); samoladění app/home/ratio.py.
+DISCOVERY = {"low": NEW_SHARE, "mid": 0.35, "high": 0.45}
 DISCOVERY_DEFAULT = "low"
 # Různorodost známých (12. 10., simulace: dva interpreti ve 20 várkách z 20):
 # oblíbenost se zplošťuje (víc celé knihovny), interpret s mnoha skladbami
@@ -818,6 +819,40 @@ def _familiar_first(out: list[str], new_ids: set[str], first: int = 2) -> list[s
     return head + [r for r in out if r not in head]
 
 
+def _no_new_in_a_row(out: list[str], new_ids: set[str]) -> list[str]:
+    """Úroveň Málo: nikdy dvě nové za sebou (7t). Nová, pro kterou už není
+    známá mezi, jde na konec."""
+    res: list[str] = []
+    pending: list[str] = []
+    for r in out:
+        if r in new_ids:
+            if res and res[-1] not in new_ids:
+                res.append(r)
+            else:
+                pending.append(r)
+        else:
+            res.append(r)
+            if pending:
+                res.append(pending.pop(0))
+    return res + pending
+
+
+def _new_skip_streak(user_id: str, n: int = 2) -> bool:
+    """Posledních `n` nových skladeb z algoritmu (40 min) přeskočeno."""
+    since = (utcnow() - timedelta(minutes=40)).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = session.exec(
+            select(PlayEvent.end_reason)
+            .where(
+                PlayEvent.user_id == user_id, PlayEvent.ended_at >= since,
+                PlayEvent.rec_slot.in_(("new", "explore")),  # type: ignore[union-attr]
+            )
+            .order_by(PlayEvent.ended_at.desc())  # type: ignore[union-attr]
+            .limit(n)
+        ).all()
+    return len(rows) >= n and all(r == "skipped" for r in rows)
+
+
 def _last_outcome(user_id: str) -> str | None:
     """Jak dopadla poslední skladba, kterou pustil algoritmus (40 min):
     "skipped" / "completed" / None."""
@@ -908,7 +943,10 @@ async def next_chunk(
     if mood and mood != "prekvap":
         moods = await mood_fit(await asyncio.to_thread(_activation, user_id), mood)
     weak_mood = bool(moods is not None and sum(1 for m in moods.values() if m >= 0.3) < 3)
-    level_share = DISCOVERY[await asyncio.to_thread(discovery_level, user_id)]
+    from app.home import ratio
+
+    level = await asyncio.to_thread(discovery_level, user_id)
+    level_share = await asyncio.to_thread(ratio.new_share, DISCOVERY[level], user_id)
     new_share = max(0.5, level_share) if mood == "prekvap" else (max(0.6, level_share) if weak_mood else level_share)
     if mood != "prekvap" and len((await asyncio.to_thread(_activation, user_id)).total) < SMALL_PROFILE:
         new_share = max(new_share, SMALL_NEW_SHARE)  # čistý start: není co opakovat
@@ -996,6 +1034,13 @@ async def next_chunk(
             kept += extra
         new = kept[:want_new]
         pool = kept[want_new:]
+        # Druhá šance nové skladby (7t): dohraná, bez návratu -- 1 místo.
+        chances = await asyncio.to_thread(ratio.second_chances, user_id, set(played) | set(familiar) | set(seeds))
+        if chances and not (mood and mood != "prekvap"):
+            if len(new) >= want_new and new:
+                pool.insert(0, new.pop())
+            new.append(chances[0])
+            funnel["second_chance_song"] = 1
         # Náhodné sloty pro poctivé měření (~10 % nových, uživatel 7. 10.):
         # místo nejlepšího tipu náhodný z širšího okruhu (prošel stejnými
         # filtry), zapsaný jako "explore".
@@ -1049,7 +1094,11 @@ async def next_chunk(
         _remember_deferred(user_id, deferred, set(out))
     except Exception:  # noqa: BLE001 -- plynulost je doplněk, várka musí přijít
         logger.exception("pusť teď: plynulé řazení")
-    out = _familiar_first(out, new_ids)
+    # Začátek relace a po 2 přeskočených nových 3 jisté (7t), jinak 2.
+    cautious = not played or await asyncio.to_thread(_new_skip_streak, user_id)
+    out = _familiar_first(out, new_ids, first=3 if cautious else 2)
+    if level == "low" and mood != "prekvap":
+        out = _no_new_in_a_row(out, new_ids)
     available = await asyncio.to_thread(_available, out)
     out = _safe_start(out, available)
     missing = [r for r in out if r not in available]
@@ -1219,6 +1268,9 @@ def set_discovery_level(user_id: str, level: str) -> str:
 
     if level not in DISCOVERY:
         raise ValueError(level)
+    from app.home import ratio
+
+    ratio.reset(user_id)  # nová volba = samoladění od nuly
     with Session(engine) as session:
         row = session.get(HomeSnapshot, _discovery_key(user_id)) or HomeSnapshot(key=_discovery_key(user_id), payload={})
         row.payload = {"level": level}

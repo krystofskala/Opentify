@@ -53,7 +53,7 @@ except Exception:  # noqa: BLE001 - chybí tzdata -> UTC
 
 MAX_DAILY_MIXES = 6
 DAILY_MIX_SIZE = 40
-FAMILIAR_SHARE = 0.7
+FAMILIAR_SHARE = 0.75  # 25 % nových (rešerše 7t; Spotify Daily Mix ~25 %)
 MIN_MIX_SIZE = 15
 # Strop skladeb jednoho interpreta v Denním mixu (12. 10.: dřív 5, mixy
 # měly 11 interpretů na 31 skladeb, jeden interpret 7× i s novými).
@@ -689,7 +689,13 @@ async def build_daily_mixes() -> int:
     memory = await asyncio.to_thread(_mix_memory, g.home_user(), day, taste)
     from app.home.play_now import discovery_level
 
-    familiar_share = MIX_FAMILIAR_SHARE.get(await asyncio.to_thread(discovery_level, g.home_user()), FAMILIAR_SHARE)
+    from app.home import ratio
+
+    familiar_share = await asyncio.to_thread(
+        ratio.familiar_share,
+        MIX_FAMILIAR_SHARE.get(await asyncio.to_thread(discovery_level, g.home_user()), FAMILIAR_SHARE),
+        g.home_user(),
+    )
     act = taste.activation
     former = set(act.former_loves()[:300]) if act is not None else set()
     from app.home.caught import caught_tracks
@@ -1048,6 +1054,41 @@ def _scene_seeds(user_id: str, rng: random.Random, skip: set[str], n: int) -> li
     return out
 
 
+def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str], rng: random.Random) -> list[str]:
+    """Objevy v blocích podle scény, ze které vzešly (13. 10.: pop-punk,
+    pak jazzová zpěvačka, pak zase pop-punk -- dřív se vše zamíchalo).
+    Bloky za sebou podle podobnosti štítků scény, uvnitř bloku náhodně."""
+    from app.home import scenes
+
+    try:
+        smap = scenes.load(user_id)
+    except Exception:  # noqa: BLE001
+        smap = scenes.SceneMap([])
+    scene_of: dict[str, scenes.Scene] = {}
+    for sc in smap.scenes:
+        for a in [*sc.artists, *sc.tail]:
+            scene_of.setdefault(a, sc)
+    blocks: dict[str, list[str]] = {}
+    tags: dict[str, set[str]] = {}
+    for t in picked:
+        sc = scene_of.get(track_seed.get(t, ""))
+        key = sc.id if sc else f"seed:{track_seed.get(t, '')}"
+        blocks.setdefault(key, []).append(t)
+        tags[key] = {x.strip() for x in (sc.label if sc else "").split(",") if x.strip()}
+    for b in blocks.values():
+        rng.shuffle(b)
+    left = list(blocks)
+    rng.shuffle(left)
+    left.sort(key=lambda k: -len(blocks[k]))
+    order = [left.pop(0)] if left else []
+    while left:
+        prev = tags[order[-1]]
+        nxt = max(left, key=lambda k: (len(prev & tags[k]), len(blocks[k])))
+        left.remove(nxt)
+        order.append(nxt)
+    return [t for k in order for t in blocks[k]]
+
+
 def _known_for_discover(taste: Taste) -> tuple[set[str], set[str]]:
     """Interpreti, které Objevy vynechají: jen ti, ke kterým se profil sám
     vrací (2+ dny, algoritmus po třetinách) nebo které si uložil. Dřív stačil
@@ -1106,6 +1147,7 @@ async def build_discover_weekly() -> int:
     # víc semínek = vždy střed nejsilnějšího žánru).
     candidates: Counter = Counter()
     per_seed: list[list[str]] = []
+    seed_of: dict[str, str] = {}  # kandidát -> semínko (bloky podle scény)
     for artist_id in seeds:
         dz = await _deezer_id(taste, artist_id)
         if dz is None:
@@ -1117,17 +1159,21 @@ async def build_discover_weekly() -> int:
                 continue
             candidates[rid] += 1
             mine.append(rid)
+            seed_of.setdefault(rid, artist_id)
         per_seed.append(mine)
         await asyncio.sleep(0.05)
     # + podobní podle posluchačů Last.fm (shoda váží; víc tvých interpretů =
     # výš), převedení na Deezer přes přesné jméno.
     lf_scores: Counter = Counter()
+    lf_seed: dict[str, tuple[float, str]] = {}
     for artist_id in seeds:
         if is_own_artist(artist_id):  # Last.fm by našel stejnojmennou cizí kapelu
             continue
         for name, match in await lt.similar_artist_names(taste.artist_name.get(artist_id, ""), 25):
             if primary_artist_name(name).casefold() not in known_names:
                 lf_scores[name] += match
+                if match > lf_seed.get(name, (-1.0, ""))[0]:
+                    lf_seed[name] = (match, artist_id)
     dzc_lookup = get_deezer_client()
     for name, score in lf_scores.most_common(40):
         try:
@@ -1138,6 +1184,7 @@ async def build_discover_weekly() -> int:
         rid = str(hit["id"]) if hit and hit.get("id") else ""
         if rid and rid not in known_dz:
             candidates[rid] += 2 * score
+            seed_of.setdefault(rid, lf_seed[name][1])
     # Po kolech: z každého semínka jeho nejbližší dosud nevybraný (pořadí
     # semínek každý týden jinak), pak kandidáti Last.fm podle skóre.
     rng.shuffle(per_seed)
@@ -1158,6 +1205,7 @@ async def build_discover_weekly() -> int:
 
     dzc = get_deezer_client()
     picked: list[str] = []
+    track_seed: dict[str, str] = {}
     for rid in ranked:
         if len(picked) >= 30:
             break
@@ -1172,7 +1220,9 @@ async def build_discover_weekly() -> int:
         from app.home import novelty
 
         ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
-        picked.extend(ids[: 2 if len(ranked) < 20 else 1])
+        for t in ids[: 2 if len(ranked) < 20 else 1]:
+            picked.append(t)
+            track_seed[t] = seed_of.get(rid, "")
         await asyncio.sleep(0.05)
     if len(picked) < 15:
         # Málo kandidátů: z každého víc skladeb (dřív výjimka a týden nic).
@@ -1188,11 +1238,13 @@ async def build_discover_weekly() -> int:
             ids = [r for r in await asyncio.to_thread(g._ingest_tracks, [t for t in top if not _is_junk(t)])
                    if r not in exclude and r not in picked]
             ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
-            picked.extend(ids[:3])
+            for t in ids[:3]:
+                picked.append(t)
+                track_seed[t] = seed_of.get(rid, "")
     logger.info("objevy týdne: semínek %d, kandidátů %d, vybráno %d", len(seeds), len(ranked), len(picked))
     if len(picked) < DISCOVER_MIN:
         raise RuntimeError(f"objevy týdne: jen {len(picked)} nových skladeb")
-    rng.shuffle(picked)
+    picked = _in_scene_blocks(g.home_user(), picked[:30], track_seed, rng)
     g._save_playlist(
         owner=g.home_user(),
         source="personal:discover-weekly",
