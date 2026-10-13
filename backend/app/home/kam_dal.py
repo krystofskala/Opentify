@@ -140,6 +140,7 @@ async def compute(user_id: str, today: date | None = None) -> dict:
             "waveDayShare": round(rep.wave_day_share, 2), "scenesPerMonth": rep.scenes_per_month}
     wave = rep.current()
     today = today or utcnow().date()
+    base["companions"] = _companions(rep, act, smap, today)
     if wave is None or (wave.state == "ended" and (today - wave.end).days > HOLD_AFTER_END_DAYS):
         live = [w for w in rep.waves if w.state in ("rising", "peak")]
         return {**base, "state": live[-1].state if live else "none",
@@ -277,6 +278,52 @@ def _save_mixes(user_id: str, data: dict) -> None:
         )
     if empty:
         _clear_playlists(user_id, empty)
+
+
+COMPANION_LIFT = 1.5
+COMPANION_MIN_PLAYS = 10
+
+
+def _companions(rep, act, smap, today: date, n: int = 3) -> list[str]:
+    """Doprovodné scény k vlně, která teď běží (13. 10.: "když mám jazzovou
+    vlnu, v minulosti jsem u toho poslouchal i jinou sekci -- ta by mohla být
+    v jiném denním mixu"): co se hrálo během dřívějších vln téže scény
+    nápadně víc než jindy. Bez dřívější vlny téže scény: během té současné."""
+    live = [w for w in rep.waves if w.state in ("rising", "peak", "fading")]
+    if not live:
+        return []
+    now = live[-1]
+    family = set(now.scenes)
+    past = [w for w in rep.waves if w is not now and family & set(w.scenes)] or [now]
+    scene_of = smap.scene_of()
+    during: Counter = Counter()
+    overall: Counter = Counter()
+    total_during = total = 0
+    spans = [(w.onset, min(w.end, today)) for w in past]
+    for t, rid in act.timeline:
+        d = t.date()
+        if d > today:
+            break
+        s = scene_of.get(act.artist_of.get(rid))
+        if not s or s in family:
+            continue
+        overall[s] += 1
+        total += 1
+        if any(a <= d <= b for a, b in spans):
+            during[s] += 1
+            total_during += 1
+    if not total_during:
+        return []
+    scored = []
+    for s, k in during.items():
+        lift = (k / total_during) / max(overall[s] / max(total, 1), 1e-6)
+        if k >= COMPANION_MIN_PLAYS and lift >= COMPANION_LIFT:
+            scored.append((k * lift, s))
+    return [s for _x, s in sorted(scored, reverse=True)[:n]]
+
+
+def companions(user_id: str) -> list[str]:
+    return list(load(user_id).get("companions") or [])
 
 
 def _one_per_artist(ids: list[str], artist_of: dict, cap: int) -> list[str]:
