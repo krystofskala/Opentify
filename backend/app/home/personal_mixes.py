@@ -1054,11 +1054,14 @@ def _scene_seeds(user_id: str, rng: random.Random, skip: set[str], n: int) -> li
     return out
 
 
-def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str], rng: random.Random) -> list[str]:
+async def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str], rng: random.Random) -> list[str]:
     """Objevy v blocích podle scény, ze které vzešly (13. 10.: pop-punk,
     pak jazzová zpěvačka, pak zase pop-punk -- dřív se vše zamíchalo).
-    Bloky za sebou podle podobnosti štítků scény, uvnitř bloku náhodně."""
+    Plynule: bloky za sebou podle podobnosti stylů (štítky Last.fm všech
+    interpretů bloku), uvnitř bloku řetěz od skladby nejbližší konci
+    předchozího bloku -- přechod jde přes to, co mají scény společné."""
     from app.home import scenes
+    from app.home.extra_sections import _artist_names
 
     try:
         smap = scenes.load(user_id)
@@ -1069,24 +1072,53 @@ def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str]
         for a in [*sc.artists, *sc.tail]:
             scene_of.setdefault(a, sc)
     blocks: dict[str, list[str]] = {}
-    tags: dict[str, set[str]] = {}
     for t in picked:
         sc = scene_of.get(track_seed.get(t, ""))
-        key = sc.id if sc else f"seed:{track_seed.get(t, '')}"
-        blocks.setdefault(key, []).append(t)
-        tags[key] = {x.strip() for x in (sc.label if sc else "").split(",") if x.strip()}
-    for b in blocks.values():
-        rng.shuffle(b)
+        blocks.setdefault(sc.id if sc else f"seed:{track_seed.get(t, '')}", []).append(t)
+    names = await asyncio.to_thread(_artist_names, picked)
+    tag_cache: dict[str, list[str]] = {}
+    vec: dict[str, Counter] = {}
+    for t in picked:
+        name = names.get(t, "")
+        if name and name not in tag_cache:
+            try:
+                tag_cache[name] = (await lt.artist_tags(name))[:6]
+            except Exception:  # noqa: BLE001 -- bez štítků jen bloky
+                tag_cache[name] = []
+        vec[t] = Counter({tag: 1.0 / (1 + i) for i, tag in enumerate(tag_cache.get(name, []))})
+
+    def sim(x: Counter, y: Counter) -> float:
+        dot = sum(v * y.get(k, 0.0) for k, v in x.items())
+        nx = sum(v * v for v in x.values()) ** 0.5
+        ny = sum(v * v for v in y.values()) ** 0.5
+        return dot / (nx * ny) if nx and ny else 0.0
+
+    block_vec = {k: sum((vec[t] for t in ts), Counter()) for k, ts in blocks.items()}
     left = list(blocks)
     rng.shuffle(left)
     left.sort(key=lambda k: -len(blocks[k]))
     order = [left.pop(0)] if left else []
     while left:
-        prev = tags[order[-1]]
-        nxt = max(left, key=lambda k: (len(prev & tags[k]), len(blocks[k])))
+        nxt = max(left, key=lambda k: (sim(block_vec[order[-1]], block_vec[k]), len(blocks[k])))
         left.remove(nxt)
         order.append(nxt)
-    return [t for k in order for t in blocks[k]]
+    out: list[str] = []
+    for i, k in enumerate(order):
+        rest = list(blocks[k])
+        rng.shuffle(rest)
+        towards = block_vec[order[i + 1]] if i + 1 < len(order) else None
+        # Poslední místo bloku = skladba nejbližší dalšímu bloku.
+        last = max(rest, key=lambda t: sim(vec[t], towards)) if towards is not None and len(rest) > 1 else None
+        if last is not None:
+            rest.remove(last)
+        while rest:
+            prev = vec[out[-1]] if out else Counter()
+            t = max(rest, key=lambda r: sim(prev, vec[r])) if out else rest[0]
+            rest.remove(t)
+            out.append(t)
+        if last is not None:
+            out.append(last)
+    return out
 
 
 def _known_for_discover(taste: Taste) -> tuple[set[str], set[str]]:
@@ -1244,7 +1276,7 @@ async def build_discover_weekly() -> int:
     logger.info("objevy týdne: semínek %d, kandidátů %d, vybráno %d", len(seeds), len(ranked), len(picked))
     if len(picked) < DISCOVER_MIN:
         raise RuntimeError(f"objevy týdne: jen {len(picked)} nových skladeb")
-    picked = _in_scene_blocks(g.home_user(), picked[:30], track_seed, rng)
+    picked = await _in_scene_blocks(g.home_user(), picked[:30], track_seed, rng)
     g._save_playlist(
         owner=g.home_user(),
         source="personal:discover-weekly",

@@ -21,20 +21,29 @@ def test_malo_nikdy_dve_nove_za_sebou():
     assert res[:3] == ["f1", "f2", "n1"]
 
 
-def test_objevy_v_blocich_podle_sceny(monkeypatch):
+def test_objevy_v_blocich_podle_sceny_a_plynule(monkeypatch):
+    import asyncio
     import random
 
+    from app.home import extra_sections, scenes
+    from app.home import lastfm_taste as lt
     from app.home import personal_mixes as pm
-    from app.home import scenes
 
     smap = scenes.SceneMap([
-        scenes.Scene(id="pp", artists=["blink"], label="pop punk, punk"),
-        scenes.Scene(id="jz", artists=["norah"], label="jazz, vocal jazz"),
-        scenes.Scene(id="emo", artists=["tbs"], label="emo, pop punk"),
+        scenes.Scene(id="pp", artists=["blink"]),
+        scenes.Scene(id="jz", artists=["norah"]),
+        scenes.Scene(id="emo", artists=["tbs"]),
     ])
+    tags = {"P": ["pop punk", "punk"], "J": ["jazz", "vocal jazz"], "E": ["emo", "pop punk"]}
+
+    async def artist_tags(name):
+        return tags[name]
+
     monkeypatch.setattr(scenes, "load", lambda _u: smap)
+    monkeypatch.setattr(lt, "artist_tags", artist_tags)
+    monkeypatch.setattr(extra_sections, "_artist_names", lambda ids: {t: t[0].upper() for t in ids})
     seed = {"p1": "blink", "p2": "blink", "j1": "norah", "j2": "norah", "e1": "tbs", "e2": "tbs"}
-    out = pm._in_scene_blocks("u", ["p1", "j1", "e1", "p2", "j2", "e2"], seed, random.Random(1))
-    kinds = [t[0] for t in out]
+    out = asyncio.run(pm._in_scene_blocks("u", ["p1", "j1", "e1", "p2", "j2", "e2"], seed, random.Random(1)))
+    kinds = "".join(t[0] for t in out)
     assert sum(1 for a, b in zip(kinds, kinds[1:]) if a != b) == 2  # jen 2 přechody
-    assert abs(kinds.index("p") - kinds.index("e")) <= 2 or kinds[0] == "j"  # pop-punk vedle emo
+    assert "pe" in kinds or "ep" in kinds  # pop-punk vedle emo, jazz na kraji
