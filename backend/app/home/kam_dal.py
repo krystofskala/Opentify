@@ -11,9 +11,13 @@ vlnu skoro nikdy nepředpověděl, proto ne jedna "podobná" cesta:
 - **Skok**: daleká, jen trochu známá scéna s nedávnou jiskrou (poslechy,
   chycené skladby), vážená podle toho, kam profil skákal z podobných vln.
 
-Dávka podle typu posluchače (pravidlo 13. 10.: nikomu vzdálenější nabídky
-úplně neskrývat, jen nenutit): vlnař plně, smíšený občas, stálý vzácně.
-Počítá se jednou denně (plánovač), uloží se do `kamdal:{profil}`.
+Cesty jsou samostatné mixy "Kam dál · Vedle / Návrat / Skok" (13. 10.:
+"denní mixy jsou denní mixy, udělat speciálně něco nového") -- jen dokud
+vlna opadá nebo nedávno skončila, pak zmizí. Do Pusť teď a Objevů se cesty
+přimíchávají v dávce podle typu posluchače (pravidlo 13. 10.: nikomu
+vzdálenější nabídky úplně neskrývat, jen nenutit): vlnař plně, smíšený
+občas, stálý vzácně. Počítá se jednou denně (plánovač), uloží se do
+`kamdal:{profil}`.
 """
 
 from __future__ import annotations
@@ -241,6 +245,40 @@ async def compute(user_id: str, today: date | None = None) -> dict:
     return {**base, "state": wave.state, "wave": info, "paths": paths}
 
 
+MIXES = {
+    "vedle": ("Kam dál · Vedle", "noví interpreti blízko ní"),
+    "navrat": ("Kam dál · Návrat", "zpátky k {label}, naposledy {year}"),
+    "skok": ("Kam dál · Skok", "jinam: {label}, kam jsi poslední dobou nakoukl"),
+}
+
+
+def _save_mixes(user_id: str, data: dict) -> None:
+    """Tři mixy cest; bez opadající vlny prázdné (na Domů se neukážou)."""
+    from app.home import generators as g
+    from app.home.personal_mixes import _clear_playlists
+    from app.models import PlaylistKind
+
+    paths = data.get("paths") or {}
+    wave = (data.get("wave") or {}).get("title") or "vlně"
+    empty = []
+    for name, (title, what) in MIXES.items():
+        p = paths.get(name) or {}
+        ids = p.get("ids") or []
+        source = f"personal:kamdal-{name}"
+        if len(ids) < 8:
+            empty.append(source)
+            continue
+        label = (p.get("label") or "").split(",")[0].strip()
+        desc = what.format(label=label or "staré scéně", year=p.get("lastYear") or "dávno")
+        g._save_playlist(
+            owner=user_id, source=source, title=title, description=f"Po vlně {wave}: {desc}",
+            kind=PlaylistKind.PERSONAL_MIX, section="mixes", recording_ids=ids,
+            cover_urls=g._covers_for(ids), ttl=timedelta(days=2),
+        )
+    if empty:
+        _clear_playlists(user_id, empty)
+
+
 def _one_per_artist(ids: list[str], artist_of: dict, cap: int) -> list[str]:
     seen: Counter = Counter()
     out = []
@@ -284,6 +322,7 @@ async def build() -> int:
         return 0
     data["day"] = today
     await asyncio.to_thread(_save, user_id, data)
+    await asyncio.to_thread(_save_mixes, user_id, data)
     paths = data.get("paths") or {}
     logger.info(
         "kam dál: %s, vlna %s (%s), cesty %s", data.get("listener"), (data.get("wave") or {}).get("title"),
