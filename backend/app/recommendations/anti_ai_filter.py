@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Any
 
 # Platformy/vydavatelé notoricky spojení s hromadně generovaným AI spamem na
-# streamovacích službách -- shoda kdekoliv ve jméně interpreta/alba/skladby.
+# streamovacích službách -- shoda celého slova ve jméně interpreta/alba/skladby.
 KNOWN_AI_PLATFORM_KEYWORDS: frozenset[str] = frozenset(
     {
         "suno",
@@ -58,6 +59,13 @@ def _normalize(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", text).strip().lower()
 
 
+@lru_cache(maxsize=8)
+def _word_pattern(keywords: frozenset[str]) -> re.Pattern[str]:
+    """Značky platforem jen jako celá slova (13. 10.: "udio" blokovalo
+    "Studio Version", "(Official Audio)" i Audioslave, "aimi" Kaimi...)."""
+    return re.compile(r"\b(?:" + "|".join(re.escape(k) for k in sorted(keywords)) + r")\b")
+
+
 @dataclass
 class AntiAIFilter:
     """`max_tracks_per_unknown_artist` řeší druhou heuristiku ze zadání --
@@ -79,7 +87,7 @@ class AntiAIFilter:
             if not text:
                 continue
             normalized = _normalize(text)
-            if any(keyword in normalized for keyword in self.blocked_keywords):
+            if _word_pattern(self.blocked_keywords).search(normalized):
                 return True
             if any(phrase in normalized for phrase in self.blocked_phrases):
                 return True

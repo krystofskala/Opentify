@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from itertools import zip_longest
 import math
 import os
 import random
@@ -57,6 +58,17 @@ MIN_MIX_SIZE = 15
 # Strop skladeb jednoho interpreta v Denním mixu (12. 10.: dřív 5, mixy
 # měly 11 interpretů na 31 skladeb, jeden interpret 7× i s novými).
 DAILY_MIX_ARTIST_CAP = 3
+# Paměť Denních mixů (13. 10.: ~70 % mixu bylo stejné jako včera). Skladba
+# z mixu před `age` dny: váha × MIX_PER_SERVE ** (0,5 ** ((age-1)/poločas)),
+# interpret slaběji; nová nabídnutá a nepuštěná se 7 dní nevrací, po dvou
+# nabídnutích za 3 týdny vůbec.
+MIX_SERVE_HALF_LIFE = 2.0
+MIX_PER_SERVE = 0.25
+MIX_MEMORY_DAYS = 7
+MIX_RESURFACE = 5  # míst pro dlouho neslyšené oblíbené ze skupiny
+MIX_FEATURED = 3  # hlavní interpreti dne -- obal, popis, semínka rádia
+# "Kolik nového" (Pusť teď) platí i pro mixy: podíl známých skladeb.
+MIX_FAMILIAR_SHARE = {"low": FAMILIAR_SHARE, "mid": 0.6, "high": 0.5}
 _TOP_ARTISTS = 30
 _EXTRA_ARTISTS = 200
 _JUNK = ("karaoke", "originally performed", "in the style of", "made famous by", "tribute to", "instrumental version")
@@ -672,25 +684,39 @@ async def build_daily_mixes() -> int:
         return fit_multiplier(manual[artist_id]) if artist_id in manual else 1.0
     later_used: set[str] = set()
     used_today: set[str] = set()
-    results: list[tuple[int, Cluster, list[str], str]] = []
+    results: list[tuple[int, Cluster, list[str], str, list[str]]] = []
+    memory = await asyncio.to_thread(_mix_memory, g.home_user(), day, taste)
+    from app.home.play_now import discovery_level
+
+    familiar_share = MIX_FAMILIAR_SHARE.get(await asyncio.to_thread(discovery_level, g.home_user()), FAMILIAR_SHARE)
+    act = taste.activation
+    former = set(act.former_loves()[:300]) if act is not None else set()
+    liked_set = set(taste.liked)
     for index, cluster in _stable_numbers(clusters, _previous_groups()):
-        rng = random.Random(f"{day}:{index}")
+        rng = random.Random(f"{g.home_user()}:{day}:{index}")
         cluster_artists = set(cluster.artists)
         preferred = [r for r in liked_or_played if taste.artist_of.get(r) in cluster_artists]
         fallback = [r for r in taste.library if taste.artist_of.get(r) in cluster_artists and r not in liked_or_played]
+        featured = _featured_artists(cluster, taste, memory, rng)
         if taste.activation is not None:
             # v2: známé podle toho, jak moc teď "žijí" (vážené losování --
             # oblíbené častěji, ale každý den jinak; jednou puštěné z 2014
             # skoro nikdy). Lajk bez poslechu dostane malou základní váhu.
-            preferred = _weighted_order(
-                preferred,
-                lambda r: (taste.track_score(r) + (0.05 if r in set(taste.liked) else 0.0)) * mood_mult(taste.artist_of.get(r)),
-                rng,
-            )
+            # 13. 10.: odmocnina místo druhé mocniny (dřív vyhrávaly pořád
+            # tytéž) a paměť minulých dnů.
+            def weight(r: str) -> float:
+                a = taste.artist_of.get(r)
+                w = (taste.track_score(r) + (0.05 if r in liked_set else 0.0)) ** 0.5
+                return w * mood_mult(a) * memory.track_factor(r) * memory.artist_factor(a) * (1.3 if a in featured else 1.0)
+
+            preferred = _weighted_order(preferred, weight, rng, sharpen=1.0)
+            # Dlouho neslyšené oblíbené ze skupiny dopředu (návrat do minulosti).
+            back = [r for r in preferred if r in former and memory.track_factor(r) > 0.5][:MIX_RESURFACE]
+            preferred = back + [r for r in preferred if r not in back]
         else:
             rng.shuffle(preferred)
         rng.shuffle(fallback)
-        familiar_target = round(DAILY_MIX_SIZE * FAMILIAR_SHARE)
+        familiar_target = round(DAILY_MIX_SIZE * familiar_share)
         familiar = _cap_per_artist(preferred + fallback, taste.artist_of, DAILY_MIX_ARTIST_CAP)[:familiar_target]
         familiar = _spread(familiar, taste.artist_of)
         # Plynulé navazování energie (P3) -- konec skladby k začátku další.
@@ -706,19 +732,21 @@ async def build_daily_mixes() -> int:
         # se stropem 3 na interpreta se malá skupina nescvrkne na 19 skladeb.
         new_target = min(
             DAILY_MIX_SIZE - len(familiar),
-            max(6, round(len(familiar) * (1 - FAMILIAR_SHARE) / FAMILIAR_SHARE), min(len(familiar), DAILY_MIX_SIZE - len(familiar))),
+            max(6, round(len(familiar) * (1 - familiar_share) / familiar_share), min(len(familiar), DAILY_MIX_SIZE - len(familiar))),
         )
-        # Půlka nových z Last.fm (co posluchači pouštějí spolu s tvými
-        # nejhranějšími ze skupiny), půlka z Deezer rádia interpretů.
-        seed_tracks = sorted(
-            (r for r in familiar if r in liked_or_played),
-            key=lambda r: -(taste.listen_counts.get(r, 0) + (3 if r in set(taste.liked) else 0)),
-        )[:4]
-        from_lastfm = await lt.similar_track_ids(seed_tracks, known, rng, new_target)
-        new = from_lastfm + [
-            r for r in await _new_tracks_from(cluster.radio_seeds, known | set(from_lastfm), rng, new_target * 2)
+        # Půlka nových z Last.fm (co posluchači pouštějí spolu s dnešními
+        # známými -- semínka losovaná, dřív pořád tytéž 4 nejhranější), půlka
+        # z Deezer rádia dnešních hlavních interpretů (dřív jen záloha).
+        today_known = [r for r in familiar[:12] if r in liked_or_played]
+        seed_tracks = rng.sample(today_known, min(4, len(today_known)))
+        exclude_new = known | memory.offered_new
+        from_lastfm = await lt.similar_track_ids(seed_tracks, exclude_new, rng, new_target // 2 + 2)
+        radio_seeds = [d for d in [await _deezer_id(taste, a) for a in featured] if d] or cluster.radio_seeds
+        from_radio = [
+            r for r in await _new_tracks_from(radio_seeds, exclude_new | set(from_lastfm), rng, new_target * 2)
             if r not in from_lastfm
         ]
+        new = [r for pair in zip_longest(from_lastfm, from_radio) for r in pair if r]
         from app.home import novelty
 
         new = await asyncio.to_thread(novelty.filter_new, g.home_user(), new, taste.activation)
@@ -744,14 +772,15 @@ async def build_daily_mixes() -> int:
             for rid, artist_id, dz_id in later
             if rid not in later_used and (artist_id in cluster_artists or (dz_id and dz_id in cluster.signature))
         ]
+        rng.shuffle(fitting)  # dřív každý den tytéž tři
         tracks = listen_later.weave(tracks, fitting)
         later_used.update(fitting[:3])
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
         used_today.update(tracks)
-        names = [taste.artist_name[a] for a in cluster.artists[:2] if a in taste.artist_name]
+        names = [taste.artist_name[a] for a in featured[:2] if a in taste.artist_name]
         genre = _genre_label(taste, cluster, familiar)
         description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
-        results.append((index, cluster, tracks, description))
+        results.append((index, cluster, tracks, description, featured))
         logger.info(
             "home: Denní mix (skupina %d) -- %d skladeb (%d známých, %d nových), %s",
             index, len(tracks), len(familiar), len(new), description,
@@ -762,7 +791,7 @@ async def build_daily_mixes() -> int:
     # tatáž hudba ze dne na den, i když se skupiny přepočítají).
     results.sort(key=lambda r: r[0])
     groups: dict[str, list[str]] = {}
-    for built, (_idx, cluster, tracks, description) in enumerate(results, start=1):
+    for built, (_idx, cluster, tracks, description, featured) in enumerate(results, start=1):
         groups[str(built)] = cluster.artists[:15]
         g._save_playlist(
             owner=g.home_user(),
@@ -772,7 +801,7 @@ async def build_daily_mixes() -> int:
             kind=PlaylistKind.PERSONAL_MIX,
             section="mixes",
             recording_ids=tracks,
-            cover_urls=_artist_covers(taste, cluster.artists) or g._covers_for(tracks),
+            cover_urls=_artist_covers(taste, list(dict.fromkeys([*featured, *cluster.artists]))) or g._covers_for(tracks),
             ttl=g.DAILY_TTL,
         )
         await g._preprovision(tracks[:1])
@@ -787,11 +816,67 @@ async def build_daily_mixes() -> int:
         from app.home import mix_log
 
         await asyncio.to_thread(
-            mix_log.record, g.home_user(), day, {str(n): tr for n, (_i, _c, tr, _d) in enumerate(results, start=1)}
+            mix_log.record, g.home_user(), day, {str(n): tr for n, (_i, _c, tr, _d, _f) in enumerate(results, start=1)}
         )
     except Exception:  # noqa: BLE001
         logger.exception("záznam Denních mixů")
     return built
+
+
+@dataclass
+class MixMemory:
+    """Co Denní mixy nabídly v minulých dnech (z `mix_log`)."""
+
+    track_exp: Counter = field(default_factory=Counter)
+    artist_exp: Counter = field(default_factory=Counter)
+    offered_new: set[str] = field(default_factory=set)  # nové nabídnuté a nepuštěné
+
+    def track_factor(self, rid: str) -> float:
+        return max(0.02, MIX_PER_SERVE ** self.track_exp.get(rid, 0.0))
+
+    def artist_factor(self, artist_id: str | None) -> float:
+        return max(0.3, 0.7 ** self.artist_exp.get(artist_id, 0.0)) if artist_id else 1.0
+
+
+def _mix_memory(user_id: str, day: str, taste: Taste) -> MixMemory:
+    from app.home import mix_log
+
+    mem = MixMemory()
+    days_offered: Counter = Counter()
+    try:
+        history = mix_log.recent(user_id, day)
+    except Exception:  # noqa: BLE001 -- bez paměti jako dřív
+        logger.exception("paměť Denních mixů")
+        return mem
+    known = taste.known
+    for age, mixes in history:
+        decay = 0.5 ** ((age - 1) / MIX_SERVE_HALF_LIFE)
+        ids = {r for tracks in mixes.values() for r in tracks}
+        for rid in ids:
+            if rid not in known:
+                days_offered[rid] += 1
+                if age <= MIX_MEMORY_DAYS:
+                    mem.offered_new.add(rid)
+            if age > MIX_MEMORY_DAYS:
+                continue
+            mem.track_exp[rid] += decay
+            a = taste.artist_of.get(rid)
+            if a:
+                mem.artist_exp[a] += decay / 3
+    mem.offered_new |= {r for r, n in days_offered.items() if n >= 2}
+    return mem
+
+
+def _featured_artists(cluster: Cluster, taste: Taste, memory: MixMemory, rng: random.Random) -> list[str]:
+    """Hlavní interpreti dne ve stálé skupině: losovaní podle váhy, kdo byl
+    hlavní nedávno, má menší šanci -- obal, popis i rádio se den ode dne mění,
+    skupina (a číslo mixu) zůstává."""
+    keyed = []
+    for a in cluster.artists[:12]:
+        w = max(taste.artist_weight.get(a, 0.0), 1e-6) ** 0.5 * memory.artist_factor(a) ** 2
+        keyed.append((rng.random() ** (1.0 / w), a))
+    keyed.sort(reverse=True)
+    return [a for _k, a in keyed[:MIX_FEATURED]]
 
 
 def _previous_groups() -> dict[int, list[str]]:
@@ -881,6 +966,30 @@ def _transient_seeds(taste: Taste, n: int) -> list[str]:
     return [a for a, _s in score.most_common(n * 2) if taste.artist_weight.get(a, 0) > 0 and a not in muted][:n]
 
 
+DISCOVER_MIN = 8  # menší Objevy jsou pořád lepší než žádné (dřív 15 a výjimka)
+
+
+def _known_for_discover(taste: Taste) -> tuple[set[str], set[str]]:
+    """Interpreti, které Objevy vynechají: jen ti, ke kterým se profil sám
+    vrací (2+ dny, algoritmus po třetinách) nebo které si uložil. Dřív stačil
+    jediný poslech kdykoli, celá sdílená složka i cizí playlisty -- u velké
+    historie pak skoro každý podobný interpret byl "známý" (audit 13. 10.).
+    Už slyšené SKLADBY dál hlídá `exclude` a `novelty.filter_new`."""
+    keep: set[str] = set()
+    act = taste.activation
+    if act is not None:
+        keep |= {a for a, (days, _span) in act.artist_days().items() if a and days >= 2}
+    else:
+        keep |= {a for a, w in taste.artist_weight.items() if w > 0}
+    for rid in [*taste.liked, *taste.library]:
+        a = taste.artist_of.get(rid)
+        if a:
+            keep.add(a)
+    names = {primary_artist_name(taste.artist_name[a]).casefold() for a in keep if a in taste.artist_name}
+    deezer = {taste.artist_deezer[a] for a in keep if a in taste.artist_deezer}
+    return names, deezer
+
+
 async def build_discover_weekly() -> int:
     week = _week_key()
     done = _already_built("personal:discover-weekly", week)
@@ -894,8 +1003,7 @@ async def build_discover_weekly() -> int:
     rng = random.Random(f"discover:{week}")
     recent = {r for r, t in taste.last_played.items() if utcnow() - t <= timedelta(days=60)}
     exclude = taste.known | recent
-    known_names = {primary_artist_name(n).casefold() for n in taste.artist_name.values()}
-    known_dz = set(taste.artist_deezer.values())
+    known_names, known_dz = _known_for_discover(taste)
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
     transient = _transient_seeds(taste, 10)
@@ -954,6 +1062,11 @@ async def build_discover_weekly() -> int:
         if rid not in ranked:
             ranked.append(rid)
     ranked = ranked[:60]
+    if not ranked:
+        # Není z čeho (13. 10.: profil s jedinou vlastní skladbou hlásil
+        # "selhal" každou hodinu celý týden) -- tiše nic.
+        logger.info("objevy týdne: žádní kandidáti (semínek %d)", len(seeds))
+        return 0
 
     dzc = get_deezer_client()
     picked: list[str] = []
@@ -974,6 +1087,22 @@ async def build_discover_weekly() -> int:
         picked.extend(ids[: 2 if len(ranked) < 20 else 1])
         await asyncio.sleep(0.05)
     if len(picked) < 15:
+        # Málo kandidátů: z každého víc skladeb (dřív výjimka a týden nic).
+        from app.home import novelty
+
+        for rid in ranked:
+            if len(picked) >= 30:
+                break
+            try:
+                top = await dzc.artist_top(rid, 5) or []
+            except Exception:  # noqa: BLE001
+                continue
+            ids = [r for r in await asyncio.to_thread(g._ingest_tracks, [t for t in top if not _is_junk(t)])
+                   if r not in exclude and r not in picked]
+            ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
+            picked.extend(ids[:3])
+    logger.info("objevy týdne: semínek %d, kandidátů %d, vybráno %d", len(seeds), len(ranked), len(picked))
+    if len(picked) < DISCOVER_MIN:
         raise RuntimeError(f"objevy týdne: jen {len(picked)} nových skladeb")
     rng.shuffle(picked)
     g._save_playlist(

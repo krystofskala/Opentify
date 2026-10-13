@@ -40,6 +40,27 @@ def record(user_id: str, day: str, mixes: dict[str, list[str]]) -> None:
         session.commit()
 
 
+def recent(user_id: str, today: str, days: int = KEEP_DAYS) -> list[tuple[int, dict[str, list[str]]]]:
+    """[(stáří ve dnech, {číslo mixu: skladby})] za posledních `days` dní
+    před `today` -- paměť Denních mixů (13. 10.: dřív jen zápis)."""
+    from app.models import HomeSnapshot
+
+    t = date.fromisoformat(today)
+    with Session(engine) as session:
+        snaps = session.exec(
+            select(HomeSnapshot).where(HomeSnapshot.key.like(f"mixlog:{user_id}:%"))  # type: ignore[attr-defined]
+        ).all()
+    out = []
+    for snap in snaps:
+        try:
+            age = (t - date.fromisoformat(snap.key.rsplit(":", 1)[-1])).days
+        except ValueError:
+            continue
+        if 1 <= age <= days:
+            out.append((age, (snap.payload or {}).get("mixes") or {}))
+    return sorted(out)
+
+
 def report(user_id: str) -> dict:
     """Opakování skladeb mezi dny a přeskakování opakovaných vs. nových."""
     from app.models import HomeSnapshot, PlayEvent, Playlist

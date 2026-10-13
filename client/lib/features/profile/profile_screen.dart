@@ -310,6 +310,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  // Roční balíček Spotify ("Údaje o účtu") má jen poslední rok (13. 10.:
+  // Wrapped 2025 pak počítal jen říjen–prosinec).
+  static const _accountOnlyHint =
+      'tohle je jen poslední rok – celou historii si na Spotify vyžádej jako „Rozšířenou historii streamování“';
+
   Future<void> _importFromSpotify(BuildContext context) async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -352,6 +357,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           [
             if (imported.historyListens! > 0)
               '$name: nahráno ${czCount(imported.historyListens!, 'poslech', 'poslechy', 'poslechů')} – Wrapped a mixy se přepočítají',
+            if (imported.accountOnly) _accountOnlyHint,
             if ((imported.libraryTracks ?? 0) > 0)
               'knihovna $name (${czCount(imported.libraryTracks!, 'skladba', 'skladby', 'skladeb')}) je v playlistu „$name · Knihovna“',
           ].join('; '),
@@ -364,6 +370,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         return;
       }
       await showSpotifyImportReport(context, result);
+      if (imported.accountOnly) showToast(messenger, _accountOnlyHint);
     } catch (e) {
       final detail = e is ApiException ? e.detail : null;
       showToast(messenger,

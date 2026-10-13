@@ -803,12 +803,13 @@ async def import_spotify(
         out = await _import_spotify(file, session, current)
     finally:
         await get_redis().delete(lock)
-    if isinstance(out, dict) and out.get("kind") == "history":
+    if isinstance(out, dict) and (out.get("kind") == "history" or "historyListens" in out):
         from app import wrapped
 
         await wrapped.invalidate(user_id)
         try:
-            await publish_event(user_id, "import.done", {"platform": out.get("platform") or "spotify", "listens": out.get("listens", 0)})
+            listens = out.get("listens", out.get("historyListens", 0))
+            await publish_event(user_id, "import.done", {"platform": out.get("platform") or "spotify", "listens": listens})
         except Exception:  # noqa: BLE001 -- jen oznámení
             pass
     return out
@@ -943,7 +944,11 @@ async def _import_spotify(file: UploadFile, session: Session, current: tuple[str
         result = await asyncio.to_thread(run)
     except (ValueError, zipfile.BadZipFile) as exc:  # i UnicodeDecodeError
         if account_history is not None:  # jen historie, bez playlistů -- i to je úspěch
-            return {"kind": "history", **{k: v for k, v in account_history.items() if isinstance(v, (int, str, float, bool))}}
+            return {
+                "kind": "history",
+                "accountOnly": True,  # jen poslední rok -- klient poradí rozšířenou historii
+                **{k: v for k, v in account_history.items() if isinstance(v, (int, str, float, bool))},
+            }
         raise HTTPException(
             status_code=400,
             detail="Nepodařilo se rozpoznat formát – očekává se Spotify export (ZIP, Playlist1.json nebo YourLibrary.json).",
@@ -966,7 +971,11 @@ async def _import_spotify(file: UploadFile, session: Session, current: tuple[str
             for p in result.playlists
         ],
         **(
-            {"historyListens": account_history.get("listens", 0), "historyTracks": account_history.get("tracks", 0)}
+            {
+                "historyListens": account_history.get("listens", 0),
+                "historyTracks": account_history.get("tracks", 0),
+                "accountOnly": True,
+            }
             if account_history is not None
             else {}
         ),

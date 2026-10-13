@@ -27,7 +27,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.home import activation as av
-from app.models import Listen, PlayEvent, Recording, SkipStreak
+from app.models import Artist, Listen, PlayEvent, Recording, SkipStreak
 from app.utils import utcnow
 
 NEW_SHARE = 0.2
@@ -423,7 +423,7 @@ def pick(
         # Denní doba podle množství dat: z pár poslechů se nedá poznat, co kdo
         # poslouchá ráno -- u malého profilu skoro neutrální (váha n/(n+K)).
         shrink = len(act.timeline) / (len(act.timeline) + TIME_SHRINK_K)
-        fit = {a: (1 - shrink) + shrink * (0.15 + w / top) for a, w in time_artists.items()}
+        fit = {a: (1 - shrink) + shrink * (TIME_FLOOR + (1 - TIME_FLOOR) * w / top) for a, w in time_artists.items()}
         reason = "Podle toho, co posloucháš v tuhle dobu" if shrink >= 0.5 else "Podle toho, co posloucháš"
     if mood == "prekvap":
         fit, time_artists = {}, Counter()  # bez denní doby -- celý vkus
@@ -449,7 +449,7 @@ def pick(
     played_titles = {_song_key(act.artist_of.get(r), act.title_of.get(r, "")) for r in exclude} - {""}
 
     shrink_all = len(act.timeline) / (len(act.timeline) + TIME_SHRINK_K)
-    default_time_fit = (1 - shrink_all) + shrink_all * 0.05
+    default_time_fit = (1 - shrink_all) + shrink_all * TIME_FLOOR
     # Malý profil: srdíčka a knihovna jako známé, i když je ještě neslyšel.
     chosen_meta = _rec_meta([r for r in chosen if r not in act.artist_of]) if chosen else {}
     for rid, (aid, title) in chosen_meta.items():
@@ -567,10 +567,11 @@ def pick(
                 moods is not None and mood != "prekvap" and sum(1 for m in moods.values() if m >= 0.3) < 3
             ),
         )
-    # Semínka pro nové: semínka nekonečného hraní, jinak dvě známé z várky
-    # a dvě z JINÝCH interpretů celého vkusu (losované podle zploštělé
-    # oblíbenosti) -- jinak se objevy točily kolem toho, co už hraje.
-    new_seeds = (seeds[-2:] if seeds else []) + familiar[:2]
+    # Semínka pro nové: semínka nekonečného hraní, jinak jedna známá z várky
+    # a tři z JINÝCH interpretů celého vkusu (losované podle zploštělé
+    # oblíbenosti) -- jinak se objevy točily kolem toho, co už hraje (13. 10.:
+    # podobné k várce navíc padly na filtru "interpret už ve várce").
+    new_seeds = (seeds[-2:] + familiar[:2]) if seeds else familiar[:1]
     if not seeds and not small:
         batch_artists = {act.artist_of.get(r) for r in familiar}
         wide = [
@@ -578,7 +579,7 @@ def pick(
             if act.artist_of.get(r) not in batch_artists and act.artist_of.get(r) not in banned
             and exposure_ok(act.artist_of.get(r))
         ]
-        new_seeds += _distinct_artist_seeds(wide, act.artist_of, 2)
+        new_seeds += _distinct_artist_seeds(wide, act.artist_of, 3)
     if small and not seeds:
         # Malý profil: z RŮZNÝCH interpretů všeho, co slyšel a co má rád --
         # jinak by po jedné písničce uvízl v jedné škatulce.
@@ -668,6 +669,12 @@ def _remember_deferred(user_id: str, ids: list[str], offered: set[str]) -> None:
         else:
             keep.pop(r, None)
 SMOOTH_TIMEOUT_S = 3.0
+# Interpret mimo profil denní doby (posledních 90 dní): dřív 0,05 proti 1,15
+# u oblíbenců chvíle -- celá starší historie i bývalé lásky skoro nehrály
+# (audit 13. 10.). Teď denní doba zvýhodní nejvýš ~2,5×.
+TIME_FLOOR = 0.4
+NEW_DEADLINE_S = 8.0  # hledání nových: co se do té doby dohledá, to se vezme
+SECOND_CHANCE_S = 3.0
 
 
 async def _smooth(
@@ -701,7 +708,17 @@ async def _smooth(
         global _feat_cache
         _feat_cache = None  # právě rozebrané ukázky
         audio = await asyncio.to_thread(_features_map)
-        out = [r for r in out if r not in new_ids or track_mood_fit(mood, *audio.get(r, (None, None))) > 0.3]
+        fits = lambda r: track_mood_fit(mood, *audio.get(r, (None, None))) > 0.3  # noqa: E731
+        dropped = [r for r in out if r in new_ids and not fits(r)]
+        out = [r for r in out if r not in dropped]
+        # Místo nesedící nové jiná nová, která náladě sedí (dřív se várka zkrátila).
+        for _r in dropped:
+            fill = next((x for x in spare if fits(x)), None)
+            if fill is None:
+                break
+            spare.remove(fill)
+            out.append(fill)
+            new_ids = new_ids | {fill}
     ordered = await asyncio.to_thread(energy_flow.order, out, artist_of, anchor, styles)
     news = [r for r in ordered if r in new_ids]
     budget = max(1, round(len(news) * MAX_DEFERRED_SHARE)) if news else 0
@@ -715,15 +732,16 @@ async def _smooth(
             culprit = after if after in new_ids else (before if before in new_ids else None)
             if culprit:
                 break
-        if not culprit:
+        if not culprit or not spare:
+            # Bez náhrady neodkládat -- várka by se zkrátila a nových by
+            # ubylo dvakrát (13. 10.); skok zmírní aspoň řazení.
             break
         deferred.append(culprit)
         rest = [r for r in ordered if r != culprit]
         # Várka se nezkracuje: místo odložené jiná nová ze zbylých kandidátů.
-        if spare:
-            fill = spare.pop(0)
-            rest.append(fill)
-            new_ids = new_ids | {fill}
+        fill = spare.pop(0)
+        rest.append(fill)
+        new_ids = new_ids | {fill}
         ordered = await asyncio.to_thread(energy_flow.order, rest, artist_of, anchor, styles)
     if deferred:
         logger.info("pusť teď: %d nových odloženo kvůli skoku stylu/energie", len(deferred))
@@ -884,6 +902,7 @@ async def next_chunk(
     if weak_mood and mood:
         reason = f"{MOODS[mood][2]} – u tebe toho na tohle moc není, zkouším i nové"
     want_new = size - len(familiar)
+    funnel: dict[str, Any] = {}
     new: list[str] = []
     explore_ids: set[str] = set()
     if want_new > 0 and (new_seeds or weak_mood):
@@ -895,15 +914,24 @@ async def next_chunk(
                 cands += await asyncio.wait_for(_mood_tag_tracks(mood, exclude, rng, want_new), timeout=12)
             except Exception:  # noqa: BLE001
                 pass
+        familiar_names = await asyncio.to_thread(_artist_names, familiar)
+        funnel["want_new"] = want_new
         if new_seeds:
             try:
-                # Rezerva: filtry (interpret už ve várce, přeskočení...) a plynulé
-                # řazení část vyřadí -- dřív 2 kandidáti na 1 místo a nové chyběly.
-                cands += await asyncio.wait_for(
-                    lt.similar_track_ids(new_seeds, exclude, rng, max(8, want_new * 4)), timeout=12
+                # Rezerva na filtry a plynulé řazení; interpreti várky se
+                # vyřadí už před dohledáním. Měkký limit vrací, co se stihlo
+                # (dřív 12 s na všechno a při překročení žádné nové, 13. 10.).
+                got = await asyncio.wait_for(
+                    lt.similar_track_ids(
+                        new_seeds, exclude, rng, want_new * 2 + 4,
+                        skip_artists=familiar_names, deadline=NEW_DEADLINE_S,
+                    ),
+                    timeout=NEW_DEADLINE_S + 6,
                 )
+                funnel["lastfm"] = len(got)
+                cands += got
             except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
-                pass
+                funnel["timeout"] = True
         # Odložené z minulé várky napřed (projdou znovu filtry i plynulostí).
         cands = list(dict.fromkeys([r for r in _take_deferred(user_id) if r not in exclude] + cands))
 
@@ -930,6 +958,14 @@ async def next_chunk(
             used.add(a)
             titles.add(key)
             kept.append(rid)
+        funnel["after_filters"] = len(kept)
+        if len(kept) < want_new + 1:
+            # Druhá šance (13. 10.): Last.fm často nic nevrátí (menší a české
+            # skladby) -- rádio Deezeru od interpretů semínek, stejné filtry.
+            extra = await _second_chance(new_seeds, exclude | set(kept), used | blocked, want_new + 1 - len(kept), rng)
+            extra = await asyncio.to_thread(_drop_heard, _T, extra)
+            funnel["second_chance"] = len(extra)
+            kept += extra
         new = kept[:want_new]
         pool = kept[want_new:]
         # Náhodné sloty pro poctivé měření (~10 % nových, uživatel 7. 10.):
@@ -941,7 +977,7 @@ async def next_chunk(
                 pool.append(new[i])
                 new[i] = rand_pick
                 explore_ids.add(rand_pick)
-        spare_new = pool[:3]
+        spare_new = pool
     else:
         spare_new = []
     if len(familiar) + len(new) < size:
@@ -959,6 +995,9 @@ async def next_chunk(
             used.add(a)
             familiar.append(rid)
     new_ids = set(new)
+    funnel["final_new"] = len(new)
+    if funnel.get("want_new"):
+        logger.info("pusť teď: nové %s", funnel)
     # Nové proložit mezi známé (ne všechny na konec).
     out: list[str] = []
     step = max(1, len(familiar) // max(1, len(new))) if new else len(familiar) or 1
@@ -1002,6 +1041,57 @@ async def next_chunk(
 
 
 _prefetching: set[asyncio.Task] = set()
+
+
+def _artist_names(recording_ids: list[str]) -> set[str]:
+    with Session(engine) as session:
+        out = set()
+        for rid in recording_ids:
+            rec = session.get(Recording, rid)
+            artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
+            if artist is not None:
+                out.add(artist.name)
+        return out
+
+
+def _deezer_ids(recording_ids: list[str]) -> list[str]:
+    with Session(engine) as session:
+        out = []
+        for rid in recording_ids:
+            rec = session.get(Recording, rid)
+            artist = session.get(Artist, rec.artist_id) if rec and rec.artist_id else None
+            if artist is not None and artist.deezer_id and artist.deezer_id not in out:
+                out.append(artist.deezer_id)
+        return out
+
+
+async def _second_chance(
+    seed_ids: list[str], exclude: set[str], skip_artists: set, need: int, rng: random.Random
+) -> list[str]:
+    """Nové z rádia Deezeru od interpretů semínek, když Last.fm nestačil:
+    jen neslyšené, jeden na interpreta, mimo interprety várky."""
+    from app.home.personal_mixes import _new_tracks_from
+
+    if need <= 0:
+        return []
+    radio_seeds = await asyncio.to_thread(_deezer_ids, seed_ids)
+    if not radio_seeds:
+        return []
+    try:
+        ids = await asyncio.wait_for(_new_tracks_from(radio_seeds[:3], exclude, rng, need * 4), timeout=SECOND_CHANCE_S)
+    except Exception:  # noqa: BLE001
+        return []
+    meta = await asyncio.to_thread(_rec_meta, ids)
+    out, seen = [], set()
+    for rid in ids:
+        a = meta.get(rid, (None, ""))[0]
+        if not a or a in skip_artists or a in seen:
+            continue
+        seen.add(a)
+        out.append(rid)
+        if len(out) >= need:
+            break
+    return out
 
 
 async def _exposure(user_id: str) -> dict[str, float]:

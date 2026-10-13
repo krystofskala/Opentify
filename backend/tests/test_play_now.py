@@ -134,7 +134,7 @@ def test_new_profile_continues_from_first_listens(monkeypatch):
     taste_cache.invalidate()
     asked: list = []
 
-    async def similar(seeds, exclude, rng, n):
+    async def similar(seeds, exclude, rng, n, **_kw):
         asked.append(list(seeds))
         return fresh_ids
 
@@ -252,7 +252,7 @@ def test_new_tracks_obey_filters_and_title_key(monkeypatch):
     taste_cache.invalidate()
     pn._batches.clear()
 
-    async def similar(seeds, exclude, rng, n):
+    async def similar(seeds, exclude, rng, n, **_kw):
         return cand
 
     from app.home import lastfm_taste as lt

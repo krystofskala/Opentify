@@ -130,6 +130,7 @@ class WrappedStats {
     required this.label,
     this.locked = false,
     this.partial = false,
+    this.dataNote,
     this.totalMinutes = 0,
     this.plays = 0,
     this.daysListened = 0,
@@ -153,6 +154,9 @@ class WrappedStats {
   final String label;
   final bool locked;
   final bool partial;
+
+  /// Import začíná až uprostřed roku ("Spotify tu má poslechy až od 7. 10.").
+  final String? dataNote;
   final int totalMinutes;
   final int plays;
   final int daysListened;
@@ -184,6 +188,7 @@ class WrappedStats {
       label: j['label'] as String? ?? id,
       locked: j['locked'] as bool? ?? false,
       partial: j['partial'] as bool? ?? false,
+      dataNote: j['dataNote'] as String?,
       totalMinutes: j['totalMinutes'] as int? ?? 0,
       plays: j['plays'] as int? ?? 0,
       daysListened: j['daysListened'] as int? ?? 0,

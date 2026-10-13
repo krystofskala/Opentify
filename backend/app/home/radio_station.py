@@ -152,6 +152,26 @@ async def _lastfm_similar(recording_id: str, rng: random.Random, limit: int = 25
     return out
 
 
+def _without_muted_and_skipped(user_id: str, ids: list[str], artist_of: dict[str, str]) -> list[str]:
+    """Rádio respektuje "míň takových" a opakovaně přeskočené skladby (audit
+    13. 10.: dřív vyřazovalo jen "nelíbí se mi"). Slyšené skladby nechává --
+    rádio není jen nová hudba."""
+    from app.home.feedback import deltas, fit_multiplier
+    from app.models import SkipStreak
+
+    muted = {a for a, d in deltas(user_id).items() if fit_multiplier(d) < 1}
+    since = (utcnow() - timedelta(days=90)).replace(tzinfo=None)
+    with Session(engine) as session:
+        skipped = set(
+            session.exec(
+                select(SkipStreak.recording_id).where(
+                    SkipStreak.user_id == user_id, SkipStreak.streak >= 2, SkipStreak.updated_at >= since
+                )
+            ).all()
+        )
+    return [r for r in ids if r not in skipped and artist_of.get(r) not in muted]
+
+
 async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, Any]:
     if kind not in KINDS:
         raise StationError("neznámý druh")
@@ -196,6 +216,7 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
         ids = lf_ids + [i for i in ids if i not in lf_ids]
     ids = [i for i in ids if i not in first]
     artist_of = await asyncio.to_thread(_artists_of, ids + first)
+    ids = await asyncio.to_thread(_without_muted_and_skipped, user_id, ids, artist_of)
     ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
     recording_ids = (first + ids)[:STATION_SIZE]
     if len(recording_ids) < 5:
