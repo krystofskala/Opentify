@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 
 from app.auth import get_current_user
@@ -10,6 +12,7 @@ from fastapi import Depends, APIRouter, HTTPException, Query
 from app import browse
 
 browse_router = APIRouter(prefix="/browse", tags=["browse"])
+logger = logging.getLogger(__name__)
 
 _DEEZER_ID = re.compile(r"^\d{1,20}$")
 
@@ -120,12 +123,34 @@ async def category_mix(category_id: str, current: tuple[str, str] = Depends(get_
     # Mix TOHO profilu (dřív vždy adminův -- výchozí home_user).
     from app.home import generators as g
 
-    token = g.set_home_user(current[0])
+    # Skládání poprvé za den trvá i 20-50 s (13. 10.: Smutné 52 s, appka po
+    # 45 s to vzdala a mix se neukázal). Skládá se na pozadí; nestihne-li se
+    # do 5 s, odpověď "building" a appka se zeptá znovu.
+    key = (current[0], c.id)
+    task = _mix_tasks.get(key)
+    if task is None or task.done():
+        user_id = current[0]
+
+        async def build() -> str | None:
+            token = g.set_home_user(user_id)
+            try:
+                return await cm.build_category_mix(c)
+            finally:
+                g.reset_home_user(token)
+
+        task = asyncio.create_task(build())
+        _mix_tasks[key] = task
     try:
-        playlist_id = await cm.build_category_mix(c)
-    finally:
-        g.reset_home_user(token)
+        playlist_id = await asyncio.wait_for(asyncio.shield(task), timeout=5)
+    except asyncio.TimeoutError:
+        return {"playlist": None, "building": True}
+    except Exception:  # noqa: BLE001 -- chyba skládání = bez mixu, ne 500
+        logger.exception("mix kategorie %s", c.id)
+        return {"playlist": None}
     return {"playlist": cm.playlist_card(playlist_id) if playlist_id else None}
+
+
+_mix_tasks: dict[tuple[str, str], "asyncio.Task[str | None]"] = {}
 
 
 @browse_router.get("/{category_id}/for-you")
