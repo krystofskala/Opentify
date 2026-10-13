@@ -417,6 +417,8 @@ class Cluster:
     artists: list[str] = field(default_factory=list)  # naše artist id, podle váhy
     signature: set[str] = field(default_factory=set)  # deezer id interpretů + jejich related
     radio_seeds: list[str] = field(default_factory=list)  # deezer id
+    only: set[str] | None = None  # známé jen z těchhle skladeb (Stálice)
+    kind: str = ""  # "" | wave | classics
 
 
 async def build_clusters(taste: Taste) -> list[Cluster]:
@@ -702,10 +704,15 @@ async def build_daily_mixes() -> int:
 
     caught = await asyncio.to_thread(caught_tracks, g.home_user(), act) if act is not None else []
     liked_set = set(taste.liked)
+    from app.home import classics
+
+    evergreen = await asyncio.to_thread(classics.evergreens, g.home_user(), act) if act is not None else {}
     for index, cluster in _stable_numbers(clusters, _previous_groups()):
         rng = random.Random(f"{g.home_user()}:{day}:{index}")
         cluster_artists = set(cluster.artists)
         preferred = [r for r in liked_or_played if taste.artist_of.get(r) in cluster_artists]
+        if cluster.only is not None:
+            preferred = [r for r in preferred if r in cluster.only]
         fallback = [r for r in taste.library if taste.artist_of.get(r) in cluster_artists and r not in liked_or_played]
         featured = _featured_artists(cluster, taste, memory, rng)
         if taste.activation is not None:
@@ -722,7 +729,10 @@ async def build_daily_mixes() -> int:
             preferred = _weighted_order(preferred, weight, rng, sharpen=1.0)
             # Dlouho neslyšené oblíbené ze skupiny dopředu (návrat do minulosti).
             back = [r for r in preferred if r in former and memory.track_factor(r) > 0.5][:MIX_RESURFACE]
-            preferred = back + [r for r in preferred if r not in back]
+            # Klasiky ze stylu mixu (i do mixu vlny a spící scény).
+            n_classic = round(DAILY_MIX_SIZE * familiar_share * CLASSICS_SHARE) if cluster.kind != "classics" else 0
+            classic = [r for r in preferred if r in evergreen and r not in back and memory.track_factor(r) > 0.5][:n_classic]
+            preferred = back + classic + [r for r in preferred if r not in back and r not in classic]
         else:
             rng.shuffle(preferred)
         rng.shuffle(fallback)
@@ -790,6 +800,7 @@ async def build_daily_mixes() -> int:
         tracks = listen_later.weave(tracks, fitting)
         later_used.update(fitting[:3])
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
+        tracks = _head_cap(tracks, {**new_artist, **taste.artist_of})
         used_today.update(tracks)
         names = [taste.artist_name[a] for a in featured[:2] if a in taste.artist_name]
         scene = scene_of_cluster.get(id(cluster))
@@ -799,6 +810,8 @@ async def build_daily_mixes() -> int:
             description = " · ".join(
                 x for x in (label, f"{', '.join(names)} a další", f"naposledy {scene.last_year}" if scene.last_year else "") if x
             )
+        elif cluster.kind == "classics":
+            description = f"Stálice · {', '.join(names)} a další"
         else:
             genre = _genre_label(taste, cluster, familiar)
             description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
@@ -853,6 +866,73 @@ async def build_daily_mixes() -> int:
 STABLE_MIXES = 3  # z toho, co se poslouchá teď; zbytek ze spících scén
 
 
+CLASSICS_SHARE = 0.2  # stálice v každém mixu (z jeho stylu)
+WAVE_CLUSTER_SHARE = 0.5
+
+
+async def _stable_lineup(clusters: list[Cluster], taste: Taste, smap) -> list[Cluster]:
+    """3 stálá místa (13. 10.): nejvýš jeden mix z běžící vlny (dřív dva ze
+    šesti pop-punk), Stálice (klasiky bez ohledu na vlny), zbytek co hraje
+    teď mimo vlnu."""
+    from app.home import classics, kam_dal
+
+    wave = (await asyncio.to_thread(kam_dal.load, g.home_user())).get("wave") or {}
+    by_id = smap.by_id()
+    family = {a for s in wave.get("scenes") or [] if s in by_id for a in by_id[s].artists}
+    if wave.get("state") not in ("rising", "peak", "fading"):
+        family = set()
+    out: list[Cluster] = []
+    rest: list[Cluster] = []
+    has_wave = False
+    for c in clusters:
+        top = c.artists[:15]
+        is_wave = bool(family) and sum(1 for a in top if a in family) >= WAVE_CLUSTER_SHARE * max(1, len(top))
+        if is_wave:
+            if has_wave:
+                c.kind = "wave-dup"
+                continue  # druhý mix z téže vlny ne
+            has_wave = True
+            c.kind = "wave"
+            out.append(c)
+        else:
+            rest.append(c)
+    act = taste.activation
+    ever = await asyncio.to_thread(classics.evergreens, g.home_user(), act) if act is not None else {}
+    if len(ever) >= 15:
+        artist_score: Counter = Counter()
+        for r, sc in ever.items():
+            a = taste.artist_of.get(r)
+            if a:
+                artist_score[a] += sc
+        artists = [a for a, _ in artist_score.most_common(60)]
+        radio = [d for d in [await _deezer_id(taste, a) for a in artists[:3]] if d]
+        out.append(Cluster(artists=artists, radio_seeds=radio, only=set(ever), kind="classics"))
+    taken = {a for c in out for a in c.artists[:15]}
+    for c in rest:
+        if len(out) >= STABLE_MIXES:
+            break
+        if len(set(c.artists[:15]) & taken) > 7:
+            continue  # skoro tytéž jako Stálice
+        out.append(c)
+    return out[:STABLE_MIXES]
+
+
+def _head_cap(tracks: list[str], artist_of: dict, head: int = 10, cap: int = 2) -> list[str]:
+    """V prvních `head` skladbách nejvýš `cap` od jednoho interpreta (13. 10.:
+    Keaton Henson 3× v prvních osmi); přebývající se posunou dál."""
+    out: list[str] = []
+    later: list[str] = []
+    seen: Counter = Counter()
+    for r in tracks:
+        a = artist_of.get(r, r)
+        if len(out) < head and seen[a] >= cap:
+            later.append(r)
+            continue
+        seen[a] += 1
+        out.append(r)
+    return out + later
+
+
 async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple[list[Cluster], dict[int, object]]:
     """3 stálé skupiny (teď) + až 3 spící scény z mapy scén, které se dlouho
     neukázaly (13. 10.: deset let historie se v mixech neprojevovalo). Bez
@@ -867,7 +947,7 @@ async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple
         return clusters, {}
     if not smap.scenes:
         return clusters, {}
-    stable = clusters[:STABLE_MIXES]
+    stable = await _stable_lineup(clusters, taste, smap)
     taken = {a for c in stable for a in c.artists[:15]}
     rng = random.Random(f"{g.home_user()}:{day}:scenes")
     # Doprovodné scény k běžící vlně (co profil hrál u dřívějších vln téže
@@ -891,11 +971,13 @@ async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple
     info: dict[int, object] = {}
     for scene in picked:
         radio = [d for d in [await _deezer_id(taste, a) for a in scene.artists[:3]] if d]
-        cluster = Cluster(artists=[*scene.artists, *scene.tail], radio_seeds=radio)
+        # Jádro scény; ocas (interpreti z jednoho dne) jen u malé scény --
+        # 13. 10. tahal do mixu bossa novy XXXTENTACIONa.
+        cluster = Cluster(artists=[*scene.artists, *(scene.tail if len(scene.artists) < 8 else [])], radio_seeds=radio)
         info[id(cluster)] = scene
         out.append(cluster)
     # Málo spících scén: doplnit dalšími skupinami jako dřív.
-    out += clusters[STABLE_MIXES : STABLE_MIXES + MAX_DAILY_MIXES - len(out)]
+    out += [c for c in clusters if c not in out and c.kind == ""][: MAX_DAILY_MIXES - len(out)]
     return out, info
 
 

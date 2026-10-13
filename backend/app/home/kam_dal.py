@@ -140,7 +140,7 @@ async def compute(user_id: str, today: date | None = None) -> dict:
             "waveDayShare": round(rep.wave_day_share, 2), "scenesPerMonth": rep.scenes_per_month}
     wave = rep.current()
     today = today or utcnow().date()
-    base["companions"] = _companions(rep, act, smap, today)
+    base["companions"] = _companions(rep, act, smap, today, sim=sim)
     if wave is None or (wave.state == "ended" and (today - wave.end).days > HOLD_AFTER_END_DAYS):
         live = [w for w in rep.waves if w.state in ("rising", "peak")]
         return {**base, "state": live[-1].state if live else "none",
@@ -281,10 +281,11 @@ def _save_mixes(user_id: str, data: dict) -> None:
 
 
 COMPANION_LIFT = 1.5
+SIBLING_SIM = 0.5
 COMPANION_MIN_PLAYS = 10
 
 
-def _companions(rep, act, smap, today: date, n: int = 3) -> list[str]:
+def _companions(rep, act, smap, today: date, n: int = 3, sim=None) -> list[str]:
     """Doprovodné scény k vlně, která teď běží (13. 10.: "když mám jazzovou
     vlnu, v minulosti jsem u toho poslouchal i jinou sekci -- ta by mohla být
     v jiném denním mixu"): co se hrálo během dřívějších vln téže scény
@@ -317,7 +318,9 @@ def _companions(rep, act, smap, today: date, n: int = 3) -> list[str]:
     scored = []
     for s, k in during.items():
         lift = (k / total_during) / max(overall[s] / max(total, 1), 1e-6)
-        if k >= COMPANION_MIN_PLAYS and lift >= COMPANION_LIFT:
+        # Stylem skoro totéž co vlna (pop punk vs. punk rock) není doprovod.
+        close = sim is not None and max((sim(s, f) for f in family), default=0.0) >= SIBLING_SIM
+        if k >= COMPANION_MIN_PLAYS and lift >= COMPANION_LIFT and not close:
             scored.append((k * lift, s))
     return [s for _x, s in sorted(scored, reverse=True)[:n]]
 
