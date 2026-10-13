@@ -17,10 +17,15 @@ class HomePlaylistCard {
     this.badge,
     this.accentColor,
     this.artStyle,
+    this.art,
   });
 
   /// Generativní obal vlastního mixu: daily | genre | mood | year.
   final String? artStyle;
+
+  /// Fakta pro obal (počty, tempo, podíly stylů, poslechy po měsících,
+  /// fotky interpretů), viz backend app/home/cover_art.py.
+  final Map<String, dynamic>? art;
 
   final String id;
   final String title;
@@ -66,7 +71,14 @@ class HomePlaylistCard {
         badge: json['badge'] as String?,
         accentColor: json['accentColor'] as String?,
         artStyle: json['artStyle'] as String?,
+        art: _art(json['art']),
       );
+}
+
+Map<String, dynamic>? _art(Object? raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  final photos = raw['photos'];
+  return {...raw, if (photos is List) 'photos': resolveMediaUrls(photos.cast<String>())};
 }
 
 /// Karta alba na Domů (nová vydání, populární alba).

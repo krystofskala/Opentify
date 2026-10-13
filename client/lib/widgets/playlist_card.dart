@@ -8,6 +8,7 @@ import '../theme/shapes.dart';
 import 'glass/glass.dart';
 import 'media_card.dart' show ArtworkImage;
 import 'mix_artwork.dart';
+import 'mix_cover.dart' show mixCoverWideV2;
 import '../core/cz_plural.dart';
 
 /// Obal playlistu: mozaika 2×2 z prvních čtyř obalů (1 obal = přes celou
@@ -381,6 +382,17 @@ class QuickPickTile extends StatelessWidget {
   /// vlevo přes jemné ztmavení, vpravo něco konkrétního: číslo denního mixu,
   /// rok, nebo vějíř obalů z mixu.
   Widget _wide(BuildContext context, OutlinedBorder shape, MixArtSpec mix) {
+    // Obaly verze 2: vlastní široká dlaždice (barva, název, motiv vpravo).
+    final v2 = mixCoverWideV2(mix, card.title);
+    if (v2 != null) {
+      return GlassPressable(
+        onPressed: onTap,
+        onLongPress: onLongPress,
+        shape: shape,
+        minSize: Size.zero,
+        child: ClipPath(clipper: ShapeBorderClipper(shape: shape), child: SizedBox(height: 56, child: v2)),
+      );
+    }
     const shadow = [Shadow(blurRadius: 8, color: Colors.black45)];
     final covers = card.coverUrls.take(3).toList();
     final Widget accent = switch (mix.style) {
