@@ -743,6 +743,9 @@ def build_home(user_id: str) -> dict[str, Any]:
         # "Pokračovat v poslechu" skládá klient (`/home/recent`) -- tady jen
         # zástupce, ať jde řadit a skrýt jako ostatní sekce.
         sections.insert(0, {"id": "continue", "title": "Pokračovat v poslechu", "type": "continue", "items": []})
+        # Připomínka z "Na později" (leží přes 2 týdny) -- skládá klient,
+        # výchozí vypnutá (14. 10.: postrkování jen na přání).
+        sections.insert(1, {"id": "listen_later", "title": "Čeká na poslech", "type": "listen_later", "items": []})
         return {"generatedAt": utcnow().isoformat(), "sections": apply_layout(session, user_id, sections)}
 
 
@@ -756,7 +759,7 @@ DEFAULT_OFF = {
     # Žebříčky, novinky a česká hudba jsou pro nováčka ZAPNUTÉ, dokud
     # nedoladíme start (uživatel 7. 10. 2026: bez nich je Domů nového profilu
     # prázdné). Pokus z 4. 10. je vypnul -- vrátit až s hotovým novým Domů.
-    "years", "trending_tracks", "top_albums", "genres", "editorial", "popular_playlists",
+    "listen_later", "years", "trending_tracks", "top_albums", "genres", "editorial", "popular_playlists",
     "now_mix", "year_ago", "forgotten", "unfinished", "anniversaries", "release_radar", "deep_cuts",
     "artist_discovery", "album_picks", "shazam", "soundcloud", "family", "caught",
 }
@@ -820,6 +823,7 @@ def default_entries(user_id: str, include_rails: bool = False) -> list[tuple[str
     extra = {s.id: s.title for s in SPECS}
     out: list[tuple[str, str]] = [
         ("continue", "Pokračovat v poslechu"),
+        ("listen_later", "Čeká na poslech"),
         ("quick_picks", "Rychlý výběr"),
         ("track_mixes", TRACK_MIXES_TITLE),
     ]
