@@ -48,7 +48,7 @@ def _week(now: datetime) -> str:
 
 def skip_rates(user_id: str, now: datetime | None = None) -> tuple[int, float, int, float]:
     """(přehrání nových, podíl přeskočených, přehrání známých, podíl přeskočených)
-    z Pusť teď za posledních `WINDOW_DAYS` dní."""
+    z Pusť teď, mixů, Objevů a rádia za posledních `WINDOW_DAYS` dní."""
     now = now or utcnow().replace(tzinfo=None)
     since = now - timedelta(days=WINDOW_DAYS)
     with Session(engine) as session:
@@ -56,10 +56,32 @@ def skip_rates(user_id: str, now: datetime | None = None) -> tuple[int, float, i
             select(PlayEvent.rec_slot, PlayEvent.end_reason)
             .where(PlayEvent.user_id == user_id, PlayEvent.started_at >= since, PlayEvent.rec_slot != None)  # noqa: E711
         ).all()
+        # + mixy, Objevy, rádio (audit 13. 10.: z Pusť teď samotného měla dost
+        # dat jen Máma): nová = do té doby ji profil neslyšel.
+        mixed = session.exec(
+            select(PlayEvent.recording_id, PlayEvent.started_at, PlayEvent.end_reason)
+            .where(
+                PlayEvent.user_id == user_id, PlayEvent.started_at >= since, PlayEvent.rec_slot == None,  # noqa: E711
+                PlayEvent.algorithmic == True, PlayEvent.origin == "connect",  # noqa: E712
+            )
+        ).all()
+        firsts: dict[str, datetime] = {}
+        ids = list({r for r, _t, _e in mixed})
+        for i in range(0, len(ids), 500):
+            firsts.update(session.exec(
+                select(Listen.recording_id, func.min(Listen.played_at))
+                .where(Listen.user_id == user_id, Listen.recording_id.in_(ids[i:i + 500]))  # type: ignore[union-attr]
+                .group_by(Listen.recording_id)
+            ).all())
     plays: Counter = Counter()
     skips: Counter = Counter()
     for slot, reason in rows:
         kind = "new" if slot in _NEW_SLOTS else "familiar"
+        plays[kind] += 1
+        skips[kind] += reason == "skipped"
+    for rid, started, reason in mixed:
+        first = firsts.get(rid)
+        kind = "new" if first is None or first >= started - timedelta(minutes=2) else "familiar"
         plays[kind] += 1
         skips[kind] += reason == "skipped"
     rate = lambda k: skips[k] / plays[k] if plays[k] else 0.0  # noqa: E731

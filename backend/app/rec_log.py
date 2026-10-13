@@ -26,7 +26,8 @@ MATCH_HOURS = 12
 
 
 def log_batch(
-    user_id: str, recording_ids: list[str], new_ids: set[str], mode: str, explore_ids: set[str] | None = None
+    user_id: str, recording_ids: list[str], new_ids: set[str], mode: str, explore_ids: set[str] | None = None,
+    sources: dict[str, str] | None = None,
 ) -> str | None:
     """`explore_ids`: nové vybrané NÁHODNĚ z širšího okruhu (slot "explore",
     ~10 % nových) -- srovnání s běžnými novými ukáže, jestli výběr pomáhá."""
@@ -40,6 +41,7 @@ def log_batch(
                     batch_id=batch_id, user_id=user_id, recording_id=rid, position=pos,
                     slot="explore" if rid in (explore_ids or ()) else ("new" if rid in new_ids else "familiar"),
                     mode=mode,
+                    source=(sources or {}).get(rid),
                 )
             )
         session.commit()
@@ -112,6 +114,15 @@ def report(days: int = 7) -> list[dict[str, Any]]:
                 round(sum(len({artist_of.get(p.recording_id) for p in w}) * 20 / len(w) for w in windows) / len(windows), 1)
                 if windows else None
             )
+            # Podle zdroje (13. 10.): přehráno / přeskočeno / přijato.
+            src_of = {(i.batch_id, i.recording_id): i.source for i in items}
+            by_src: dict[str, list[PlayEvent]] = {}
+            for p in ps:
+                by_src.setdefault(src_of.get((p.rec_batch_id, p.recording_id)) or "?", []).append(p)
+            sources = {
+                k: {"played": len(g), "skipped": sum(1 for p in g if p.end_reason == "skipped"), "accepted": accepted_of(g)}
+                for k, g in by_src.items()
+            }
             n = len(ps) or 1
             out.append({
                 "userId": user_id,
@@ -130,5 +141,6 @@ def report(days: int = 7) -> list[dict[str, Any]]:
                 "exploreCompletedPct": round(100 * sum(1 for p in explore_plays if p.end_reason == "completed") / (len(explore_plays) or 1)),
                 "exploreAccepted": explore_accepted,
                 "artistsPer20": diversity,
+                "sources": sources,
             })
     return out

@@ -475,6 +475,14 @@ def pick(
     tracks_per_artist = Counter(act.artist_of.get(r) for r in act.total)
     former = set(act.former_loves()[:FORMER_LOVES]) if not seeds else set()
 
+    from app.home import repeats, skip_heavy
+
+    try:
+        rep = repeats.for_user(user_id)
+    except Exception:  # noqa: BLE001
+        rep = repeats.Repeats()
+    heavy = skip_heavy.for_user(user_id)
+
     def score(rid: str) -> float:
         artist = act.artist_of.get(rid)
         if not artist or artist in banned or rid in exclude:
@@ -484,6 +492,11 @@ def pick(
         base = act.medium.get(rid, 0.0) / max_med + 0.5 * act.long.get(rid, 0.0) / max_long
         if rid in chosen_set:
             base = max(base, 0.6)  # srdíčko / knihovna = "mám rád", i neslyšené
+        if rid in rep.loved_days:
+            # Pustil si ji hned znovu (v různé dny) -- "líbí se" (13. 10.).
+            base = max(base, 0.4) * (1 + 0.15 * min(len(rep.loved_days[rid]), 4))
+        if rid in heavy:
+            base *= 0.3  # i v importu většinou přeskočená (audit 13. 10.)
         if seed_artists:
             base = base ** 0.5  # navazování: podobnost víc než oblíbenost (návrh 2)
         else:
@@ -595,7 +608,7 @@ def pick(
         wide = [
             r for r in _weighted_order(list(act.total), lambda r: (act.long.get(r, 0.0) / max_long) ** 0.3, rng)
             if act.artist_of.get(r) not in batch_artists and act.artist_of.get(r) not in banned
-            and exposure_ok(act.artist_of.get(r))
+            and exposure_ok(act.artist_of.get(r)) and r not in rep.practice_tracks
         ]
         # Skladba, která tě nedávno chytla (nová nebo návrat po dlouhé
         # pauze): z ní jedno semínko -- objevy na ni navážou (13. 10.).
@@ -997,6 +1010,8 @@ async def next_chunk(
     if weak_mood and mood:
         reason = f"{MOODS[mood][2]} – u tebe toho na tohle moc není, zkouším i nové"
     want_new = size - len(familiar)
+    src: dict[str, str] = {r: "familiar" for r in familiar}
+    src.update({r: "dormant" for r in ctx.get("dormant") or ()})
     funnel: dict[str, Any] = {}
     new: list[str] = []
     explore_ids: set[str] = set()
@@ -1006,7 +1021,10 @@ async def next_chunk(
         cands: list[str] = []
         if weak_mood and mood:
             try:
-                cands += await asyncio.wait_for(_mood_tag_tracks(mood, exclude, rng, want_new), timeout=12)
+                got_mood = await asyncio.wait_for(_mood_tag_tracks(mood, exclude, rng, want_new), timeout=12)
+                cands += got_mood
+                for r in got_mood:
+                    src.setdefault(r, "mood")
             except Exception:  # noqa: BLE001
                 pass
         familiar_names = await asyncio.to_thread(_artist_names, familiar)
@@ -1025,13 +1043,21 @@ async def next_chunk(
                 )
                 funnel["lastfm"] = len(got)
                 cands += got
+                for r in got:
+                    src.setdefault(r, "lastfm")
             except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
                 funnel["timeout"] = True
         if ctx.get("caught"):
             # + neslyšené od interpreta chycené skladby (hlubší skladby).
-            cands = await _artist_unheard(ctx["caught"], exclude, rng) + cands
+            deeper = await _artist_unheard(ctx["caught"], exclude, rng)
+            for r in deeper:
+                src[r] = "caught_artist"
+            cands = deeper + cands
         # Odložené z minulé várky napřed (projdou znovu filtry i plynulostí).
-        cands = list(dict.fromkeys([r for r in _take_deferred(user_id) if r not in exclude] + cands))
+        deferred_ids = [r for r in _take_deferred(user_id) if r not in exclude]
+        for r in deferred_ids:
+            src.setdefault(r, "deferred")
+        cands = list(dict.fromkeys(deferred_ids + cands))
 
         class _T:  # _drop_heard čte jen .activation
             activation = act
@@ -1064,6 +1090,8 @@ async def next_chunk(
             extra = await asyncio.to_thread(_drop_heard, _T, extra)
             funnel["second_chance"] = len(extra)
             kept += extra
+            for r in extra:
+                src.setdefault(r, "deezer_radio")
         new = kept[:want_new]
         pool = kept[want_new:]
         # Druhá šance nové skladby (7t): dohraná, bez návratu -- 1 místo.
@@ -1072,6 +1100,7 @@ async def next_chunk(
             if len(new) >= want_new and new:
                 pool.insert(0, new.pop())
             new.append(chances[0])
+            src[chances[0]] = "second_chance"
             funnel["second_chance_song"] = 1
         # Náhodné sloty pro poctivé měření (~10 % nových, uživatel 7. 10.):
         # místo nejlepšího tipu náhodný z širšího okruhu (prošel stejnými
@@ -1143,7 +1172,7 @@ async def next_chunk(
         from app import rec_log
 
         mode = f"mood:{mood}" if mood else ("endless" if seeds else "fresh")
-        await asyncio.to_thread(rec_log.log_batch, user_id, out, new_ids, mode, explore_ids & set(out))
+        await asyncio.to_thread(rec_log.log_batch, user_id, out, new_ids, mode, explore_ids & set(out), src)
     except Exception:  # noqa: BLE001 -- měření nesmí shodit várku
         pass
     return {"recordingIds": out, "reason": reason}

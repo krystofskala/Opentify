@@ -3,7 +3,9 @@ ať mi to ukáže podobné a pomůže rozšířit, co se mi líbí").
 
 Chycená skladba = za posledních `WINDOW_DAYS` dní sám pustil ve 2+ dnech a
 buď je nová (první poslech do `NEW_DAYS`), nebo se k ní vrátil po dlouhé
-pauze (`RETURN_GAP_DAYS`); nebo jí nedávno dal srdíčko. Z chycených pak
+pauze (`RETURN_GAP_DAYS`); nebo jí nedávno dal srdíčko, nebo si ji pustil
+hned znovu (oblíbené opakování, app/home/repeats.py). Skladby ze zkoušení
+s kapelou (smyčka playlistu) chycené nejsou. Z chycených pak
 Pusť teď, Denní mixy a Objevy týdne berou semínka pro nové skladby -- když
 chytne i něco z nových, řetěz pokračuje (vkus se rozšiřuje krok za krokem).
 """
@@ -11,7 +13,7 @@ chytne i něco z nových, řetěz pokračuje (vkus se rozšiřuje krok za krokem
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -53,6 +55,18 @@ def caught_tracks(user_id: str, act) -> list[str]:
     for rid, added in _recent_likes(user_id, now - timedelta(days=LIKE_DAYS)):
         if rid not in scored:
             scored[rid] = (2.0, _naive(added))
+    from app.home import repeats
+
+    try:
+        rep = repeats.for_user(user_id)
+    except Exception:  # noqa: BLE001
+        rep = repeats.Repeats()
+    for rid, ds in rep.loved_days.items():
+        recent = [d for d in ds if d >= since.date()]
+        if recent and rid not in scored:
+            scored[rid] = (1.5 + len(recent), datetime.combine(recent[-1], datetime.min.time()))
+    for rid in rep.practice_tracks:
+        scored.pop(rid, None)
     return [r for r, _ in sorted(scored.items(), key=lambda kv: (kv[1][1], kv[1][0]), reverse=True)]
 
 
