@@ -39,7 +39,12 @@ async def is_minor_namesake(artist: Artist) -> bool:
     if artist.mbid or not artist.deezer_id:
         return False
     candidates = await deezer_candidates(artist.name)
-    own = next((int(a.get("nb_fan") or 0) for a in candidates if str(a.get("id")) == str(artist.deezer_id)), 0)
+    me = next((a for a in candidates if str(a.get("id")) == str(artist.deezer_id)), None)
+    own = int((me or {}).get("nb_fan") or 0)
+    # Profil bez vlastních alb (jen hostování) je duplikát téhož interpreta,
+    # ne jmenovec -- ty se slučovat mají (Lana Del Rey 3×).
+    if me is not None and not int(me.get("nb_album") or 0):
+        return False
     best_other = max((int(a.get("nb_fan") or 0) for a in candidates if str(a.get("id")) != str(artist.deezer_id)), default=0)
     return best_other >= MIN_FANS and best_other >= RATIO * max(own, 1)
 

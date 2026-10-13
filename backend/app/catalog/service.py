@@ -754,6 +754,13 @@ class CatalogService:
         except MusicBrainzError:
             self._session.commit()
             return artist
+        from app.catalog.namesakes import is_minor_namesake
+
+        if await is_minor_namesake(artist):
+            # Neznámý jmenovec slavnějšího: MBID podle jména patří tomu
+            # slavnému (14. 10.: Journey z roku 2024 se sloučil do kapely).
+            self._session.commit()
+            return artist
         wanted = norm(artist.name)
         for candidate in data.get("artists", []):
             if norm(candidate.get("name")) != wanted or int(candidate.get("score") or 0) < 90:
