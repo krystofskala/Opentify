@@ -52,8 +52,14 @@ async def namesakes(session: Session, artist: Artist) -> list[dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     fans: dict[str, int] = {}
     for candidate in await deezer_candidates(artist.name):
-        row = ingest_artist(session, candidate)
-        if row is None or row.id == artist.id:
+        if str(candidate.get("id")) == str(artist.deezer_id):
+            continue  # to je on sám
+        # Napřed přesně podle Deezer id -- `ingest_artist` páruje i podle
+        # jména a jmenovce by sloučil se slavným (živě: oba Journey -> kapela).
+        row = session.exec(select(Artist).where(Artist.deezer_id == str(candidate.get("id")))).first() or ingest_artist(
+            session, candidate
+        )
+        if row is None or row.id == artist.id or row.id in out:
             continue
         fans[row.id] = int(candidate.get("nb_fan") or 0)
         out[row.id] = {
