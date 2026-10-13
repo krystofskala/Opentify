@@ -13,9 +13,14 @@ def _with(monkeypatch, candidates):
 
 
 def test_neznamy_jmenovec_slavne_kapely(monkeypatch):
-    _with(monkeypatch, [{"id": 3381, "name": "Journey", "nb_fan": 663789}, {"id": 285841141, "name": "Journey", "nb_fan": 23}])
+    _with(monkeypatch, [{"id": 3381, "name": "Journey", "nb_fan": 663789, "nb_album": 34}, {"id": 285841141, "name": "Journey", "nb_fan": 23, "nb_album": 3}])
     assert asyncio.run(namesakes.is_minor_namesake(Artist(name="Journey", deezer_id="285841141")))
     assert not asyncio.run(namesakes.is_minor_namesake(Artist(name="Journey", deezer_id="3381")))
+
+
+def test_profil_bez_alb_je_duplikat_ne_jmenovec(monkeypatch):
+    _with(monkeypatch, [{"id": 1424821, "name": "Lana Del Rey", "nb_fan": 5824066, "nb_album": 48}, {"id": 323998521, "name": "Lana Del Rey", "nb_fan": 120, "nb_album": 0}])
+    assert not asyncio.run(namesakes.is_minor_namesake(Artist(name="Lana Del Rey", deezer_id="323998521")))
 
 
 def test_s_musicbrainz_id_nebo_bez_slavneho_jmenovce_ne(monkeypatch):
