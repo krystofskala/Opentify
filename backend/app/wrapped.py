@@ -214,6 +214,8 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
     def minutes(ms: float) -> int:
         return int(round(ms / 60000))
 
+    data_note = None if period == DECADE else await asyncio.to_thread(_data_note, user_id, int(period))
+
     def assemble() -> dict[str, Any]:
         with Session(engine) as session:
             out: dict[str, Any] = {
@@ -222,6 +224,7 @@ async def _stats(user_id: str, period: str) -> dict[str, Any]:
                 "partial": period != DECADE and int(period) == _local(_now()).year,
                 "totalMinutes": minutes(total_ms),
                 "plays": len(rows),
+                "dataNote": data_note,
                 "daysListened": len(days),
                 "artistsCount": len(artist_ms),
                 "tracksCount": len(track_plays),
@@ -318,6 +321,29 @@ def _decade_playlists(ranked: list[str], evergreens: list[str], year_track: dict
     return out
 
 
+_PLATFORMS = {"spotify-history": "Spotify", "ytmusic-history": "YouTube Music", "applemusic-history": "Apple Music"}
+
+
+def _data_note(user_id: str, year: int) -> str | None:
+    """Import, který začíná až uprostřed roku (roční balíček Spotify kryje
+    jen poslední rok): říct to rovnou ve Wrapped (13. 10.: Míšův rok 2025
+    byl jen říjen–prosinec a nejposlouchanější vyšel Landa z YouTube)."""
+    from sqlalchemy import func
+
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Listen.source, func.min(Listen.played_at))
+            .where(Listen.user_id == user_id, Listen.source.in_(list(_PLATFORMS)))  # type: ignore[union-attr]
+            .group_by(Listen.source)
+        ).all()
+    notes = []
+    for source, first in rows:
+        local = _local(first) if first else None
+        if local is not None and local.year == year and local.month > 1:
+            notes.append(f"{_PLATFORMS[source]} tu má poslechy až od {local.day}. {local.month}.")
+    return " ".join(notes) or None
+
+
 async def invalidate(user_id: str) -> None:
     """Po importu historie: spočítané roky profilu zahodit (uzavřený rok se
     jinak drží týden -- 13. 10. Míša viděl stav z půlky importu)."""
@@ -325,7 +351,7 @@ async def invalidate(user_id: str) -> None:
     from app.redis_bus import get_redis
 
     r = get_redis()
-    keys = [k async for k in r.scan_iter(f"{CACHE_PREFIX}wrapped:v4:{user_id}:*")]
+    keys = [k async for k in r.scan_iter(f"{CACHE_PREFIX}wrapped:v5:{user_id}:*")]
     if keys:
         await r.delete(*keys)
 
@@ -340,7 +366,7 @@ async def period_stats(user_id: str, period: str) -> dict[str, Any] | None:
     current = _local(_now()).year
     finished = period != DECADE and int(period) < current
     # Uzavřený rok se nemění (týden cache); rozběhnutý rok a dekáda po dnech.
-    key = f"wrapped:v4:{user_id}:{period}" + ("" if finished else f":{pm._day_key()}")
+    key = f"wrapped:v5:{user_id}:{period}" + ("" if finished else f":{pm._day_key()}")
     return await cached_json(key, 7 * 24 * 3600 if finished else 24 * 3600, lambda: _stats(user_id, period))
 
 

@@ -65,22 +65,55 @@ def _track_info(recording_ids: list[str]) -> list[tuple[str, str]]:
     return out
 
 
+_background: set[asyncio.Task] = set()
+
+
 async def similar_track_ids(
-    seed_recording_ids: list[str], exclude: set[str], rng: random.Random, want: int, per_seed: int = 25
+    seed_recording_ids: list[str],
+    exclude: set[str],
+    rng: random.Random,
+    want: int,
+    per_seed: int = 25,
+    *,
+    skip_artists: set[str] | None = None,
+    deadline: float | None = None,
 ) -> list[str]:
     """Skladby, které posluchači pouštějí spolu se semínky -- seřazené podle
     toho, k kolika semínkům a jak silně sedí; převzaté přes Deezer (jen
-    přesná shoda interpreta), bez `exclude`."""
-    from app.tags import _resolve_tracks
+    přesná shoda interpreta), bez `exclude`.
 
+    `skip_artists` (jména): vyřadit ještě před dohledáním -- dřív se drahé
+    dotazy na Deezer utratily za skladby interpretů, které várka stejně zahodí.
+    `deadline` (s): vrátit, co se do té doby dohledalo (13. 10.: jeden 12s
+    limit kolem všeho zahodil při překročení VŠECHNY nové -- čím víc nového
+    profil chtěl, tím častěji). Nedokončená dohledání doběhnou na pozadí
+    (zahřejí cache na příště)."""
     seeds = await asyncio.to_thread(_track_info, seed_recording_ids)
     if not seeds or want <= 0:
         return []
+    loop = asyncio.get_running_loop()
+    end = loop.time() + deadline if deadline else None
+
+    def left(floor: float = 0.3) -> float | None:
+        return None if end is None else max(floor, end - loop.time())
+
+    # Last.fm souběžně (dřív jedno po druhém).
+    tasks = [asyncio.ensure_future(lastfm.similar_tracks(a, t, limit=per_seed)) for a, t in seeds]
+    done, pending = await asyncio.wait(tasks, timeout=left() if end is None else max(0.5, (end - loop.time()) * 0.5))
+    for task in pending:
+        _keep(task)
+    skip = {norm(a) for a in (skip_artists or ())}
     score: Counter = Counter()
     meta: dict[tuple[str, str], dict[str, str]] = {}
-    for artist, title in seeds:
-        for item in await lastfm.similar_tracks(artist, title, limit=per_seed):
+    for task in done:
+        try:
+            items = task.result() or []
+        except Exception:  # noqa: BLE001
+            continue
+        for item in items:
             key = (norm(item["artist"]), _normalize(item["title"]))
+            if key[0] in skip:
+                continue
             score[key] += item.get("match", 0) + 0.2  # víc semínek = výš
             meta.setdefault(key, {"artist": item["artist"], "title": item["title"]})
     if not score:
@@ -89,7 +122,7 @@ async def similar_track_ids(
     # Nejsilnější napřed, zbytek promíchat (ať se mix den ode dne liší).
     head, tail = ranked[: want // 2], ranked[want // 2 :]
     rng.shuffle(tail)
-    ids = await _resolve_tracks(head + tail, want * 2)
+    ids = await _resolve_until(head + tail, int(want * 1.5) + 2, left())
     out: list[str] = []
     per_artist: Counter = Counter()
     with Session(engine) as session:
@@ -105,6 +138,46 @@ async def similar_track_ids(
             if len(out) >= want:
                 break
     return out
+
+
+def _keep(task: asyncio.Task) -> None:
+    """Nechat doběhnout na pozadí (výsledek se uloží do cache)."""
+    _background.add(task)
+    task.add_done_callback(lambda t: (_background.discard(t), t.cancelled() or t.exception()))
+
+
+async def _resolve_until(items: list[dict[str, str]], limit: int, timeout: float | None) -> list[str]:
+    """Jako `tags._resolve_tracks`, ale s limitem: co se do `timeout` dohledá,
+    to se vezme (v pořadí `items`), zbytek doběhne na pozadí."""
+    from app.catalog.deezer import get_deezer_client
+    from app.home import generators as g
+    from app.home.taste_bridge import is_junk_version
+
+    dz = get_deezer_client()
+    sem = asyncio.Semaphore(6)
+
+    async def one(item: dict[str, str]) -> dict | None:
+        async with sem:
+            try:
+                found = await dz.find_track(item["artist"], item["title"])
+            except Exception:  # noqa: BLE001
+                return None
+        if not found or not found.get("id"):
+            return None
+        if _normalize((found.get("artist") or {}).get("name", "")) != _normalize(item["artist"]):
+            return None
+        if is_junk_version(found.get("title")) or is_junk_version(item.get("title")):
+            return None
+        return found
+
+    tasks = [asyncio.ensure_future(one(i)) for i in items[: limit + limit // 2]]
+    if not tasks:
+        return []
+    _done, pending = await asyncio.wait(tasks, timeout=timeout)
+    for task in pending:
+        _keep(task)
+    found = [t.result() for t in tasks if t.done() and not t.cancelled() and t.exception() is None and t.result()]
+    return (await asyncio.to_thread(g._ingest_tracks, found[:limit])) if found else []
 
 
 def merge_shares(*sources: dict[str, float]) -> dict[str, float]:

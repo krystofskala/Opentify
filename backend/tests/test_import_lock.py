@@ -61,8 +61,8 @@ def test_druhy_import_behem_prvniho_odmitnut(env, monkeypatch):
 
 def test_po_importu_historie_wrapped_smazan_a_oznameni(env, monkeypatch):
     r, sent = env
-    r.d[f"{CACHE_PREFIX}wrapped:v4:u1:2025"] = "{}"
-    r.d[f"{CACHE_PREFIX}wrapped:v4:u2:2025"] = "{}"
+    r.d[f"{CACHE_PREFIX}wrapped:v5:u1:2025"] = "{}"
+    r.d[f"{CACHE_PREFIX}wrapped:v5:u2:2025"] = "{}"
 
     async def fake(*a):
         return {"kind": "history", "listens": 10}
@@ -70,8 +70,8 @@ def test_po_importu_historie_wrapped_smazan_a_oznameni(env, monkeypatch):
     monkeypatch.setattr(library, "_import_spotify", fake)
     out = asyncio.run(library.import_spotify(None, None, ("u1", "d1")))
     assert out["listens"] == 10
-    assert f"{CACHE_PREFIX}wrapped:v4:u1:2025" not in r.d
-    assert f"{CACHE_PREFIX}wrapped:v4:u2:2025" in r.d  # cizí profil zůstává
+    assert f"{CACHE_PREFIX}wrapped:v5:u1:2025" not in r.d
+    assert f"{CACHE_PREFIX}wrapped:v5:u2:2025" in r.d  # cizí profil zůstává
     assert "import:running:u1" not in r.d  # zámek uvolněn
     assert sent == [("u1", "import.done", {"platform": "spotify", "listens": 10})]
 

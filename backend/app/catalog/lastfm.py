@@ -40,7 +40,11 @@ class LastfmError(RuntimeError):
     pass
 
 
-async def _call(params: dict[str, str]) -> dict[str, Any] | None:
+class _Transient(Exception):
+    """Fronta plná / síť -- výsledek neznámý, ne "nic" (necachovat)."""
+
+
+async def _call(params: dict[str, str], *, raise_transient: bool = False) -> dict[str, Any] | None:
     key = api_key()
     if not key:
         return None
@@ -48,7 +52,11 @@ async def _call(params: dict[str, str]) -> dict[str, Any] | None:
         await _limiter.wait()
         resp = await _http.get(API, params={**params, "api_key": key, "format": "json"})
         data = resp.json()
-    except (httpx.HTTPError, ValueError, RateLimitBusy):
+    except (httpx.HTTPError, RateLimitBusy) as exc:
+        if raise_transient:
+            raise _Transient from exc
+        return None
+    except ValueError:
         return None
     if not isinstance(data, dict) or data.get("error"):
         return None
@@ -66,9 +74,14 @@ async def get(params: dict[str, str], ttl: int = DAY) -> dict[str, Any] | None:
     key = _cache_key(params)
 
     async def fetch() -> dict[str, Any]:
-        return (await _call(params)) or {}
+        return (await _call(params, raise_transient=True)) or {}
 
-    data = await cached_json(key, ttl, fetch, is_empty=lambda v: not v)
+    try:
+        data = await cached_json(key, ttl, fetch, is_empty=lambda v: not v)
+    except _Transient:
+        # 13. 10.: plná fronta (náladový čip = desítky dotazů) se dřív uložila
+        # jako "nic" na 10 minut a várky mezitím neměly nové skladby.
+        return None
     return data or None
 
 

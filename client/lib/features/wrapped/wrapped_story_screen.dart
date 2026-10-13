@@ -851,6 +851,14 @@ List<_Slide> _buildSlides(WrappedStats s) {
               style: _text(20, FontWeight.w600, opacity: 0.9, height: 1.25),
             ),
           ),
+          if (s.dataNote != null) ...[
+            const SizedBox(height: 12),
+            _Reveal(
+              active: a,
+              order: 3,
+              child: Text(s.dataNote!, style: _text(15, FontWeight.w500, opacity: 0.7, height: 1.3)),
+            ),
+          ],
           const Spacer(flex: 2),
         ],
       ),
