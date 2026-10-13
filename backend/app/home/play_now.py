@@ -1094,6 +1094,22 @@ async def next_chunk(
                 src.setdefault(r, "deezer_radio")
         new = kept[:want_new]
         pool = kept[want_new:]
+        # Kam dál (7v): jedna nová z cesty Vedle / Skok místo poslední nové.
+        try:
+            from app.home import kam_dal
+
+            dose = await asyncio.to_thread(kam_dal.dose, user_id)
+            if new and dose and rng.random() < dose and not (mood and mood not in FREE_MOODS):
+                tr = await asyncio.to_thread(kam_dal.path_tracks, user_id, ("vedle", "skok"))
+                way = [r for r in tr["vedle"] + tr["skok"] if r not in exclude and r not in new]
+                way = await asyncio.to_thread(_drop_heard, _T, way)
+                if way:
+                    pick_ = rng.choice(way[:10])
+                    pool.insert(0, new.pop())
+                    new.append(pick_)
+                    src[pick_] = "kamdal"
+        except Exception:  # noqa: BLE001
+            logger.exception("pusť teď: kam dál")
         # Druhá šance nové skladby (7t): dohraná, bez návratu -- 1 místo.
         chances = await asyncio.to_thread(ratio.second_chances, user_id, set(played) | set(familiar) | set(seeds))
         if chances and not (mood and mood not in FREE_MOODS):
@@ -1196,7 +1212,16 @@ def _dormant_picks(
     except Exception:  # noqa: BLE001
         return []
     keyed = []
+    try:
+        from app.home import kam_dal
+
+        path = kam_dal.path_scene(user_id, utcnow().date().isoformat())
+    except Exception:  # noqa: BLE001
+        path = None
     for sc in smap.scenes:
+        if path and sc.id == path[0]:
+            keyed.append((2.0, sc))  # cesta Kam dál má přednost (dávka už v path_scene)
+            continue
         if not sc.dormant or len(sc.artists) < scenes.MIN_SCENE:
             continue
         seen = max((exposure.get(a, 0.0) for a in sc.artists[:20]), default=0.0)
