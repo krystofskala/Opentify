@@ -157,7 +157,8 @@ class AutoContinue {
             seedIds: fromSeeds ? ids.sublist(ids.length > 3 ? ids.length - 3 : 0) : const [],
             playedIds: ids,
             size: 8,
-            mood: fromSeeds ? null : mood,
+            // Nekonečné hraní po Objevech týdne objevuje dál (jen neslyšené).
+            mood: fromSeeds ? (s.queueSourceLabel == 'Objevy týdne' ? 'objevuj' : null) : mood,
           );
       if (chunk.tracks.isEmpty) {
         _failed();

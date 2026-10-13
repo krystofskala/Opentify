@@ -1094,14 +1094,35 @@ async def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str
         return dot / (nx * ny) if nx and ny else 0.0
 
     block_vec = {k: sum((vec[t] for t in ts), Counter()) for k, ts in blocks.items()}
-    left = list(blocks)
-    rng.shuffle(left)
-    left.sort(key=lambda k: -len(blocks[k]))
-    order = [left.pop(0)] if left else []
-    while left:
-        nxt = max(left, key=lambda k: (sim(block_vec[order[-1]], block_vec[k]), len(blocks[k])))
-        left.remove(nxt)
-        order.append(nxt)
+    # Pořadí bloků: hladově z každého možného začátku, pak 2-opt (obrácení
+    # úseků) -- dřív jen hladově od největšího bloku a na konec zbyly bloky,
+    # které se k ničemu nehodily (bossa nova -> pop-punk -> klasická kytara).
+    keys = list(blocks)
+    rng.shuffle(keys)
+    S = {(x, y): sim(block_vec[x], block_vec[y]) for x in keys for y in keys if x != y}
+
+    def total(seq: list[str]) -> float:
+        return sum(S[(x, y)] for x, y in zip(seq, seq[1:]))
+
+    best: list[str] = keys[:1]
+    for start in keys:
+        left = [k for k in keys if k != start]
+        seq = [start]
+        while left:
+            nxt = max(left, key=lambda k: S[(seq[-1], k)])
+            left.remove(nxt)
+            seq.append(nxt)
+        if len(best) < len(seq) or total(seq) > total(best):
+            best = seq
+    improved = True
+    while improved and len(best) > 3:
+        improved = False
+        for i in range(len(best) - 1):
+            for j in range(i + 2, len(best) + 1):
+                cand = best[:i] + best[i:j][::-1] + best[j:]
+                if total(cand) > total(best) + 1e-9:
+                    best, improved = cand, True
+    order = best
     out: list[str] = []
     for i, k in enumerate(order):
         rest = list(blocks[k])
