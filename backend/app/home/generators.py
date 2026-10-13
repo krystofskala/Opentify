@@ -163,7 +163,10 @@ def _save_playlist(
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
         # Zlomená srdce do žádného výběru.
-        for position, recording_id in enumerate(without_disliked(owner, recording_ids)):
+        # Nesehnatelné (stažení selhalo) nahradit jinou verzí nebo vynechat.
+        from app.home.obtainable import swap_failed
+
+        for position, recording_id in enumerate(without_disliked(owner, swap_failed(recording_ids))):
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         now = utcnow()
         playlist.title = title

@@ -1176,6 +1176,9 @@ async def next_chunk(
     out = _familiar_first(out, new_ids, first=3 if cautious else 2)
     if level == "low" and mood not in FREE_MOODS:
         out = _no_new_in_a_row(out, new_ids)
+    from app.home.obtainable import swap_failed_async
+
+    out = await swap_failed_async(out)
     available = await asyncio.to_thread(_available, out)
     out = _safe_start(out, available)
     missing = [r for r in out if r not in available]
@@ -1448,7 +1451,9 @@ async def start_from(user_id: str, artist_id: str | None, recording_id: str | No
             continue
         per_artist[a] += 1
         new.append(rid)
-    out = (head + new)[:size]
+    from app.home.obtainable import swap_failed_async
+
+    out = await swap_failed_async((head + new)[:size])
     available = await asyncio.to_thread(_available, out)
     missing = [r for r in out if r not in available]
     if missing:
