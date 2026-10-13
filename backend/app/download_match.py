@@ -137,7 +137,11 @@ def version_words(title: str) -> set[str]:
     for part in parts:
         if fold(part).strip().startswith(_SKIP_BRACKET):
             continue
-        words |= {w for w in tokens(part) if len(w) >= 2 and not w.isdigit()}
+        part_words = {w for w in tokens(part) if len(w) >= 2 and not w.isdigit()}
+        # "(20th Anniversary Remaster)" -- pořadí výročí verzi nemění, jako rok.
+        if part_words & {"anniversary", "remaster", "remastered", "edition", "deluxe"}:
+            part_words = {w for w in part_words if not re.fullmatch(r"\d+(?:st|nd|rd|th)", w)}
+        words |= part_words
     return words - NOISE - _STOP
 
 

@@ -218,7 +218,10 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     artist_of = await asyncio.to_thread(_artists_of, ids + first)
     ids = await asyncio.to_thread(_without_muted_and_skipped, user_id, ids, artist_of)
     ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
-    recording_ids = (first + ids)[:STATION_SIZE]
+    from app.home.obtainable import swap_failed_async
+
+    recording_ids = first + (await swap_failed_async(ids[: STATION_SIZE + 10]))
+    recording_ids = recording_ids[:STATION_SIZE]
     if len(recording_ids) < 5:
         raise StationError("na rádio je tu zatím málo podobné hudby")
 

@@ -67,6 +67,7 @@ RIGHT = [
     ("Dej lásku svou a hřej", "Kontrast", None, "Kontrast - Dej Lasku Svou A Hrej.mp3", ""),
     ("Damn Right, I've Got the Blues", "Buddy Guy", None, "02 Damn Right, I've Got The Blues.flac", ""),
     ("Can You Get to That (2026 Remastered)", "Funkadelic", None, "02-funkadelic-can_you_get_to_that_(2026_remastered).flac", ""),
+    ("Trouble (20th Anniversary Remaster)", "Ray LaMontagne", None, "Ray LaMontagne - Trouble (Official Audio)", ""),
     ("Elegy", "Leif Vollebekk", None, "Leif Vollebekk - Elegy (Official Audio)", ""),
     ("Dracula", "Tame Impala", None, "Tame Impala - Dracula (Official Video)", ""),
     ("Hodinový hotel", "Mňága a Žďorp", None, "Mňága a Žďorp - Hodinový hotel (oficiální video)", ""),

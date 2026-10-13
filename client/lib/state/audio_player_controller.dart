@@ -1192,7 +1192,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> retryCurrent() async {
     if (state.nowPlaying == null || state.queue.isEmpty) return;
     _restoredIdle = false;
-    await _playAtIndex(state.queueIndex);
+    await _playAtIndex(state.queueIndex, tapped: true);
   }
 
   /// Přehraje `items[startIndex]` a zbytek seznamu si uloží jako frontu pro
@@ -1279,6 +1279,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // nechat skladbu, na kterou uživatel čeká, stát ve frontě ZA deseti
     // dalšími z prefetche, místo aby ji tři workery zpracovaly jako první.
     _switchKind = 'tap';
+    // Klepnutí na konkrétní skladbu (ne Přehrát od začátku): když se nedá
+    // sehnat, zůstane stát s chybou -- uživatel ji chtěl slyšet.
+    _tappedTrack = index != 0 || items.length == 1;
     await _playCurrent();
     if (prefetchWholeQueue) {
       _prefetchQueue(items, except: items[index].recordingId);
@@ -1599,6 +1602,24 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   /// `auto`: skladba dohrála (ne klepnutí) -- jen pro měření rychlosti startu.
+  /// Skladba se nedá sehnat (13. 10.: rádio stálo na „Nepodařilo se
+  /// přehrát“): ve frontě krátce ukázat proč a pustit další. Ne u klepnutí
+  /// na konkrétní skladbu a nejvýš 3x za sebou, ať neprojede celou frontu.
+  bool _tappedTrack = false;
+  int _unobtainableSkips = 0;
+
+  bool _skipUnobtainable(NowPlayingInfo info, String? error) {
+    if (_tappedTrack || isSpokenId(info.recordingId) || state.nextIndex == null || _unobtainableSkips >= 3) {
+      return false;
+    }
+    _unobtainableSkips++;
+    state = state.copyWith(isBuffering: false, error: 'Nedá se sehnat – přeskakuji');
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (state.nowPlaying?.recordingId == info.recordingId && !_player.playing) unawaited(next(auto: true));
+    });
+    return true;
+  }
+
   Future<void> next({bool auto = false}) async {
     if (!auto && _skipChapter(forward: true)) return;
     final index = state.nextIndex;
@@ -1664,7 +1685,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       await seek(Duration.zero);
       return;
     }
-    await _playAtIndex(state.previousIndex!);
+    await _playAtIndex(state.previousIndex!, tapped: true);
   }
 
   /// Přeskočí přímo na `index` ve frontě (bez ohledu na shuffle pořadí) --
@@ -1676,7 +1697,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _resumeAt = position;
       _resumeFor = state.queue[index].recordingId;
     }
-    await _playAtIndex(index);
+    await _playAtIndex(index, tapped: true);
   }
 
   /// Přeskládá frontu (`SliverReorderableList.onReorderItem` v `QueuePanel`
@@ -2358,8 +2379,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     return Uri.dataFromBytes(bytes.takeBytes(), mimeType: 'audio/wav');
   }();
 
-  Future<void> _playAtIndex(int index) async {
+  Future<void> _playAtIndex(int index, {bool tapped = false}) async {
     final info = state.queue[index];
+    _tappedTrack = tapped;
     _restoredIdle = false;
     _primeAudioElement(info.recordingId);
     state = AudioPlayerState(
@@ -2399,6 +2421,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   ///   na `track.available`/`FAILED` z WS (viz `ProvisioningController._handleEvent`).
   Future<void> _playCurrent() async {
     final info = state.nowPlaying!;
+    // Stažení už selhalo (přednačtení dopředu) -- rovnou dál, bez čekání.
+    final knownFailed = _ref.read(provisioningControllerProvider)[info.recordingId];
+    if (knownFailed != null && knownFailed.isFailed && _skipUnobtainable(info, knownFailed.error)) return;
     _applySpeedFor(info);
     // Zamčená obrazovka u knihy: ±30 s (web; převzato z hudby 8. 10.).
     // Knihy rádiem nikdy nehrají -- podmínka na rádio by to na iPhonu vypnula.
@@ -2543,6 +2568,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     } else if (result != null && result.isFailed) {
       _awaitingProvisioning = false;
       _priming = false;
+      if (_skipUnobtainable(info, result.error)) return;
       state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
       if (info.releaseId != null) _hints.signal(Hint.albumDownload);
     } else {
@@ -2618,6 +2644,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         _provisioningSub = null;
         _awaitingProvisioning = false;
         _priming = false;
+        if (_skipUnobtainable(info, result.error)) return;
         state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
         if (info.releaseId != null) _hints.signal(Hint.albumDownload);
         return;
@@ -2909,6 +2936,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
           _waitForAvailability(info);
         } else if (result.isFailed) {
           done();
+          if (_skipUnobtainable(info, result.error)) return;
           state = state.copyWith(isBuffering: false, error: result.error ?? 'obstarání skladby selhalo');
           if (info.releaseId != null) _hints.signal(Hint.albumDownload);
         }
@@ -3379,6 +3407,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       return;
     }
     // Pozastaveně načtená skladba se teď opravdu rozehrála -> nový poslech.
+    if (playerState.playing) _unobtainableSkips = 0;
     if (_scrobbleOnPlay case final id? when playerState.playing) {
       _scrobbleOnPlay = null;
       if (state.nowPlaying?.recordingId == id) _beginScrobble(id);
