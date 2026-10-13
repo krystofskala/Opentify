@@ -533,6 +533,18 @@ def pick(
 
     capped = _cap_per_artist(ordered, act.artist_of, 1)
     familiar = _spread(capped[:known_target], act.artist_of)
+    if not seeds and not small and mood in (None, "prekvap") and len(familiar) >= 3:
+        # Scéna, která se dlouho neozvala (mapa scén, 13. 10.): 1–2 známé
+        # odtamtud místo posledních -- deset let historie se tak postupně
+        # prostřídá (dřív hrálo skoro jen posledních pár měsíců).
+        back = _dormant_picks(
+            user_id, act, rng, lambda r: score(r) > 0, {act.artist_of.get(r) for r in familiar},
+            DORMANT_PER_BATCH if size > 8 else 1, exposure,
+        )
+        if back:
+            familiar = familiar[: len(familiar) - len(back)] + back
+            if ctx is not None:
+                ctx["dormant"] = back
     if seed_artists and familiar and not any(act.artist_of.get(r) in seed_artists for r in familiar):
         # Nekonečné hraní drží směr (návrh 2): aspoň jedna skladba od
         # interpreta semínka, i když ho strop relace ztlumil.
@@ -579,7 +591,19 @@ def pick(
             if act.artist_of.get(r) not in batch_artists and act.artist_of.get(r) not in banned
             and exposure_ok(act.artist_of.get(r))
         ]
-        new_seeds += _distinct_artist_seeds(wide, act.artist_of, 3)
+        # Skladba, která tě nedávno chytla (nová nebo návrat po dlouhé
+        # pauze): z ní jedno semínko -- objevy na ni navážou (13. 10.).
+        from app.home.caught import caught_tracks
+
+        caught = [r for r in caught_tracks(user_id, act) if act.artist_of.get(r) not in banned][:6]
+        if caught:
+            hook = rng.choice(caught)
+            new_seeds.append(hook)
+            if ctx is not None:
+                ctx["caught"] = hook
+        new_seeds += _distinct_artist_seeds(
+            [r for r in wide if r not in new_seeds], act.artist_of, 2 if caught else 3
+        )
     if small and not seeds:
         # Malý profil: z RŮZNÝCH interpretů všeho, co slyšel a co má rád --
         # jinak by po jedné písničce uvízl v jedné škatulce.
@@ -673,6 +697,7 @@ SMOOTH_TIMEOUT_S = 3.0
 # u oblíbenců chvíle -- celá starší historie i bývalé lásky skoro nehrály
 # (audit 13. 10.). Teď denní doba zvýhodní nejvýš ~2,5×.
 TIME_FLOOR = 0.4
+DORMANT_PER_BATCH = 2  # z 10 skladeb nejvýš 2 ze spící scény (8 a méně: 1)
 NEW_DEADLINE_S = 8.0  # hledání nových: co se do té doby dohledá, to se vezme
 SECOND_CHANCE_S = 3.0
 
@@ -932,6 +957,9 @@ async def next_chunk(
                 cands += got
             except Exception:  # noqa: BLE001 -- bez nových je to pořád dobrá várka
                 funnel["timeout"] = True
+        if ctx.get("caught"):
+            # + neslyšené od interpreta chycené skladby (hlubší skladby).
+            cands = await _artist_unheard(ctx["caught"], exclude, rng) + cands
         # Odložené z minulé várky napřed (projdou znovu filtry i plynulostí).
         cands = list(dict.fromkeys([r for r in _take_deferred(user_id) if r not in exclude] + cands))
 
@@ -1041,6 +1069,69 @@ async def next_chunk(
 
 
 _prefetching: set[asyncio.Task] = set()
+
+
+def _dormant_picks(
+    user_id: str, act, rng: random.Random, allowed, batch_artists: set, n: int, exposure: dict[str, float]
+) -> list[str]:
+    """`n` známých skladeb (různí interpreti) z jedné spící scény. Scéna se
+    losuje podle toho, jak moc byla oblíbená; když její interpreti hráli
+    v posledních várkách (paměť interpretů), má menší šanci."""
+    from app.home import scenes
+    from app.home.exposure import factor as exposure_factor
+    from app.home.personal_mixes import _weighted_order
+
+    try:
+        smap = scenes.load(user_id)
+    except Exception:  # noqa: BLE001
+        return []
+    keyed = []
+    for sc in smap.scenes:
+        if not sc.dormant or len(sc.artists) < scenes.MIN_SCENE:
+            continue
+        seen = max((exposure.get(a, 0.0) for a in sc.artists[:20]), default=0.0)
+        w = sc.weight ** 0.7 * exposure_factor(seen)
+        keyed.append((rng.random() ** (1.0 / max(w, 1e-9)), sc))
+    if not keyed:
+        return []
+    keyed.sort(key=lambda x: x[0], reverse=True)
+    scene = keyed[0][1]
+    members = set(scene.artists) | set(scene.tail)
+    max_long = max(act.long.values(), default=0) or 1.0
+    former = set(act.former_loves()[:FORMER_LOVES])
+    pool = [r for r in act.total if act.artist_of.get(r) in members and act.artist_of.get(r) not in batch_artists]
+
+    def weight(r: str) -> float:
+        return (act.long.get(r, 0.0) / max_long) ** 0.5 + (0.5 if r in former else 0.0)
+
+    out, used = [], set()
+    for r in _weighted_order(pool, weight, rng, sharpen=1.0):
+        a = act.artist_of.get(r)
+        if a in used or not allowed(r):
+            continue
+        used.add(a)
+        out.append(r)
+        if len(out) >= n:
+            break
+    return out
+
+
+async def _artist_unheard(recording_id: str, exclude: set[str], rng: random.Random) -> list[str]:
+    """Pár neslyšených skladeb interpreta (Deezer top), nejvýš 2."""
+    from app.catalog.deezer import get_deezer_client
+    from app.home import generators as g
+    from app.home.personal_mixes import _is_junk
+
+    dz_ids = await asyncio.to_thread(_deezer_ids, [recording_id])
+    if not dz_ids:
+        return []
+    try:
+        top = await asyncio.wait_for(get_deezer_client().artist_top(dz_ids[0], 10), timeout=SECOND_CHANCE_S)
+    except Exception:  # noqa: BLE001
+        return []
+    ids = [r for r in await asyncio.to_thread(g._ingest_tracks, [t for t in top or [] if not _is_junk(t)]) if r not in exclude]
+    rng.shuffle(ids)
+    return ids[:2]
 
 
 def _artist_names(recording_ids: list[str]) -> set[str]:

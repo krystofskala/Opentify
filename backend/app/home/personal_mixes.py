@@ -671,6 +671,7 @@ async def build_daily_mixes() -> int:
         logger.info("osobní mixy %s: zatím málo dat o chuti, přeskakuji", g.home_user()[:8])
         return 0
     clusters = await build_clusters(taste)
+    clusters, scene_of_cluster = await _with_scenes(clusters, taste, day)
     known = taste.known
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
     later = await asyncio.to_thread(_listen_later_candidates, g.home_user())
@@ -691,6 +692,9 @@ async def build_daily_mixes() -> int:
     familiar_share = MIX_FAMILIAR_SHARE.get(await asyncio.to_thread(discovery_level, g.home_user()), FAMILIAR_SHARE)
     act = taste.activation
     former = set(act.former_loves()[:300]) if act is not None else set()
+    from app.home.caught import caught_tracks
+
+    caught = await asyncio.to_thread(caught_tracks, g.home_user(), act) if act is not None else []
     liked_set = set(taste.liked)
     for index, cluster in _stable_numbers(clusters, _previous_groups()):
         rng = random.Random(f"{g.home_user()}:{day}:{index}")
@@ -739,6 +743,10 @@ async def build_daily_mixes() -> int:
         # z Deezer rádia dnešních hlavních interpretů (dřív jen záloha).
         today_known = [r for r in familiar[:12] if r in liked_or_played]
         seed_tracks = rng.sample(today_known, min(4, len(today_known)))
+        # Chycená skladba ze skupiny jako semínko (navázat na nový objev).
+        hook = next((r for r in caught if taste.artist_of.get(r) in cluster_artists), None)
+        if hook and hook not in seed_tracks:
+            seed_tracks = [hook, *seed_tracks][:4]
         exclude_new = known | memory.offered_new
         from_lastfm = await lt.similar_track_ids(seed_tracks, exclude_new, rng, new_target // 2 + 2)
         radio_seeds = [d for d in [await _deezer_id(taste, a) for a in featured] if d] or cluster.radio_seeds
@@ -778,8 +786,16 @@ async def build_daily_mixes() -> int:
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
         used_today.update(tracks)
         names = [taste.artist_name[a] for a in featured[:2] if a in taste.artist_name]
-        genre = _genre_label(taste, cluster, familiar)
-        description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
+        scene = scene_of_cluster.get(id(cluster))
+        if scene is not None:
+            # Spící scéna: styl + kdy se naposledy poslouchala.
+            label = (scene.label.split(",")[0].strip() or "").capitalize()
+            description = " · ".join(
+                x for x in (label, f"{', '.join(names)} a další", f"naposledy {scene.last_year}" if scene.last_year else "") if x
+            )
+        else:
+            genre = _genre_label(taste, cluster, familiar)
+            description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
         results.append((index, cluster, tracks, description, featured))
         logger.info(
             "home: Denní mix (skupina %d) -- %d skladeb (%d známých, %d nových), %s",
@@ -812,6 +828,11 @@ async def build_daily_mixes() -> int:
     g._save_snapshot("personal:daily-mixes", {"stamp": day, "count": built})
     g._save_snapshot("personal:daily-mix-groups", {"groups": groups})
     _mark_used(day, used_today)
+    shown_scenes = [scene_of_cluster[id(c)].id for _i, c, _t, _d, _f in results if id(c) in scene_of_cluster]
+    if shown_scenes:
+        from app.home import scenes
+
+        await asyncio.to_thread(scenes.mark_shown, g.home_user(), shown_scenes, day)
     try:  # měření opakování mezi dny (7m) -- jen zápis
         from app.home import mix_log
 
@@ -821,6 +842,41 @@ async def build_daily_mixes() -> int:
     except Exception:  # noqa: BLE001
         logger.exception("záznam Denních mixů")
     return built
+
+
+STABLE_MIXES = 3  # z toho, co se poslouchá teď; zbytek ze spících scén
+
+
+async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple[list[Cluster], dict[int, object]]:
+    """3 stálé skupiny (teď) + až 3 spící scény z mapy scén, které se dlouho
+    neukázaly (13. 10.: deset let historie se v mixech neprojevovalo). Bez
+    mapy scén (malý profil, ještě nespočítaná) jako dřív."""
+    from app.home import scenes
+
+    try:
+        smap = await asyncio.to_thread(scenes.load, g.home_user())
+        shown = await asyncio.to_thread(scenes.shown_days, g.home_user())
+    except Exception:  # noqa: BLE001
+        logger.exception("mapa scén")
+        return clusters, {}
+    if not smap.scenes:
+        return clusters, {}
+    stable = clusters[:STABLE_MIXES]
+    taken = {a for c in stable for a in c.artists[:15]}
+    rng = random.Random(f"{g.home_user()}:{day}:scenes")
+    picked = scenes.pick_dormant(
+        smap, MAX_DAILY_MIXES - len(stable), rng, today=day, shown=shown, exclude_artists=taken
+    )
+    out = list(stable)
+    info: dict[int, object] = {}
+    for scene in picked:
+        radio = [d for d in [await _deezer_id(taste, a) for a in scene.artists[:3]] if d]
+        cluster = Cluster(artists=[*scene.artists, *scene.tail], radio_seeds=radio)
+        info[id(cluster)] = scene
+        out.append(cluster)
+    # Málo spících scén: doplnit dalšími skupinami jako dřív.
+    out += clusters[STABLE_MIXES : STABLE_MIXES + MAX_DAILY_MIXES - len(out)]
+    return out, info
 
 
 @dataclass
@@ -969,6 +1025,29 @@ def _transient_seeds(taste: Taste, n: int) -> list[str]:
 DISCOVER_MIN = 8  # menší Objevy jsou pořád lepší než žádné (dřív 15 a výjimka)
 
 
+def _scene_seeds(user_id: str, rng: random.Random, skip: set[str], n: int) -> list[str]:
+    """Semínka Objevů z `n` různých scén celé historie (i spících), losovaných
+    podle váhy -- noví interpreti z celé šíře vkusu, ne jen z letoška."""
+    from app.home import scenes
+
+    try:
+        smap = scenes.load(user_id)
+    except Exception:  # noqa: BLE001
+        return []
+    keyed = sorted(
+        ((rng.random() ** (1.0 / max(sc.weight ** 0.6, 1e-9)), sc) for sc in smap.scenes if sc.artists),
+        key=lambda x: x[0], reverse=True,
+    )
+    out = []
+    for _k, sc in keyed:
+        pool = [a for a in sc.artists[:8] if a not in skip]
+        if pool:
+            out.append(rng.choice(pool))
+        if len(out) >= n:
+            break
+    return out
+
+
 def _known_for_discover(taste: Taste) -> tuple[set[str], set[str]]:
     """Interpreti, které Objevy vynechají: jen ti, ke kterým se profil sám
     vrací (2+ dny, algoritmus po třetinách) nebo které si uložil. Dřív stačil
@@ -1007,11 +1086,20 @@ async def build_discover_weekly() -> int:
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
     transient = _transient_seeds(taste, 10)
-    lasting = [
-        a for a, w in taste.artist_weight.most_common(60) if w > 0 and a not in transient
-    ]
-    rng.shuffle(lasting)
-    seeds = transient + lasting[:8]
+    lasting = _scene_seeds(g.home_user(), rng, set(transient), 8)
+    if not lasting:
+        lasting = [a for a, w in taste.artist_weight.most_common(60) if w > 0 and a not in transient]
+        rng.shuffle(lasting)
+    # Interpreti skladeb, které tě nedávno chytly, napřed (13. 10.).
+    from app.home.caught import caught_tracks
+
+    hooks = []
+    if taste.activation is not None:
+        for rid in await asyncio.to_thread(caught_tracks, g.home_user(), taste.activation):
+            a = taste.artist_of.get(rid)
+            if a and a not in hooks and a not in transient:
+                hooks.append(a)
+    seeds = list(dict.fromkeys(hooks[:4] + transient + lasting[:8]))
 
     # Kandidáti = "related" interpreti tvých interpretů, které neznáš. Každé
     # semínko přispěje svými nejbližšími rovnoměrně (dřív vyhrávala shoda

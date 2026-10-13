@@ -26,6 +26,7 @@ RAILS: dict[str, str] = {
     "now_mix": "Mix na teď",
     "year_ago": "Tento týden před rokem",
     "deep_cuts": "Méně známé skladby",
+    "caught": "Protože tě chytla…",
     "trending_tracks": "Populární ve světě",
     "shazam": "Z tvého Shazamu",
     "soundcloud": "Na SoundCloudu od tvých interpretů",
