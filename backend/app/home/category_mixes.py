@@ -365,7 +365,10 @@ async def _mood_mix(
 
     # Tvoje skladby, které náladu opravdu mají.
     liked_or_played = list(dict.fromkeys([*taste.liked, *(r for r, _c in taste.listen_counts.most_common())]))
-    pool = (liked_or_played + [r for r in taste.library if r not in set(liked_or_played)])[:2500]
+    # Množina jednou -- dřív `set(...)` pro každou skladbu knihovny: 11 s
+    # synchronního počítání, po které celé API stálo (14. 10.).
+    seen = set(liked_or_played)
+    pool = (liked_or_played + [r for r in taste.library if r not in seen])[:2500]
     ev = await mood_tracks.evidence(pool, c.id, dz_track_ids, dz_keys, chart)
     target = round(MIX_SIZE * FAMILIAR_SHARE)
     familiar = _familiar_tracks(taste, [r for r in pool if ev.get(r, 0) >= 1], rng, target)

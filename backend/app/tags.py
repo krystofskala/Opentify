@@ -335,7 +335,8 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
     from app.home import novelty
 
     # Společný filtr nových (už slyšené i pod jiným id, nelíbí, míň, přeskočené).
-    found = [r for r in await _resolve_tracks(mixed, want + 12) if r not in set(own)]
+    own_set = set(own)
+    found = [r for r in await _resolve_tracks(mixed, want + 12) if r not in own_set]
     discovery = (await asyncio.to_thread(novelty.filter_new, user_id, found, taste.activation))[:want]
     if len(own) + len(discovery) < 12:
         return None
