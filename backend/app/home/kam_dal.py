@@ -361,16 +361,21 @@ async def build() -> int:
     """Plánovač: jednou denně pro aktuální profil."""
     from app.home import generators as g
 
+    from app.home import scenes
+
     user_id = g.home_user()
     today = utcnow().date().isoformat()
-    if load(user_id).get("day") == today:
-        return 0
+    stamp = await asyncio.to_thread(scenes._stamp, user_id)
+    prev = load(user_id)
+    if prev.get("day") == today and prev.get("scenesStamp") == stamp:
+        return 0  # dnes hotovo a mapa scén se nezměnila (id scén platí)
     try:
         data = await compute(user_id)
     except Exception:  # noqa: BLE001
         logger.exception("kam dál: výpočet")
         return 0
     data["day"] = today
+    data["scenesStamp"] = stamp
     await asyncio.to_thread(_save, user_id, data)
     await asyncio.to_thread(_save_mixes, user_id, data)
     paths = data.get("paths") or {}
