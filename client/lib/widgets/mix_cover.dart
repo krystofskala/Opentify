@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '../features/browse/browse_grid.dart' show genreIcon;
 import 'media_card.dart' show ArtworkImage;
 import 'mix_artwork.dart' show GrainPainter, MixArtSpec, MixArtStyle;
 
@@ -185,15 +186,21 @@ class _MixCover extends StatelessWidget {
           children.add(CustomPaint(painter: _GenrePainter(pal, tile)));
           final lr = s * (tile ? 0.24 : 0.15);
           final lx = tile ? s * 0.6 : s * 0.78, ly = tile ? s * 0.42 : s * 0.34;
-          if (photos.isNotEmpty) {
-            children.add(Positioned(
-              left: lx - lr,
-              top: ly - lr,
-              width: lr * 2,
-              height: lr * 2,
-              child: ClipOval(child: _photo(photos.first, pal.ink, pal.mid)),
-            ));
-          }
+          // Štítek desky: fotka interpreta, jinak ikonka žánru jako v Hledat.
+          children.add(Positioned(
+            left: lx - lr,
+            top: ly - lr,
+            width: lr * 2,
+            height: lr * 2,
+            child: ClipOval(
+              child: photos.isNotEmpty
+                  ? _photo(photos.first, pal.ink, pal.mid)
+                  : ColoredBox(
+                      color: pal.mid,
+                      child: Icon(genreIcon(spec.seed.split(':').last), size: lr * 1.1, color: pal.ink),
+                    ),
+            ),
+          ));
         case CoverKind.mood:
           children.add(CustomPaint(painter: _MoodPainter(pal, _moodKey(spec), spec.seed)));
         case CoverKind.year:
