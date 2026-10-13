@@ -178,7 +178,9 @@ async def artist_shares(taste: pm.Taste, budget: int) -> dict[str, dict[str, flo
     from app.home import lastfm_taste as lt
 
     lf: dict[str, dict[str, float]] = {}
-    for artist_id in ranked[: max(budget * 4, 150)]:
+    gate = asyncio.Semaphore(8)
+
+    async def one(artist_id: str) -> None:
         if is_own_artist(artist_id):
             # Štítky podle jména by patřily cizí kapele -- jen ručně zadané styly.
             from app.catalog.identity import own_styles
@@ -186,8 +188,11 @@ async def artist_shares(taste: pm.Taste, budget: int) -> dict[str, dict[str, flo
             manual = await asyncio.to_thread(own_styles, artist_id)
             if manual:
                 lf[artist_id] = lt.shares_from_tags(manual)
-            continue
-        lf[artist_id] = await lt.tag_category_shares(taste.artist_name.get(artist_id, ""))
+            return
+        async with gate:  # souběžně, ale ne 150 dotazů na Last.fm naráz
+            lf[artist_id] = await lt.tag_category_shares(taste.artist_name.get(artist_id, ""))
+
+    await asyncio.gather(*(one(a) for a in ranked[: max(budget * 4, 150)]))
     out: dict[str, dict[str, float]] = {}
     for artist_id in ranked:
         shares = lt.merge_shares(stored.get(artist_id) or mb.get(artist_id) or {}, lf.get(artist_id) or {})
@@ -335,8 +340,11 @@ async def _mood_mix(
 
     dz = get_deezer_client()
     mood_dz: list[dict[str, Any]] = []
-    for playlist in (await _category_playlists(c))[:4]:
-        mood_dz.extend(await dz.playlist_tracks(playlist["deezerId"], 100) or [])
+    for tracks in await asyncio.gather(
+        *(dz.playlist_tracks(p["deezerId"], 100) for p in (await _category_playlists(c))[:4]), return_exceptions=True
+    ):
+        if isinstance(tracks, list):
+            mood_dz.extend(tracks)
     # "Interpret" Deezer apod. (redakční vložky) pryč.
     mood_dz = [t for t in mood_dz if str((t.get("artist") or {}).get("name") or "").strip().lower() not in mood_tracks.JUNK_ARTISTS]
     mood_artists = Counter(str((t.get("artist") or {}).get("id") or "") for t in mood_dz)
@@ -386,16 +394,17 @@ async def _mood_mix(
     # Nové 2: nejposlouchanější skladby štítků nálady (Last.fm) od tvých
     # interpretů a jim podobných.
     ok_names = {_normalize(taste.artist_name.get(a) or "") for a, _w in taste.artist_weight.most_common(300)}
-    for a in mix_artists[:5]:
-        try:
-            ok_names |= {_normalize(n) for n, _m in await lt.similar_artist_names(taste.artist_name.get(a) or "", 25)}
-        except Exception:  # noqa: BLE001 -- objevy navíc
-            pass
+    for similar in await asyncio.gather(
+        *(lt.similar_artist_names(taste.artist_name.get(a) or "", 25) for a in mix_artists[:5]), return_exceptions=True
+    ):
+        if not isinstance(similar, BaseException):  # objevy navíc
+            ok_names |= {_normalize(n) for n, _m in similar}
     ok_names.discard("")
     per_artist: Counter = Counter()
     lfm_items: list[dict[str, str]] = []
-    for tag in mood_tracks.MOOD_TAGS.get(c.id, ())[:3]:
-        for x in await lastfm.tag_top_tracks(tag, 200):
+    tags = mood_tracks.MOOD_TAGS.get(c.id, ())[:3]
+    for top in await asyncio.gather(*(lastfm.tag_top_tracks(tag, 200) for tag in tags)):
+        for x in top:
             name = _normalize(x["artist"])
             if name in ok_names and per_artist[name] < 2 and x["artist"].strip().lower() not in mood_tracks.JUNK_ARTISTS:
                 per_artist[name] += 1

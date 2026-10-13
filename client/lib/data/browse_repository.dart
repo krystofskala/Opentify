@@ -191,10 +191,18 @@ class BrowseRepository {
 
   /// "Tvůj mix" kategorie podle poslechů; `null`, když na něj nemáš v téhle
   /// náladě/žánru dost skladeb. Poprvé za den se skládá pár sekund.
+  ///
+  /// Server skládá na pozadí: dokud odpovídá `building`, ptá se znovu
+  /// (13. 10.: jeden dlouhý požadavek přes 45 s appka vzdala).
   Future<HomePlaylistCard?> mix(String categoryId) async {
-    final json = await _api.getJson('/browse/$categoryId/mix');
-    final playlist = json['playlist'];
-    return playlist == null ? null : HomePlaylistCard.fromJson(playlist as Map<String, dynamic>);
+    for (var attempt = 0; attempt < 30; attempt++) {
+      final json = await _api.getJson('/browse/$categoryId/mix');
+      final playlist = json['playlist'];
+      if (playlist != null) return HomePlaylistCard.fromJson(playlist as Map<String, dynamic>);
+      if (json['building'] != true) return null;
+      await Future<void>.delayed(const Duration(seconds: 3));
+    }
+    return null;
   }
 
   /// Playlisty z Deezeru pro Hledat (od lidí i redakce -- GTA rádia,
