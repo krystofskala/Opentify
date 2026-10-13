@@ -231,6 +231,9 @@ async def on_startup() -> None:
     from app.home.play_now import warm_mood_tags_loop
 
     asyncio.create_task(warm_mood_tags_loop())
+    from app.preview_features import backfill_loop as preview_backfill_loop
+
+    asyncio.create_task(preview_backfill_loop())
 
 
 async def on_shutdown() -> None:

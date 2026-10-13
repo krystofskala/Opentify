@@ -66,15 +66,22 @@ def _store(recording_id: str, features: dict) -> None:
 
 
 async def analyze(recording_id: str, deezer_id: str) -> bool:
-    from app import audio_features
     from app.catalog.deezer import get_deezer_client
+
+    try:
+        track = await get_deezer_client().track(str(deezer_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.info("ukázka %s: %s", recording_id[:8], exc)
+        return False
+    url = (track or {}).get("preview")
+    return bool(url) and await analyze_url(recording_id, url)
+
+
+async def analyze_url(recording_id: str, url: str) -> bool:
+    from app import audio_features
 
     async with _sem:
         try:
-            track = await get_deezer_client().track(str(deezer_id))
-            url = (track or {}).get("preview")
-            if not url:
-                return False
             async with httpx.AsyncClient(timeout=_TIMEOUT_S, follow_redirects=True) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
@@ -114,3 +121,112 @@ async def ensure(recording_ids: list[str], timeout_s: float = 4.0) -> int:
         t.add_done_callback(_background.discard)
     done, _pending = await asyncio.wait(tasks, timeout=timeout_s)
     return sum(1 for t in done if not t.cancelled() and t.exception() is None and t.result())
+
+
+# Doplňování na pozadí (13. 10.): rozbor měla jen ~5 % poslouchaných skladeb
+# (jen stažené a nové z Pusť teď), plynulé řazení bylo u známých naslepo.
+# Napřed skladby s nejvíc poslechy napříč profily; bez ukázky se 30 dní
+# nezkouší znovu. Pomalu a s nižší prioritou než to, co otevřel uživatel.
+BACKFILL_BATCH = 200
+BACKFILL_PAUSE_S = 2.0
+BACKFILL_MIN_LISTENS = 2
+_MISS_TTL_S = 30 * 86400
+
+
+def _miss_key(recording_id: str) -> str:
+    return f"preview-features:miss:{recording_id}"
+
+
+def _backfill_candidates(limit: int) -> list[tuple[str, str | None, str, str, int | None]]:
+    """(skladba, deezer id nebo None, interpret, název, délka ms)."""
+    from sqlalchemy import text
+
+    with Session(engine) as session:
+        rows = session.exec(  # type: ignore[call-overload]
+            text(
+                "SELECT r.id, r.deezer_id, a.name, r.title, r.duration_ms FROM listen l "
+                "JOIN recording r ON r.id = l.recording_id "
+                "JOIN artist a ON a.id = r.artist_id "
+                "LEFT JOIN trackfeatures f ON f.recording_id = l.recording_id "
+                "WHERE f.recording_id IS NULL AND (r.deezer_id IS NULL OR r.deezer_id NOT LIKE 'own:%') "
+                "GROUP BY r.id HAVING COUNT(*) >= :min ORDER BY COUNT(*) DESC LIMIT :lim"
+            ).bindparams(min=BACKFILL_MIN_LISTENS, lim=limit * 3)
+        ).all()
+    if not rows:
+        return []
+    try:
+        from app.redis_bus import get_redis
+
+        missed = get_redis().mget([_miss_key(r[0]) for r in rows])
+    except Exception:  # noqa: BLE001
+        missed = [None] * len(rows)
+    return [(rid, str(dz) if dz else None, name, title, dur) for (rid, dz, name, title, dur), m in zip(rows, missed) if not m][:limit]
+
+
+def _plain(title: str) -> str:
+    from app.catalog.service import normalize_title  # i bez závorkových dovětků
+
+    return normalize_title(title or "")
+
+
+async def _search_preview(artist: str, title: str, duration_ms: int | None) -> str | None:
+    """Ukázka stejné skladby na Deezeru podle jména (skladba bez deezer id):
+    stejný interpret, stejný název bez závorek, délka do 8 s. Jen pro rozbor
+    zvuku -- katalog se tím nemění."""
+    from app.catalog.artwork import same_artist_name
+    from app.catalog.deezer import get_deezer_client
+
+    try:
+        res = await get_deezer_client().search(f'artist:"{artist}" track:"{title}"', 5)
+    except Exception:  # noqa: BLE001
+        return None
+    want = _plain(title)
+    for hit in (res or {}).get("data") or []:
+        if not hit.get("preview") or not same_artist_name((hit.get("artist") or {}).get("name", ""), artist):
+            continue
+        if _plain(hit.get("title") or "") != want:
+            continue
+        if duration_ms and hit.get("duration") and abs(hit["duration"] * 1000 - duration_ms) > 8000:
+            continue
+        return hit["preview"]
+    return None
+
+
+def _mark_miss(recording_id: str) -> None:
+    try:
+        from app.redis_bus import get_redis
+
+        get_redis().set(_miss_key(recording_id), 1, ex=_MISS_TTL_S)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def backfill_loop() -> None:
+    from app.catalog.rate_limit import mark_background
+
+    mark_background()
+    await asyncio.sleep(300)  # po startu nechat doběhnout Domů
+    while True:
+        try:
+            todo = await asyncio.to_thread(_backfill_candidates, BACKFILL_BATCH)
+            if not todo:
+                await asyncio.sleep(6 * 3600)
+                continue
+            done = 0
+            for rid, dz, artist, title, dur in todo:
+                if dz:
+                    ok = await analyze(rid, dz)
+                else:
+                    url = await _search_preview(artist, title, dur)
+                    ok = bool(url) and await analyze_url(rid, url)
+                if ok:
+                    done += 1
+                else:
+                    await asyncio.to_thread(_mark_miss, rid)
+                await asyncio.sleep(BACKFILL_PAUSE_S)
+            logger.info("rozbor ukázek na pozadí: %d z %d", done, len(todo))
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 -- smyčka nesmí umřít
+            logger.exception("rozbor ukázek na pozadí selhal")
+            await asyncio.sleep(600)
