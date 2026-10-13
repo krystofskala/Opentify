@@ -10,7 +10,7 @@ chytne i něco z nových, řetěz pokračuje (vkus se rozšiřuje krok za krokem
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import timedelta
 
 from sqlmodel import Session, select
@@ -21,6 +21,7 @@ WINDOW_DAYS = 21
 NEW_DAYS = 60
 RETURN_GAP_DAYS = 120
 LIKE_DAYS = 30
+BULK_LIKES_PER_DAY = 15
 
 
 def caught_tracks(user_id: str, act) -> list[str]:
@@ -74,4 +75,7 @@ def _recent_likes(user_id: str, since) -> list[tuple[str, object]]:
                 PlaylistItem.playlist_id == liked, PlaylistItem.added_at >= since.replace(tzinfo=None)
             )
         ).all()
-    return [(rid, added) for rid, added in rows if rid]
+    # Hromadně přidané (import oblíbených ze Spotify = stovky "srdíček"
+    # s dnešním datem) nejsou čerstvé objevy -- jen dny s pár srdíčky.
+    per_day = Counter(added.date() for _rid, added in rows if added)
+    return [(rid, added) for rid, added in rows if rid and added and per_day[added.date()] <= BULK_LIKES_PER_DAY]
