@@ -129,6 +129,12 @@ async def get_artist_stats(artist_id: str, _current=Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="interpret nenalezen")
         if (artist.mbid or "").startswith("own:"):
             return {"listeners": None, "playcount": None, "popularReleaseIds": [], "tags": []}
+        from app.catalog.namesakes import is_minor_namesake
+
+        if await is_minor_namesake(artist):
+            # Neznámý jmenovec slavnějšího (Journey 2024 vs. kapela Journey):
+            # posluchači a štítky podle jména by patřili tomu slavnému.
+            return {"listeners": None, "playcount": None, "popularReleaseIds": [], "tags": []}
         name = primary_artist_name(artist.name)
         releases = session.exec(select(Release).where(Release.artist_id == artist_id)).all()
         # Přesný název (i se závorkami) -- Last.fm počítá každou verzi zvlášť
@@ -393,6 +399,54 @@ async def mark_release_not_artist(
     if keys:
         await r.delete(*keys)
     return {"artistId": artist_id, "releaseId": release_id, "notMine": not_mine}
+
+
+@catalog_router.post("/artists/{artist_id}/wrong-photo")
+async def wrong_photo(artist_id: str, _current=Depends(get_current_user)):
+    """"Špatná fotka" (14. 10.): současná fotka se zapamatuje jako špatná
+    a hledá se jiná (Deezer, Wikidata). Nenajde-li se, interpret je bez
+    fotky -- radši žádná než cizí."""
+    from sqlmodel import Session
+
+    from app.catalog.artwork import fill_artist
+    from app.db import engine
+    from app.models import Artist
+
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        if artist is None:
+            raise HTTPException(status_code=404, detail="interpret nenalezen")
+        refs = dict(artist.external_refs or {})
+        rejected = list(refs.get("rejectedPhotos") or [])
+        for url in artist.images or []:
+            if url not in rejected:
+                rejected.append(url)
+        refs["rejectedPhotos"] = rejected
+        artist.external_refs = refs
+        artist.images = []
+        session.add(artist)
+        session.commit()
+    found = await fill_artist(artist_id, force=True)
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        image = (artist.images or [None])[0] if artist else None
+    return {"found": found, "imageUrl": image}
+
+
+@catalog_router.get("/artists/{artist_id}/namesakes")
+async def artist_namesakes(artist_id: str, _current=Depends(get_current_user)):
+    """Ostatní interpreti stejného jména ("Je to jiný interpret")."""
+    from sqlmodel import Session
+
+    from app.catalog.namesakes import namesakes
+    from app.db import engine
+    from app.models import Artist
+
+    with Session(engine) as session:
+        artist = session.get(Artist, artist_id)
+        if artist is None:
+            raise HTTPException(status_code=404, detail="interpret nenalezen")
+        return {"artists": await namesakes(session, artist)}
 
 
 @catalog_router.get("/artists/{artist_id}/bio")

@@ -1071,6 +1071,12 @@ class CatalogService:
             return ArtistBioOut(
                 bio=refs.get("bio"), related_artists=[], bands=[self._to_artist_out(a) for a in bands]
             )
+        from app.catalog.namesakes import is_minor_namesake
+
+        if await is_minor_namesake(artist):
+            # Neznámý jmenovec slavnějšího (14. 10., Journey): životopis i
+            # podobní podle jména by patřili tomu slavnému.
+            return ArtistBioOut(bio=None, related_artists=[])
         # "Podobní" z Last.fm (podobnost podle posluchačů) -- MusicBrainz
         # vztahy (členové, spolupráce) jsou jen záloha.
         similar = await self._lastfm_similar(artist)
