@@ -1074,21 +1074,31 @@ class CatalogService:
         # "Podobní" z Last.fm (podobnost podle posluchačů) -- MusicBrainz
         # vztahy (členové, spolupráce) jsou jen záloha.
         similar = await self._lastfm_similar(artist)
+        relations: list[dict[str, Any]] = []
+        if artist.mbid is not None:
+            try:
+                relations = (await self._mb.get_artist(artist.mbid)).get("relations") or []
+            except MusicBrainzError:
+                relations = []
+
+        # Životopis (13. 10.: Hugh Coltman neměl nic): Wikidata z MusicBrainz,
+        # jinak hledání podle jména (jen shoda s popisem "hudebník/kapela"),
+        # i jiné Wikipedie než cs/en, nakonec text z Last.fm.
+        wiki = get_wikimedia_client()
+        wikidata_qid = self._extract_wikidata_qid(relations) or await wiki.search_music_entity(artist.name)
+        bio: str | None = await wiki.get_bio_any_language(wikidata_qid) if wikidata_qid else None
+        if not bio:
+            try:
+                from app.catalog import lastfm
+                from app.home.lastfm_taste import lastfm_name
+
+                info = await lastfm.artist_info(lastfm_name(artist.name))
+                if info and info.get("bio"):
+                    bio = f"{info['bio']}\n\n(Z Last.fm, anglicky.)"
+            except Exception:  # noqa: BLE001 -- best effort
+                bio = None
         if artist.mbid is None:
-            return ArtistBioOut(bio=None, related_artists=[self._to_artist_out(a) for a in similar])
-
-        try:
-            data = await self._mb.get_artist(artist.mbid)
-        except MusicBrainzError:
-            return ArtistBioOut(bio=None, related_artists=[self._to_artist_out(a) for a in similar])
-
-        relations = data.get("relations") or []
-
-        bio: str | None = None
-        wikidata_qid = self._extract_wikidata_qid(relations)
-        if wikidata_qid is not None:
-            wiki = get_wikimedia_client()
-            bio = await wiki.get_bio_from_wikidata(wikidata_qid)
+            return ArtistBioOut(bio=bio, related_artists=[self._to_artist_out(a) for a in similar])
 
         related = similar or self._upsert_related_artists(relations)
         bands, members = self._band_relations(relations)

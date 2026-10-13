@@ -33,6 +33,21 @@ LOOKUP_TTL_SECONDS = 24 * 60 * 60  # 24h -- životopisy se prakticky nemění
 # ale řada menších interpretů má jen anglický článek.
 _PREFERRED_WIKIS = ["cswiki", "enwiki"]
 _WIKI_TO_LANG = {"cswiki": "cs", "enwiki": "en"}
+# Interpret bez cs/en článku (13. 10.: Hugh Coltman -- Brit ve Francii):
+# další Wikipedie s poznámkou, odkud text je.
+_MORE_WIKIS = {
+    "frwiki": ("fr", "francouzské"), "dewiki": ("de", "německé"), "eswiki": ("es", "španělské"),
+    "itwiki": ("it", "italské"), "skwiki": ("sk", "slovenské"), "plwiki": ("pl", "polské"),
+    "nlwiki": ("nl", "nizozemské"), "svwiki": ("sv", "švédské"), "ptwiki": ("pt", "portugalské"),
+}
+# Popis entity na Wikidatech, který říká "hudebník / kapela" (hledání podle
+# jména nesmí přiřadit jiného člověka stejného jména).
+_MUSIC_WORDS = (
+    "musician", "singer", "band", "songwriter", "rapper", "guitarist", "pianist", "composer", "musical group",
+    "duo", "dj", "drummer", "bassist", "vocalist", "hudebník", "zpěvák", "zpěvačka", "kapela", "skupina",
+    "chanteur", "chanteuse", "musicien", "musicienne", "groupe", "sänger", "sängerin", "musiker", "cantante",
+    "músico", "musicista", "gruppo",
+)
 
 
 class WikimediaClient:
@@ -117,6 +132,55 @@ class WikimediaClient:
         if not entity:
             return None
         return await self.get_bio_from_sitelinks(entity.get("sitelinks") or {})
+
+    async def search_music_entity(self, name: str) -> str | None:
+        """Q-id interpreta podle jména -- jen přesná shoda názvu a popis, který
+        říká, že jde o hudebníka nebo kapelu; jinak None."""
+        cache_key = f"wikidata:search-music:{name.casefold()}"
+
+        async def fetch() -> dict[str, Any]:
+            resp = await self._client.get(
+                WIKIDATA_API_BASE,
+                params={"action": "wbsearchentities", "search": name, "language": "en", "uselang": "en",
+                        "type": "item", "limit": "7", "format": "json"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        try:
+            data = await cached_json(cache_key, LOOKUP_TTL_SECONDS, fetch)
+        except httpx.HTTPError:
+            return None
+        want = name.casefold().strip()
+        for hit in (data or {}).get("search") or []:
+            label = (hit.get("label") or "").casefold().strip()
+            desc = (hit.get("description") or "").casefold()
+            if label == want and any(w in desc for w in _MUSIC_WORDS):
+                return hit.get("id")
+        return None
+
+    async def get_bio_any_language(self, wikidata_qid: str) -> str | None:
+        """Jako `get_bio_from_wikidata`, a když cs/en článek není, další
+        Wikipedie -- s poznámkou, z jaké je text."""
+        bio = await self.get_bio_from_wikidata(wikidata_qid)
+        if bio:
+            return bio
+        try:
+            entity = ((await self._get_wikidata_sitelinks(wikidata_qid)).get("entities") or {}).get(wikidata_qid) or {}
+        except httpx.HTTPError:
+            return None
+        sitelinks = entity.get("sitelinks") or {}
+        for wiki_key, (lang, adj) in _MORE_WIKIS.items():
+            title = (sitelinks.get(wiki_key) or {}).get("title")
+            if not title:
+                continue
+            try:
+                intro = await self._get_wikipedia_intro(lang, title)
+            except httpx.HTTPError:
+                intro = None
+            if intro:
+                return f"{intro}\n\n(Z {adj} Wikipedie.)"
+        return None
 
     async def get_bio_from_sitelinks(self, sitelinks: dict[str, Any]) -> str | None:
         """Úvod článku (čeština -> angličtina) z už načtených sitelinks
