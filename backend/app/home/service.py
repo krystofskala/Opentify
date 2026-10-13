@@ -67,10 +67,12 @@ def _generator_registry() -> list[tuple[str, timedelta, Callable[[], Awaitable[i
     registry.append(("apple:rss:cz", g.CHART_TTL, lambda: g.build_apple_chart("cz", "Apple Music Top 50: Česko", "Nejhranější na Apple Music v Česku")))
     registry.append(("personal:mixes", g.DAILY_TTL, g.build_personal_mixes))
     # Vlastní mixy: interně hlídají den (4:00) / týden, kontrola každou hodinu.
-    from app.home import scenes
+    from app.home import kam_dal, scenes
 
     # Mapa scén (týdně) před Denními mixy -- ty z ní berou spící scény.
     registry.append(("personal:scenes", timedelta(hours=1), scenes.build))
+    # Kam dál po opadající vlně (denně) -- z něj berou mixy, Pusť teď a Objevy.
+    registry.append(("personal:kamdal", timedelta(hours=1), kam_dal.build))
     registry.append(("personal:daily-mixes", timedelta(hours=1), pm.build_daily_mixes))
     registry.append(("personal:discover-weekly", timedelta(hours=1), pm.build_discover_weekly))
     registry.append(("personal:on-repeat", timedelta(hours=1), pm.build_on_repeat))

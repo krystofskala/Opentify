@@ -799,6 +799,8 @@ async def build_daily_mixes() -> int:
             description = " · ".join(
                 x for x in (label, f"{', '.join(names)} a další", f"naposledy {scene.last_year}" if scene.last_year else "") if x
             )
+            if getattr(scene, "kam_dal", ""):
+                description = f"Kam dál po {scene.kam_dal} · {description}"
         else:
             genre = _genre_label(taste, cluster, familiar)
             description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
@@ -873,6 +875,16 @@ async def _with_scenes(clusters: list[Cluster], taste: Taste, day: str) -> tuple
     picked = scenes.pick_dormant(
         smap, MAX_DAILY_MIXES - len(stable), rng, today=day, shown=shown, exclude_artists=taken
     )
+    try:
+        from app.home import kam_dal
+
+        path = await asyncio.to_thread(kam_dal.path_scene, g.home_user(), day)
+    except Exception:  # noqa: BLE001
+        path = None
+    if path and path[0] in smap.by_id():
+        scene = smap.by_id()[path[0]]
+        scene.kam_dal = path[2]  # type: ignore[attr-defined]  # popis mixu
+        picked = [scene] + [s for s in picked if s.id != scene.id][: max(0, len(picked) - 1)]
     out = list(stable)
     info: dict[int, object] = {}
     for scene in picked:
@@ -1054,6 +1066,14 @@ def _scene_seeds(user_id: str, rng: random.Random, skip: set[str], n: int) -> li
     return out
 
 
+async def _artist_of_rec(recording_id: str) -> str | None:
+    from app.models import Recording
+
+    with Session(engine) as session:
+        rec = session.get(Recording, recording_id)
+    return rec.artist_id if rec else None
+
+
 async def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str], rng: random.Random) -> list[str]:
     """Objevy v blocích podle scény, ze které vzešly (13. 10.: pop-punk,
     pak jazzová zpěvačka, pak zase pop-punk -- dřív se vše zamíchalo).
@@ -1227,6 +1247,17 @@ async def build_discover_weekly() -> int:
             if a and a not in hooks and a not in transient:
                 hooks.append(a)
     seeds = list(dict.fromkeys(hooks[:4] + transient + lasting[:8]))
+    try:
+        from app.home import kam_dal
+
+        share = await asyncio.to_thread(kam_dal.dose, g.home_user())
+        if share > 0:
+            tracks = await asyncio.to_thread(kam_dal.path_tracks, g.home_user(), ("vedle", "skok"))
+            artists = [taste.artist_of.get(r) or _artist_of_rec(r) for r in tracks["vedle"][:6] + tracks["skok"][:6]]
+            extra = [a for a in dict.fromkeys(artists) if a and a not in seeds][: max(1, round(len(seeds) * share / 2))]
+            seeds = list(dict.fromkeys(seeds[: len(seeds) - len(extra) // 2] + extra))
+    except Exception:  # noqa: BLE001 -- Kam dál je doplněk
+        logger.exception("objevy týdne: kam dál")
 
     # Kandidáti = "related" interpreti tvých interpretů, které neznáš. Každé
     # semínko přispěje svými nejbližšími rovnoměrně (dřív vyhrávala shoda
