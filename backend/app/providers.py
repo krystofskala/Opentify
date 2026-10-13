@@ -98,6 +98,10 @@ def _soulseek_words(artist: str | None, title: str) -> str:
     # každé slovo musí v cestě být a "ve" zbytečně zužovalo hledání.
     text = re.sub(r"['’`´]\w{1,2}\b", "", f"{artist} {title}")
     words = [w for w in re.findall(r"\w+", text) if len(w) >= 2 and w.lower() not in _SOULSEEK_STOPWORDS]
+    # Album "Denison Witmer Live at Schubas" od Denison Witmer -- jméno
+    # dvakrát v dotazu nic nepřidá, každé slovo jen jednou.
+    seen: set[str] = set()
+    words = [w for w in words if not (w.casefold() in seen or seen.add(w.casefold()))]
     return " ".join(words)
 
 
