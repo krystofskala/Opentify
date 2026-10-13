@@ -1296,6 +1296,9 @@ async def _vpn_port_tick(r) -> None:
         from app import vpn_ports
 
         await vpn_ports.sync_slskd_port()
+        from app import slskd_watch
+
+        await slskd_watch.check(r)
 
 
 async def _podcasts_tick(r) -> None:
