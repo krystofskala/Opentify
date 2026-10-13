@@ -127,8 +127,11 @@ def _import_source_key(name: str) -> str:
 
 
 def _import_tracks_into_playlist(
-    session: Session, playlist: Playlist, tracks: list[TrackRow], *, mirror: bool
+    session: Session, playlist: Playlist, tracks: list[TrackRow], *, mirror: bool, added: list | None = None
 ) -> PlaylistReport:
+    """`added`: kdy byla která skladba přidána (Exportify "Added At", stejné
+    pořadí jako `tracks`) -- u Oblíbených i u už importovaných se doplní
+    skutečné datum místo dne importu (13. 10.)."""
     existing_items = session.exec(
         select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position)
     ).all()
@@ -137,7 +140,8 @@ def _import_tracks_into_playlist(
     matched = skipped = 0
     resolved: list[str] = []
     seen: set[str] = set()
-    for artist_name, track_name, album_name, duration_ms in tracks:
+    added_of: dict[str, Any] = {}
+    for idx, (artist_name, track_name, album_name, duration_ms) in enumerate(tracks):
         artist_name = (artist_name or "").strip()
         track_name = (track_name or "").strip()
         if not artist_name or not track_name:
@@ -151,22 +155,32 @@ def _import_tracks_into_playlist(
         if recording.id not in seen:  # stejná skladba 2x v jednom playlistu -> jednou
             seen.add(recording.id)
             resolved.append(recording.id)
+            if added and idx < len(added) and added[idx] is not None:
+                added_of[recording.id] = added[idx]
 
     already_present = sum(1 for rid in resolved if rid in existing_ids)
     if mirror:
         session.exec(delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id))
         final_ids = resolved
         for position, rid in enumerate(final_ids):
-            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=position))
+            item = PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=position)
+            if rid in added_of:
+                item.added_at = added_of[rid]
+            session.add(item)
     else:
         # Oblíbené: nové NAHORU v pořadí exportu (ten je nejnovější první),
         # stejně jako lajk v appce (routes/library.like_song).
         new_ids = [rid for rid in resolved if rid not in existing_ids]
         top = min((item.position for item in existing_items), default=0)
         for i, rid in enumerate(new_ids):
-            session.add(
-                PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=top - len(new_ids) + i)
-            )
+            item = PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=top - len(new_ids) + i)
+            if rid in added_of:
+                item.added_at = added_of[rid]
+            session.add(item)
+        for item in existing_items:  # skutečné datum i u už importovaných
+            if item.recording_id in added_of:
+                item.added_at = added_of[item.recording_id]
+                session.add(item)
         final_ids = new_ids + [item.recording_id for item in existing_items]
 
     playlist.updated_at = utcnow()
@@ -194,15 +208,22 @@ def _import_tracks_into_playlist(
     )
 
 
+_LIKED_NAMES = {"liked_songs", "oblibene_skladby", "moje_oblibene_skladby"}
+
+
 def _import_named_playlist(
-    session: Session, user_id: str, name: str, tracks: list[TrackRow], description: str = "Import ze Spotify"
+    session: Session, user_id: str, name: str, tracks: list[TrackRow], description: str = "Import ze Spotify",
+    added: list | None = None,
 ) -> PlaylistReport:
     """`description` -- odkud playlist je (Spotify / YouTube Music / Apple Music)."""
-    if name.replace(" ", "_").lower() == "liked_songs":
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().replace(" ", "_").lower()
+    if plain in _LIKED_NAMES:
         playlist = get_or_create_liked_songs_playlist(session, user_id)
-        return _import_tracks_into_playlist(session, playlist, tracks, mirror=False)
+        return _import_tracks_into_playlist(session, playlist, tracks, mirror=False, added=added)
     playlist = _get_or_create_playlist(session, user_id, _import_source_key(name), name, description)
-    return _import_tracks_into_playlist(session, playlist, tracks, mirror=True)
+    return _import_tracks_into_playlist(session, playlist, tracks, mirror=True, added=added)
 
 
 def _primary_artist(field_value: str) -> str:
@@ -228,6 +249,20 @@ def _csv_tracks(text: str) -> list[TrackRow]:
         )
         for row in csv.DictReader(io.StringIO(text))
     ]
+
+
+def _csv_added(text: str) -> list:
+    """Exportify "Added At" (ISO, UTC) ve stejném pořadí jako `_csv_tracks`."""
+    from datetime import datetime
+
+    out = []
+    for row in csv.DictReader(io.StringIO(text)):
+        raw = (row.get("Added At") or "").strip()
+        try:
+            out.append(datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None) if raw else None)
+        except ValueError:
+            out.append(None)
+    return out
 
 
 def _official_playlists(data: dict[str, Any]) -> list[tuple[str, list[TrackRow]]]:
@@ -295,7 +330,9 @@ def _import_zip(session: Session, user_id: str, raw: bytes) -> ImportResult:
                 text = zf.read(info).decode("utf-8-sig", errors="replace")
                 title = (stem or "Playlist").replace("_", " ")
                 result.playlists.append(
-                    _import_named_playlist(session, user_id, _unique_name(title, seen_names), _csv_tracks(text))
+                    _import_named_playlist(
+                        session, user_id, _unique_name(title, seen_names), _csv_tracks(text), added=_csv_added(text)
+                    )
                 )
             elif lower.endswith(".json") and (stem.lower().startswith("playlist") or stem.lower() == "yourlibrary"):
                 try:
