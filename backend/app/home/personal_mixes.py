@@ -1142,6 +1142,39 @@ async def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str
     return out
 
 
+def _discover_ignored(user_id: str) -> set[str]:
+    """Skladby z minulých Objevů, které profil nepustil nebo přeskočil --
+    znovu se nenabízejí (audit 13. 10.: Objevy si nabídnuté nepamatovaly).
+    Pamatuje si posledních ~600."""
+    from app.models import HomeSnapshot, PlayEvent, Playlist, PlaylistItem
+
+    key = f"discover-ignored:{user_id}"
+    with Session(engine) as session:
+        row = session.get(HomeSnapshot, key)
+        ignored = list((row.payload or {}).get("ids") or []) if row else []
+        pl = session.exec(
+            select(Playlist).where(Playlist.owner_user_id == user_id, Playlist.source == "personal:discover-weekly")
+        ).first()
+        # Jen Objevy, které měly čas (přestavění v týdnu po změně algoritmu
+        # by jinak "nepuštěné" označilo hned).
+        if pl is not None and pl.updated_at and utcnow().replace(tzinfo=None) - pl.updated_at.replace(tzinfo=None) >= timedelta(days=5):
+            ids = list(session.exec(select(PlaylistItem.recording_id).where(PlaylistItem.playlist_id == pl.id)).all())
+            since = pl.updated_at
+            played = set(session.exec(
+                select(PlayEvent.recording_id).where(
+                    PlayEvent.user_id == user_id, PlayEvent.recording_id.in_(ids),  # type: ignore[attr-defined]
+                    PlayEvent.started_at >= since, PlayEvent.end_reason != "skipped",
+                )
+            ).all()) if ids else set()
+            ignored = list(dict.fromkeys(ignored + [r for r in ids if r not in played]))[-600:]
+            row = row or HomeSnapshot(key=key, payload={})
+            row.payload = {"ids": ignored}
+            row.generated_at = utcnow()
+            session.add(row)
+            session.commit()
+    return set(ignored)
+
+
 def _known_for_discover(taste: Taste) -> tuple[set[str], set[str]]:
     """Interpreti, které Objevy vynechají: jen ti, ke kterým se profil sám
     vrací (2+ dny, algoritmus po třetinách) nebo které si uložil. Dřív stačil
@@ -1175,7 +1208,7 @@ async def build_discover_weekly() -> int:
         return 0
     rng = random.Random(f"discover:{week}")
     recent = {r for r, t in taste.last_played.items() if utcnow() - t <= timedelta(days=60)}
-    exclude = taste.known | recent
+    exclude = taste.known | recent | await asyncio.to_thread(_discover_ignored, g.home_user())
     known_names, known_dz = _known_for_discover(taste)
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).

@@ -307,6 +307,10 @@ class RecBatchItem(SQLModel, table=True):
     position: int = 0
     slot: str = "familiar"  # familiar | new | explore (náhodný průzkum, ~10 % nových)
     mode: str = "fresh"  # fresh (ťuknutí) | endless | mood:<nálada>
+    # Odkud skladba přišla (audit 13. 10.: nešlo poznat, který zdroj funguje):
+    # familiar | dormant | lastfm | mood | caught_artist | deezer_radio |
+    # second_chance | deferred
+    source: str | None = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
