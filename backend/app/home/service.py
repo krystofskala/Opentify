@@ -42,6 +42,9 @@ class PlaylistCardOut(CamelModel):
     accent_color: str | None = None
     # Generativní obal vlastních mixů: daily | genre | mood | year.
     art_style: str | None = None
+    # Fakta pro obal (app/home/cover_art.py): počty, tempo, podíly stylů,
+    # poslechy po měsících, fotky interpretů.
+    art: dict | None = None
 
 
 class AlbumCardOut(CamelModel):
@@ -366,6 +369,9 @@ def _art_style(source: str | None) -> str | None:
     return None
 
 
+from app.home import cover_art  # noqa: E402
+
+
 def _card(session: Session, playlist: Playlist) -> PlaylistCardOut:
     return PlaylistCardOut(
         accent_color=_accent_for(playlist.source),
@@ -381,6 +387,7 @@ def _card(session: Session, playlist: Playlist) -> PlaylistCardOut:
         item_count=_item_count(session, playlist.id),
         generated_at=playlist.generated_at,
         badge=_BADGES.get(playlist.source or ""),
+        art=cover_art.facts(session, playlist),
     )
 
 

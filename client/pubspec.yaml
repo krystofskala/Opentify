@@ -75,6 +75,10 @@ flutter:
   # celou váhovou škálu (400-800), Flutter si z něj sám vybere instanci
   # podle FontWeight v TextStyle.
   fonts:
+    # Obaly mixů (14. 10.): proměnná šířka + tloušťka (fontVariations wdth/wght).
+    - family: Archivo
+      fonts:
+        - asset: assets/fonts/Archivo/Archivo-Variable.ttf
     - family: Nunito
       fonts:
         - asset: assets/fonts/Nunito/Nunito-VariableFont_wght.ttf

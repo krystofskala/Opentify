@@ -7,9 +7,10 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../data/home_repository.dart';
 import 'media_card.dart' show ArtworkImage;
+import 'mix_cover.dart';
 
 /// Styl generativního obalu vlastního mixu (backend `PlaylistCardOut.art_style`).
-enum MixArtStyle { daily, genre, mood, year, discover }
+enum MixArtStyle { daily, genre, mood, year }
 
 /// Co obal potřebuje: styl, stálý seed (stejný mix = pořád stejný obrázek),
 /// barvu, velký text (číslo mixu / žánr / rok) a fotky interpretů.
@@ -21,7 +22,15 @@ class MixArtSpec {
     this.color,
     this.photos = const [],
     this.eyebrow,
+    this.facts,
   });
+
+  /// Fakta pro obal verze 2 (backend `PlaylistCardOut.art`).
+  final Map<String, dynamic>? facts;
+
+  MixArtSpec withFacts(Map<String, dynamic>? facts) => facts == null
+      ? this
+      : MixArtSpec(style: style, seed: seed, headline: headline, color: color, photos: photos, eyebrow: eyebrow, facts: facts);
 
   final MixArtStyle style;
   final String seed;
@@ -68,6 +77,7 @@ MixArtSpec? mixArtOf(HomePlaylistCard card) => mixArtForSource(
       photos: card.coverUrls,
       color: _hex(card.accentColor),
       categoryGroup: card.artStyle == 'mood' ? 'mood' : null,
+      facts: card.art,
     );
 
 /// Obal vlastního mixu jen ze zdroje playlistu (`personal:daily-mix:2`,
@@ -75,6 +85,17 @@ MixArtSpec? mixArtOf(HomePlaylistCard card) => mixArtForSource(
 /// na Domů i v hlavičce playlistu. `null` = obyčejný playlist.
 /// `categoryGroup` (mood/genre) a `color` jen u mixů kategorií.
 MixArtSpec? mixArtForSource({
+  required String? source,
+  required String title,
+  List<String> photos = const [],
+  Color? color,
+  String? categoryGroup,
+  Map<String, dynamic>? facts,
+}) =>
+    _mixArtForSource(source: source, title: title, photos: photos, color: color, categoryGroup: categoryGroup)
+        ?.withFacts(facts);
+
+MixArtSpec? _mixArtForSource({
   required String? source,
   required String title,
   List<String> photos = const [],
@@ -95,7 +116,7 @@ MixArtSpec? mixArtForSource({
   // Ostatní vlastní mixy -- styly, které unesou delší název (2 řádky).
   if (s.startsWith('personal:discover-weekly')) {
     return MixArtSpec(
-      style: MixArtStyle.mood, // discover až po výběru tvaru
+      style: MixArtStyle.mood,
       seed: s,
       headline: 'Objevy týdne',
       color: const Color(0xFF12B5CB),
@@ -173,6 +194,9 @@ class MixArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Obaly verze 2 (Objevy, denní mixy, žánry, nálady, roky).
+    final v2 = mixCoverV2(spec, compact: compact, labels: labels);
+    if (v2 != null) return v2;
     final hue = _hue;
     final seed = _seedOf(spec.seed);
     return LayoutBuilder(
@@ -182,7 +206,6 @@ class MixArtwork extends StatelessWidget {
           MixArtStyle.daily => _WavesPainter(hue, seed),
           MixArtStyle.genre => _GroovesPainter(hue, seed),
           MixArtStyle.mood => _AuroraPainter(hue, seed),
-          MixArtStyle.discover => const _BeamPainter(),
           MixArtStyle.year => _BarsPainter(hue, seed),
         };
         return Stack(
@@ -276,29 +299,6 @@ class MixArtwork extends StatelessWidget {
             ),
           ),
         ];
-      case MixArtStyle.discover:
-        if (compact) return const [];
-        // Rovné tučné písmo na dva řádky -- ne kurzíva mixů nálad, Objevy
-        // mají být na první pohled jiné (13. 10.).
-        return [
-          if (label != null) label,
-          Positioned(
-            left: side * 0.08,
-            right: side * 0.08,
-            bottom: side * 0.08,
-            child: Text(
-              spec.headline.replaceFirst(' ', '\n'),
-              maxLines: 2,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: side * 0.16,
-                fontWeight: FontWeight.w800,
-                height: 1.0,
-                shadows: shadow,
-              ),
-            ),
-          ),
-        ];
       case MixArtStyle.genre:
       case MixArtStyle.mood:
         if (compact) return const [];
@@ -353,7 +353,6 @@ class MixBackground extends StatelessWidget {
       MixArtStyle.daily => _WavesPainter(hue, s),
       MixArtStyle.genre => _GroovesPainter(hue, s),
       MixArtStyle.mood => _AuroraPainter(hue, s),
-      MixArtStyle.discover => const _BeamPainter(),
       MixArtStyle.year => _BarsPainter(hue, s),
     };
     return Stack(
@@ -518,50 +517,6 @@ class _AuroraPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_AuroraPainter old) => old.hue != hue || old.seed != seed;
-}
-
-/// Objevy týdne: tyrkysová aurora se světelným kuželem zprava zdola
-/// (13. 10., vybráno z nákresů). Kužel = dvoubodový radiální přechod, jehož
-/// ohnisko leží mimo cílový kruh -- stejně jako `createRadialGradient`
-/// v prohlížeči, ze kterého nákres vznikl. Pevná paleta, ne odstín mixu.
-class _BeamPainter extends CustomPainter {
-  const _BeamPainter();
-
-  // (ohnisko x, y, střed x, y, poloměr, odstín, jas, krytí) jako podíl strany.
-  static const _layers = [
-    [0.237, 0.551, 0.874, 0.779, 0.653, 214.6, 0.646, 0.75],
-    [0.388, 0.034, 0.754, 0.158, 0.817, 201.8, 0.661, 0.75],
-    [0.692, 0.913, 0.167, 0.357, 0.612, 192.2, 0.640, 0.75],
-    [0.230, 0.411, 0.462, 0.365, 0.736, 211.3, 0.687, 0.75],
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final s = size.shortestSide;
-    final rect = Offset.zero & size;
-    canvas.drawRect(rect, Paint()..color = const Color(0xFF0D4D57));
-    final edge = const HSLColor.fromAHSL(0, 190, 0.8, 0.4).toColor();
-    for (final l in _layers) {
-      final color = HSLColor.fromAHSL(l[7], l[5], 0.8, l[6]).toColor();
-      canvas.drawRect(
-        rect,
-        Paint()
-          ..shader = ui.Gradient.radial(
-            Offset(l[2] * s, l[3] * s),
-            l[4] * s,
-            [color, edge],
-            null,
-            TileMode.clamp,
-            null,
-            Offset(l[0] * s, l[1] * s),
-            0,
-          ),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_BeamPainter old) => false;
 }
 
 /// Rok: sloupce ekvalizéru ve spodní polovině, střídavě dva tóny.
