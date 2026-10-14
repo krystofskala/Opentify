@@ -80,6 +80,20 @@ def _years(session: Session, user_id: str, first: int, last: int) -> list[int]:
     return [by_year.get(y, 0) for y in range(first, last + 1)]
 
 
+def daily_label(description: str) -> dict[str, str | None]:
+    """Zaměření a interpreti Denního mixu z popisu, ať je štítek obalu u všech
+    mixů stejný. Popis má podle druhu skupiny tvary „Styl · X, Y a další ·
+    naposledy 2019“, „Stálice · X, Y a další“ a „X, Y a další · styl“ (styl i
+    chybí) -- interpreti jsou část s „a další“. Bez stylu je zaměřením první
+    interpret."""
+    parts = [p.strip() for p in description.split(" · ") if p.strip()]
+    artists = next((p for p in parts if p.endswith(" a další")), None)
+    style = next((p for p in parts if p != artists and not p.startswith("naposledy ")), None)
+    if style is None and artists:
+        style = artists.removesuffix(" a další").split(",")[0].strip() or None
+    return {"style": style, "artistsLine": artists or (parts[0] if parts else None)}
+
+
 def facts(session: Session, playlist: Playlist) -> dict[str, Any] | None:
     source = playlist.source or ""
     if not source.startswith("personal:"):
@@ -112,10 +126,7 @@ def facts(session: Session, playlist: Playlist) -> dict[str, Any] | None:
                 out["week"] = playlist.generated_at.isocalendar()[1]
         elif source.startswith("personal:daily-mix:"):
             out["shares"] = _shares(session, counts)
-            desc = playlist.description or ""
-            style, _, rest = desc.partition(" · ")
-            out["style"] = style if rest else None
-            out["artistsLine"] = (rest or desc).split(" · ")[0] or None
+            out.update(daily_label(playlist.description or ""))
     if len(_cache) > 2000:
         _cache.clear()
     _cache[key] = out
