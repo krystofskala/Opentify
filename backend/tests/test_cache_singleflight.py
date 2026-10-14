@@ -114,3 +114,30 @@ def test_waits_for_other_process_holding_redis_lock(monkeypatch):
         return await cache.cached_json("cat:w", 60, build)
 
     assert asyncio.run(run()) == {"from": "worker"}
+
+
+class DownRedis:
+    """Redis neběží (simulace 14. 10.: bez Redisu padala skoro celá appka)."""
+
+    async def _fail(self, *a, **k):
+        from redis.exceptions import ConnectionError
+
+        raise ConnectionError("Error -3 connecting to redis:6379")
+
+    get = set = exists = delete = _fail
+
+
+def test_redis_down_builds_without_cache(monkeypatch):
+    monkeypatch.setattr(cache, "get_redis", lambda: DownRedis())
+
+    async def build():
+        return {"n": 7}
+
+    async def run():
+        return (
+            await cache.cached_json("cat:down", 60, build),
+            await cache.cached_json_swr("cat:down", 60, build),
+        )
+
+    assert asyncio.run(run()) == ({"n": 7}, {"n": 7})
+    assert not cache._inflight
