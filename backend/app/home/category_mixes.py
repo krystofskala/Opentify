@@ -91,7 +91,9 @@ _MOOD_GENRES: dict[str, tuple[str, ...]] = {
 }
 
 _CLASSIFY_BUDGET_BACKGROUND = 250
-_CLASSIFY_BUDGET_PAGE = 25
+# Stránka kategorie nezařazuje (14. 10.: 25 interpretů = ~6 s čekání při každém
+# skládání); dozařazuje noční přestavba Domů (_CLASSIFY_BUDGET_BACKGROUND).
+_CLASSIFY_BUDGET_PAGE = 0
 
 _locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _VERSION = 8  # zvýšit při změně skládání -- dnešní mixy se postaví znovu
@@ -108,12 +110,14 @@ def _source(category_id: str) -> str:
 
 def _stored_shares(artist_ids: list[str]) -> dict[str, dict[str, float] | None]:
     """artist -> {kategorie: podíl}; `None` = ještě nezjišťováno."""
-    out: dict[str, dict[str, float] | None] = {}
+    out: dict[str, dict[str, float] | None] = dict.fromkeys(artist_ids)
+    # Po dávkách jedním dotazem (14. 10.: po jednom 9 877 interpretů = 3,5 s).
     with Session(engine) as session:
-        for artist_id in artist_ids:
-            artist = session.get(Artist, artist_id)
-            info = ((artist.external_refs or {}) if artist else {}).get("dzGenres")
-            out[artist_id] = None if info is None else {k: float(v) for k, v in (info.get("shares") or {}).items()}
+        for i in range(0, len(artist_ids), 800):
+            for artist in session.exec(select(Artist).where(Artist.id.in_(artist_ids[i : i + 800]))).all():
+                info = (artist.external_refs or {}).get("dzGenres")
+                if info is not None:
+                    out[artist.id] = {k: float(v) for k, v in (info.get("shares") or {}).items()}
     return out
 
 
