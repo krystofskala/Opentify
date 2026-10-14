@@ -473,6 +473,9 @@ def get_playlist(
 ):
     user_id, _device_id = current
     playlist = _readable_playlist_or_404(session, playlist_id, user_id)
+    from app.home.obtainable import refresh_failed_items
+
+    refresh_failed_items(session, playlist)
     return _playlist_detail(session, playlist, user_id).model_dump(by_alias=True)
 
 

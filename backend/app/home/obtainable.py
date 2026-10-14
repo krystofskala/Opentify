@@ -84,6 +84,46 @@ def swap_failed(ids: list[str]) -> list[str]:
     return _replace(ids, swaps)
 
 
+# Vygenerované mixy, kde se nesehnatelná skladba vyměňuje i při otevření
+# (A6, 14. 10.: stažení selhalo až pár minut po sestavení mixu, náhrada se
+# dělala jen při sestavení). Vlastní playlisty uživatele nikdy.
+GENERATED_PREFIXES = ("personal:", "home:")
+
+
+def refresh_failed_items(session: Session, playlist: Any) -> bool:
+    """Ve vygenerovaném mixu vymění skladby, jejichž stažení mezitím
+    selhalo, za jinou verzi (nebo je vynechá). Vrací, jestli se něco
+    změnilo. Bez selhaných je to jeden dotaz."""
+    from app.models import PlaylistItem
+
+    if not (playlist.source or "").startswith(GENERATED_PREFIXES):
+        return False
+    items = session.exec(
+        select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position)
+    ).all()
+    ids = [i.recording_id for i in items]
+    failed = _failed(session, ids)
+    if not failed:
+        return False
+    taken = set(ids)
+    swaps: dict[str, str | None] = {}
+    for rid in failed:
+        recording = session.get(Recording, rid)
+        twin = _twin(session, recording, taken) if recording else None
+        if twin:
+            taken.add(twin)
+        swaps[rid] = twin
+    new_ids = _replace(ids, swaps)
+    for item in items:
+        session.delete(item)
+    session.flush()
+    for position, rid in enumerate(new_ids):
+        session.add(PlaylistItem(playlist_id=playlist.id, recording_id=rid, position=position))
+    session.commit()
+    logger.info("mix %s: %d nesehnatelných vyměněno/vynecháno při otevření", playlist.id, len(failed))
+    return True
+
+
 async def swap_failed_async(ids: list[str]) -> list[str]:
     """Jako `swap_failed`, a co v katalogu jinou verzi nemá, zkusí najít na
     Deezeru (stejný interpret, stejný název bez závorek)."""
