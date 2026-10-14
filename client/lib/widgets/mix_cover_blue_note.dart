@@ -62,10 +62,10 @@ class _BlueNoteDaily extends StatelessWidget {
         .split(',')
         .map((a) => a.trim())
         .where((a) => a.isNotEmpty)
-        .take(3)
+        // Popisy mixů nesou dva interprety („X, Y a další“, 15. 10. všech 18) -- série
+        // má proto vždy dva řádky (zásada B10), bez výplně.
+        .take(2)
         .toList();
-    // Série má vždy tři řádky interpretů (zásada B10); kratší seznam doplní „a další“.
-    if (artists.isNotEmpty && artists.length < 3) artists.add('a další');
     return LayoutBuilder(builder: (context, c) {
       final s = c.biggest.shortestSide;
       final block = Rect.fromLTWH(0, s * 0.441, s * 0.665, s * 0.559);
