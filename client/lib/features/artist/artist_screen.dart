@@ -202,20 +202,18 @@ class _ArtistBody extends ConsumerWidget {
                     // se musí dát vrátit stejně snadno, jako vzniklo.
                     onPressed: () =>
                         ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
-                    onLongPress: () =>
-                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
                   )
                 else
                   HeroAction(
                     icon: Symbols.favorite_rounded,
                     filled: ref.watch(
                         favoriteArtistsProvider.select((s) => s.valueOrNull?.any((a) => a.id == artist.id) ?? false)),
-                    tooltip: 'Oblíbený interpret (podržením: nelíbí se mi)',
+                    // UX audit 26b: dřív podržení potají dalo „Nelíbí se mi“ (bez
+                    // možnosti si všimnout) -- teď jen v menu ⋯ interpreta.
+                    tooltip: 'Oblíbený interpret',
                     onPressed: () => ref
                         .read(favoriteArtistsProvider.notifier)
                         .toggle(context, id: artist.id, name: artist.name, imageUrl: artist.coverImageUrl),
-                    onLongPress: () =>
-                        ref.read(dislikedArtistsProvider.notifier).toggle(context, id: artist.id, name: artist.name),
                   ),
                 HeroAction(
                   icon: Symbols.more_horiz_rounded,
