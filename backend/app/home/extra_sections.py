@@ -13,7 +13,7 @@ Sekce:
 - anniversaries    Výročí alb z tvé knihovny
 - release_radar    Novinky od tvých interpretů
 - deep_cuts        Méně známé skladby tvých oblíbených
-- artist_discovery Interpreti, které bys mohl znát
+- artist_discovery Interpreti, které možná neznáš
 - album_picks      Celá alba pro tebe
 - shazam           Z tvého Shazamu
 - soundcloud       Na SoundCloudu od tvých interpretů (věci, které jinde nejsou)
@@ -552,7 +552,7 @@ async def build_deep_cuts(user_id: str) -> int:
 
 
 # ----------------------------------------------------------------------
-# Interpreti, které bys mohl znát / Celá alba pro tebe
+# Interpreti, které možná neznáš / Celá alba pro tebe
 # ----------------------------------------------------------------------
 
 async def _similar_unknown(
@@ -605,7 +605,7 @@ async def build_artist_discovery(user_id: str) -> int:
 
     ranked, _known, _top = await _similar_unknown(user_id)
     ids = await browse._resolve_artists(ranked, 14, set())
-    _save(user_id, "artist_discovery", {"title": "Interpreti, které bys mohl znát", "kind": "artists", "ids": ids})
+    _save(user_id, "artist_discovery", {"title": "Interpreti, které možná neznáš", "kind": "artists", "ids": ids})
     return len(ids)
 
 
@@ -857,7 +857,7 @@ SPECS: list[Spec] = [
     Spec("anniversaries", "Výročí alb", timedelta(hours=12), build_anniversaries),
     Spec("release_radar", "Novinky od tvých interpretů", timedelta(days=1), build_release_radar),
     Spec("deep_cuts", "Méně známé skladby", timedelta(days=1), build_deep_cuts),
-    Spec("artist_discovery", "Interpreti, které bys mohl znát", timedelta(days=1), build_artist_discovery),
+    Spec("artist_discovery", "Interpreti, které možná neznáš", timedelta(days=1), build_artist_discovery),
     Spec("album_picks", "Celá alba pro tebe", timedelta(days=1), build_album_picks),
     Spec("shazam", "Z tvého Shazamu", timedelta(hours=1), None),
     Spec("soundcloud", "Na SoundCloudu od tvých interpretů", timedelta(days=1), build_soundcloud),

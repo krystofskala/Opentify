@@ -231,12 +231,33 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         child: query.isEmpty
             ? _SearchHistoryView(key: const ValueKey('history'), onPick: _runSearch)
             : libraryOnly
-                ? LibrarySearchResults(
+                // UX audit 26e: zapnuté hledání jen v knihovně musí být vidět
+                // a jít jedním ťuknutím zrušit (dřív jen nepopsaná ikona nahoře).
+                ? Column(
                     key: ValueKey('library-$filter-$query'),
-                    query: query,
-                    scope: _libraryScopeFor[filter]!,
-                    onSeeAll: (scope) => ref.read(searchFilterProvider.notifier).state =
-                        _libraryScopeFor.entries.firstWhere((e) => e.value == scope).key,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: InputChip(
+                            avatar: const Icon(Symbols.library_music_rounded, size: 18),
+                            label: const Text('Jen v mé knihovně'),
+                            tooltip: 'Hledat všude',
+                            onPressed: () => ref.read(searchLibraryOnlyProvider.notifier).state = false,
+                            onDeleted: () => ref.read(searchLibraryOnlyProvider.notifier).state = false,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: LibrarySearchResults(
+                          query: query,
+                          scope: _libraryScopeFor[filter]!,
+                          onSeeAll: (scope) => ref.read(searchFilterProvider.notifier).state =
+                              _libraryScopeFor.entries.firstWhere((e) => e.value == scope).key,
+                        ),
+                      ),
+                    ],
                   )
                 : filter == SearchFilter.all
                     ? _AllResults(key: ValueKey('all-$query'), query: query)

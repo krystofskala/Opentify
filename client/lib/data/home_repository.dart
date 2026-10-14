@@ -156,7 +156,7 @@ class HomeSection {
   /// Karty nováčka na konci Domů: "import" / "customize".
   final List<String> setupCards;
 
-  /// "Interpreti, které bys mohl znát".
+  /// "Interpreti, které možná neznáš".
   final List<BrowseArtist> artists;
 
   /// "Populární playlisty pro tebe": playlisty z Deezeru (otevřou se až na klepnutí).
