@@ -215,6 +215,27 @@ def _ingest_tracks(tracks: list[dict[str, Any]]) -> list[str]:
     return ids
 
 
+def _cap_trending(recordings: list[Any], per_artist: int = 2, size: int = 40) -> list[Any]:
+    """Žebříček ListenBrainz s nejvýš `per_artist` skladbami od interpreta
+    (14. 10.: 23 z 38 skladeb Trendů bylo od BTS – fanoušci hromadně
+    přehrávají celé album). Pořadí žebříčku zůstává."""
+    from collections import Counter
+
+    from app.catalog.artwork import primary_artist_name
+
+    per: Counter = Counter()
+    out = []
+    for r in recordings:
+        key = primary_artist_name(getattr(r, "artist_name", None) or "").casefold() or r.id
+        if per[key] >= per_artist:
+            continue
+        per[key] += 1
+        out.append(r)
+        if len(out) >= size:
+            break
+    return out
+
+
 async def _preprovision(recording_ids: list[str]) -> None:
     """První skladby žebříčků předem stáhnout (NE-interaktivní fronta), ať
     se na Domů pouští okamžitě. Denní strop -- žebříčky se mění, ať to
@@ -469,7 +490,7 @@ async def build_personal_mixes() -> int:
         mixes: list[tuple[str, str, str, Callable[[], Awaitable[list[Any]]]]] = [
             ("home:mix:discover", "Objevuj", "Nová hudba podle tvého poslechu", lambda: service.discover(lb_user, 40)),
             ("home:mix:my-top", "Moje nejposlouchanější", "Tvoje top skladby za měsíc", lambda: service.my_top_tracks(lb_user, 40)),
-            ("home:mix:trending", "Trendy na ListenBrainz", "Co se tento týden nejvíc poslouchá", lambda: service.trending(40)),
+            ("home:mix:trending", "Trendy na ListenBrainz", "Co se tento týden nejvíc poslouchá", lambda: service.trending(100)),
             ("home:mix:community", "Komunitní objevy", "Tipy od komunity ListenBrainz", lambda: service.community_picks(lb_user, 40)),
         ]
         for source, title, description, fetch in mixes:
@@ -478,6 +499,8 @@ async def build_personal_mixes() -> int:
             except Exception:  # noqa: BLE001
                 logger.exception("home: mix %s selhal", source)
                 continue
+            if source == "home:mix:trending":
+                recordings = _cap_trending(recordings)
             ids = [r.id for r in recordings]
             if not ids:
                 continue
