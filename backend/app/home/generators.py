@@ -166,7 +166,10 @@ def _save_playlist(
         # Nesehnatelné (stažení selhalo) nahradit jinou verzí nebo vynechat.
         from app.home.obtainable import swap_failed
 
-        for position, recording_id in enumerate(without_disliked(owner, swap_failed(recording_ids))):
+        recording_ids = swap_failed(recording_ids)
+        if not source.startswith(("personal:year:", "personal:decade:", "personal:on-repeat")):
+            recording_ids = _drop_version_twins(session, recording_ids)
+        for position, recording_id in enumerate(without_disliked(owner, recording_ids)):
             session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
         now = utcnow()
         playlist.title = title
@@ -213,6 +216,31 @@ def _ingest_tracks(tracks: list[dict[str, Any]]) -> list[str]:
                 ids.append(recording.id)
         session.commit()
     return ids
+
+
+def _drop_version_twins(session: Session, recording_ids: list[str]) -> list[str]:
+    """Stejná skladba od stejného interpreta jen jednou (14. 10., kontrola mixů:
+    „On the Road Again - Live“ i „(Live at The Hollywood Bowl…)“ v Objevech,
+    „Gentle On My Mind“ 2× v Nočním mixu). Zůstává první výskyt. Top roku,
+    dekáda a Na opakování ne – tam jsou obě verze skutečně poslouchané."""
+    from app.catalog.service import normalize_title
+
+    rows = dict(
+        (rid, (artist_id, title))
+        for rid, artist_id, title in session.exec(
+            select(Recording.id, Recording.artist_id, Recording.title).where(Recording.id.in_(recording_ids))
+        ).all()
+    )
+    seen: set[tuple[str | None, str]] = set()
+    out = []
+    for rid in recording_ids:
+        artist_id, title = rows.get(rid, (None, ""))
+        key = (artist_id, normalize_title((title or "").split(" - ")[0]))
+        if artist_id and key[1] and key in seen:
+            continue
+        seen.add(key)
+        out.append(rid)
+    return out
 
 
 def _cap_trending(recordings: list[Any], per_artist: int = 2, size: int = 40) -> list[Any]:
