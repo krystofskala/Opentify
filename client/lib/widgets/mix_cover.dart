@@ -18,13 +18,17 @@ import 'mix_artwork.dart' show GrainPainter, MixArtSpec, MixArtStyle;
 /// * Archivo: název 12,5 % strany, účaří v 93 %; čísla 40 %; popisek 3,8 %,
 /// * fotka jen v kruhu / horní části a vždy ve dvou barvách obalu,
 /// * malá dlaždice a široká dlaždice mají vlastní zjednodušenou verzi.
-enum CoverKind { discover, daily, genre, mood, year }
+enum CoverKind { discover, daily, genre, mood, year, decade, onRepeat, throwback, homeMix }
 
 CoverKind? coverKindOf(MixArtSpec spec) {
   final s = spec.seed;
   if (s.startsWith('personal:discover-weekly')) return CoverKind.discover;
   if (s.startsWith('personal:daily-mix:')) return CoverKind.daily;
   if (s.startsWith('personal:year:')) return CoverKind.year;
+  if (s.startsWith('personal:decade:')) return CoverKind.decade;
+  if (s.startsWith('personal:on-repeat')) return CoverKind.onRepeat;
+  if (s.startsWith('personal:throwback')) return CoverKind.throwback;
+  if (s.startsWith('home:mix:')) return CoverKind.homeMix;
   if (s.startsWith('personal:category-mix:') || s.startsWith('personal:tag:')) {
     return spec.style == MixArtStyle.mood ? CoverKind.mood : CoverKind.genre;
   }
@@ -81,6 +85,19 @@ _Pal _palette(CoverKind kind, MixArtSpec spec) {
       final h = _hueOf(spec);
       return _Pal(_hsl(h, 0.55, 0.50), _hsl(h, 0.75, 0.76), _hsl(h, 0.5, 0.07), _hsl(h, 0.5, 0.07), _hsl(h, 0.6, 0.92),
           _hsl(h, 0.75, 0.76));
+    case CoverKind.decade:
+      return const _Pal(Color(0xFF1F2A44), Color(0xFF8FB3FF), Color(0xFF8FB3FF), Color(0xFF1F2A44), Color(0xFFEEF2FF),
+          Color(0xFFFFD166));
+    case CoverKind.onRepeat:
+      return const _Pal(Color(0xFFB8456E), Color(0xFFF08FB0), Color(0xFF7E2447), Color(0xFF2A0A17), Color(0xFFFDE6EE),
+          Color(0xFFFFD6E4));
+    case CoverKind.throwback:
+      return const _Pal(Color(0xFF3E6F73), Color(0xFF9CC9C4), Color(0xFF234547), Color(0xFF0D1F20), Color(0xFFF1EBDD),
+          Color(0xFFE9C46A));
+    case CoverKind.homeMix:
+      final h = _hueOf(spec);
+      return _Pal(_hsl(h, 0.5, 0.42), _hsl(h, 0.7, 0.7), _hsl(h, 0.5, 0.25), _hsl(h, 0.5, 0.08), _hsl(h, 0.4, 0.94),
+          _hsl(h, 0.7, 0.7));
     case CoverKind.mood:
       final pal = _moodPals[_moodKey(spec)];
       if (pal != null) return pal;
@@ -205,6 +222,35 @@ class _MixCover extends StatelessWidget {
           children.add(CustomPaint(painter: _MoodPainter(pal, _moodKey(spec), spec.seed)));
         case CoverKind.year:
           children.add(CustomPaint(painter: _YearPainter(pal, facts, tile)));
+        case CoverKind.decade:
+          children.add(CustomPaint(painter: _YearPainter(pal, facts, tile, decade: true)));
+        case CoverKind.onRepeat:
+          children.add(CustomPaint(painter: _RepeatPainter(pal, tile)));
+        case CoverKind.homeMix:
+          children.add(CustomPaint(painter: _MoodPainter(pal, '', spec.seed)));
+        case CoverKind.throwback:
+          // Polaroid s fotkou interpreta ve dvou barvách, za ním druhý natočený.
+          final w = s * (tile ? 0.62 : 0.38);
+          for (final (dx, dy, angle, front) in [(0.52, 0.17, 0.14, false), (0.46, 0.2, -0.08, true)]) {
+            children.add(Positioned(
+              left: s * dx,
+              top: s * dy,
+              width: w,
+              height: w * 1.18,
+              child: Transform.rotate(
+                angle: angle,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: front ? pal.light : pal.mid),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(w * 0.07, w * 0.07, w * 0.07, w * 0.25),
+                    child: front && photos.isNotEmpty
+                        ? _photo(photos.first, pal.ink, pal.accent)
+                        : ColoredBox(color: front ? pal.deep : pal.bg),
+                  ),
+                ),
+              ),
+            ));
+          }
       }
       children.add(const IgnorePointer(child: CustomPaint(painter: GrainPainter())));
       if (labels) children.addAll(_texts(s, pal, facts));
@@ -247,6 +293,24 @@ class _MixCover extends StatelessWidget {
         final months = (facts['months'] as List<dynamic>?)?.cast<num>();
         final total = months?.fold<num>(0, (a, b) => a + b).toInt();
         fact = total != null && total > 0 ? '${_thousands(total)} poslechů' : null;
+      case CoverKind.decade:
+        caption = 'DEKÁDA';
+        final years = (facts['years'] as List<dynamic>?)?.cast<num>();
+        final total = years?.fold<num>(0, (a, b) => a + b).toInt();
+        fact = total != null && total > 0 ? '${_thousands(total)} poslechů' : null;
+      case CoverKind.onRepeat:
+        caption = 'POSLEDNÍ MĚSÍC';
+        fact = tracks != null ? '$tracks skladeb' : null;
+        title = 'Na\nopakování';
+      case CoverKind.throwback:
+        caption = 'ZNOVU OBJEVENO';
+        fact = tracks != null ? '$tracks skladeb' : null;
+        title = 'Návrat do\nminulosti';
+      case CoverKind.homeMix:
+        caption = 'MIX';
+        fact = tracks != null ? '$tracks skladeb' : null;
+        title = spec.headline;
+        ink = pal.light;
     }
     final mark = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -294,6 +358,15 @@ class _MixCover extends StatelessWidget {
               alignment: Alignment.bottomLeft,
               child: Text(title, style: _archivo(s * 0.125, 800, 112, tracking: -0.03, color: ink, height: 0.88)),
             ),
+          ),
+        ),
+      if (kind == CoverKind.decade)
+        Positioned(
+          left: s * 0.055,
+          bottom: -s * 0.02,
+          child: Text(
+            spec.headline,
+            style: _archivo(s * 0.21, 900, 125, tracking: -0.04, color: pal.light),
           ),
         ),
       if (kind == CoverKind.year)
@@ -613,10 +686,13 @@ class _MoodPainter extends CustomPainter {
 /// Top roku: 12 sloupců = poslechy po měsících, nejsilnější měsíc
 /// zvýrazněný a popsaný.
 class _YearPainter extends CustomPainter {
-  _YearPainter(this.pal, this.facts, this.tile);
+  _YearPainter(this.pal, this.facts, this.tile, {this.decade = false});
   final _Pal pal;
   final Map<String, dynamic> facts;
   final bool tile;
+
+  /// Dekáda: sloupce = roky (facts['years'], první rok facts['from']).
+  final bool decade;
 
   static const _monthNames = [
     'LEDEN', 'ÚNOR', 'BŘEZEN', 'DUBEN', 'KVĚTEN', 'ČERVEN', 'ČERVENEC', 'SRPEN', 'ZÁŘÍ', 'ŘÍJEN', 'LISTOPAD', 'PROSINEC',
@@ -625,22 +701,26 @@ class _YearPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final s = size.shortestSide;
-    var months = ((facts['months'] as List<dynamic>?) ?? const []).map((e) => (e as num).toDouble()).toList();
-    if (months.length != 12 || months.every((v) => v == 0)) {
+    final key = decade ? 'years' : 'months';
+    final count = decade ? 11 : 12;
+    var months = ((facts[key] as List<dynamic>?) ?? const []).map((e) => (e as num).toDouble()).toList();
+    if (months.isEmpty || months.every((v) => v == 0)) {
       final rnd = math.Random(7);
-      months = List.generate(12, (_) => 0.3 + rnd.nextDouble());
+      months = List.generate(count, (_) => 0.3 + rnd.nextDouble());
     }
-    final m = s * 0.07, gap = s * 0.014, w = (s - 2 * m - gap * 11) / 12;
+    final n = months.length;
+    final m = s * 0.07, gap = s * 0.014, w = (s - 2 * m - gap * (n - 1)) / n;
     final base = tile ? s * 0.9 : s * 0.62, maxH = tile ? s * 0.75 : s * 0.3;
     final max = months.reduce(math.max);
     final peak = months.indexOf(max);
-    for (var i = 0; i < 12; i++) {
+    for (var i = 0; i < n; i++) {
       final h = months[i] / max * maxH;
       canvas.drawRect(Rect.fromLTWH(m + i * (w + gap), base - h, w, h), Paint()..color = i == peak ? pal.accent : pal.mid);
     }
-    if (tile || facts['months'] == null) return;
+    if (tile || facts[key] == null) return;
+    final label = decade ? '${(_int(facts, 'from') ?? 0) + peak}' : _monthNames[peak];
     final tp = TextPainter(
-      text: TextSpan(text: _monthNames[peak], style: _archivo(s * 0.03, 600, 87, tracking: 0.12, color: pal.accent)),
+      text: TextSpan(text: label, style: _archivo(s * 0.03, 600, 87, tracking: 0.12, color: pal.accent)),
       textDirection: TextDirection.ltr,
     )..layout();
     final px = m + peak * (w + gap);
@@ -649,5 +729,37 @@ class _YearPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_YearPainter old) => old.facts != facts || old.tile != tile;
+  bool shouldRepaint(_YearPainter old) => old.facts != facts || old.tile != tile || old.decade != decade;
+}
+
+/// Na opakování: silná spirála (smyčka, která se opakuje) se šipkou na konci.
+class _RepeatPainter extends CustomPainter {
+  _RepeatPainter(this.pal, this.tile);
+  final _Pal pal;
+  final bool tile;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    final c = Offset(s * (tile ? 0.5 : 0.66), s * (tile ? 0.5 : 0.4));
+    final stroke = s * (tile ? 0.07 : 0.045);
+    final path = Path();
+    const turns = 2.3;
+    Offset? last;
+    for (var a = 0.0; a <= turns * math.pi * 2; a += 0.05) {
+      final r = s * 0.035 + a * s * (tile ? 0.028 : 0.02);
+      final p = c + Offset(math.cos(a), math.sin(a)) * r;
+      last == null ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+      last = p;
+    }
+    canvas.drawPath(path, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = pal.mid);
+    if (last != null) canvas.drawCircle(last, stroke * 0.9, Paint()..color = pal.accent);
+  }
+
+  @override
+  bool shouldRepaint(_RepeatPainter old) => old.tile != tile || old.pal.bg != pal.bg;
 }

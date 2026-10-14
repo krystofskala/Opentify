@@ -70,6 +70,16 @@ def _months(session: Session, user_id: str, year: str) -> list[int]:
     return [by_month.get(i, 0) for i in range(1, 13)]
 
 
+def _years(session: Session, user_id: str, first: int, last: int) -> list[int]:
+    rows = session.exec(
+        select(func.strftime("%Y", Listen.played_at), func.count())
+        .where(Listen.user_id == user_id)
+        .group_by(func.strftime("%Y", Listen.played_at))
+    ).all()
+    by_year = {int(y): int(c) for y, c in rows if y and y.isdigit()}
+    return [by_year.get(y, 0) for y in range(first, last + 1)]
+
+
 def facts(session: Session, playlist: Playlist) -> dict[str, Any] | None:
     source = playlist.source or ""
     if not source.startswith("personal:"):
@@ -80,6 +90,11 @@ def facts(session: Session, playlist: Playlist) -> dict[str, Any] | None:
     out: dict[str, Any] | None = None
     if source.startswith("personal:year:"):
         out = {"months": _months(session, playlist.owner_user_id, source.rsplit(":", 1)[-1])}
+    elif source.startswith("personal:decade:"):
+        # personal:decade:2016-2026:top -> poslechy po letech (sloupce obalu).
+        years = [int(y) for y in source.split(":")[2].split("-")[:2] if y.isdigit()]
+        if len(years) == 2:
+            out = {"years": _years(session, playlist.owner_user_id, years[0], years[1]), "from": years[0]}
     else:
         items = _items(session, playlist.id)
         counts = Counter(a for _r, a in items if a)
