@@ -86,7 +86,7 @@ async def podcasts_for(user_id: str) -> list[dict]:
             return feeds_, itunes, history
 
     subscribed, itunes_ids, history = await asyncio.to_thread(mine)
-    out: list[dict] = [_podcast_item(h, "Poslouchal jsi na Spotify") for h in history[:4]]
+    out: list[dict] = [_podcast_item(h, "Z tvé historie na Spotify") for h in history[:4]]
     seen = set(subscribed) | {o["feedUrl"] for o in out}
     try:
         async with httpx.AsyncClient(proxy=feeds.proxy(), timeout=15, headers={"User-Agent": "Opentify-Podcasts/1.0"}) as c:

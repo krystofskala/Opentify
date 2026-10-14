@@ -255,7 +255,7 @@ class _MyPodcastsListState extends ConsumerState<MyPodcastsList> {
         : ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Symbols.history_rounded),
-            title: const Text('Poslouchal jsi na Spotify'),
+            title: const Text('Z tvé historie na Spotify'),
             subtitle: Text('${czCount(fromSpotify.length, 'pořad', 'pořady', 'pořadů')} – vyber, co odebírat', style: muted),
             trailing: const Icon(Symbols.chevron_right_rounded),
             onTap: () => context.push('/podcasts/history'),
@@ -379,7 +379,7 @@ class PodcastHistoryScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     return Scaffold(
-      appBar: const SectionAppBar('Poslouchal jsi na Spotify'),
+      appBar: const SectionAppBar('Z tvé historie na Spotify'),
       body: async.when(
         loading: () => const LoadingState(),
         error: (e, _) => ErrorState(
