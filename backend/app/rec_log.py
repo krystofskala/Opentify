@@ -13,7 +13,7 @@ jak to dopadlo.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session, select
@@ -61,18 +61,19 @@ def match(session: Session, user_id: str, recording_id: str, hours: float = MATC
     ).first()
 
 
-def report(days: int = 7) -> list[dict[str, Any]]:
+def report(days: int = 7, since: datetime | None = None, until: datetime | None = None) -> list[dict[str, Any]]:
     """Po profilech za `days` dní. Přijetí nové = do 14 dní znovu poslechnutá
     mimo várku nebo dohraná ve várce a dána do Oblíbených."""
     from app.models import AppUser, Listen, PlayEvent, Recording
 
-    since = (utcnow() - timedelta(days=days)).replace(tzinfo=None)
+    since = since or (utcnow() - timedelta(days=days)).replace(tzinfo=None)
+    until = until or utcnow().replace(tzinfo=None)
     out: list[dict[str, Any]] = []
     with Session(engine) as session:
         names = {u.id: u.name for u in session.exec(select(AppUser)).all()}
-        offered = session.exec(select(RecBatchItem).where(RecBatchItem.created_at >= since)).all()
+        offered = session.exec(select(RecBatchItem).where(RecBatchItem.created_at >= since, RecBatchItem.created_at < until)).all()
         plays = session.exec(
-            select(PlayEvent).where(PlayEvent.started_at >= since, PlayEvent.rec_batch_id.is_not(None))  # type: ignore[union-attr]
+            select(PlayEvent).where(PlayEvent.started_at >= since, PlayEvent.started_at < until, PlayEvent.rec_batch_id.is_not(None))  # type: ignore[union-attr]
         ).all()
         by_user_offer: dict[str, list[RecBatchItem]] = defaultdict(list)
         for item in offered:
