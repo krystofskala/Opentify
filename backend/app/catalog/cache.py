@@ -10,15 +10,32 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import Any, Awaitable, Callable
 
+from redis.exceptions import RedisError
+
 from app.redis_bus import get_redis
+
+log = logging.getLogger(__name__)
 
 CACHE_PREFIX = "vault:catalog:cache:"
 
 
 EMPTY_TTL_SECONDS = 10 * 60
+
+# Výpadek Redisu nesmí shodit appku (simulace 14. 10.: bez Redisu 500 na Domů,
+# katalogu i Trendech) -- cache se pak přeskočí a sestavuje se rovnou.
+_REDIS_DOWN = (RedisError, OSError)
+_last_down_log = 0.0
+
+
+def _note_down(exc: BaseException) -> None:
+    global _last_down_log
+    if time.monotonic() - _last_down_log > 60:
+        _last_down_log = time.monotonic()
+        log.warning("Redis nedostupný, cache přeskočena: %s", exc)
 
 
 # Single-flight: drahé studené sestavení (stránka kategorie 20-30 s) běží
@@ -43,7 +60,11 @@ async def cached_json(
     cache_key = CACHE_PREFIX + key
     flight = (id(asyncio.get_running_loop()), cache_key)
     while True:
-        cached = await r.get(cache_key)
+        try:
+            cached = await r.get(cache_key)
+        except _REDIS_DOWN as exc:
+            _note_down(exc)
+            return await fetch()
         if cached is not None:
             return json.loads(cached)
         pending = _inflight.get(flight)
@@ -100,7 +121,10 @@ async def _build(r, cache_key: str, ttl_seconds: int, fetch, is_empty) -> Any:
     try:
         value = await fetch()
         ttl = EMPTY_TTL_SECONDS if is_empty is not None and is_empty(value) else ttl_seconds
-        await r.set(cache_key, json.dumps(value), ex=ttl)
+        try:
+            await r.set(cache_key, json.dumps(value), ex=ttl)
+        except _REDIS_DOWN as exc:
+            _note_down(exc)
         return value
     finally:
         if got_lock:
@@ -128,9 +152,16 @@ async def cached_json_swr(
 
     async def store(value: Any) -> None:
         if value is not None:
-            await r.set(cache_key, json.dumps({"at": time.time(), "value": value}), ex=keep_seconds)
+            try:
+                await r.set(cache_key, json.dumps({"at": time.time(), "value": value}), ex=keep_seconds)
+            except _REDIS_DOWN as exc:
+                _note_down(exc)
 
-    raw = await r.get(cache_key)
+    try:
+        raw = await r.get(cache_key)
+    except _REDIS_DOWN as exc:
+        _note_down(exc)
+        return await fetch()
     if raw is not None:
         envelope = json.loads(raw)
         if time.time() - envelope.get("at", 0) > fresh_seconds and key not in _refreshing:
