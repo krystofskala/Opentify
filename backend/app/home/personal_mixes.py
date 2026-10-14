@@ -32,6 +32,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app import listen_later
+from app.genre_names import genre_name
 from app.catalog.artwork import primary_artist_name, same_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.catalog.identity import is_own_artist
@@ -806,7 +807,7 @@ async def build_daily_mixes() -> int:
         scene = scene_of_cluster.get(id(cluster))
         if scene is not None:
             # Spící scéna: styl + kdy se naposledy poslouchala.
-            label = (scene.label.split(",")[0].strip() or "").capitalize()
+            label = genre_name(scene.label.split(",")[0].strip()).capitalize()
             description = " · ".join(
                 x for x in (label, f"{', '.join(names)} a další", f"naposledy {scene.last_year}" if scene.last_year else "") if x
             )
@@ -814,6 +815,7 @@ async def build_daily_mixes() -> int:
             description = f"Stálice · {', '.join(names)} a další"
         else:
             genre = _genre_label(taste, cluster, familiar)
+            genre = genre_name(genre) if genre else None
             description = f"{', '.join(names)} a další" + (f" · {genre}" if genre else "")
         results.append((index, cluster, tracks, description, featured))
         logger.info(

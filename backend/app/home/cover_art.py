@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlmodel import Session, func, select
 
+from app.genre_names import genre_name
 from app.catalog.artwork import _is_deezer_placeholder
 from app.models import Artist, Listen, Playlist, PlaylistItem, Recording, TrackFeatures
 
@@ -91,6 +92,9 @@ def daily_label(description: str) -> dict[str, str | None]:
     style = next((p for p in parts if p != artists and not p.startswith("naposledy ")), None)
     if style is None and artists:
         style = artists.removesuffix(" a další").split(",")[0].strip() or None
+    elif style is not None:
+        # Popisy vzniklé před překladem žánrů (do další přestavby).
+        style = genre_name(style)
     return {"style": style, "artistsLine": artists or (parts[0] if parts else None)}
 
 
