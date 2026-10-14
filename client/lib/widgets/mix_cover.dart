@@ -194,10 +194,11 @@ class _MixCover extends StatelessWidget {
             ));
           }
           children.add(CustomPaint(painter: _DailyPainter(pal, facts, int.tryParse(spec.headline) ?? 1)));
+          // Číslo celé nad spodní hranou (14. 10.: useknuté vypadalo zmáčknuté).
           children.add(Positioned(
             left: s * 0.055,
-            bottom: -s * (tile ? 0.06 : 0.085),
-            child: Text(spec.headline, style: _archivo(s * 0.4, 900, 125, tracking: -0.05, color: pal.light)),
+            bottom: s * 0.045,
+            child: Text(spec.headline, style: _archivo(s * 0.34, 900, 125, tracking: -0.05, color: pal.light, height: 0.74)),
           ));
         case CoverKind.genre:
           children.add(CustomPaint(painter: _GenrePainter(pal, tile)));
