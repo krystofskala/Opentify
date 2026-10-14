@@ -5,6 +5,7 @@ import 'dart:math' show Random, pow;
 import 'dart:typed_data' show BytesBuilder;
 
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/services.dart' show MissingPluginException, PlatformException;
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
 // Flutter má od 3.47 vlastní `RepeatMode` (`RepeatingAnimationBuilder`) --
@@ -404,6 +405,18 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   // místa jako po chybě (`_handleStreamFailure` -- sám jednou, pak chyba se
   // "Zkusit znovu", nezacyklí se). Rádio a stahující se soubor mají hlídání
   // vlastní.
+  /// Hlasitost přehrávače bez pádu, když nativní přehrávač mezitím zanikl
+  /// (14. 10.: iPhone hlásil MissingPluginException setVolume po přepnutí).
+  Future<void> _setVolumeSafe(double volume) async {
+    try {
+      await _player.setVolume(volume);
+    } on MissingPluginException {
+      // přehrávač už neexistuje -- nic
+    } on PlatformException {
+      // totéž
+    }
+  }
+
   static const _stallLimit = Duration(seconds: 12);
   Timer? _stallWatch;
   Duration _stallPosition = Duration.zero;
@@ -475,6 +488,19 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
     if (now.difference(_stallSince) < _stallLimit) return;
     _stallSince = now;
+    // Pozice stojí na samém konci a `completed` nepřišlo (iPhone, délka v
+    // souboru o kousek jiná; 14. 10.: „Ghostride“ 24× „zaseknuté přehrávání“
+    // na 126 s = konec souboru) -- to je dohrání, ne zaseknutí.
+    final duration = _player.duration;
+    if (duration != null && duration > Duration.zero && position >= duration - const Duration(seconds: 2)) {
+      debugPrint('AudioPlayerController: stojí na konci skladby bez completed, pokračuji dál');
+      if (state.repeatMode == RepeatMode.one) {
+        unawaited(_replayCurrent());
+      } else {
+        unawaited(next(auto: true));
+      }
+      return;
+    }
     debugPrint('AudioPlayerController: pozice stojí ${_stallLimit.inSeconds} s ($processing), navazuji');
     _handleStreamFailure(info, 'zaseknuté přehrávání', isProgressive: false);
   }
@@ -1984,7 +2010,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   Future<void> setVolume(double value) async {
     state = state.copyWith(volume: value);
-    if (_fadeTimer == null) await _player.setVolume(_effectiveVolume);
+    if (_fadeTimer == null) await _setVolumeSafe(_effectiveVolume);
   }
 
   /// Uživatelova hlasitost vynásobená korekcí normalizace. Jen zeslabení --
@@ -2033,7 +2059,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (_fadeTimer != null) return;
     _gainRampTimer?.cancel();
     _gainRampTimer = null;
-    unawaited(_player.setVolume(_effectiveVolume));
+    unawaited(_setVolumeSafe(_effectiveVolume));
   }
 
   /// Plynulý (~1 s) přechod na novou efektivní hlasitost -- pro korekci,
@@ -2045,7 +2071,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final from = _player.volume;
     final to = _effectiveVolume;
     if ((from - to).abs() < 0.01) {
-      unawaited(_player.setVolume(to));
+      unawaited(_setVolumeSafe(to));
       return;
     }
     const steps = 20;
@@ -2053,7 +2079,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _gainRampTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       step += 1;
       final t = step / steps;
-      unawaited(_player.setVolume(from + (to - from) * t));
+      unawaited(_setVolumeSafe(from + (to - from) * t));
       if (step >= steps) {
         timer.cancel();
         _gainRampTimer = null;
@@ -2308,7 +2334,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _fadeTimer = Timer.periodic(stepInterval, (timer) async {
       step += 1;
       final t = (step / steps).clamp(0.0, 1.0);
-      await _player.setVolume(originalVolume * (1 - t));
+      await _setVolumeSafe(originalVolume * (1 - t));
       if (t >= 1.0) {
         timer.cancel();
         _fadeTimer = null;
@@ -2321,7 +2347,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
         }
         // Aktuální efektivní hlasitost, ne ta z začátku fadu -- během 10 s
         // mohla přeskočit skladba (jiná korekce normalizace).
-        await _player.setVolume(_effectiveVolume);
+        await _setVolumeSafe(_effectiveVolume);
         _realtime.playbackPause();
         state = state.withSleepTimerEndAt(null);
       }
@@ -2335,7 +2361,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (_fadeTimer == null) return;
     _fadeTimer!.cancel();
     _fadeTimer = null;
-    unawaited(_player.setVolume(_effectiveVolume));
+    unawaited(_setVolumeSafe(_effectiveVolume));
   }
 
   /// iOS Safari pustí zvuk jen v přímé reakci na klepnutí. U skladby, co se
