@@ -64,6 +64,8 @@ class _BlueNoteDaily extends StatelessWidget {
         .where((a) => a.isNotEmpty)
         .take(3)
         .toList();
+    // Série má vždy tři řádky interpretů (zásada B10); kratší seznam doplní „a další“.
+    if (artists.isNotEmpty && artists.length < 3) artists.add('a další');
     return LayoutBuilder(builder: (context, c) {
       final s = c.biggest.shortestSide;
       final block = Rect.fromLTWH(0, s * 0.441, s * 0.665, s * 0.559);
@@ -161,7 +163,7 @@ class _TypePainter extends CustomPainter {
     _text(canvas, s, 'denní', _heavy(s * 0.4, tracking: -0.05, width: 100), -s * 0.03, 0.4, fitWidth: s * 1.0);
     _text(canvas, s, 'mix', _heavy(s * 0.14, tracking: -0.05, width: 100), s * 0.682, 0.585);
     // Číslo celé: účaří nad spodní hranou (zásada B11).
-    _text(canvas, s, '$n', _heavy(s * 0.42, tracking: -0.04, color: accent, width: 80), s * 0.675, 0.972);
+    _text(canvas, s, '$n', _heavy(s * 0.42, tracking: -0.04, color: accent, width: 80), s * 0.675, 0.935);
     if (small) return;
     canvas.drawRect(Rect.fromLTWH(s * 0.688, s * 0.603, s * 0.282, s * 0.006), Paint()..color = _cream);
     _text(canvas, s, stamp, _heavy(s * 0.024, tracking: 0.18, weight: 600), s * 0.688, 0.468);
@@ -185,7 +187,7 @@ class _TypePainter extends CustomPainter {
     _text(canvas, s, line, focus, s * 0.688, 0.642, fitWidth: fit);
     if (parts.length > 1) _text(canvas, s, parts.last, _heavy(s * 0.024, tracking: 0.18, weight: 500), s * 0.688, 0.675);
     for (var i = 0; i < artists.length; i++) {
-      final y = 0.955 - (artists.length - 1 - i) * 0.042;
+      final y = 0.935 - (artists.length - 1 - i) * 0.042;
       final st = _heavy(s * 0.031, tracking: 0.2, weight: 700);
       final p = TextPainter(text: TextSpan(text: artists[i], style: st), textDirection: TextDirection.ltr)..layout();
       _text(canvas, s, artists[i], st, s * 0.035, y, fitWidth: p.width > s * 0.6 ? s * 0.6 : null);
