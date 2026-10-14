@@ -465,7 +465,7 @@ async def lastfm_finish(body: LastfmFinishIn, request: Request):
     try:
         name = await finish_connect(acting.id, body.token.strip())
     except LastfmError as exc:
-        raise HTTPException(status_code=400, detail="Připojení k Last.fm se nepovedlo – povolil jsi přístup na stránce Last.fm?") from exc
+        raise HTTPException(status_code=400, detail="Připojení k Last.fm se nepovedlo – je na stránce Last.fm přístup povolený?") from exc
     return {"lastfmUser": name}
 
 

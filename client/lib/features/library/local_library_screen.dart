@@ -1059,7 +1059,7 @@ class LibraryScopeToggle extends ConsumerWidget {
 
   static const _labels = {
     LibraryScope.mine: ('Moje', Symbols.person_rounded, 'Co sis přidal do knihovny a lajkl'),
-    LibraryScope.downloaded: ('Staženo', Symbols.download_done_rounded, 'Všechno, co sis stáhl nebo pustil'),
+    LibraryScope.downloaded: ('Staženo', Symbols.download_done_rounded, 'Všechno stažené nebo puštěné'),
     LibraryScope.all: ('Server', Symbols.dns_rounded, 'Všechno stažené na serveru, i od ostatních profilů'),
     LibraryScope.offline: ('Offline', Symbols.download_for_offline_rounded, 'Uložené v tomhle zařízení (hraje i bez internetu)'),
   };
