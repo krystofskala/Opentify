@@ -123,7 +123,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   void _onChanged(String value) {
     if (_maybeSpotifyLink(value)) return;
-    setState(() {});
+    // Bez setState: pole (GlassSearchField) se překresluje samo podle
+    // controlleru a výsledky podle searchQueryProvider po debounce. Dřív
+    // každé písmeno překreslilo celou obrazovku i s výsledky (A3: render
+    // stuck / rage-taps na /search).
     _debounce?.cancel();
     _debounce = Timer(_debounceDuration, () {
       if (!mounted) return;
