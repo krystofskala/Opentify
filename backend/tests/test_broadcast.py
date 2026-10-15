@@ -1,0 +1,380 @@
+"""Sdílený stream (app/broadcast.py): vysílání v paměti, viditelnost, pořadí
+od serveru, slučování bez ztráty stavu, HTTP pro iOS na pozadí, úklid."""
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+
+import pytest
+from sqlmodel import Session
+
+import app.broadcast as bc
+from app.db import engine
+from app.models import AppUser, HomeSnapshot
+
+
+class FakeWS:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_text(self, text: str) -> None:
+        self.sent.append(json.loads(text))
+
+    def of(self, kind: str) -> list[dict]:
+        return [m["payload"] for m in self.sent if m["type"] == kind]
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _id() -> str:
+    return uuid.uuid4().hex
+
+
+def _anchor(rid: str = "rec-a", pos: int = 0, playing: bool = True, **kw) -> dict:
+    return {"recordingId": rid, "index": kw.pop("index", 0), "qv": kw.pop("qv", 1), "positionMs": pos,
+            "atServerMs": 5000, "rate": 1.0, "isPlaying": playing, **kw}
+
+
+def _queue(qv: int = 1, ids=("rec-a", "rec-b")) -> dict:
+    return {"qv": qv, "baseIndex": 0, "items": [{"recordingId": r, "title": f"T {r}", "artistName": "A"} for r in ids]}
+
+
+def _start(sid, bid, **kw) -> dict:
+    return {"sid": sid, "bid": bid, "visibility": kw.pop("visibility", "invited"), "invited": kw.pop("invited", []),
+            "queue": kw.pop("queue", _queue()), "anchor": kw.pop("anchor", _anchor()), **kw}
+
+
+def _hub():
+    clock = Clock()
+    hub = bc.BroadcastHub(clock=clock)
+    return hub, clock
+
+
+def test_start_join_state_leave_stop_and_list_shows_only_name() -> None:
+    async def run():
+        hub, clock = _hub()
+        owner_ws, lis_ws, other_ws = FakeWS(), FakeWS(), FakeWS()
+        sid, bid = _id(), _id()
+        hub.connections = lambda: [("owner", owner_ws), ("friend", lis_ws), ("stranger", other_ws)]
+        await hub.start("owner", "Kryštof", "dev-o", _start(sid, bid, invited=["friend", "stranger"]), {"friend"}, owner_ws)
+        # Seznam: nepozvaný nic nevidí, pozvaný jen jméno + skladbu + počet.
+        assert hub.visible_list("stranger") == []
+        [item] = hub.visible_list("friend")
+        assert item["name"] == "Kryštof" and item["listeners"] == 0
+        assert item["track"]["title"] == "T rec-a"
+        assert set(item) == {"id", "name", "mine", "isPlaying", "track", "listeners"}
+        assert bid not in json.dumps(item) and "dev-o" not in json.dumps(item)
+
+        await hub.join("friend", "dev-f", lis_ws, {"sid": sid, "prepMs": 300})
+        [st] = lis_ws.of("broadcast.state")
+        assert st["reset"] and st["queue"]["items"][0]["recordingId"] == "rec-a"
+        assert st["clockId"] == bc.CLOCK_ID and st["gen"] == 1
+        assert owner_ws.of("broadcast.listeners")[-1] == {"sid": sid, "count": 1, "prepMs": 300}
+        assert hub.is_listening("friend", "dev-f") and not hub.is_listening("owner", "dev-o")
+
+        clock.t += 1
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1, "anchor": _anchor("rec-b", index=1)})
+        st = lis_ws.of("broadcast.state")[-1]
+        assert st["anchor"]["recordingId"] == "rec-b" and "queue" not in st  # fronta beze změny se neposílá
+
+        await hub.leave(lis_ws, {"sid": sid})
+        assert hub.visible_list("friend")[0]["listeners"] == 0
+        await hub.join("friend", "dev-f", lis_ws, {"sid": sid})
+        await hub.stop("owner", {"sid": sid, "bid": bid})
+        assert lis_ws.of("broadcast.ended")[-1]["reason"] == "stopped"
+        assert hub.visible_list("friend") == []
+        assert not hub.is_listening("friend", "dev-f")
+
+    asyncio.run(run())
+
+
+def test_stranger_cannot_join_and_server_visibility_opens_it() -> None:
+    async def run():
+        hub, _clock = _hub()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid, invited=["x"]), {"x"})
+        ws = FakeWS()
+        await hub.join("stranger", None, ws, {"sid": sid})
+        assert ws.of("broadcast.ended")[0]["reason"] == "unknown" and not ws.of("broadcast.state")
+        # Pozvat smí jen profily, které pravidlo dovolí (allowed_invites).
+        sid2, bid2 = _id(), _id()
+        room = await hub.start("owner2", "L", None, _start(sid2, bid2, invited=["a", "b"]), {"a"})
+        assert room.invited == {"a"}
+        # "Všichni na serveru".
+        sid3, bid3 = _id(), _id()
+        await hub.start("owner3", "M", None, _start(sid3, bid3, visibility="server"), set())
+        ws3 = FakeWS()
+        await hub.join("stranger", None, ws3, {"sid": sid3})
+        assert ws3.of("broadcast.state")
+
+    asyncio.run(run())
+
+
+def test_order_from_server_takeover_and_late_http_message() -> None:
+    async def run():
+        hub, _clock = _hub()
+        owner_ws, new_ws, lis = FakeWS(), FakeWS(), FakeWS()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", "d1", _start(sid, bid, visibility="server"), set(), owner_ws)
+        await hub.join("u", None, lis, {"sid": sid})
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 5, "anchor": _anchor(pos=5000)})
+        # Zpožděná starší zpráva (HTTP po WS) nepřepíše novější stav.
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 4, "anchor": _anchor(pos=1000)})
+        assert hub.rooms[sid].anchor["positionMs"] == 5000
+        # Převzetí jiným zařízením: nový bid -> nová generace, bseq od nuly platí.
+        bid2 = _id()
+        await hub.start("owner", "K", "d2", _start(sid, bid2, visibility="server", bseq=0), set(), new_ws)
+        assert owner_ws.of("broadcast.taken")
+        await hub.flush_pending()
+        await hub.state("owner", {"sid": sid, "bid": bid2, "bseq": 1, "anchor": _anchor(pos=200)})
+        await hub.flush_pending()
+        last = lis.of("broadcast.state")[-1]
+        assert last["gen"] == 2 and last["anchor"]["positionMs"] == 200
+        # Nová generace = posluchač dostane i frontu znovu.
+        assert any("queue" in m for m in lis.of("broadcast.state") if m["gen"] == 2)
+        # Staré zařízení už nic neposlat nesmí.
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 99, "anchor": _anchor()})
+        assert e.value.status == 410
+        # Jiný profil se sid stejně nic nezmůže.
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.state("intruder", {"sid": sid, "bid": bid2, "bseq": 100, "anchor": _anchor()})
+        assert e.value.status == 403
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.start("intruder", "X", None, _start(sid, _id()), set())
+        assert e.value.status == 403
+
+    asyncio.run(run())
+
+
+def test_unknown_sid_is_409_and_ended_is_410() -> None:
+    async def run():
+        hub, _clock = _hub()
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.state("owner", {"sid": _id(), "bid": _id(), "bseq": 1, "anchor": _anchor()})
+        assert e.value.status == 409
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid), set())
+        await hub.stop("owner", {"sid": sid, "bid": bid})
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 2, "anchor": _anchor()})
+        assert e.value.status == 410
+
+    asyncio.run(run())
+
+
+def test_coalescing_keeps_latest_state_and_queue() -> None:
+    """Rychlé přeskoky + úprava fronty v jednom okně: posluchač dostane
+    poslední kotvu I novou frontu (nic se nezahodí, N4)."""
+
+    async def run():
+        hub, clock = _hub()
+        lis = FakeWS()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid, visibility="server"), set())
+        await hub.join("u", None, lis, {"sid": sid})
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1, "anchor": _anchor("rec-b", index=1)})
+        before = len(lis.of("broadcast.state"))
+        # Ve stejném okně: nová fronta, pak několik kotev bez fronty.
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 2, "queue": _queue(2, ("rec-a", "rec-b", "rec-c")),
+                                  "anchor": _anchor("rec-c", index=2, qv=2)})
+        for i in range(3, 9):
+            await hub.state("owner", {"sid": sid, "bid": bid, "bseq": i, "anchor": _anchor("rec-c", pos=i, index=2, qv=2)})
+        assert len(lis.of("broadcast.state")) == before  # zatím sloučeno
+        await hub.flush_pending()
+        last = lis.of("broadcast.state")[-1]
+        assert last["anchor"]["positionMs"] == 8 and last["queue"]["qv"] == 2
+        assert len(lis.of("broadcast.state")) == before + 1
+        # Plán přechodu téže skladby přežije heartbeat bez plánu.
+        clock.t += 1
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 20, "anchor": _anchor("rec-c", index=2, qv=2, transitionAtServerMs=99_000)})
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 21, "anchor": _anchor("rec-c", pos=50, index=2, qv=2)})
+        assert hub.rooms[sid].anchor["transitionAtServerMs"] == 99_000
+
+    asyncio.run(run())
+
+
+def test_clock_not_ok_drops_plans() -> None:
+    a = bc.clean_anchor(_anchor(startAtServerMs=1, transitionAtServerMs=2, clockOk=False))
+    assert "startAtServerMs" not in a and "transitionAtServerMs" not in a and a["clockOk"] is False
+    assert bc.clean_anchor({"positionMs": 1}) is None  # bez skladby to není kotva
+
+
+def test_liveness_offline_while_playing_idle_while_paused() -> None:
+    async def run():
+        hub, clock = _hub()
+        lis = FakeWS()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid, visibility="server"), set())
+        await hub.join("u", None, lis, {"sid": sid})
+        clock.t += 80
+        await hub.sweep()
+        assert sid in hub.rooms  # 80 s bez kontaktu ještě ne
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1})  # HTTP heartbeat bez kotvy
+        clock.t += 80
+        await hub.sweep()
+        assert sid in hub.rooms
+        clock.t += 11
+        await hub.sweep()
+        assert sid not in hub.rooms and lis.of("broadcast.ended")[-1]["reason"] == "offline"
+
+        # Pozastavený vysílač mlčí (iOS se uspí) -- to je v pořádku do 30 min.
+        sid2, bid2 = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid2, bid2, visibility="server"), set())
+        await hub.state("owner", {"sid": sid2, "bid": bid2, "bseq": 1, "anchor": _anchor(playing=False)})
+        clock.t += 20 * 60
+        await hub.sweep()
+        assert sid2 in hub.rooms
+        clock.t += 11 * 60
+        await hub.sweep()
+        assert sid2 not in hub.rooms
+
+    asyncio.run(run())
+
+
+def test_pending_listener_attaches_after_api_restart() -> None:
+    async def run():
+        hub, clock = _hub()  # "nový proces": vysílání neexistuje
+        lis, late = FakeWS(), FakeWS()
+        sid, bid = _id(), _id()
+        await hub.join("u", None, lis, {"sid": sid})
+        await hub.join("u2", None, late, {"sid": _id()})
+        assert lis.of("broadcast.pending")
+        await hub.start("owner", "K", None, _start(sid, bid, visibility="server"), set())
+        assert lis.of("broadcast.state")
+        clock.t += 61
+        await hub.sweep()
+        assert late.of("broadcast.ended")[-1]["reason"] == "unknown"
+
+    asyncio.run(run())
+
+
+def test_http_poll_long_wait_and_clock_reset() -> None:
+    async def run():
+        hub = bc.BroadcastHub()
+        sid, bid = _id(), _id()
+        room = await hub.start("owner", "K", None, _start(sid, bid, invited=["friend"]), {"friend"})
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.poll("stranger", None, sid, None, 0)
+        assert e.value.status == 404
+        first = await hub.poll("friend", "phone", sid, None, 0)
+        assert first["anchor"]["recordingId"] == "rec-a" and first["queue"]
+        after = f"{first['clockId']}.{first['gen']}.{first['seq']}"
+        assert await hub.poll("friend", "phone", sid, after, 0) is None
+        # Jiné clockId (restart API) -> hned celý stav (N1).
+        assert (await hub.poll("friend", "phone", sid, f"jine.{room.gen}.{room.seq}", 0))["seq"] == room.seq
+        assert hub.is_listening("friend", "phone")
+
+        async def later():
+            await asyncio.sleep(0.05)
+            await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1, "anchor": _anchor(pos=777)})
+
+        task = asyncio.create_task(later())
+        got = await hub.poll("friend", "phone", sid, after, 2.0)
+        await task
+        assert got["anchor"]["positionMs"] == 777
+        # Konec vysílání probudí čekajícího.
+        after = f"{got['clockId']}.{got['gen']}.{got['seq']}"
+
+        async def stop():
+            await asyncio.sleep(0.05)
+            await hub.stop("owner", {"sid": sid, "bid": bid})
+
+        task = asyncio.create_task(stop())
+        got = await hub.poll("friend", "phone", sid, after, 2.0)
+        await task
+        assert got["ended"] == "stopped"
+        unknown = await hub.poll("friend", "phone", _id(), None, 0)
+        assert unknown["pending"] is True
+
+    asyncio.run(run())
+
+
+def test_replaced_broadcast_ends_old_one() -> None:
+    async def run():
+        hub, _clock = _hub()
+        old_ws, lis = FakeWS(), FakeWS()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid, visibility="server"), set(), old_ws)
+        await hub.join("u", None, lis, {"sid": sid})
+        await hub.start("owner", "K", None, _start(_id(), _id(), visibility="server"), set())
+        assert sid not in hub.rooms and lis.of("broadcast.ended")[-1]["reason"] == "replaced"
+        assert old_ws.of("broadcast.taken")
+
+    asyncio.run(run())
+
+
+def test_queue_limit_and_garbage_fields() -> None:
+    q = bc.clean_queue({"qv": 3, "items": [{"recordingId": str(i)} for i in range(800)] + ["x"]})
+    assert len(q["items"]) == bc.MAX_QUEUE
+    a = bc.clean_anchor({"recordingId": "r", "positionMs": "5", "evil": 1, "rate": True})
+    assert "positionMs" not in a and "evil" not in a and "rate" not in a
+
+
+def test_allowed_invites_follow_blend_rule() -> None:
+    run = uuid.uuid4().hex[:6]
+    with Session(engine) as s:
+        owner = AppUser(name=f"o-{run}")
+        sharing = AppUser(name=f"s-{run}")
+        private = AppUser(name=f"p-{run}")
+        s.add_all([owner, sharing, private])
+        s.commit()
+        from app.home.extra_sections import share_key
+
+        s.add(HomeSnapshot(key=share_key(sharing.id), payload={"on": True}))
+        s.commit()
+        ids = owner.id, sharing.id, private.id
+    allowed = bc.allowed_invites(ids[0])
+    assert ids[1] in allowed and ids[2] not in allowed and ids[0] not in allowed
+    assert bc.profile_name(ids[0]) == f"o-{run}"
+
+
+def test_http_routes_require_login_and_work(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setattr("app.auth.auth_mode", lambda: "login")
+    client = TestClient(app)
+    r = client.get("/api/v1/broadcasts")
+    assert r.status_code == 401
+
+
+def test_connect_device_state_of_listener_skips_backup_listens(monkeypatch) -> None:
+    from app import realtime
+
+    calls = []
+    monkeypatch.setattr("app.connect_listens.tracker.update", lambda *a: calls.append(a))
+
+    async def run():
+        hub = bc.hub
+        mgr = realtime.ConnectionManager()
+        ws = FakeWS()
+        ws.accept = lambda: asyncio.sleep(0)
+        await mgr.connect("lis-user", ws)
+        await mgr.handle("lis-user", ws, json.dumps({"type": "device.hello", "payload": {"deviceId": "dev-lis", "name": "x"}}))
+        sid, bid = _id(), _id()
+        await hub.start("own-user", "K", None, _start(sid, bid, visibility="server"), set())
+        await mgr.handle("lis-user", ws, json.dumps({"type": "broadcast.join", "payload": {"sid": sid}}))
+        assert ws.of("broadcast.state")
+        state = {"type": "device.state", "payload": {"nowPlaying": {"recordingId": "rec-a"}, "isPlaying": True, "positionMs": 1}}
+        await mgr.handle("lis-user", ws, json.dumps(state))
+        assert calls == []
+        await mgr.handle("lis-user", ws, json.dumps({"type": "broadcast.leave", "payload": {"sid": sid}}))
+        await mgr.handle("lis-user", ws, json.dumps(state))
+        assert len(calls) == 1
+        # Hodiny: pong nese c0, čas serveru a id hodin.
+        await mgr.handle("lis-user", ws, json.dumps({"type": "clock.ping", "payload": {"c0": 12.5}}))
+        pong = ws.of("clock.pong")[-1]
+        assert pong["c0"] == 12.5 and pong["clockId"] == bc.CLOCK_ID and isinstance(pong["s"], float)
+        await hub.end(sid, "stopped")
+
+    monkeypatch.setattr(realtime.ConnectionManager, "_store_playing", lambda self, u: asyncio.sleep(0))
+    asyncio.run(run())

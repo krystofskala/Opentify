@@ -15,6 +15,11 @@ o sobě vědí:
     (fronta, index, pozice) a ztichne; žadatel pokračuje u sebe.
 Stav je jen v paměti procesu (jeden uvicorn) -- po restartu se zařízení
 znovu představí samy.
+
+Přes stejné spojení jde i sdílený stream mezi profily (`broadcast.*`,
+app/broadcast.py) a měření hodin pro jeho synchronizaci:
+  - `clock.ping {c0}` -> hned `clock.pong {c0, s, clockId}` (s = monotónní
+    čas serveru v ms).
 """
 
 from __future__ import annotations
@@ -140,9 +145,14 @@ class ConnectionManager:
             me.state = new_state
             me.updated = time.time()
             # Záložní poslechy (app/connect_listens.py) -- i když je appka nenahlásí.
+            # Ne u posluchače cizího vysílání: pasivní poslech ve streamu se do
+            # vkusu nepočítá (Kryštof 15. 10.), appka ho sama taky nehlásí.
+            from app.broadcast import hub
             from app.connect_listens import tracker
 
-            tracker.update(user_id, me.device_id or f"ws:{id(ws)}", new_state)
+            device_key = me.device_id or f"ws:{id(ws)}"
+            if not hub.is_listening(user_id, device_key):
+                tracker.update(user_id, device_key, new_state)
             await self._store_playing(user_id)
             # Jen pozice -> nerozesílat při každém tiku (zařízení posílá
             # stav při změně skladby/přehrávání + občas kvůli pozici).
@@ -158,6 +168,16 @@ class ConnectionManager:
             forward = {k: v for k, v in payload.items() if k not in ("target", "to")}
             forward["from"] = me.device_id
             await self._send(user_id, target, json.dumps({"type": kind, "payload": forward}))
+        elif kind == "clock.ping":
+            # Co nejdřív -- RTT měří klient, server jen razítkuje.
+            from app.broadcast import CLOCK_ID, hub
+
+            await self._send(user_id, me, json.dumps({
+                "type": "clock.pong",
+                "payload": {"c0": payload.get("c0"), "s": hub.server_ms(), "clockId": CLOCK_ID},
+            }))
+        elif isinstance(kind, str) and kind.startswith("broadcast"):
+            await self._broadcast(user_id, me, kind, payload)
         elif kind == "ping":
             # Klient podle odpovědi pozná mrtvý socket (iOS po pozadí).
             await self._send(user_id, me, '{"type": "pong", "payload": {}}')
@@ -167,7 +187,59 @@ class ConnectionManager:
             )
 
 
+    async def _broadcast(self, user_id: str, me: _Device, kind: str, payload: dict[str, Any]) -> None:
+        """Sdílený stream (app/broadcast.py) přes Connect spojení."""
+        import asyncio
+
+        from app import broadcast as bc
+
+        hub = bc.hub
+        try:
+            if kind == "broadcast.start":
+                name = await asyncio.to_thread(bc.profile_name, user_id)
+                allowed = await asyncio.to_thread(bc.allowed_invites, user_id)
+                room = await hub.start(user_id, name, me.device_id, payload, allowed, owner_ws=me.ws)
+                await self._send(user_id, me, json.dumps({"type": "broadcast.started", "payload": {
+                    "sid": room.sid, "gen": room.gen, "seq": room.seq, "clockId": bc.CLOCK_ID, **hub.listener_info(room),
+                }}))
+            elif kind == "broadcast.state":
+                await hub.state(user_id, payload, owner_ws=me.ws)
+            elif kind == "broadcast.stop":
+                await hub.stop(user_id, payload)
+            elif kind == "broadcast.join":
+                await hub.join(user_id, me.device_id, me.ws, payload)
+            elif kind == "broadcast.leave":
+                await hub.leave(me.ws, payload)
+            elif kind == "broadcast.sync":
+                await hub.sync(me.ws, payload)
+            elif kind == "broadcast.prep":
+                await hub.prep(me.ws, payload)
+            elif kind == "broadcasts.list":
+                await self._send(user_id, me, json.dumps({"type": "broadcasts.update", "payload": {"items": hub.visible_list(user_id)}}))
+        except bc.BroadcastError as exc:
+            # Vysílač pozná podle kódu, co dělat: 409 = pošli celý start,
+            # 410 = převzato / skončilo (končí), 403/400 = chyba.
+            await self._send(user_id, me, json.dumps({
+                "type": "broadcast.error",
+                "payload": {"sid": payload.get("sid"), "status": exc.status, "detail": exc.detail},
+            }))
+
+    def all_connections(self):
+        for user_id, devs in list(self._connections.items()):
+            for dev in list(devs.values()):
+                yield user_id, dev.ws
+
+
 manager = ConnectionManager()
+
+
+def _wire_broadcast() -> None:
+    from app.broadcast import hub
+
+    hub.connections = manager.all_connections
+
+
+_wire_broadcast()
 
 
 async def websocket_endpoint(websocket: WebSocket, user_id: str) -> None:
@@ -182,6 +254,9 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str) -> None:
         pass
     finally:
         manager.disconnect(user_id, websocket)
+        from app.broadcast import hub
+
+        await hub.disconnected(user_id, websocket)
         await manager._store_playing(user_id)
         await manager.broadcast_devices(user_id)
 

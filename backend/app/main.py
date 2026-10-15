@@ -25,6 +25,7 @@ from app.listens import lb_submit_loop
 from app.loudness import backfill_loop
 from app.realtime import redis_listener, websocket_endpoint
 from app.routes.blends import blends_router
+from app.routes.broadcast import broadcast_router
 from app.routes.spoken import spoken_router
 from app.routes.download_requests import download_requests_router
 from app.routes.podcasts import podcasts_router
@@ -192,6 +193,7 @@ app.include_router(listen_later_router, prefix="/api/v1")
 app.include_router(client_log_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(recognize_router, prefix="/api/v1")
 app.include_router(blends_router, prefix="/api/v1")
+app.include_router(broadcast_router, prefix="/api/v1")
 app.include_router(spoken_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 # Bez globálního přihlášení: tlačítko v upozornění nese vlastní jednorázový klíč.
 app.include_router(download_requests_router, prefix="/api/v1")
