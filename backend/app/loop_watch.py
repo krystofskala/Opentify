@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import threading
 import time
@@ -18,6 +19,8 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
+# Kód appky (balíček app) -- v kontejneru /app/app, na dev jinde.
+_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIMIT_S = 1.0
 QUIET_S = 60.0
 _beat = time.monotonic()
@@ -45,7 +48,7 @@ def _watch(loop_thread_id: int) -> None:
                 # Volající z kódu appky (kdo blokuje) + konec zásobníku (čím);
                 # samotný konec ukazoval jen knihovnu SQLAlchemy (15. 10.).
                 frames = traceback.extract_stack(frame) if frame else []
-                ours = [f for f in frames if "/app/app/" in f.filename.replace("\\", "/")]
+                ours = [f for f in frames if os.path.abspath(f.filename).startswith(_APP_DIR)]
                 stack = "".join(traceback.format_list(ours[-8:])) + "  …\n" + "".join(traceback.format_list(frames[-4:])) if frames else "?"
                 logger.warning("API stojí už %.1f s, právě běží:\n%s", lag, stack)
         elif lag <= LIMIT_S and stuck_since is not None:

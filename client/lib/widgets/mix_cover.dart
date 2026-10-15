@@ -877,7 +877,7 @@ class _MorePainter extends CustomPainter {
               ..close(),
             Paint()..color = pal.mid);
       case CoverKind.soundcloud:
-        final n = ((facts['tracks'] as num?)?.toInt() ?? 24).clamp(8, 40);
+        final n = (_int(facts, 'tracks') ?? 24).clamp(8, 40);
         final rnd = math.Random(n * 7919);
         final w = s / n;
         final mid = s * 0.42;
