@@ -3,20 +3,23 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import 'media_card.dart' show ArtworkImage;
 import 'mix_artwork.dart' show GrainPainter, MixArtSpec;
+import 'mix_cover.dart' show CoverKind, coverKindOf;
 
-/// Speciální edice obalů Denních mixů ve stylu Blue Note / Reida Milese
-/// (15. 10., návrh 8c-BN, vzor `claude/design/vzory/blue-note-denni-mix.html`).
-/// Vedle obalů v2, ne místo nich.
+/// Speciální série obalů ve stylu Blue Note / Reida Milese (15. 10., návrh
+/// 8c-BN, vzor `claude/design/vzory/blue-note-denni-mix.html`). Vedle obalů v2,
+/// ne místo nich; k čemu se použije, se rozhodne později (Kryštof 15. 10.:
+/// „celou další novou sérii, kterou budeme mít jako special series“).
 ///
-/// Pravidla série (zásady B10–B12):
-/// * všechny obaly stejná stavba: obří „denní“ ořezané okrajem, barevný
-///   rastrovaný fotoblok vlevo dole, vpravo „mix“, linka, štítek a číslo,
-/// * štítek vždy „ZAMĚŘENÍ · MĚSÍC“, nad ním „OPENTIFY MMDD“,
-/// * číslo celé uvnitř obalu,
-/// * dvoubarevnost: černá + krémová + jedna barva mixu.
+/// Pravidla série (zásady B10–B12) -- všechny druhy mixů mají stejnou stavbu:
+/// * nahoře obří slovo přes celou šířku (ořízne ho okraj, diakritika celá),
+/// * vlevo dole barevný rastrovaný fotoblok, v něm dva řádky faktů,
+/// * vpravo „OPENTIFY MMDD“, menší slovo, linka, štítek „ZAMĚŘENÍ / MĚSÍC“
+///   a velké číslo (číslo mixu, týden, rok, jinak počet skladeb) -- celé,
+/// * černá + krémová + jedna barva mixu,
+/// * dlaždice (`compact`) jen slova, blok a číslo.
 const _black = Color(0xFF0B0B0B);
 const _cream = Color(0xFFF4F1EA);
-const _accents = [
+const _dailyAccents = [
   Color(0xFF1E6FC4), // modrá
   Color(0xFFE2662B), // oranžová
   Color(0xFF2E9E6A), // zelená
@@ -37,58 +40,123 @@ TextStyle _heavy(double size, {double tracking = 0, Color color = _cream, double
       decoration: TextDecoration.none,
     );
 
-/// Obal Denního mixu v edici Blue Note; `today` jen pro testy a náhledy.
-Widget blueNoteDailyCover(MixArtSpec spec, {bool compact = false, DateTime? today}) =>
-    _BlueNoteDaily(spec: spec, tile: compact, today: today ?? DateTime.now());
+/// Obsah obalu jednoho druhu mixu.
+class _Content {
+  const _Content(this.big, this.small, this.number, this.focus, this.lines, this.accent);
+  final String big;
+  final String small;
+  final String number;
+  final String focus;
+  final List<String> lines;
+  final Color accent;
+}
 
-class _BlueNoteDaily extends StatelessWidget {
-  const _BlueNoteDaily({required this.spec, required this.tile, required this.today});
+int? _int(Map<String, dynamic> m, String k) => (m[k] as num?)?.toInt();
+
+String _thousands(int n) {
+  final s = n.toString();
+  final b = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) b.write(' ');
+    b.write(s[i]);
+  }
+  return b.toString();
+}
+
+Color _accentOf(MixArtSpec spec) => HSLColor.fromAHSL(1, spec.hue, 0.62, 0.5).toColor();
+
+_Content _content(CoverKind kind, MixArtSpec spec) {
+  final f = spec.facts ?? const <String, dynamic>{};
+  final tracks = _int(f, 'tracks');
+  final artists = _int(f, 'artists');
+  final counts = [
+    if (tracks != null) '$tracks skladeb',
+    if (artists != null) '$artists interpretů',
+  ];
+  final trackNo = tracks != null ? '$tracks' : '';
+  switch (kind) {
+    case CoverKind.daily:
+      final n = int.tryParse(spec.headline) ?? 1;
+      // Popisy nesou dva interprety („X, Y a další“) -> vždy dva řádky.
+      final names = ((f['artistsLine'] as String?) ?? '')
+          .replaceAll(RegExp(r'\s+a další$'), '')
+          .split(',')
+          .map((a) => a.trim())
+          .where((a) => a.isNotEmpty)
+          .take(2)
+          .toList();
+      return _Content('denní', 'mix', '$n', (f['style'] as String?) ?? 'MIX', names, _dailyAccents[(n - 1) % _dailyAccents.length]);
+    case CoverKind.discover:
+      final week = _int(f, 'week');
+      return _Content('objevy', 'týdne', week != null ? '$week' : trackNo, 'PRO TEBE', counts, _accentOf(spec));
+    case CoverKind.genre:
+      return _Content(spec.headline.toLowerCase(), 'mix', trackNo, 'TVŮJ MIX', counts, _accentOf(spec));
+    case CoverKind.mood:
+      return _Content(spec.headline.toLowerCase(), 'nálada', trackNo, 'NÁLADA', counts, _accentOf(spec));
+    case CoverKind.year:
+      final months = (f['months'] as List<dynamic>?)?.cast<num>();
+      final total = months?.fold<num>(0, (a, b) => a + b).toInt();
+      final y = spec.headline;
+      return _Content('top', 'skladby', '’${y.substring(y.length < 2 ? 0 : y.length - 2)}', 'ROK $y',
+          [if (total != null && total > 0) '${_thousands(total)} poslechů', ...counts.take(1)], _accentOf(spec));
+    case CoverKind.decade:
+      // Dekáda je překvapení k 1. 1. 2027 -- obal existuje, v náhledech se neukazuje.
+      final digits = spec.headline.replaceAll(RegExp(r'[^0-9]'), '');
+      return _Content('dekáda', 'tvoje', digits.length >= 2 ? digits.substring(digits.length - 2) : digits, 'DEKÁDA', counts,
+          _accentOf(spec));
+    case CoverKind.onRepeat:
+      return _Content('znovu', 'a znovu', trackNo, 'POSLEDNÍ MĚSÍC', counts, _accentOf(spec));
+    case CoverKind.throwback:
+      return _Content('návrat', 'do minulosti', trackNo, 'ZNOVU OBJEVENO', counts, _accentOf(spec));
+    case CoverKind.homeMix:
+      final words = spec.headline.split(' ');
+      return _Content(words.first.toLowerCase(), words.skip(1).join(' ').toLowerCase(), trackNo, 'MIX', counts, _accentOf(spec));
+  }
+}
+
+/// Obal série Blue Note, nebo `null` pro druhy, které ho nemají (stejné jako
+/// v2). `today` jen pro testy a náhledy.
+Widget? blueNoteCover(MixArtSpec spec, {bool compact = false, DateTime? today}) {
+  final kind = coverKindOf(spec);
+  if (kind == null) return null;
+  return _BlueNote(spec: spec, c: _content(kind, spec), tile: compact, today: today ?? DateTime.now());
+}
+
+class _BlueNote extends StatelessWidget {
+  const _BlueNote({required this.spec, required this.c, required this.tile, required this.today});
 
   final MixArtSpec spec;
+  final _Content c;
   final bool tile;
   final DateTime today;
 
   @override
   Widget build(BuildContext context) {
-    final n = int.tryParse(spec.headline) ?? 1;
-    final accent = _accents[(n - 1) % _accents.length];
     final facts = spec.facts ?? const <String, dynamic>{};
     final photos = ((facts['photos'] as List<dynamic>?)?.cast<String>() ?? const <String>[]).isNotEmpty
         ? (facts['photos'] as List<dynamic>).cast<String>()
         : spec.photos;
-    final style = facts['style'] as String?;
-    final artists = ((facts['artistsLine'] as String?) ?? '')
-        .replaceAll(RegExp(r'\s+a další$'), '')
-        .split(',')
-        .map((a) => a.trim())
-        .where((a) => a.isNotEmpty)
-        // Popisy mixů nesou dva interprety („X, Y a další“, 15. 10. všech 18) -- série
-        // má proto vždy dva řádky (zásada B10), bez výplně.
-        .take(2)
-        .toList();
-    return LayoutBuilder(builder: (context, c) {
-      final s = c.biggest.shortestSide;
+    return LayoutBuilder(builder: (context, box) {
+      final s = box.biggest.shortestSide;
       final block = Rect.fromLTWH(0, s * 0.441, s * 0.665, s * 0.559);
       return ClipRect(
         child: Stack(fit: StackFit.expand, children: [
           const ColoredBox(color: _black),
-          Positioned.fromRect(rect: block, child: ColoredBox(color: accent)),
+          Positioned.fromRect(rect: block, child: ColoredBox(color: c.accent)),
           if (photos.isNotEmpty)
             Positioned.fromRect(
               rect: block,
               child: ColorFiltered(
-                colorFilter: _duotone(_black, accent),
+                colorFilter: _duotone(_black, c.accent),
                 child: ArtworkImage(url: photos.first, icon: Symbols.person_rounded, iconSize: 18),
               ),
             ),
           Positioned.fromRect(rect: block, child: const CustomPaint(painter: _HalftonePainter())),
           CustomPaint(
             painter: _TypePainter(
-              n: n,
-              accent: accent,
-              label: '${(style ?? 'MIX').toUpperCase()} · ${_months[today.month - 1]}',
+              c: c,
+              month: _months[today.month - 1],
               stamp: 'OPENTIFY ${today.month.toString().padLeft(2, '0')}${today.day.toString().padLeft(2, '0')}',
-              artists: tile ? const [] : artists.map((a) => a.toUpperCase()).toList(),
               small: tile,
             ),
           ),
@@ -134,66 +202,66 @@ class _HalftonePainter extends CustomPainter {
 }
 
 class _TypePainter extends CustomPainter {
-  _TypePainter({required this.n, required this.accent, required this.label, required this.stamp, required this.artists, required this.small});
+  _TypePainter({required this.c, required this.month, required this.stamp, required this.small});
 
-  final int n;
-  final Color accent;
-  final String label;
+  final _Content c;
+  final String month;
   final String stamp;
-  final List<String> artists;
   final bool small;
 
-  /// Text s účařím v `baseline` (zlomek strany).
-  double _text(Canvas canvas, double s, String text, TextStyle style, double x, double baseline, {double? fitWidth}) {
-    var tp = TextPainter(text: TextSpan(text: text, style: style), textDirection: TextDirection.ltr)..layout();
-    if (fitWidth != null && tp.width > 0) {
-      final scaled = style.copyWith(fontSize: style.fontSize! * fitWidth / tp.width, letterSpacing: style.letterSpacing! * fitWidth / tp.width);
-      tp = TextPainter(text: TextSpan(text: text, style: scaled), textDirection: TextDirection.ltr)..layout();
+  TextPainter _layout(String text, TextStyle style) =>
+      TextPainter(text: TextSpan(text: text, style: style), textDirection: TextDirection.ltr)..layout();
+
+  /// Text s účařím v `baseline` (zlomek strany); `maxWidth` ho zmenší, aby se vešel.
+  void _text(Canvas canvas, double s, String text, TextStyle style, double x, double baseline, {double? maxWidth}) {
+    var tp = _layout(text, style);
+    if (maxWidth != null && tp.width > maxWidth) {
+      final k = maxWidth / tp.width;
+      tp = _layout(text, style.copyWith(fontSize: style.fontSize! * k, letterSpacing: style.letterSpacing! * k));
     }
-    final asc = tp.computeDistanceToActualBaseline(TextBaseline.alphabetic);
-    tp.paint(canvas, Offset(x, s * baseline - asc));
-    return tp.width;
+    tp.paint(canvas, Offset(x, s * baseline - tp.computeDistanceToActualBaseline(TextBaseline.alphabetic)));
+  }
+
+  /// Text zkrácený „…“, aby písmo při zmenšení nekleslo pod `minScale`.
+  String _shorten(String text, TextStyle style, double width, double minScale) {
+    if (_layout(text, style).width * minScale <= width) return text;
+    var t = text;
+    while (t.length > 4 && _layout('$t…', style).width * minScale > width) {
+      t = t.substring(0, t.length - 1);
+    }
+    return '${t.trimRight()}…';
   }
 
   @override
   void paint(Canvas canvas, Size size) {
     final s = size.shortestSide;
-    // „denní“ přes celou šířku, levý okraj ořízne první písmeno.
-    // Čárka nad í musí zůstat celá (náhled v1: useknutá, četlo se „denni“).
-    _text(canvas, s, 'denní', _heavy(s * 0.4, tracking: -0.05, width: 100), -s * 0.03, 0.4, fitWidth: s * 1.0);
-    _text(canvas, s, 'mix', _heavy(s * 0.14, tracking: -0.05, width: 100), s * 0.682, 0.585);
-    // Číslo celé: účaří nad spodní hranou (zásada B11).
-    _text(canvas, s, '$n', _heavy(s * 0.42, tracking: -0.04, color: accent, width: 80), s * 0.675, 0.935);
+    // Obří slovo přes celou šířku, ale nejvýš tak velké jako „denní“ (krátká
+    // slova jako „top“ by jinak přerostla do bloku); čárky a háčky celé.
+    final bigStyle = _heavy(s * 0.4, tracking: -0.05, width: 100);
+    final natural = _layout(c.big, bigStyle).width;
+    final denni = _layout('denní', bigStyle).width;
+    final k = natural > 0 ? (s / natural).clamp(0.0, s / denni) : 1.0;
+    // Slovo s dolními dotahy (objevy, top, moje) se zvedne, ať „y“ nebo „p“
+    // nepřekrývá razítko vpravo; slova s čárkou zůstávají na 0,4.
+    final down = RegExp('[gjpqyý]').hasMatch(c.big) && !RegExp('[áéíóúůýčďěňřšťž]').hasMatch(c.big.replaceAll('ý', '')) ? 0.075 * k : 0.0;
+    _text(canvas, s, c.big, bigStyle.copyWith(fontSize: bigStyle.fontSize! * k, letterSpacing: bigStyle.letterSpacing! * k), -s * 0.03,
+        0.4 - down);
+    _text(canvas, s, c.small, _heavy(s * 0.14, tracking: -0.05, width: 100), s * 0.682, 0.585, maxWidth: s * 0.29);
+    // Číslo celé, s okrajem nad spodní hranou (zásada B11); dlouhé se zúží.
+    _text(canvas, s, c.number, _heavy(s * 0.42, tracking: -0.04, color: c.accent, width: 80), s * 0.675, 0.935, maxWidth: s * 0.3);
     if (small) return;
     canvas.drawRect(Rect.fromLTWH(s * 0.688, s * 0.603, s * 0.282, s * 0.006), Paint()..color = _cream);
     _text(canvas, s, stamp, _heavy(s * 0.024, tracking: 0.18, weight: 600), s * 0.688, 0.468);
-    // Štítek ve dvou řádcích: zaměření / měsíc; dlouhé zaměření se zúží jen do míry.
-    final parts = label.split(' · ');
     final focus = _heavy(s * 0.03, tracking: 0.12, weight: 700);
-    final fp = TextPainter(text: TextSpan(text: parts.first, style: focus), textDirection: TextDirection.ltr)..layout();
-    var line = parts.first;
-    var fit = fp.width > s * 0.29 ? s * 0.29 : null;
-    if (fit != null && fit / fp.width < 0.7) {
-      // příliš dlouhé -> zkrátit, ať písmo není drobné
-      while (line.length > 4) {
-        line = line.substring(0, line.length - 1);
-        final t = TextPainter(text: TextSpan(text: '$line…', style: focus), textDirection: TextDirection.ltr)..layout();
-        if (t.width * 0.7 <= s * 0.29) break;
-      }
-      line = '${line.trimRight()}…';
-      final t = TextPainter(text: TextSpan(text: line, style: focus), textDirection: TextDirection.ltr)..layout();
-      fit = t.width > s * 0.29 ? s * 0.29 : null;
-    }
-    _text(canvas, s, line, focus, s * 0.688, 0.642, fitWidth: fit);
-    if (parts.length > 1) _text(canvas, s, parts.last, _heavy(s * 0.024, tracking: 0.18, weight: 500), s * 0.688, 0.675);
-    for (var i = 0; i < artists.length; i++) {
-      final y = 0.935 - (artists.length - 1 - i) * 0.042;
-      final st = _heavy(s * 0.031, tracking: 0.2, weight: 700);
-      final p = TextPainter(text: TextSpan(text: artists[i], style: st), textDirection: TextDirection.ltr)..layout();
-      _text(canvas, s, artists[i], st, s * 0.035, y, fitWidth: p.width > s * 0.6 ? s * 0.6 : null);
+    _text(canvas, s, _shorten(c.focus.toUpperCase(), focus, s * 0.29, 0.7), focus, s * 0.688, 0.642, maxWidth: s * 0.29);
+    _text(canvas, s, month, _heavy(s * 0.024, tracking: 0.18, weight: 500), s * 0.688, 0.675);
+    final lineStyle = _heavy(s * 0.031, tracking: 0.2, weight: 700);
+    for (var i = 0; i < c.lines.length; i++) {
+      final y = 0.935 - (c.lines.length - 1 - i) * 0.042;
+      _text(canvas, s, c.lines[i].toUpperCase(), lineStyle, s * 0.035, y, maxWidth: s * 0.6);
     }
   }
 
   @override
-  bool shouldRepaint(_TypePainter old) => old.n != n || old.label != label || old.artists != artists || old.small != small;
+  bool shouldRepaint(_TypePainter old) => old.c != c || old.small != small || old.month != month;
 }
