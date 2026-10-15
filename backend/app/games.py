@@ -551,11 +551,11 @@ async def _mix(cat: Catalog, mix_id: str, cards: dict[str, dict[str, Any]]) -> s
     if not picked:
         return None
     ids = await asyncio.to_thread(g._ingest_tracks, picked[:60])
-    return g._save_playlist(
+    return await asyncio.to_thread(lambda: g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"{cat.ns}:mix:{mix_id}", title=title, description=description,
         kind=PlaylistKind.EDITORIAL, section=cat.ns, recording_ids=ids, cover_urls=rng.sample(covers, min(4, len(covers))),
         ttl=g.DAILY_TTL,
-    )
+    ))
 
 
 async def page(cat: Catalog | None = None) -> dict[str, Any]:
@@ -647,11 +647,11 @@ async def stations(game: Game) -> list[str]:
         ids = await asyncio.to_thread(g._ingest_tracks, tracks)
         if not ids:
             return None
-        return g._save_playlist(
+        return await asyncio.to_thread(lambda: g._save_playlist(
             owner=GLOBAL_PLAYLIST_OWNER, source=f"games:station:{game.slug}:{fold(station)}", title=station,
             description=game.title, kind=PlaylistKind.EDITORIAL, section="games", recording_ids=ids,
             cover_urls=[img["cover"]] if img.get("cover") else [], ttl=g.DAILY_TTL,
-        )
+        ))
 
     async def cached(station: str) -> str | None:
         hit = await cached_json(f"games:station-pl:v1:{game.slug}:{station}", DAY, lambda: _wrap(one(station)), is_empty=lambda v: not v.get("id"))
@@ -749,11 +749,11 @@ async def _series_playlist(
     if not ids:
         return None
     title = title or cat.series[series_id][0]
-    return g._save_playlist(
+    return await asyncio.to_thread(lambda: g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"{cat.ns}:series:{series_id}", title=f"{title} · celá série",
         description="Soundtracky všech dílů série", kind=PlaylistKind.EDITORIAL, section=cat.ns,
         recording_ids=ids, cover_urls=[c["cover"] for c in cards if c.get("cover")][-4:], ttl=g.DAILY_TTL,
-    )
+    ))
 
 
 GAMES_CATALOG = Catalog(

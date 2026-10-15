@@ -83,7 +83,7 @@ async def _seed_mix(genre_id: str, user_id: str) -> tuple[str | None, list[str]]
             if rec and rec.artist_id and rec.artist_id not in artists:
                 artists.append(rec.artist_id)
     title = CZECH_GENRES[genre_id][1]
-    playlist_id = g._save_playlist(
+    playlist_id = await asyncio.to_thread(lambda: g._save_playlist(
         owner=user_id,
         source=f"czech-seed:{genre_id}",
         title=title,
@@ -93,7 +93,7 @@ async def _seed_mix(genre_id: str, user_id: str) -> tuple[str | None, list[str]]
         recording_ids=ids[:40],
         cover_urls=g._covers_for(ids[:4]),
         ttl=g.DAILY_TTL,
-    )
+    ))
     return playlist_id, artists
 
 

@@ -120,6 +120,8 @@ def _artist_weights(user_id: str, days: int = 365, half_life: float = 60.0) -> t
 
 
 def _save_playlist(user_id: str, source: str, title: str, description: str, ids: list[str], ttl: timedelta) -> str:
+    """Synchronní zápis do DB -- z async generátorů volat přes
+    `asyncio.to_thread` (generátory běží v procesu API, noc 15. 10.)."""
     from app.home import generators as g
 
     return g._save_playlist(
@@ -233,7 +235,7 @@ async def build_now_mix(user_id: str) -> int:
         similar = similar[1:]
     ids = list(dict.fromkeys(ids))[:40]
     what = f"{style} – " if style else ""
-    pid = _save_playlist(user_id, "personal:now-mix", band, f"{band}: {what}co v tuhle dobu posloucháš a podobné", ids, timedelta(hours=8))
+    pid = await asyncio.to_thread(_save_playlist, user_id, "personal:now-mix", band, f"{band}: {what}co v tuhle dobu posloucháš a podobné", ids, timedelta(hours=8))
     _save(user_id, "now_mix", {"title": f"Mix na teď · {band}", "kind": "tracks", "ids": ids[:20], "playlistId": pid, "stamp": stamp})
     return len(ids)
 
@@ -266,7 +268,7 @@ async def build_year_ago(user_id: str) -> int:
     for years, label in ((1, "Tento týden před rokem"), (2, "Tento týden před dvěma lety"), (3, "Tento týden před třemi lety")):
         ids = await asyncio.to_thread(collect, years)
         if len(ids) >= 8:
-            pid = _save_playlist(user_id, "personal:year-ago", label, f"{label} – co ti tehdy hrálo nejvíc", ids, timedelta(hours=12))
+            pid = await asyncio.to_thread(_save_playlist, user_id, "personal:year-ago", label, f"{label} – co ti tehdy hrálo nejvíc", ids, timedelta(hours=12))
             _save(user_id, "year_ago", {"title": label, "kind": "tracks", "ids": ids[:20], "playlistId": pid})
             return len(ids)
     _clear(user_id, "year_ago")
@@ -365,7 +367,7 @@ async def build_caught(user_id: str) -> int:
         rec = s.get(Recording, hook)
         title = rec.title if rec else "tahle skladba"
     label = f"Protože tě chytla {title}"
-    pid = _save_playlist(user_id, "personal:caught", label, f"Podobné skladby k {title}", ids, timedelta(days=1))
+    pid = await asyncio.to_thread(_save_playlist, user_id, "personal:caught", label, f"Podobné skladby k {title}", ids, timedelta(days=1))
     _save(user_id, "caught", {"title": label, "kind": "tracks", "ids": ids[:20], "playlistId": pid})
     return len(ids)
 
@@ -546,7 +548,7 @@ async def build_deep_cuts(user_id: str) -> int:
     if len(ids) < 8:
         _clear(user_id, "deep_cuts")
         return 0
-    pid = _save_playlist(user_id, "personal:deep-cuts", "Méně známé od tvých oblíbených", "Skladby mimo hity tvých nejposlouchanějších interpretů, které jsi ještě neslyšel", ids, timedelta(days=1))
+    pid = await asyncio.to_thread(_save_playlist, user_id, "personal:deep-cuts", "Méně známé od tvých oblíbených", "Skladby mimo hity tvých nejposlouchanějších interpretů, které jsi ještě neslyšel", ids, timedelta(days=1))
     _save(user_id, "deep_cuts", {"title": "Méně známé skladby", "kind": "tracks", "ids": ids[:20], "playlistId": pid})
     return len(ids)
 
@@ -799,7 +801,7 @@ async def build_soundcloud(user_id: str) -> int:
         _clear(user_id, "soundcloud")
         return 0
     random.Random(f"sc:{user_id}:{utcnow().date().isoformat()}").shuffle(ids)
-    pid = _save_playlist(user_id, "personal:soundcloud", "Na SoundCloudu", "Dema, živáky a remixy z oficiálních SoundCloud profilů tvých interpretů", ids, timedelta(days=1))
+    pid = await asyncio.to_thread(_save_playlist, user_id, "personal:soundcloud", "Na SoundCloudu", "Dema, živáky a remixy z oficiálních SoundCloud profilů tvých interpretů", ids, timedelta(days=1))
     _save(user_id, "soundcloud", {"title": "Na SoundCloudu od tvých interpretů", "kind": "tracks", "ids": ids[:20], "playlistId": pid})
     return len(ids)
 

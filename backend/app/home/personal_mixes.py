@@ -830,7 +830,7 @@ async def build_daily_mixes() -> int:
     groups: dict[str, list[str]] = {}
     for built, (_idx, cluster, tracks, description, featured) in enumerate(results, start=1):
         groups[str(built)] = cluster.artists[:15]
-        g._save_playlist(
+        await asyncio.to_thread(lambda: g._save_playlist(
             owner=g.home_user(),
             source=f"personal:daily-mix:{built}",
             title=f"Denní mix {built}",
@@ -840,14 +840,14 @@ async def build_daily_mixes() -> int:
             recording_ids=tracks,
             cover_urls=_artist_covers(taste, list(dict.fromkeys([*featured, *cluster.artists]))) or g._covers_for(tracks),
             ttl=g.DAILY_TTL,
-        )
+        ))
         await g._preprovision(tracks[:1])
     built = len(results)
     await asyncio.to_thread(
         _clear_playlists, g.home_user(), [f"personal:daily-mix:{n}" for n in range(built + 1, MAX_DAILY_MIXES + 1)]
     )
-    g._save_snapshot("personal:daily-mixes", {"stamp": day, "count": built})
-    g._save_snapshot("personal:daily-mix-groups", {"groups": groups})
+    await asyncio.to_thread(lambda: g._save_snapshot("personal:daily-mixes", {"stamp": day, "count": built}))
+    await asyncio.to_thread(lambda: g._save_snapshot("personal:daily-mix-groups", {"groups": groups}))
     _mark_used(day, used_today)
     shown_scenes = [scene_of_cluster[id(c)].id for _i, c, _t, _d, _f in results if id(c) in scene_of_cluster]
     if shown_scenes:
@@ -1424,7 +1424,7 @@ async def build_discover_weekly() -> int:
     if len(picked) < DISCOVER_MIN:
         raise RuntimeError(f"objevy týdne: jen {len(picked)} nových skladeb")
     picked = await _in_scene_blocks(g.home_user(), picked[:30], track_seed, rng)
-    g._save_playlist(
+    await asyncio.to_thread(lambda: g._save_playlist(
         owner=g.home_user(),
         source="personal:discover-weekly",
         title="Objevy týdne",
@@ -1434,9 +1434,9 @@ async def build_discover_weekly() -> int:
         recording_ids=picked[:30],
         cover_urls=g._covers_for(picked),
         ttl=timedelta(days=7),
-    )
+    ))
     await g._preprovision(picked[:1])
-    g._save_snapshot("personal:discover-weekly", {"stamp": week, "count": len(picked[:30])})
+    await asyncio.to_thread(lambda: g._save_snapshot("personal:discover-weekly", {"stamp": week, "count": len(picked[:30])}))
     return len(picked[:30])
 
 
@@ -1447,7 +1447,7 @@ async def build_on_repeat() -> int:
         await asyncio.to_thread(_clear_playlists, g.home_user(), ["personal:on-repeat"])
         return 0
     ids = ranked[:30]
-    g._save_playlist(
+    await asyncio.to_thread(lambda: g._save_playlist(
         owner=g.home_user(),
         source="personal:on-repeat",
         title="Na opakování",
@@ -1457,7 +1457,7 @@ async def build_on_repeat() -> int:
         recording_ids=ids,
         cover_urls=g._covers_for(ids),
         ttl=timedelta(hours=6),
-    )
+    ))
     return len(ids)
 
 
@@ -1490,7 +1490,7 @@ async def build_throwback() -> int:
     if len(ids) < 10:
         await asyncio.to_thread(_clear_playlists, g.home_user(), ["personal:throwback"])
         return 0
-    g._save_playlist(
+    await asyncio.to_thread(lambda: g._save_playlist(
         owner=g.home_user(),
         source="personal:throwback",
         title="Návrat do minulosti",
@@ -1500,7 +1500,7 @@ async def build_throwback() -> int:
         recording_ids=ids,
         cover_urls=g._covers_for(ids),
         ttl=g.DAILY_TTL,
-    )
+    ))
     return len(ids)
 
 

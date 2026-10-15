@@ -245,7 +245,7 @@ async def run_generators(*, force: bool = False) -> dict[str, Any]:
                     logger.warning("home: generátor %s selhal: %s: %s", label, type(exc).__name__, exc)
                     report[label] = f"error: {exc}"
                     continue
-                g._save_snapshot(f"gen:{name}", {"count": count})
+                await asyncio.to_thread(lambda: g._save_snapshot(f"gen:{name}", {"count": count}))
                 report[label] = count
             finally:
                 g.reset_home_user(token)

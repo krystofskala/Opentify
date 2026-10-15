@@ -246,12 +246,12 @@ async def _genre_recording_ids(c: Category) -> list[str]:
     tracks = await get_deezer_client().chart_tracks(c.genre_id or 0, 50)
     if not tracks:
         return []
-    ids = g._ingest_tracks(tracks)
+    ids = await asyncio.to_thread(g._ingest_tracks, tracks)
     if ids:
-        g._save_playlist(
+        await asyncio.to_thread(lambda: g._save_playlist(
             owner=GLOBAL_PLAYLIST_OWNER, source=source, title=c.title, description=f"Žebříček žánru {c.title} podle Deezeru",
             kind=PlaylistKind.GENRE, section="browse", recording_ids=ids, cover_urls=g._covers_for(ids), ttl=g.DAILY_TTL,
-        )
+        ))
     return ids
 
 
@@ -463,11 +463,11 @@ async def genre_rail(c: Category, *, force: bool = False) -> str | None:
             take(rid)
     if not combined:
         return snap.payload.get("playlistId") if snap is not None else None
-    playlist_id = g._save_playlist(
+    playlist_id = await asyncio.to_thread(lambda: g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:genre:{c.id}", title=c.title,
         description=f"{c.title} – populární, klasika i tipy komunity", kind=PlaylistKind.GENRE,
         section="genres", recording_ids=combined, cover_urls=g._covers_for(combined[:4]), ttl=g.DAILY_TTL,
-    )
+    ))
     with Session(engine) as session:
         row = session.get(HomeSnapshot, rail_key(c.id)) or HomeSnapshot(key=rail_key(c.id))
         row.payload = {"playlistId": playlist_id}
@@ -605,11 +605,11 @@ async def genre_new_releases(c: Category, *, force: bool = False) -> str | None:
     ids = await asyncio.to_thread(g._ingest_tracks, tracks) if tracks else []
     if not ids:
         return snap.payload.get("playlistId") if snap is not None else None
-    playlist_id = g._save_playlist(
+    playlist_id = await asyncio.to_thread(lambda: g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:new:{c.id}", title=f"Novinky: {c.title}",
         description=f"Co vyšlo za poslední rok – {c.title.lower()} od klasiků po mladé", kind=PlaylistKind.EDITORIAL,
         section="browse", recording_ids=ids[:RAIL_SIZE], cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
-    )
+    ))
     with Session(engine) as session:
         row = session.get(HomeSnapshot, new_key(c.id)) or HomeSnapshot(key=new_key(c.id))
         row.payload = {"playlistId": playlist_id}
@@ -1136,13 +1136,13 @@ async def open_deezer_playlist(deezer_id: str, title_hint: str | None = None) ->
     tracks = await dz.playlist_tracks(deezer_id, 100)
     if not tracks:
         return existing.id if existing is not None else None
-    ids = g._ingest_tracks(tracks)
+    ids = await asyncio.to_thread(g._ingest_tracks, tracks)
     if not ids:
         return existing.id if existing is not None else None
     title = (meta or {}).get("title") or title_hint or "Playlist"
     description = (meta or {}).get("description") or None
     picture = (meta or {}).get("picture_xl") or (meta or {}).get("picture_big")
-    return g._save_playlist(
+    return await asyncio.to_thread(lambda: g._save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER,
         source=source,
         title=title,
@@ -1152,7 +1152,7 @@ async def open_deezer_playlist(deezer_id: str, title_hint: str | None = None) ->
         recording_ids=ids,
         cover_urls=[picture] if picture else g._covers_for(ids),
         ttl=g.DAILY_TTL,
-    )
+    ))
 
 
 def _known_artists(user_id: str) -> set[str]:

@@ -289,10 +289,10 @@ async def build_deezer_playlist(spec: DeezerPlaylistSpec, ttl: timedelta) -> int
     tracks = await spec.fetch()
     if not tracks:
         raise RuntimeError(f"{spec.source}: zdroj nevrátil žádné skladby")
-    recording_ids = _ingest_tracks(tracks)
+    recording_ids = await asyncio.to_thread(lambda: _ingest_tracks(tracks))
     if not recording_ids:
         raise RuntimeError(f"{spec.source}: žádnou skladbu nešlo napojit")
-    _save_playlist(
+    await asyncio.to_thread(lambda: _save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER,
         source=spec.source,
         title=spec.title,
@@ -302,7 +302,7 @@ async def build_deezer_playlist(spec: DeezerPlaylistSpec, ttl: timedelta) -> int
         recording_ids=recording_ids,
         cover_urls=_covers_for(recording_ids),
         ttl=ttl,
-    )
+    ))
     if spec.preprovision:
         await _preprovision(recording_ids)
     return len(recording_ids)
@@ -321,10 +321,10 @@ async def build_editorial() -> int:
         await asyncio.sleep(_BACKGROUND_GAP_S)
         if not tracks:
             continue
-        recording_ids = _ingest_tracks(tracks)
+        recording_ids = await asyncio.to_thread(lambda: _ingest_tracks(tracks))
         if not recording_ids:
             continue
-        _save_playlist(
+        await asyncio.to_thread(lambda: _save_playlist(
             owner=GLOBAL_PLAYLIST_OWNER,
             source=f"deezer:playlist:{pid}",
             title=meta.get("title") or "Výběr",
@@ -334,7 +334,7 @@ async def build_editorial() -> int:
             recording_ids=recording_ids,
             cover_urls=_covers_for(recording_ids),
             ttl=DAILY_TTL,
-        )
+        ))
         built += 1
     return built
 
@@ -358,10 +358,10 @@ async def build_apple_chart(country: str, title: str, description: str) -> int:
         if match:
             tracks.append(match)
         await asyncio.sleep(_BACKGROUND_GAP_S)
-    recording_ids = _ingest_tracks(tracks)
+    recording_ids = await asyncio.to_thread(lambda: _ingest_tracks(tracks))
     if len(recording_ids) < len(entries) // 3:
         raise RuntimeError(f"apple rss {country}: napárováno jen {len(recording_ids)}/{len(entries)}")
-    _save_playlist(
+    await asyncio.to_thread(lambda: _save_playlist(
         owner=GLOBAL_PLAYLIST_OWNER,
         source=f"apple:rss:{country}",
         title=title,
@@ -371,7 +371,7 @@ async def build_apple_chart(country: str, title: str, description: str) -> int:
         recording_ids=recording_ids,
         cover_urls=_covers_for(recording_ids),
         ttl=CHART_TTL,
-    )
+    ))
     return len(recording_ids)
 
 
@@ -444,7 +444,7 @@ async def build_new_releases() -> int:
                 release_ids.append(release.id)
     if len(release_ids) < 4:
         raise RuntimeError(f"fresh releases: jen {len(release_ids)} od známých interpretů")
-    _save_snapshot("new_releases", {"releaseIds": release_ids})
+    await asyncio.to_thread(lambda: _save_snapshot("new_releases", {"releaseIds": release_ids}))
     return len(release_ids)
 
 
@@ -479,7 +479,7 @@ async def build_top_albums() -> int:
         session.commit()
     if len(release_ids) < 10:
         raise RuntimeError(f"top albums: napárováno jen {len(release_ids)}")
-    _save_snapshot("top_albums", {"releaseIds": release_ids})
+    await asyncio.to_thread(lambda: _save_snapshot("top_albums", {"releaseIds": release_ids}))
     return len(release_ids)
 
 
@@ -532,7 +532,7 @@ async def build_personal_mixes() -> int:
             ids = [r.id for r in recordings]
             if not ids:
                 continue
-            _save_playlist(
+            await asyncio.to_thread(lambda: _save_playlist(
                 owner=owner,
                 source=source,
                 title=title,
@@ -544,7 +544,7 @@ async def build_personal_mixes() -> int:
                 recording_ids=ids,
                 cover_urls=_covers_for(ids),
                 ttl=DAILY_TTL,
-            )
+            ))
             built += 1
     return built
 

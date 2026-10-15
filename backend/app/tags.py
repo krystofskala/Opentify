@@ -117,11 +117,11 @@ async def tag_mix(tag: str) -> dict[str, Any]:
         if not ids:
             return {"playlistId": None}
         return {
-            "playlistId": g._save_playlist(
+            "playlistId": await asyncio.to_thread(lambda: g._save_playlist(
                 owner=GLOBAL_PLAYLIST_OWNER, source=f"browse:tag:{t}", title=f"{title_of(t)} · nejoblíbenější",
                 description=f"{title_of(t)} -- co posluchači Last.fm pouštějí nejvíc", kind=PlaylistKind.GENRE,
                 section="browse", recording_ids=ids, cover_urls=g._covers_for(ids[:4]), ttl=g.DAILY_TTL,
-            )
+            ))
         }
 
     return await cached_json(f"tag:mix:v1:{t}", TAG_TTL_S, build, is_empty=lambda v: not v.get("playlistId"))
@@ -347,12 +347,12 @@ async def _tag_for_you(tag: str, user_id: str) -> str | None:
         ids += discovery[:1]
         discovery = discovery[1:]
     ids = list(dict.fromkeys(ids))[:40]
-    return g._save_playlist(
+    return await asyncio.to_thread(lambda: g._save_playlist(
         owner=user_id, source=source, title=f"Tvůj mix · {title_of(t)}",
         description=f"{title_of(t)} podle tebe -- tvoje oblíbené a objevy podle celého tvého vkusu",
         kind=PlaylistKind.PERSONAL_MIX, section="tag", recording_ids=ids, cover_urls=g._covers_for(ids[:4]),
         ttl=g.DAILY_TTL,
-    )
+    ))
 
 
 # Štítek, který je celým žánrem z Procházet ("jazz", "rock", "hip-hop"),
