@@ -13,6 +13,12 @@ import 'dart:math' as math;
 // Hodiny
 // ---------------------------------------------------------------------------
 
+final Stopwatch _mono = Stopwatch()..start();
+
+/// Monotónní čas klienta v ms (neskáče s nastavením hodin; na iOS/Androidu
+/// ve spánku stojí -- proto po návratu z pozadí `ClockSync.invalidate`).
+double monoNowMs() => _mono.elapsedMicroseconds / 1000.0;
+
 /// Odhad posunu "čas serveru − čas klienta" z dvojic `clock.ping`/`clock.pong`
 /// (i z odpovědí HTTP). Bere se vzorek s nejmenším RTT z posledních 8 --
 /// zpožděné odpovědi (zátěž, záseky event loopu API) mají větší RTT a prohrají.

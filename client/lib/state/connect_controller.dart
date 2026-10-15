@@ -137,6 +137,8 @@ class ConnectController extends StateNotifier<List<RemoteDevice>> with WidgetsBi
         }
       case 'handoff.request':
         // Jiné zařízení přebírá: pošli mu frontu a místo, sám ztichni.
+        // Cizí vysílání se nepředává (patří vysílači, ne tomuhle profilu).
+        if (audio.followingBroadcast) return;
         final snapshot = audio.handoffSnapshot();
         final to = e.payload['from'] as String?;
         if (snapshot == null || to == null) return;

@@ -19,6 +19,7 @@ import '../../widgets/glass/glass.dart';
 import '../../widgets/lyrics_panel.dart' show LyricsTimingRow, lyricsVisibleProvider;
 import '../../widgets/radio_station.dart';
 import 'player_buttons_sheet.dart';
+import '../../widgets/broadcast_widgets.dart' show BroadcastMoreTile;
 import '../../widgets/connect_sheet.dart';
 import '../../widgets/report_problem.dart';
 import '../../widgets/toast.dart';
@@ -162,6 +163,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                               showConnectSheet(host);
                             },
                           ),
+                          // Sdílený stream: vysílat / s kým poslouchám.
+                          const BroadcastMoreTile(),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Symbols.tune_rounded),

@@ -48,6 +48,18 @@ sealed class RealtimeEvent {
       // a předání přehrávání mezi nimi.
       case 'devices.update' || 'remote.command' || 'handoff.request' || 'handoff.state':
         return ConnectEvent(type!, payload);
+      // Sdílený stream mezi profily (app/broadcast.py) a hodiny pro jeho
+      // synchronizaci -- zpracovává state/broadcast_controller.dart.
+      case 'clock.pong' ||
+            'broadcast.state' ||
+            'broadcast.started' ||
+            'broadcast.pending' ||
+            'broadcast.ended' ||
+            'broadcast.listeners' ||
+            'broadcast.taken' ||
+            'broadcast.error' ||
+            'broadcasts.update':
+        return ConnectEvent(type!, payload);
       default:
         return UnknownEvent(type ?? '<chybí type>', payload);
     }
