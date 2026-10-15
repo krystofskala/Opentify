@@ -19,8 +19,9 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
-# Kód appky (balíček app) -- v kontejneru /app/app, na dev jinde.
-_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Kód appky = balíček app (adresář tohoto souboru), s oddělovačem na konci,
+# ať neprojde ani .venv vedle, ani /app2.
+_APP_DIR = os.path.dirname(os.path.abspath(__file__)) + os.sep
 LIMIT_S = 1.0
 QUIET_S = 60.0
 _beat = time.monotonic()
