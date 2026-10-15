@@ -144,6 +144,9 @@ MixArtSpec? _mixArtForSource({
       eyebrow: 'ZNOVU OBJEVENO',
     );
   }
+  if (s == 'personal:now-mix' || s == 'personal:deep-cuts' || s == 'personal:year-ago' || s == 'personal:soundcloud') {
+    return MixArtSpec(style: MixArtStyle.mood, seed: s, headline: title, photos: photos);
+  }
   if (s.startsWith('home:mix:')) {
     return MixArtSpec(style: MixArtStyle.mood, seed: s, headline: title, photos: photos, eyebrow: 'MIX');
   }

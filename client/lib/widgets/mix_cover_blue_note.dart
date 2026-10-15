@@ -109,11 +109,19 @@ _Content _content(CoverKind kind, MixArtSpec spec) {
       return _Content('návrat', 'do minulosti', trackNo, 'ZNOVU OBJEVENO', rest, _accentOf(spec));
     case CoverKind.homeMix:
       return _Content('mix', spec.headline.toLowerCase(), trackNo, 'DOMŮ', rest, _accentOf(spec));
+    case CoverKind.nowMix:
+      return _Content('teď', spec.headline.toLowerCase(), trackNo, 'PRÁVĚ TEĎ', rest, _accentOf(spec));
+    case CoverKind.deepCuts:
+      return _Content('méně', 'známé', trackNo, 'MIMO HITY', rest, _accentOf(spec));
+    case CoverKind.yearAgo:
+      return _Content('loni', spec.headline.toLowerCase(), trackNo, 'PŘED ROKEM', rest, _accentOf(spec));
+    case CoverKind.soundcloud:
+      return _Content('dema', 'a živáky', trackNo, 'SOUNDCLOUD', rest, _accentOf(spec));
   }
 }
 
 /// Velká slova série -- pevná velikost písma podle nejširšího z nich.
-const _bigWords = ['denní', 'objevy', 'mix', 'nálada', 'top', 'dekáda', 'znovu', 'návrat'];
+const _bigWords = ['denní', 'objevy', 'mix', 'nálada', 'top', 'dekáda', 'znovu', 'návrat', 'teď', 'méně', 'loni', 'dema'];
 
 /// Jak se sází velké slovo nahoře (rozhodne Kryštof, náhled 15. 10.):
 /// * [oneHeight] -- slovo druhu mixu, u všech stejně velké (série v2),

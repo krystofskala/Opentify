@@ -18,7 +18,7 @@ import 'mix_artwork.dart' show GrainPainter, MixArtSpec, MixArtStyle;
 /// * Archivo: název 12,5 % strany, účaří v 93 %; čísla 40 %; popisek 3,8 %,
 /// * fotka jen v kruhu / horní části a vždy ve dvou barvách obalu,
 /// * malá dlaždice a široká dlaždice mají vlastní zjednodušenou verzi.
-enum CoverKind { discover, daily, genre, mood, year, decade, onRepeat, throwback, homeMix }
+enum CoverKind { discover, daily, genre, mood, year, decade, onRepeat, throwback, homeMix, nowMix, deepCuts, yearAgo, soundcloud }
 
 CoverKind? coverKindOf(MixArtSpec spec) {
   final s = spec.seed;
@@ -29,6 +29,11 @@ CoverKind? coverKindOf(MixArtSpec spec) {
   if (s.startsWith('personal:on-repeat')) return CoverKind.onRepeat;
   if (s.startsWith('personal:throwback')) return CoverKind.throwback;
   if (s.startsWith('home:mix:')) return CoverKind.homeMix;
+  // Další osobní mixy (15. 10. noc, náhled 8c-v2+).
+  if (s == 'personal:now-mix') return CoverKind.nowMix;
+  if (s == 'personal:deep-cuts') return CoverKind.deepCuts;
+  if (s == 'personal:year-ago') return CoverKind.yearAgo;
+  if (s == 'personal:soundcloud') return CoverKind.soundcloud;
   if (s.startsWith('personal:category-mix:') || s.startsWith('personal:tag:')) {
     return spec.style == MixArtStyle.mood ? CoverKind.mood : CoverKind.genre;
   }
@@ -98,6 +103,18 @@ _Pal _palette(CoverKind kind, MixArtSpec spec) {
       final h = _hueOf(spec);
       return _Pal(_hsl(h, 0.5, 0.42), _hsl(h, 0.7, 0.7), _hsl(h, 0.5, 0.25), _hsl(h, 0.5, 0.08), _hsl(h, 0.4, 0.94),
           _hsl(h, 0.7, 0.7));
+    case CoverKind.nowMix:
+      return const _Pal(Color(0xFFE07A3F), Color(0xFFFFC36B), Color(0xFF9A3F1C), Color(0xFF2B1006), Color(0xFFFFF1DC),
+          Color(0xFFFFE08A));
+    case CoverKind.deepCuts:
+      return const _Pal(Color(0xFF1D4E6B), Color(0xFF5FA8C9), Color(0xFF0E2C3F), Color(0xFF07161F), Color(0xFFE6F4FA),
+          Color(0xFFA9DDF0));
+    case CoverKind.yearAgo:
+      return const _Pal(Color(0xFF6B4E8F), Color(0xFFB79CDB), Color(0xFF3E2A57), Color(0xFF1A1026), Color(0xFFF3ECFB),
+          Color(0xFFFFCF6E));
+    case CoverKind.soundcloud:
+      return const _Pal(Color(0xFFD9541E), Color(0xFFFF9A5C), Color(0xFF8E2E0C), Color(0xFF240A02), Color(0xFFFFEDE2),
+          Color(0xFFFFC7A3));
     case CoverKind.mood:
       final pal = _moodPals[_moodKey(spec)];
       if (pal != null) return pal;
@@ -229,6 +246,11 @@ class _MixCover extends StatelessWidget {
           children.add(CustomPaint(painter: _RepeatPainter(pal, tile)));
         case CoverKind.homeMix:
           children.add(CustomPaint(painter: _MoodPainter(pal, '', spec.seed)));
+        case CoverKind.nowMix:
+        case CoverKind.deepCuts:
+        case CoverKind.yearAgo:
+        case CoverKind.soundcloud:
+          children.add(CustomPaint(painter: _MorePainter(kind, pal, facts, tile)));
         case CoverKind.throwback:
           // Polaroid s fotkou interpreta ve dvou barvách, za ním druhý natočený.
           final w = s * (tile ? 0.62 : 0.38);
@@ -267,6 +289,7 @@ class _MixCover extends StatelessWidget {
     String? fact;
     String? title;
     Color ink = pal.light;
+    Color? titleInk;
     Color? plate;
     switch (kind) {
       case CoverKind.discover:
@@ -312,6 +335,25 @@ class _MixCover extends StatelessWidget {
         fact = tracks != null ? '$tracks skladeb' : null;
         title = spec.headline;
         ink = pal.light;
+      case CoverKind.nowMix:
+        caption = 'PRÁVĚ TEĎ';
+        fact = tracks != null ? '$tracks skladeb' : null;
+        title = spec.headline;
+        ink = pal.ink;
+        // Název leží na tmavé zemi pod obzorem.
+        titleInk = pal.light;
+      case CoverKind.deepCuts:
+        caption = 'MIMO HITY';
+        fact = artists != null ? 'od $artists tvých interpretů' : null;
+        title = 'Méně\nznámé';
+      case CoverKind.yearAgo:
+        caption = 'PŘED ROKEM';
+        fact = tracks != null ? '$tracks skladeb' : null;
+        title = spec.headline;
+      case CoverKind.soundcloud:
+        caption = 'SOUNDCLOUD';
+        fact = tracks != null ? '$tracks nahrávek' : null;
+        title = 'Dema\na živáky';
     }
     final mark = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,7 +399,7 @@ class _MixCover extends StatelessWidget {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.bottomLeft,
-              child: Text(title, style: _archivo(s * 0.125, 800, 112, tracking: -0.03, color: ink, height: 0.88)),
+              child: Text(title, style: _archivo(s * 0.125, 800, 112, tracking: -0.03, color: titleInk ?? ink, height: 0.88)),
             ),
           ),
         ),
@@ -763,4 +805,92 @@ class _RepeatPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_RepeatPainter old) => old.tile != tile || old.pal.bg != pal.bg;
+}
+
+
+/// Další osobní mixy (náhled 8c-v2+), každý tvar je fakt nebo znak mixu:
+/// * Pusť teď: slunce nad obzorem -- výška podle denní doby,
+/// * Méně známé: ledovec -- nad hladinou špička (hity), pod ní zbytek,
+/// * Před rokem: kalendářní list s otočeným rohem,
+/// * SoundCloud: vlna nahrávky, sloupců tolik co skladeb.
+class _MorePainter extends CustomPainter {
+  _MorePainter(this.kind, this.pal, this.facts, this.tile);
+  final CoverKind kind;
+  final _Pal pal;
+  final Map<String, dynamic> facts;
+  final bool tile;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    switch (kind) {
+      case CoverKind.nowMix:
+        final hour = DateTime.now().hour;
+        final up = (1 - (hour - 13).abs() / 13).clamp(0.15, 1.0);
+        final horizon = s * 0.62;
+        final c = Offset(s * 0.68, horizon - s * 0.28 * up);
+        canvas.drawCircle(c, s * (tile ? 0.3 : 0.22), Paint()..color = pal.light);
+        canvas.drawRect(Rect.fromLTWH(0, horizon, s, s - horizon), Paint()..color = pal.deep);
+        for (var i = 1; i <= 3; i++) {
+          canvas.drawRect(Rect.fromLTWH(0, horizon + s * 0.03 * i, s, s * 0.008 * (4 - i)), Paint()..color = pal.mid);
+        }
+      case CoverKind.deepCuts:
+        final sea = s * 0.36;
+        canvas.drawRect(Rect.fromLTWH(0, sea, s, s - sea), Paint()..color = pal.deep);
+        canvas.drawPath(
+            Path()
+              ..moveTo(s * 0.52, sea)
+              ..lineTo(s * 0.64, sea - s * 0.14)
+              ..lineTo(s * 0.72, sea - s * 0.06)
+              ..lineTo(s * 0.8, sea)
+              ..close(),
+            Paint()..color = pal.light);
+        canvas.drawPath(
+            Path()
+              ..moveTo(s * 0.5, sea)
+              ..lineTo(s * 0.82, sea)
+              ..lineTo(s * 0.98, sea + s * 0.3)
+              ..lineTo(s * 0.86, sea + s * 0.56)
+              ..lineTo(s * 0.48, sea + s * 0.6)
+              ..lineTo(s * 0.36, sea + s * 0.26)
+              ..close(),
+            Paint()..color = pal.mid);
+      case CoverKind.yearAgo:
+        final r = Rect.fromLTWH(s * 0.5, s * 0.1, s * 0.4, s * 0.44);
+        canvas.drawRect(r, Paint()..color = pal.light);
+        canvas.drawRect(Rect.fromLTWH(r.left, r.top, r.width, s * 0.1), Paint()..color = pal.accent);
+        for (var i = 0; i < 3; i++) {
+          canvas.drawCircle(Offset(r.left + r.width * (0.25 + i * 0.25), r.top), s * 0.018, Paint()..color = pal.ink);
+        }
+        canvas.drawPath(
+            Path()
+              ..moveTo(r.right - s * 0.12, r.bottom)
+              ..lineTo(r.right, r.bottom - s * 0.12)
+              ..lineTo(r.right, r.bottom)
+              ..close(),
+            Paint()..color = pal.bg);
+        canvas.drawPath(
+            Path()
+              ..moveTo(r.right - s * 0.12, r.bottom)
+              ..lineTo(r.right, r.bottom - s * 0.12)
+              ..lineTo(r.right - s * 0.12, r.bottom - s * 0.12)
+              ..close(),
+            Paint()..color = pal.mid);
+      case CoverKind.soundcloud:
+        final n = ((facts['tracks'] as num?)?.toInt() ?? 24).clamp(8, 40);
+        final rnd = math.Random(n * 7919);
+        final w = s / n;
+        final mid = s * 0.42;
+        for (var i = 0; i < n; i++) {
+          final h = s * (0.06 + rnd.nextDouble() * 0.26) * (0.5 + 0.5 * math.sin(i / n * math.pi));
+          canvas.drawRect(Rect.fromLTWH(i * w + w * 0.18, mid - h, w * 0.64, h), Paint()..color = pal.light);
+          canvas.drawRect(Rect.fromLTWH(i * w + w * 0.18, mid + s * 0.01, w * 0.64, h * 0.55), Paint()..color = pal.mid);
+        }
+      default:
+        break;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MorePainter old) => old.kind != kind || old.facts != facts || old.tile != tile;
 }
