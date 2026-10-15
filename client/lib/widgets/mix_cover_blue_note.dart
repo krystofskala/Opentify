@@ -115,21 +115,43 @@ _Content _content(CoverKind kind, MixArtSpec spec) {
 /// Velká slova série -- pevná velikost písma podle nejširšího z nich.
 const _bigWords = ['denní', 'objevy', 'mix', 'nálada', 'top', 'dekáda', 'znovu', 'návrat'];
 
+/// Jak se sází velké slovo nahoře (rozhodne Kryštof, náhled 15. 10.):
+/// * [oneHeight] -- slovo druhu mixu, u všech stejně velké (série v2),
+/// * [fillWidth] -- nejvýraznější slovo (styl, nálada, „komunitní“) vždy přesně
+///   na šířku obalu jako u Reida Milese; krátká slova obří, dlouhá nižší.
+enum BlueNoteLayout { oneHeight, fillWidth }
+
 /// Obal série Blue Note, nebo `null` pro druhy, které ho nemají (stejné jako
 /// v2). `today` jen pro testy a náhledy.
-Widget? blueNoteCover(MixArtSpec spec, {bool compact = false, DateTime? today}) {
+Widget? blueNoteCover(MixArtSpec spec, {bool compact = false, DateTime? today, BlueNoteLayout layout = BlueNoteLayout.oneHeight}) {
   final kind = coverKindOf(spec);
   if (kind == null) return null;
-  return _BlueNote(spec: spec, c: _content(kind, spec), tile: compact, today: today ?? DateTime.now());
+  var c = _content(kind, spec);
+  if (layout == BlueNoteLayout.fillWidth) {
+    // Nahoru slovo, které je vidět hned; „mix“ / „nálada“ doprava.
+    switch (kind) {
+      case CoverKind.genre:
+        c = _Content(c.small, 'mix', c.number, c.focus, c.lines, c.accent);
+      case CoverKind.mood:
+        c = _Content(c.small, 'nálada', c.number, c.focus, c.lines, c.accent);
+      case CoverKind.homeMix:
+        final words = c.small.split(' ');
+        c = _Content(words.first, words.length > 1 ? words.skip(1).join(' ') : 'mix', c.number, c.focus, c.lines, c.accent);
+      default:
+        break;
+    }
+  }
+  return _BlueNote(spec: spec, c: c, tile: compact, today: today ?? DateTime.now(), layout: layout);
 }
 
 class _BlueNote extends StatelessWidget {
-  const _BlueNote({required this.spec, required this.c, required this.tile, required this.today});
+  const _BlueNote({required this.spec, required this.c, required this.tile, required this.today, required this.layout});
 
   final MixArtSpec spec;
   final _Content c;
   final bool tile;
   final DateTime today;
+  final BlueNoteLayout layout;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +181,7 @@ class _BlueNote extends StatelessWidget {
               month: _months[today.month - 1],
               stamp: 'OPENTIFY ${today.month.toString().padLeft(2, '0')}${today.day.toString().padLeft(2, '0')}',
               small: tile,
+              layout: layout,
             ),
           ),
           const IgnorePointer(child: CustomPaint(painter: GrainPainter())),
@@ -203,12 +226,13 @@ class _HalftonePainter extends CustomPainter {
 }
 
 class _TypePainter extends CustomPainter {
-  _TypePainter({required this.c, required this.month, required this.stamp, required this.small});
+  _TypePainter({required this.c, required this.month, required this.stamp, required this.small, required this.layout});
 
   final _Content c;
   final String month;
   final String stamp;
   final bool small;
+  final BlueNoteLayout layout;
 
   TextPainter _layout(String text, TextStyle style) =>
       TextPainter(text: TextSpan(text: text, style: style), textDirection: TextDirection.ltr)..layout();
@@ -260,22 +284,34 @@ class _TypePainter extends CustomPainter {
     // (Okoun 15. 10., zásada B10). Účaří nechává místo dolním dotahům.
     final base = _heavy(s * 0.4, tracking: -0.05, width: 100);
     final widest = _bigWords.map((w) => _layout(w, base).width).reduce((a, b) => a > b ? a : b);
-    final k = s * 0.94 / widest;
-    _text(canvas, s, c.big, base.copyWith(fontSize: base.fontSize! * k, letterSpacing: base.letterSpacing! * k), s * 0.03, 0.335);
+    var k = s * 0.94 / widest;
+    var baseline = 0.335;
+    if (layout == BlueNoteLayout.fillWidth) {
+      // Přesně na šířku (stejné okraje vlevo i vpravo), účaří těsně nad blokem;
+      // výška nejvýš po horní okraj, ať čárky zůstanou celé.
+      final tp = _layout(c.big, base);
+      k = s * 0.94 / tp.width;
+      final ascent = tp.computeDistanceToActualBaseline(TextBaseline.alphabetic);
+      final maxK = s * 0.39 / ascent;
+      if (k > maxK) k = maxK;
+      baseline = 0.42;
+    }
+    _text(canvas, s, c.big, base.copyWith(fontSize: base.fontSize! * k, letterSpacing: base.letterSpacing! * k), s * 0.03, baseline);
     // Menší slovo vpravo: jedna velikost, dlouhé se zalomí do dvou řádků.
-    final smallStyle = _heavy(s * 0.075, tracking: -0.03, width: 100);
-    final narrow = smallStyle.copyWith(fontVariations: [const FontVariation('wght', 900), const FontVariation('wdth', 62)]);
+    // Menší slovo vpravo: jedna velikost a jeden (zúžený) řez pro všechny;
+    // dlouhé se zalomí, jen nezalomitelné slovo se zmenší.
+    final smallStyle = _heavy(s * 0.075, tracking: -0.02, width: 75);
     final lines = _wrap(c.small, smallStyle, s * 0.29);
-    final fits = lines.every((l) => _layout(l, smallStyle).width <= s * 0.29);
     for (var i = 0; i < lines.length; i++) {
       final y = 0.585 - (lines.length - 1 - i) * 0.068;
-      _text(canvas, s, lines[i], fits ? smallStyle : narrow, s * 0.684, y, maxWidth: s * 0.29);
+      _text(canvas, s, lines[i], smallStyle, s * 0.684, y, maxWidth: s * 0.29);
     }
     // Číslo celé, s okrajem nad spodní hranou (zásada B11); dlouhé se zúží.
     _text(canvas, s, c.number, _heavy(s * 0.42, tracking: -0.04, color: c.accent, width: 80), s * 0.675, 0.935, maxWidth: s * 0.3);
     if (small) return;
     canvas.drawRect(Rect.fromLTWH(s * 0.688, s * 0.603, s * 0.282, s * 0.006), Paint()..color = _cream);
-    _text(canvas, s, stamp, _heavy(s * 0.024, tracking: 0.18, weight: 600), s * 0.688, 0.425);
+    // Ve variantě na šířku slovo sahá až k bloku -- razítko by se překrylo.
+    if (layout == BlueNoteLayout.oneHeight) _text(canvas, s, stamp, _heavy(s * 0.024, tracking: 0.18, weight: 600), s * 0.688, 0.425);
     final focus = _heavy(s * 0.03, tracking: 0.12, weight: 700);
     _text(canvas, s, _shorten(c.focus.toUpperCase(), focus, s * 0.29, 0.7), focus, s * 0.688, 0.642, maxWidth: s * 0.29);
     _text(canvas, s, month, _heavy(s * 0.024, tracking: 0.18, weight: 500), s * 0.688, 0.675);
@@ -287,5 +323,5 @@ class _TypePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_TypePainter old) => old.c != c || old.small != small || old.month != month;
+  bool shouldRepaint(_TypePainter old) => old.c != c || old.small != small || old.month != month || old.layout != layout;
 }
