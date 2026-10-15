@@ -42,7 +42,11 @@ def _watch(loop_thread_id: int) -> None:
             if now - last_report > QUIET_S:
                 last_report = now
                 frame = sys._current_frames().get(loop_thread_id)
-                stack = "".join(traceback.format_stack(frame)[-12:]) if frame else "?"
+                # Volající z kódu appky (kdo blokuje) + konec zásobníku (čím);
+                # samotný konec ukazoval jen knihovnu SQLAlchemy (15. 10.).
+                frames = traceback.extract_stack(frame) if frame else []
+                ours = [f for f in frames if "/app/app/" in f.filename.replace("\\", "/")]
+                stack = "".join(traceback.format_list(ours[-8:])) + "  …\n" + "".join(traceback.format_list(frames[-4:])) if frames else "?"
                 logger.warning("API stojí už %.1f s, právě běží:\n%s", lag, stack)
         elif lag <= LIMIT_S and stuck_since is not None:
             logger.warning("API stálo %.1f s", time.monotonic() - stuck_since)

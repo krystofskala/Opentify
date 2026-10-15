@@ -478,6 +478,12 @@ async def _listen_later_fitting(c: Category, taste: pm.Taste, mix_artists: list[
     return [rid for rid, _a in fitting]
 
 
+def _snapshot_payload(key: str) -> dict[str, Any] | None:
+    with Session(engine) as session:
+        snapshot = g.load_snapshot(session, key)
+        return dict(snapshot.payload or {}) if snapshot else None
+
+
 def _section_for(category_id: str) -> str | None:
     """Jen žánry vybrané na Domů mají sekci -- ostatní mixy jsou vidět jen
     na stránce kategorie."""
@@ -492,11 +498,11 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
     tvých skladeb v téhle kategorii."""
     day = f"{pm._day_key()}:{_VERSION}"
     async with _locks[c.id]:
-        with Session(engine) as session:
-            snapshot = g.load_snapshot(session, f"{_source(c.id)}:state")
-            state = snapshot.payload if snapshot else None
-            if state and state.get("stamp") == day:
-                return state.get("playlistId")
+        # Čtení a zápisy DB ve vlákně: generátor běží v procesu API a čekání
+        # na SQLite tu zastavilo celé API (hlídač 15. 10.: 3,3 s v load_snapshot).
+        state = await asyncio.to_thread(_snapshot_payload, f"{_source(c.id)}:state")
+        if state and state.get("stamp") == day:
+            return state.get("playlistId")
 
         taste = taste or await asyncio.to_thread(pm.load_taste, g.home_user())
         rng = random.Random(f"{day}:{c.id}")
@@ -517,22 +523,27 @@ async def build_category_mix(c: Category, taste: pm.Taste | None = None, shares:
         ).ready
         if (len(familiar) >= MIN_FAMILIAR or ready) and len(tracks) >= MIN_MIX_SIZE:
             names = [taste.artist_name[a] for a in top_artists[:2] if a in taste.artist_name]
-            playlist_id = g._save_playlist(
-                owner=g.home_user(),
-                source=_source(c.id),
-                title=f"Tvůj mix · {c.title}",
-                description=(f"{', '.join(names)} a další" if names else "Podle toho, co posloucháš"),
-                kind=PlaylistKind.PERSONAL_MIX,
-                section=_section_for(c.id) or "category_mix",
-                recording_ids=tracks,
-                cover_urls=pm._artist_covers(taste, top_artists) or g._covers_for(tracks),
-                ttl=g.DAILY_TTL,
-            )
+            owner = g.home_user()
+
+            def save() -> str:
+                return g._save_playlist(
+                    owner=owner,
+                    source=_source(c.id),
+                    title=f"Tvůj mix · {c.title}",
+                    description=(f"{', '.join(names)} a další" if names else "Podle toho, co posloucháš"),
+                    kind=PlaylistKind.PERSONAL_MIX,
+                    section=_section_for(c.id) or "category_mix",
+                    recording_ids=tracks,
+                    cover_urls=pm._artist_covers(taste, top_artists) or g._covers_for(tracks),
+                    ttl=g.DAILY_TTL,
+                )
+
+            playlist_id = await asyncio.to_thread(save)
             logger.info("category mix %s: %d skladeb (%d známých, %d nových)", c.id, len(tracks), len(familiar), len(new))
         else:
             await asyncio.to_thread(pm._clear_playlists, g.home_user(), [_source(c.id)])
             logger.info("category mix %s: málo skladeb (%d známých, %d celkem)", c.id, len(familiar), len(tracks))
-        g._save_snapshot(f"{_source(c.id)}:state", {"stamp": day, "playlistId": playlist_id})
+        await asyncio.to_thread(g._save_snapshot, f"{_source(c.id)}:state", {"stamp": day, "playlistId": playlist_id})
         return playlist_id
 
 
@@ -579,16 +590,14 @@ def _set_sections(picks: list[str]) -> None:
 async def build_home_category_mixes() -> int:
     """Generátor Domů (každou hodinu, interně jednou za den)."""
     day = f"{pm._day_key()}:{_VERSION}"
-    with Session(engine) as session:
-        snapshot = g.load_snapshot(session, PICKS_KEY)
-        payload = (snapshot.payload or {}) if snapshot else {}
+    payload = await asyncio.to_thread(_snapshot_payload, PICKS_KEY) or {}
     if payload.get("stamp") == day:
         return len(payload.get("picks") or [])
     taste = await asyncio.to_thread(pm.load_taste, g.home_user())
     shares = await artist_shares(taste, _CLASSIFY_BUDGET_BACKGROUND)
     scores = genre_scores(taste, shares)
     picks = update_picks(scores, payload.get("picks") or [])
-    g._save_snapshot(PICKS_KEY, {"stamp": day, "picks": picks, "scores": {k: round(v, 1) for k, v in scores.most_common()}})
+    await asyncio.to_thread(g._save_snapshot, PICKS_KEY, {"stamp": day, "picks": picks, "scores": {k: round(v, 1) for k, v in scores.most_common()}})
     built = []
     for cat_id in picks:
         c = get_category(cat_id)
