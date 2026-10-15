@@ -69,11 +69,10 @@ _Content _content(CoverKind kind, MixArtSpec spec) {
   final f = spec.facts ?? const <String, dynamic>{};
   final tracks = _int(f, 'tracks');
   final artists = _int(f, 'artists');
-  final counts = [
-    if (tracks != null) '$tracks skladeb',
-    if (artists != null) '$artists interpretů',
-  ];
   final trackNo = tracks != null ? '$tracks' : '';
+  // Velké číslo = počet skladeb -> dole už jen interpreti (bez opakování).
+  final rest = [if (artists != null) '$artists interpretů'];
+  final counts = [if (tracks != null) '$tracks skladeb', ...rest];
   switch (kind) {
     case CoverKind.daily:
       final n = int.tryParse(spec.headline) ?? 1;
@@ -88,11 +87,11 @@ _Content _content(CoverKind kind, MixArtSpec spec) {
       return _Content('denní', 'mix', '$n', (f['style'] as String?) ?? 'MIX', names, _dailyAccents[(n - 1) % _dailyAccents.length]);
     case CoverKind.discover:
       final week = _int(f, 'week');
-      return _Content('objevy', 'týdne', week != null ? '$week' : trackNo, 'PRO TEBE', counts, _accentOf(spec));
+      return _Content('objevy', 'týdne', week != null ? '$week' : trackNo, 'PRO TEBE', week != null ? counts : rest, _accentOf(spec));
     case CoverKind.genre:
-      return _Content(spec.headline.toLowerCase(), 'mix', trackNo, 'TVŮJ MIX', counts, _accentOf(spec));
+      return _Content('mix', spec.headline.toLowerCase(), trackNo, 'TVŮJ STYL', rest, _accentOf(spec));
     case CoverKind.mood:
-      return _Content(spec.headline.toLowerCase(), 'nálada', trackNo, 'NÁLADA', counts, _accentOf(spec));
+      return _Content('nálada', spec.headline.toLowerCase(), trackNo, 'TVŮJ MIX', rest, _accentOf(spec));
     case CoverKind.year:
       final months = (f['months'] as List<dynamic>?)?.cast<num>();
       final total = months?.fold<num>(0, (a, b) => a + b).toInt();
@@ -105,14 +104,16 @@ _Content _content(CoverKind kind, MixArtSpec spec) {
       return _Content('dekáda', 'tvoje', digits.length >= 2 ? digits.substring(digits.length - 2) : digits, 'DEKÁDA', counts,
           _accentOf(spec));
     case CoverKind.onRepeat:
-      return _Content('znovu', 'a znovu', trackNo, 'POSLEDNÍ MĚSÍC', counts, _accentOf(spec));
+      return _Content('znovu', 'a znovu', trackNo, 'POSLEDNÍ MĚSÍC', rest, _accentOf(spec));
     case CoverKind.throwback:
-      return _Content('návrat', 'do minulosti', trackNo, 'ZNOVU OBJEVENO', counts, _accentOf(spec));
+      return _Content('návrat', 'do minulosti', trackNo, 'ZNOVU OBJEVENO', rest, _accentOf(spec));
     case CoverKind.homeMix:
-      final words = spec.headline.split(' ');
-      return _Content(words.first.toLowerCase(), words.skip(1).join(' ').toLowerCase(), trackNo, 'MIX', counts, _accentOf(spec));
+      return _Content('mix', spec.headline.toLowerCase(), trackNo, 'DOMŮ', rest, _accentOf(spec));
   }
 }
+
+/// Velká slova série -- pevná velikost písma podle nejširšího z nich.
+const _bigWords = ['denní', 'objevy', 'mix', 'nálada', 'top', 'dekáda', 'znovu', 'návrat'];
 
 /// Obal série Blue Note, nebo `null` pro druhy, které ho nemají (stejné jako
 /// v2). `today` jen pro testy a náhledy.
@@ -232,26 +233,49 @@ class _TypePainter extends CustomPainter {
     return '${t.trimRight()}…';
   }
 
+  /// Slova rozdělená do nejvýš dvou řádků šířky `width`; příliš široké slovo
+  /// se nejdřív zúží řezem, teprve pak zmenší.
+  List<String> _wrap(String text, TextStyle style, double width) {
+    // Zalomit jde i za lomítkem („alternativa/ indie“).
+    final words = text.replaceAll('/', '/ ').split(' ').where((w) => w.isNotEmpty).toList();
+    final lines = <String>[];
+    var cur = '';
+    for (final w in words) {
+      final next = cur.isEmpty ? w : (cur.endsWith('/') ? '$cur$w' : '$cur $w');
+      if (cur.isNotEmpty && _layout(next, style).width > width && lines.isEmpty) {
+        lines.add(cur);
+        cur = w;
+      } else {
+        cur = next;
+      }
+    }
+    lines.add(cur);
+    return lines;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final s = size.shortestSide;
-    // Obří slovo přes celou šířku, ale nejvýš tak velké jako „denní“ (krátká
-    // slova jako „top“ by jinak přerostla do bloku); čárky a háčky celé.
-    final bigStyle = _heavy(s * 0.4, tracking: -0.05, width: 100);
-    final natural = _layout(c.big, bigStyle).width;
-    final denni = _layout('denní', bigStyle).width;
-    final k = natural > 0 ? (s / natural).clamp(0.0, s / denni) : 1.0;
-    // Slovo s dolními dotahy (objevy, top, moje) se zvedne, ať „y“ nebo „p“
-    // nepřekrývá razítko vpravo; slova s čárkou zůstávají na 0,4.
-    final down = RegExp('[gjpqyý]').hasMatch(c.big) && !RegExp('[áéíóúůýčďěňřšťž]').hasMatch(c.big.replaceAll('ý', '')) ? 0.075 * k : 0.0;
-    _text(canvas, s, c.big, bigStyle.copyWith(fontSize: bigStyle.fontSize! * k, letterSpacing: bigStyle.letterSpacing! * k), -s * 0.03,
-        0.4 - down);
-    _text(canvas, s, c.small, _heavy(s * 0.14, tracking: -0.05, width: 100), s * 0.682, 0.585, maxWidth: s * 0.29);
+    // Velké slovo: u všech obalů stejná velikost, poloha i účaří, bez ořezu
+    // (Okoun 15. 10., zásada B10). Účaří nechává místo dolním dotahům.
+    final base = _heavy(s * 0.4, tracking: -0.05, width: 100);
+    final widest = _bigWords.map((w) => _layout(w, base).width).reduce((a, b) => a > b ? a : b);
+    final k = s * 0.94 / widest;
+    _text(canvas, s, c.big, base.copyWith(fontSize: base.fontSize! * k, letterSpacing: base.letterSpacing! * k), s * 0.03, 0.335);
+    // Menší slovo vpravo: jedna velikost, dlouhé se zalomí do dvou řádků.
+    final smallStyle = _heavy(s * 0.075, tracking: -0.03, width: 100);
+    final narrow = smallStyle.copyWith(fontVariations: [const FontVariation('wght', 900), const FontVariation('wdth', 62)]);
+    final lines = _wrap(c.small, smallStyle, s * 0.29);
+    final fits = lines.every((l) => _layout(l, smallStyle).width <= s * 0.29);
+    for (var i = 0; i < lines.length; i++) {
+      final y = 0.585 - (lines.length - 1 - i) * 0.068;
+      _text(canvas, s, lines[i], fits ? smallStyle : narrow, s * 0.684, y, maxWidth: s * 0.29);
+    }
     // Číslo celé, s okrajem nad spodní hranou (zásada B11); dlouhé se zúží.
     _text(canvas, s, c.number, _heavy(s * 0.42, tracking: -0.04, color: c.accent, width: 80), s * 0.675, 0.935, maxWidth: s * 0.3);
     if (small) return;
     canvas.drawRect(Rect.fromLTWH(s * 0.688, s * 0.603, s * 0.282, s * 0.006), Paint()..color = _cream);
-    _text(canvas, s, stamp, _heavy(s * 0.024, tracking: 0.18, weight: 600), s * 0.688, 0.468);
+    _text(canvas, s, stamp, _heavy(s * 0.024, tracking: 0.18, weight: 600), s * 0.688, 0.425);
     final focus = _heavy(s * 0.03, tracking: 0.12, weight: 700);
     _text(canvas, s, _shorten(c.focus.toUpperCase(), focus, s * 0.29, 0.7), focus, s * 0.688, 0.642, maxWidth: s * 0.29);
     _text(canvas, s, month, _heavy(s * 0.024, tracking: 0.18, weight: 500), s * 0.688, 0.675);
