@@ -746,6 +746,10 @@ def build_home(user_id: str) -> dict[str, Any]:
         # Připomínka z "Na později" (leží přes 2 týdny) -- skládá klient,
         # výchozí vypnutá (14. 10.: postrkování jen na přání).
         sections.insert(1, {"id": "listen_later", "title": "Čeká na poslech", "type": "listen_later", "items": []})
+        # Živá vysílání ostatních (sdílený stream, app/broadcast.py) -- seznam
+        # je jen v paměti a mění se každou chvíli, skládá ho klient z
+        # `GET /broadcasts`. Výchozí vypnutá (nové sekce si profil zapne sám).
+        sections.insert(2, {"id": "now_streaming", "title": "Teď streamuje", "type": "now_streaming", "items": []})
         return {"generatedAt": utcnow().isoformat(), "sections": apply_layout(session, user_id, sections)}
 
 
@@ -761,7 +765,7 @@ DEFAULT_OFF = {
     # prázdné). Pokus z 4. 10. je vypnul -- vrátit až s hotovým novým Domů.
     "listen_later", "years", "trending_tracks", "top_albums", "genres", "editorial", "popular_playlists",
     "now_mix", "year_ago", "forgotten", "unfinished", "anniversaries", "release_radar", "deep_cuts",
-    "artist_discovery", "album_picks", "shazam", "soundcloud", "family", "caught",
+    "artist_discovery", "album_picks", "shazam", "soundcloud", "family", "caught", "now_streaming",
 }
 
 
@@ -824,6 +828,7 @@ def default_entries(user_id: str, include_rails: bool = False) -> list[tuple[str
     out: list[tuple[str, str]] = [
         ("continue", "Pokračovat v poslechu"),
         ("listen_later", "Čeká na poslech"),
+        ("now_streaming", "Teď streamuje"),
         ("quick_picks", "Rychlý výběr"),
         ("track_mixes", TRACK_MIXES_TITLE),
     ]
