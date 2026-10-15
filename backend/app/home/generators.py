@@ -90,7 +90,9 @@ _BACKGROUND_GAP_S = 0.35
 # Zápisy mixů a snapshotů z procesu API jeden po druhém (noc 15. 10.): dřív je
 # serializovala smyčka asyncio, od přesunu do vláken by dvě vlákna mohla
 # uložit tentýž `source` dvakrát nebo narazit na SQLITE_BUSY při přechodu
-# čtení -> zápis. RLock: `_save_playlist` volá uvnitř další zapisující funkce.
+# čtení -> zápis. RLock jen jako pojistka pro vnořené volání; uvnitř
+# `_save_playlist` jiné spojení jen čte (swap_failed, without_disliked), což
+# WAL dovolí i při rozepsané transakci.
 DB_WRITE = threading.RLock()
 _PREPROVISION_PER_PLAYLIST = 2
 _PREPROVISION_DAILY_CAP = 30
