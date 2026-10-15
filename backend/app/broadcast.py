@@ -69,7 +69,7 @@ PREP_MAX_MS = 1200
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
-_ANCHOR_NUM = ("index", "qv", "positionMs", "atServerMs", "rate", "durationMs", "startAtServerMs", "transitionAtServerMs")
+_ANCHOR_NUM = ("index", "qv", "epoch", "positionMs", "atServerMs", "rate", "durationMs", "startAtServerMs", "transitionAtServerMs")
 _ANCHOR_STR = ("recordingId", "repeatMode")
 
 
