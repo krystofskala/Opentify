@@ -17,6 +17,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
+import '../core/broadcast_sync.dart' show monoNowMs;
 import '../core/config.dart' show AppConfig;
 import '../core/device_token.dart' show authHeaders, withDeviceToken, withoutDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
@@ -592,7 +593,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final np = s.nowPlaying;
     // Po přepnutí profilu / odhlášení (do restartu appky) nepsat starou
     // frontu zpátky -- obnovil by ji další profil.
-    if (np == null || _restoredIdle || _prefsGeneration != profilePrefsGeneration) return;
+    // Cizí vysílání se neukládá -- po odchodu se vrací vlastní fronta.
+    if (np == null || _restoredIdle || _prefsGeneration != profilePrefsGeneration || _followingBroadcast) return;
     final key = '${np.recordingId}|${s.queueIndex}|${s.queue.length}|${s.shuffleEnabled}|${s.repeatMode.name}';
     final now = DateTime.now();
     if (!force && key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
@@ -1525,6 +1527,184 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     );
   }
 
+  // --- Sdílený stream (state/broadcast_controller.dart) ----------------------
+  //
+  // Posluchač cizího vysílání: přehrávač hraje frontu vysílače, ale řídí ho
+  // jen `BroadcastController` (kotvy vysílače, regulátor). Vlastní poslechy,
+  // nekonečné hraní, ukládání fronty, další/předchozí ani dřívější přechod
+  // na webu tu neplatí -- pasivní poslech ve streamu se do vkusu nepočítá.
+  // Vysílač: přirozený přechod na další skladbu jde podle plánu (oba přejdou
+  // ve stejný okamžik), ne podle `completed` / `_maybeAdvanceEarly`.
+
+  bool _followingBroadcast = false;
+
+  /// Hraje se cizí vysílání (posluchač).
+  bool get followingBroadcast => _followingBroadcast;
+
+  /// Další načtený zdroj se rozehraje až v tuhle chvíli (`monoNowMs`), nebo
+  /// zůstane pozastavený (`double.infinity`). `null` = jako vždy.
+  double? _holdPlay;
+
+  /// O kolik dřív volat `play()`, než má být zvuk slyšet (EWMA, viz
+  /// `BroadcastController`).
+  double startLeadMs = 50;
+
+  /// Vysílač s posluchači: plánovaný start po přeskoku / výběru skladby.
+  /// Vrací čas startu (`monoNowMs`), nebo `null` = hned.
+  double? Function()? broadcastStartPlanner;
+
+  /// Hlášení doby načtení zdroje (`setUrl` -> připraveno) pro `loadLead`.
+  void Function(double ms, bool cached)? onSourceLoaded;
+
+  Timer? _holdTimer;
+  Timer? _planTimer;
+  double? _planX;
+
+  /// Přirozený přechod je naplánovaný (vysílač s posluchači).
+  bool get _transitionPlanned => _planX != null;
+
+  /// Hraje se ze souboru v zařízení/cache (kratší seek).
+  bool get currentSourceLocal => _currentLocal;
+
+  /// Zdroj je načtený a přehrávač hlásí platnou pozici.
+  bool get sourceReady => _readyGen == _sourceGen && !_loadingTrack && _player.processingState == ProcessingState.ready;
+
+  /// Přesná pozice z přehrávače (ne stav pro UI, ten chodí po ~200 ms).
+  Duration get exactPosition => _player.position;
+
+  bool get playerPlaying => _player.playing;
+
+  /// Hraje rádio (nepřetržitý stream, iPhone v prohlížeči) -- tam přesné
+  /// plánování přechodů nejde.
+  bool get radioStreamActive => _radioActive;
+
+  /// Posluchač: začít hrát frontu vysílače od `index`/`position`. `playAtMono`:
+  /// plánovaný start, `double.infinity` = načíst pozastaveně, `null` = hned.
+  Future<void> followStart(List<NowPlayingInfo> queue, int index, {required Duration position, double? playAtMono, required String label}) async {
+    _followingBroadcast = true;
+    _cancelPlan();
+    // Rádio (iPhone v prohlížeči) je jeden stream celé fronty -- posluchač
+    // potřebuje skladby po jedné (seek, přesný start).
+    _radioModeBeforeFollow ??= _radioMode;
+    _radioMode = false;
+    _holdPlay = playAtMono;
+    await playQueue(
+      queue,
+      index,
+      sourceLabel: label,
+      startPosition: position,
+      rememberProgress: false,
+      context: (route: null),
+      shuffle: false,
+      repeatMode: RepeatMode.off,
+    );
+  }
+
+  bool? _radioModeBeforeFollow;
+
+  /// Položka fronty pro sdílený stream (stejný tvar jako snímek pro předání).
+  static Map<String, dynamic> queueItemToJson(NowPlayingInfo i) => _infoToJson(i);
+  static NowPlayingInfo queueItemFromJson(Map<String, dynamic> j) => _infoFromJson(j);
+
+  /// Posluchač: přejít na jinou položku už převzaté fronty.
+  Future<void> followJump(int index, {required Duration position, double? playAtMono}) async {
+    if (!_followingBroadcast || index < 0 || index >= state.queue.length) return;
+    _holdPlay = playAtMono;
+    _resumeAt = position;
+    _resumeFor = state.queue[index].recordingId;
+    _switchKind = 'auto';
+    await _playAtIndex(index);
+  }
+
+  /// Posluchač: nová podoba fronty vysílače, aniž by se přerušila hrající skladba.
+  void followReplaceQueue(List<NowPlayingInfo> queue, int index, String label) {
+    if (!_followingBroadcast || queue.isEmpty) return;
+    state = state.copyWith(queue: queue, queueIndex: index.clamp(0, queue.length - 1), queueSourceLabel: label);
+  }
+
+  /// Rozehrát pozastavený zdroj v čase `atMono` (plánovaný start).
+  void playAt(double atMono) {
+    _holdTimer?.cancel();
+    final gen = _sourceGen;
+    final wait = atMono - startLeadMs - monoNowMs();
+    void go() {
+      if (gen != _sourceGen) return;
+      unawaited(_player.play().catchError((Object _) {}));
+    }
+
+    if (wait <= 0) {
+      go();
+    } else {
+      _holdTimer = Timer(Duration(microseconds: (wait * 1000).round()), go);
+    }
+  }
+
+  Future<void> followSeek(Duration position) async {
+    if (_radioActive) return;
+    await _player.seek(position);
+  }
+
+  /// Rychlost bez uložení do nastavení (dorovnání driftu ±1-2 %).
+  Future<void> followSetRate(double rate) => _player.setSpeed(rate);
+
+  /// Základní rychlost vysílače (v UI jako rychlost přehrávání, neukládá se).
+  void followBaseSpeed(double speed) {
+    if ((state.speed - speed).abs() < 0.001) return;
+    state = state.copyWith(speed: speed);
+    unawaited(_player.setSpeed(speed).catchError((Object _) {}));
+  }
+
+  Future<void> followPause() async {
+    _holdTimer?.cancel();
+    if (_player.playing) await _player.pause();
+  }
+
+  /// Konec poslechu: vrátit se k vlastnímu (snímek z `handoffSnapshot`),
+  /// pozastaveně -- nic se samo nerozehraje.
+  Future<void> endFollow({Map<String, dynamic>? restore}) async {
+    _followingBroadcast = false;
+    _holdPlay = null;
+    _holdTimer?.cancel();
+    if (_radioModeBeforeFollow != null) _radioMode = _radioModeBeforeFollow!;
+    _radioModeBeforeFollow = null;
+    if (_player.playing) await _player.pause();
+    unawaited(_player.setSpeed(1.0).catchError((Object _) {}));
+    state = state.copyWith(speed: 1.0);
+    if (restore != null) {
+      _holdPlay = double.infinity;
+      await resumeFromHandoff(restore);
+    }
+  }
+
+  /// Vysílač: naplánovaný přirozený přechod -- v `loadAtMono` začne načítat
+  /// další skladbu, rozehraje ji v `xMono` (N3: jeden přehrávač nenačte další
+  /// zdroj, dokud hraje současný).
+  void planTransition({required double xMono, required double loadAtMono}) {
+    final nextIndex = state.nextIndex;
+    if (nextIndex == null || _radioActive) return;
+    _cancelPlan();
+    _planX = xMono;
+    final current = state.nowPlaying?.recordingId;
+    final wait = loadAtMono - monoNowMs();
+    _planTimer = Timer(Duration(microseconds: (wait.clamp(0, 1e9) * 1000).round()), () {
+      if (_planX != xMono || state.nowPlaying?.recordingId != current) return;
+      final idx = state.nextIndex;
+      if (idx == null) return _cancelPlan();
+      _holdPlay = xMono;
+      _switchKind = 'auto';
+      _planX = null;
+      unawaited(_playAtIndex(idx));
+    });
+  }
+
+  void cancelTransitionPlan() => _cancelPlan();
+
+  void _cancelPlan() {
+    _planTimer?.cancel();
+    _planTimer = null;
+    _planX = null;
+  }
+
   /// Pauza (povel z jiného zařízení / předání přehrávání jinam).
   /// Vrací, jestli hrálo / mělo po načtení hrát -- Wrapped podle toho po
   /// zavření přehrávání vrátí (`isPlaying` je při načítání false).
@@ -1647,6 +1827,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   Future<void> next({bool auto = false}) async {
+    if (_followingBroadcast) return; // řídí jen vysílač
+    _cancelPlan();
     if (!auto && _skipChapter(forward: true)) return;
     final index = state.nextIndex;
     if (index == null) return;
@@ -1702,6 +1884,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// aktuální -- jinak by neúmyslné dvojité kliknutí za sebou přeskočilo o
   /// dvě skladby zpátky místo restartu poslouchané.
   Future<void> previous() async {
+    if (_followingBroadcast) return;
+    _cancelPlan();
     if (_skipChapter(forward: false)) return;
     if (_radioActive) {
       final restart = state.position > const Duration(seconds: 3) || state.previousIndex == null;
@@ -2280,7 +2464,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   DateTime? _earlyAdvancedAt;
 
   void _maybeAdvanceEarly(Duration position) {
-    if (!kIsWeb || _priming || !_player.playing) return;
+    if (!kIsWeb || _priming || !_player.playing || _followingBroadcast || _transitionPlanned) return;
     final current = state.nowPlaying;
     final duration = state.duration;
     if (current == null || duration == null || duration < const Duration(seconds: 10)) return;
@@ -2716,7 +2900,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Chyby/dokončení staršího `setUrl` (přerušené tímhle) se k tomuhle
     // zdroji nevztahují -- viz `_sourceGen`.
     final gen = ++_sourceGen;
-    final startPaused = _startPausedWhenReady;
+    // Sdílený stream: plánovaný start (posluchač / vysílač s posluchači).
+    var hold = _holdPlay;
+    _holdPlay = null;
+    if (hold == null && !_startPausedWhenReady && !_followingBroadcast && broadcastStartPlanner != null) {
+      hold = broadcastStartPlanner!();
+    }
+    final startPaused = _startPausedWhenReady || hold != null;
     _startPausedWhenReady = false;
     _unannounced = info;
     _unannouncedResume = null;
@@ -2790,6 +2980,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
         watchLoad();
       }
+      final loadStartedMono = monoNowMs();
       final durationFuture = _player.setUrl(streamUrl, initialPosition: resumeAt);
       if (!startPaused) {
         unawaited(_player.play().catchError((Object e) {
@@ -2801,6 +2992,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       await durationFuture;
       if (gen != _sourceGen) return; // mezitím spuštěn jiný zdroj
       _readyGen = gen;
+      onSourceLoaded?.call(monoNowMs() - loadStartedMono, isLocal);
       _reprovisioned = null;
       // `setUrl` znovu načte celý zdroj -- pro jistotu znovu vynutíme
       // rychlost/hlasitost z předchozí skladby, ať se novým zdrojem
@@ -2811,6 +3003,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // Play mezitím (klepnutí během `setUrl`) -> skutečný stav, ne natvrdo
       // "pozastaveno".
       if (startPaused) state = state.copyWith(isPlaying: _player.playing, isBuffering: false);
+      // Plánovaný start: rozehrát přesně v daný čas (pozastaveně načteno).
+      if (hold != null && hold.isFinite && _radioSession == null) playAt(hold);
       _announceStart(info, paused: startPaused && !_player.playing, resumedAt: _unannouncedResume);
       // Mluvené slovo měřenou hlasitost nemá -- dřív 3 zbytečné dotazy na díl.
       if (!_radioActive &&
@@ -3113,6 +3307,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// první, bez duplicit, omezeno na posledních 20 -- delší historie nemá
   /// pro "bublinovou" řadu na Home smysl.
   void _recordRecentlyPlayed(NowPlayingInfo info) {
+    if (_followingBroadcast) return; // cizí vysílání není "naposledy hráno"
     final updated = [info, ...state.recentlyPlayed.where((r) => r.recordingId != info.recordingId)];
     state = state.copyWith(recentlyPlayed: updated.take(20).toList());
   }
@@ -3317,7 +3512,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _startPausedWhenReady = !_startPausedWhenReady;
       return;
     }
-    if (!_player.playing && await _continueFromOtherDevice()) return;
+    if (!_player.playing && !_followingBroadcast && await _continueFromOtherDevice()) return;
     if (_restoredIdle) {
       // Obnovený přehrávač po znovuotevření appky -- zdroj ještě není
       // načtený; spustit skladbu od uložené pozice.
@@ -3482,6 +3677,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // skladba obstarává -- to není konec skladby, na další nepřeskakovat.
       return;
     }
+    if (playerState.processingState == ProcessingState.completed && (_followingBroadcast || _transitionPlanned)) {
+      // Sdílený stream: přechod jde podle plánu (oba ve stejný okamžik), ne
+      // podle konce souboru -- ten se na každé platformě liší.
+      return;
+    }
     if (playerState.processingState == ProcessingState.completed) {
       // Právě přepnuto dřív (`_maybeAdvanceEarly`) -- `completed` patří staré
       // skladbě, jinak by se přeskočilo o dvě.
@@ -3519,6 +3719,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Nové přehrávání skladby (i opakované přehrání téže) = nový poslech.
   void _beginScrobble(String recordingId) {
     _finishScrobble();
+    if (_followingBroadcast) {
+      // Pasivní poslech cizího vysílání se nehlásí (Kryštof 15. 10.).
+      _scrobbleId = null;
+      return;
+    }
     _scrobbleId = recordingId;
     _scrobbleStartedAt = DateTime.now();
     _scrobbleAccum = Duration.zero;
@@ -3585,7 +3790,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   /// Nahlásí poslech, je-li odehráno aspoň půl skladby nebo 4 minuty.
   void _submitIfHeard(String id, Duration? duration) {
-    if (_scrobbled) return;
+    if (_scrobbled || _followingBroadcast) return;
     if (duration != null && duration < const Duration(seconds: 30)) return;
     final half = duration == null ? const Duration(minutes: 4) : duration ~/ 2;
     final threshold = half < const Duration(minutes: 4) ? half : const Duration(minutes: 4);

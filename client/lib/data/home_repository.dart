@@ -114,11 +114,12 @@ class HomeAlbumCard {
       );
 }
 
-enum HomeSectionType { continueListening, listenLater, quickPicks, playlistCards, albumCards, artistCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, albumSpotlight, newcomerSetup, unknown }
+enum HomeSectionType { continueListening, listenLater, nowStreaming, quickPicks, playlistCards, albumCards, artistCards, trackRail, categoryTiles, genreShowcase, tagChips, deezerPlaylists, albumSpotlight, newcomerSetup, unknown }
 
 HomeSectionType _typeFrom(String? raw) => switch (raw) {
       'continue' => HomeSectionType.continueListening,
       'listen_later' => HomeSectionType.listenLater,
+      'now_streaming' => HomeSectionType.nowStreaming,
       'quick_picks' => HomeSectionType.quickPicks,
       'playlist_cards' => HomeSectionType.playlistCards,
       'album_cards' => HomeSectionType.albumCards,

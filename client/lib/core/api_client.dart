@@ -70,6 +70,13 @@ class ApiClient {
     return _decode(response) as Map<String, dynamic>;
   }
 
+  /// Jako `getJson`, ale 204 (nic nového) = `null` (long-poll sdíleného streamu).
+  Future<Map<String, dynamic>?> getJsonMaybe(String path, {Map<String, String>? query, Duration timeout = _defaultTimeout}) async {
+    final response = await _http.get(_uri(path, query), headers: _headers).timeout(timeout);
+    if (response.statusCode == 204) return null;
+    return _decode(response) as Map<String, dynamic>?;
+  }
+
   /// Binární odpověď (export ZIP).
   Future<Uint8List> getBytes(String path, {Duration timeout = const Duration(minutes: 2)}) async {
     final response = await _http.get(_uri(path, null), headers: _headers).timeout(timeout);

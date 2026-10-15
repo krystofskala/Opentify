@@ -101,6 +101,9 @@ class AutoContinue {
 
   void _onPlayer(AudioPlayerState s) {
     if (s.nowPlaying == null || s.queue.isEmpty) return;
+    // Cizí vysílání (sdílený stream): frontu řídí vysílač, nic nedoplňovat
+    // ani nehlásit přeskoky.
+    if (_ref.read(audioPlayerControllerProvider.notifier).followingBroadcast) return;
     final playNow = s.queueSourceLabel == playNowLabel;
     final endless = s.repeatMode == RepeatMode.endless;
     _syncAlgoIds(s, playNow);

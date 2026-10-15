@@ -9,6 +9,7 @@ import '../../state/app_mode.dart';
 import 'package:go_router/go_router.dart';
 
 import '../library/listen_later_screen.dart' show ListenLaterReminder;
+import '../../widgets/broadcast_widgets.dart' show BroadcastListeningBanner, NowStreamingSection;
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/browse_repository.dart' show BrowseArtist;
@@ -75,7 +76,10 @@ class HomeScreen extends ConsumerWidget {
             children: [
               // "Pokračovat v poslechu" posílá server vždy (jako zástupce) --
               // prázdný Domů = nic jiného než ten, a ještě bez historie.
-              if (sections.every((s) => s.type == HomeSectionType.continueListening || s.type == HomeSectionType.listenLater) &&
+              if (sections.every((s) =>
+                      s.type == HomeSectionType.continueListening ||
+                      s.type == HomeSectionType.listenLater ||
+                      s.type == HomeSectionType.nowStreaming) &&
                   recent.isEmpty)
                 const EmptyState(
                   icon: Symbols.home_rounded,
@@ -84,6 +88,8 @@ class HomeScreen extends ConsumerWidget {
                 ),
               // Pozvánka do společného mixu (Blend), čeká na mě.
               const BlendInviteBanner(),
+              // Poslech cizího vysílání (sdílený stream): s kým, Odejít.
+              const BroadcastListeningBanner(),
               // Pořadí a skrytí sekcí podle profilu (Domů › Upravit); "Pokračovat
               // v poslechu" je mezi nimi jako zástupce (data z /home/recent).
               for (final section in sections)
@@ -92,6 +98,9 @@ class HomeScreen extends ConsumerWidget {
                 // Něco, co v "Poslechnout později" leží přes 2 týdny (volitelná sekce).
                 else if (section.type == HomeSectionType.listenLater)
                   const ListenLaterReminder()
+                // Živá vysílání ostatních (volitelná sekce, výchozí vypnutá).
+                else if (section.type == HomeSectionType.nowStreaming)
+                  NowStreamingSection(title: section.title)
                 else
                   _HomeSectionView(section: section),
             ],
@@ -579,6 +588,7 @@ class _HomeSectionView extends StatelessWidget {
         return NewcomerSetupCards(cards: section.setupCards);
       case HomeSectionType.continueListening: // vykresluje HomeScreen (data z /home/recent)
       case HomeSectionType.listenLater: // vykresluje HomeScreen (ListenLaterReminder)
+      case HomeSectionType.nowStreaming: // vykresluje HomeScreen (NowStreamingSection)
       case HomeSectionType.unknown:
         return const SizedBox.shrink();
     }
