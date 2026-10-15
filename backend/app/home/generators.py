@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -85,6 +86,12 @@ DAILY_TTL = timedelta(hours=24)
 # Pauza mezi Deezer dotazy generátorů -- sdílí rate limiter s hledáním,
 # fronta se tak nikdy nenahromadí a uživatelovo hledání čeká nejvýš 1 slot.
 _BACKGROUND_GAP_S = 0.35
+
+# Zápisy mixů a snapshotů z procesu API jeden po druhém (noc 15. 10.): dřív je
+# serializovala smyčka asyncio, od přesunu do vláken by dvě vlákna mohla
+# uložit tentýž `source` dvakrát nebo narazit na SQLITE_BUSY při přechodu
+# čtení -> zápis. RLock: `_save_playlist` volá uvnitř další zapisující funkce.
+DB_WRITE = threading.RLock()
 _PREPROVISION_PER_PLAYLIST = 2
 _PREPROVISION_DAILY_CAP = 30
 
@@ -142,7 +149,7 @@ GENRES: list[tuple[int, str]] = [
 # --------------------------------------------------------------------------
 
 
-def _save_playlist(
+def __save_playlist_unlocked(
     *,
     owner: str,
     source: str,
@@ -204,7 +211,7 @@ def _covers_for(recording_ids: list[str]) -> list[str]:
     return covers
 
 
-def _ingest_tracks(tracks: list[dict[str, Any]]) -> list[str]:
+def __ingest_tracks_unlocked(tracks: list[dict[str, Any]]) -> list[str]:
     """Synchronní -- bez `await` uvnitř (viz app/catalog/deezer_ingest.py)."""
     ids: list[str] = []
     with Session(engine) as session:
@@ -549,7 +556,7 @@ async def build_personal_mixes() -> int:
     return built
 
 
-def _save_snapshot(key: str, payload: dict[str, Any]) -> None:
+def __save_snapshot_unlocked(key: str, payload: dict[str, Any]) -> None:
     key = _scoped(key)
     with Session(engine) as session:
         snapshot = session.get(HomeSnapshot, key) or HomeSnapshot(key=key)
@@ -561,3 +568,22 @@ def _save_snapshot(key: str, payload: dict[str, Any]) -> None:
 
 def load_snapshot(session: Session, key: str) -> HomeSnapshot | None:
     return session.get(HomeSnapshot, _scoped(key))
+
+
+
+def _save_playlist(**kwargs: Any) -> str:
+    """Viz `__save_playlist_unlocked`; pod zámkem zápisů `DB_WRITE`."""
+    with DB_WRITE:
+        return __save_playlist_unlocked(**kwargs)
+
+
+def _ingest_tracks(tracks: list[dict[str, Any]]) -> list[str]:
+    """Viz `__ingest_tracks_unlocked`; pod zámkem zápisů `DB_WRITE`."""
+    with DB_WRITE:
+        return __ingest_tracks_unlocked(tracks)
+
+
+def _save_snapshot(key: str, payload: dict[str, Any]) -> None:
+    """Viz `__save_snapshot_unlocked`; pod zámkem zápisů `DB_WRITE`."""
+    with DB_WRITE:
+        __save_snapshot_unlocked(key, payload)

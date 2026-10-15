@@ -79,3 +79,40 @@ def test_hlidac_pozna_kod_appky():
     assert here.startswith(loop_watch._APP_DIR)
     assert not os.path.join(os.path.dirname(loop_watch._APP_DIR.rstrip(os.sep)), ".venv", "x.py").startswith(loop_watch._APP_DIR)
     assert not (loop_watch._APP_DIR.rstrip(os.sep) + "2" + os.sep + "x.py").startswith(loop_watch._APP_DIR)
+
+
+def test_soubezne_ulozeni_tehoz_mixu_da_jeden_playlist():
+    """Dvě vlákna ukládají tentýž `source` naráz -> právě jeden playlist
+    (zámek zápisů DB_WRITE, recenze 15. 10.)."""
+    import threading
+    import uuid
+    from datetime import timedelta
+
+    from sqlmodel import Session, select
+
+    from app.db import engine
+    from app.models import Playlist, PlaylistKind
+
+    source = f"personal:test-race:{uuid.uuid4().hex[:8]}"
+    owner = "u-race-" + uuid.uuid4().hex[:6]
+    start = threading.Barrier(4)
+    errors: list[BaseException] = []
+
+    def save():
+        try:
+            start.wait()
+            g._save_playlist(
+                owner=owner, source=source, title="Test", description=None, kind=PlaylistKind.PERSONAL_MIX,
+                section="mixes", recording_ids=[], cover_urls=[], ttl=timedelta(hours=1),
+            )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=save) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    with Session(engine) as s:
+        assert len(s.exec(select(Playlist).where(Playlist.owner_user_id == owner, Playlist.source == source)).all()) == 1
