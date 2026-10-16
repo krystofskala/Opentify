@@ -122,6 +122,28 @@ void main() {
     });
   });
 
+  group('regrese 16. 10. (posluchač o 30 s napřed)', () {
+    test('změřená kotva po plánovaném startu nepočítá uběhlý čas dvakrát', () {
+      final m = TimelineModel();
+      // Plán: start v 10 000 od 0.
+      m.apply(const BroadcastAnchor(recordingId: 'x', index: 1, positionMs: 0, atServerMs: 10000, startAtServerMs: 10000, isPlaying: true, epoch: 3));
+      expect(targetAt(m.anchor!, 9000).waitingForStart, isTrue);
+      // Vysílač se rozjel, heartbeat po 30 s: pozice 30 000 v čase 40 000.
+      expect(m.apply(const BroadcastAnchor(recordingId: 'x', index: 1, positionMs: 30000, atServerMs: 40000, isPlaying: true, epoch: 3)), isFalse);
+      expect(targetAt(m.anchor!, 40000).positionMs, closeTo(30000, 1));
+      expect(targetAt(m.anchor!, 45000).positionMs, closeTo(35000, 1));
+      // I kdyby plán v kotvě zůstal (server), změřená kotva má přednost.
+      const stale = BroadcastAnchor(recordingId: 'x', index: 1, positionMs: 30000, atServerMs: 40000, startAtServerMs: 10000, isPlaying: true);
+      expect(targetAt(stale, 40000).positionMs, closeTo(30000, 1));
+    });
+
+    test('kotva bez platných hodin u téže skladby cíl neposune', () {
+      final m = TimelineModel()..apply(const BroadcastAnchor(recordingId: 'x', index: 0, positionMs: 0, atServerMs: 0, isPlaying: true, epoch: 1));
+      expect(m.apply(const BroadcastAnchor(recordingId: 'x', index: 0, positionMs: 99999, atServerMs: 10, isPlaying: true, epoch: 1, clockOk: false)), isFalse);
+      expect(targetAt(m.anchor!, 5000).positionMs, 5000);
+    });
+  });
+
   group('plánování', () {
     test('zdržení startu a načítání před přechodem', () {
       expect(plannedStartDelayMs(), 600);
