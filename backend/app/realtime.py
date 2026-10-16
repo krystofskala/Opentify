@@ -204,6 +204,12 @@ class ConnectionManager:
                 }}))
             elif kind == "broadcast.state":
                 await hub.state(user_id, payload, owner_ws=me.ws)
+            elif kind == "broadcast.prepare":
+                await hub.prepare(user_id, payload, owner_ws=me.ws)
+            elif kind == "broadcast.ready":
+                await hub.ready(user_id, me.ws, payload)
+            elif kind == "broadcast.suspend":
+                await hub.suspend(me.ws, payload)
             elif kind == "broadcast.stop":
                 await hub.stop(user_id, payload)
             elif kind == "broadcast.join":
