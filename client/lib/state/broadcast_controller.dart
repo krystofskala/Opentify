@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/widgets.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
 import '../core/broadcast_sync.dart';
@@ -68,7 +70,11 @@ class BroadcastState {
     this.waiting = false,
     this.weakSync = false,
     this.notice,
+    this.needsTap = false,
   });
+
+  /// Posluchač: prohlížeč nepustil zvuk bez gesta -- ukázat "Klepni pro zvuk".
+  final bool needsTap;
 
   final BroadcastRole role;
   final String? sid;
@@ -106,6 +112,7 @@ class BroadcastState {
     bool? weakSync,
     String? notice,
     bool clearNotice = false,
+    bool? needsTap,
   }) =>
       BroadcastState(
         role: role ?? this.role,
@@ -118,6 +125,7 @@ class BroadcastState {
         waiting: waiting ?? this.waiting,
         weakSync: weakSync ?? this.weakSync,
         notice: clearNotice ? null : (notice ?? this.notice),
+        needsTap: needsTap ?? this.needsTap,
       );
 }
 
@@ -146,6 +154,75 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       if (event is ConnectEvent) _onEvent(event);
     });
     if (client.isConnected) client.send('broadcasts.list', {});
+    unawaited(_loadLatency());
+  }
+
+  // --- latence startu (play() -> zvuk), naučená a uložená v zařízení -------
+
+  static const _latencyKey = 'broadcast.startLatency.v2';
+  StartLatency _latency = StartLatency();
+
+  Future<void> _loadLatency() async {
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(_latencyKey);
+      if (raw != null) _latency = StartLatency(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {}
+  }
+
+  void _saveLatency() {
+    final raw = jsonEncode(_latency.toJson());
+    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_latencyKey, raw)).then<void>((_) {}, onError: (Object _) {}));
+  }
+
+  /// Měření každého startu (bariéra, připravený start, přechod): latence
+  /// z události přehrávače, chyba proti cíli 1,5 s po startu, záznam do
+  /// diagnostiky a doučení odhadu (Kryštof 16. 10.).
+  Map<String, Object?>? _startCheck;
+  Timer? _startCheckTimer;
+
+  void _expectStart(String kind, double tServer, {required bool local}) {
+    final offset = clock.offsetMs;
+    if (offset == null) return;
+    final pred = _latency.estimate(local);
+    _startCheck = {'kind': kind, 't': tServer, 'pred': pred, 'local': local, 'ev': null};
+    final audio = _audio;
+    audio.onStartMeasured = (ms, l) {
+      final c = _startCheck;
+      if (c != null && c['t'] == tServer) c['ev'] = ms;
+    };
+    _startCheckTimer?.cancel();
+    final wait = tServer - offset - monoNowMs() + 1500;
+    _startCheckTimer = Timer(Duration(milliseconds: wait.clamp(0, 30000).round()), () => _finishStart(tServer));
+  }
+
+  void _finishStart(double tServer) {
+    final c = _startCheck;
+    if (c == null || c['t'] != tServer || !mounted) return;
+    _startCheck = null;
+    final audio = _audio;
+    final local = c['local'] as bool;
+    final pred = c['pred'] as double;
+    final ev = c['ev'] as double?;
+    double? err;
+    final now = monoNowMs();
+    final serverNow = clock.serverNow(now);
+    if (audio.sourceReady && audio.playerPlaying && serverNow != null) {
+      if (state.role == BroadcastRole.listening && _model.anchor != null) {
+        err = audio.exactPosition.inMicroseconds / 1000.0 - targetAt(_model.anchor!, serverNow, durationOf: _durationOf).positionMs;
+      }
+    }
+    // Učit se z platformou nahlášeného startu; když chybí, ze zbytkové chyby
+    // (zazní pozdě o d -> pozice o d pozadu -> skutečná latence = pred − err).
+    final sample = ev ?? (err != null && err.abs() < 2000 ? pred - err : null);
+    if (sample != null) {
+      _latency.add(local, sample);
+      _saveLatency();
+    }
+    final ePos = audio.lastPlaybackEvent;
+    _diagEvent('START ${state.role == BroadcastRole.broadcasting ? 'B' : 'L'} kind=${c['kind']} plat=${defaultTargetPlatform.name} '
+        'src=${local ? 'local' : 'stream'} pred=${_f(pred)} ev=${_f(ev)} err=${_f(err)} '
+        'est=${_f(_latency.estimate(local))} p80=${_f(_latency.p80(local))} reload=${audio.startReloads} '
+        'evPos=${ePos.updatePosition.inMilliseconds} evAge=${DateTime.now().difference(ePos.updateTime).inMilliseconds} ${_clockDiag()}');
   }
 
   final Ref _ref;
@@ -249,6 +326,20 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         }
       case 'broadcast.state':
         if (state.role == BroadcastRole.listening && p['sid'] == state.sid) _onListenerState(p);
+      case 'broadcast.prepared':
+        if (state.role == BroadcastRole.broadcasting && p['sid'] == state.sid) {
+          _barrier.prepared((p['epoch'] as num).toInt());
+          _maybeSendOwnReady();
+        }
+      case 'broadcast.prepare':
+        if (state.role == BroadcastRole.listening && p['sid'] == state.sid) _onPrepare(p);
+      case 'broadcast.go':
+        if (p['sid'] != state.sid) return;
+        if (state.role == BroadcastRole.broadcasting) {
+          _onOwnerGo(p);
+        } else if (state.role == BroadcastRole.listening) {
+          p['solo'] == true ? _onSoloGo(p) : _onGroupGo(p);
+        }
       case 'broadcast.pending':
         if (state.role == BroadcastRole.listening && p['sid'] == state.sid) {
           state = state.copyWith(waiting: true);
@@ -298,6 +389,12 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   final LeadEstimate _loadLead = LeadEstimate(150);
   double _lastHttpBeat = -1e9;
 
+  // Ready bariéra: start po přeskoku, seek a play po pauze.
+  final BarrierTracker _barrier = BarrierTracker();
+  Timer? _prepareTimer;
+  Timer? _goFallback;
+  ({String kind, String rid, double positionMs})? _pendingPrepare;
+
   bool get canBroadcast {
     final s = _ref.read(audioPlayerControllerProvider);
     final np = s.nowPlaying;
@@ -324,7 +421,19 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     state = state.copyWith(role: BroadcastRole.broadcasting, sid: _randomId(), visibility: visibility, listeners: 0, clearEnded: true, clearNotice: true);
     _startClock();
     _audio.broadcastStartPlanner = _planStart;
-    _audio.onSourceLoaded = (ms, cached) => _loadLead.add(ms);
+    _audio.broadcastResumeBarrier = _resumeBarrier;
+    _audio.broadcastSeekBarrier = _seekBarrier;
+    _audio.onBarrierParked = _ownParked;
+    _audio.onPlayBlocked = _onPlayBlocked;
+    _audio.onSourceLoaded = (ms, cached) {
+      _loadLead.add(ms);
+      // Vlastní zdroj pro bariéru načtený a pozastavený na pozici = ready.
+      final rid = _ref.read(audioPlayerControllerProvider).nowPlaying?.recordingId;
+      if ((_barrier.active && rid == _barrier.recordingId) || (_pendingPrepare != null && rid == _pendingPrepare!.rid)) {
+        _barrier.ownReady = true;
+        _maybeSendOwnReady();
+      }
+    };
     _playerSub = _ref.listen<AudioPlayerState>(audioPlayerControllerProvider, _onPlayer);
     _heartbeat = Timer.periodic(const Duration(seconds: 10), (_) => _sendAnchor(discontinuity: false));
     _tick = Timer.periodic(const Duration(milliseconds: 250), (_) => _broadcasterTick());
@@ -358,8 +467,15 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _pollActive = false;
     final audio = _audio;
     if (audio.broadcastStartPlanner == _planStart) audio.broadcastStartPlanner = null;
+    audio.broadcastResumeBarrier = null;
+    audio.broadcastSeekBarrier = null;
+    audio.onBarrierParked = null;
     audio.onSourceLoaded = null;
     audio.cancelTransitionPlan();
+    _prepareTimer?.cancel();
+    _goFallback?.cancel();
+    _barrier.clear();
+    _pendingPrepare = null;
   }
 
   /// Fronta ve skutečném pořadí hraní od aktuální skladby (shuffle a
@@ -473,6 +589,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
 
   void _flushSend() {
     if (state.role != BroadcastRole.broadcasting) return;
+    // Běží bariéra: běžný stav by ji na serveru zrušil -- pošle se po `go`.
+    if (_barrier.active || _pendingPrepare != null) return;
     final s = _ref.read(audioPlayerControllerProvider);
     if (s.nowPlaying == null) return;
     if (_discontinuityNext) _epoch++;
@@ -570,22 +688,133 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
 
   /// Plánovaný start po přeskoku / výběru skladby (volá přehrávač při
   /// načítání): s posluchači oba začnou za Δ, bez posluchačů hned.
+  /// Bariéru jde použít: posluchači, platné hodiny, WS (go chodí přes WS),
+  /// ne rádio (iPhone v Safari, start nejde odložit).
+  bool get _barrierUsable =>
+      state.role == BroadcastRole.broadcasting &&
+      state.listeners > 0 &&
+      clock.isValid &&
+      !_audio.radioStreamActive &&
+      _ref.read(realtimeClientProvider).isConnected;
+
+  /// Start nové skladby (přeskok, klepnutí ve frontě) -- volá přehrávač při
+  /// načítání: s posluchači přes ready bariéru (přehrávač čeká pozastavený
+  /// na `go`), bez nich hned.
   double? _planStart() {
-    if (state.role != BroadcastRole.broadcasting || state.listeners == 0) return null;
-    // iPhone v Safari hraje rádio (jeden stream fronty) -- start nejde odložit.
-    if (_audio.radioStreamActive) return null;
-    final mono = monoNowMs();
-    final server = clock.serverNow(mono);
-    if (server == null) return null; // hodiny neplatné -> neplánovat (N7)
-    final np = _ref.read(audioPlayerControllerProvider).nowPlaying;
+    if (!_barrierUsable) return null;
+    final s = _ref.read(audioPlayerControllerProvider);
+    final np = s.nowPlaying;
     if (np == null) return null;
-    // Plánovaný přirozený přechod už čas startu má.
-    if (_startAtServer != null && _startFor == np.recordingId && _startAtServer! > server) return _startAtServer! - clock.offsetMs!;
-    final delay = plannedStartDelayMs(prepMs: _listenerPrep, oneWayMs: clock.minRtt / 2);
-    _startAtServer = server + delay;
-    _startFor = np.recordingId;
-    _sendAnchor(discontinuity: false);
-    return mono + delay;
+    _queuePrepare('start', np.recordingId, s.position.inMilliseconds.toDouble());
+    return double.infinity;
+  }
+
+  /// Play po pauze přes bariéru (krátký limit).
+  bool _resumeBarrier() {
+    if (!_barrierUsable) return false;
+    final s = _ref.read(audioPlayerControllerProvider);
+    final np = s.nowPlaying;
+    if (np == null || !_audio.sourceReady) return false;
+    _queuePrepare('seek', np.recordingId, _audio.exactPosition.inMicroseconds / 1000.0);
+    _barrier.ownReady = true; // zdroj je načtený a stojí na pozici
+    return true;
+  }
+
+  /// Seek za přehrávání přes krátkou bariéru.
+  bool _seekBarrier(Duration position) {
+    if (!_barrierUsable) return false;
+    final np = _ref.read(audioPlayerControllerProvider).nowPlaying;
+    if (np == null) return false;
+    _queuePrepare('seek', np.recordingId, position.inMicroseconds / 1000.0);
+    return true;
+  }
+
+  void _ownParked() {
+    _barrier.ownReady = true;
+    _maybeSendOwnReady();
+  }
+
+  /// Rychlé ťukání (další, další...) se slučuje: prepare odejde až po 150 ms
+  /// klidu, za poslední volbu; starší bariéra tím na serveru končí.
+  void _queuePrepare(String kind, String rid, double positionMs) {
+    final ownReady = _pendingPrepare?.rid == rid && _barrier.ownReady;
+    _pendingPrepare = (kind: kind, rid: rid, positionMs: positionMs);
+    _barrier.ownReady = ownReady;
+    _prepareTimer?.cancel();
+    _prepareTimer = Timer(const Duration(milliseconds: 150), _sendPrepare);
+  }
+
+  void _sendPrepare() {
+    final p = _pendingPrepare;
+    if (p == null || state.role != BroadcastRole.broadcasting) return;
+    final s = _ref.read(audioPlayerControllerProvider);
+    if (s.nowPlaying?.recordingId != p.rid) return; // mezitím jinde
+    _pendingPrepare = null;
+    final ownReady = _barrier.ownReady;
+    _barrier.begin(p.rid);
+    _barrier.ownReady = ownReady;
+    _epoch++;
+    final server = clock.serverNow(monoNowMs()) ?? 0;
+    final anchor = BroadcastAnchor(
+      recordingId: p.rid,
+      index: _abs,
+      qv: _qv,
+      epoch: _epoch,
+      positionMs: p.positionMs,
+      atServerMs: server,
+      rate: s.speed,
+      isPlaying: true,
+      durationMs: s.duration?.inMilliseconds.toDouble(),
+      repeatMode: s.repeatMode == RepeatMode.one ? 'one' : 'off',
+    );
+    _ref.read(realtimeClientProvider).send('broadcast.prepare', {
+      'sid': state.sid,
+      'bid': _bid,
+      'bseq': ++_bseq,
+      'kind': p.kind,
+      'anchor': anchor.toJson(),
+      if (_sendQueueNext) 'queue': _queuePayload(),
+    });
+    _sendQueueNext = false;
+    _diagEvent('PREPARE B kind=${p.kind} rid=${p.rid} pos=${_f(p.positionMs)} ${_clockDiag()}');
+  }
+
+  void _maybeSendOwnReady() {
+    if (!_barrier.readyToReport) return;
+    final local = _audio.currentSourceLocal;
+    _ref.read(realtimeClientProvider).send('broadcast.ready', {
+      'sid': state.sid,
+      'epoch': _barrier.epoch,
+      'rtt': clock.minRtt.isFinite ? clock.minRtt : null,
+      'startLeadMs': _latency.p80(local),
+    });
+    // Pojistka: server neodpoví (výpadek) -> po 6 s hrát hned.
+    final epoch = _barrier.epoch;
+    _goFallback?.cancel();
+    _goFallback = Timer(const Duration(seconds: 6), () {
+      if (_barrier.epoch != epoch || !_barrier.active) return;
+      _barrier.clear();
+      _diagEvent('GO-FALLBACK B epoch=$epoch');
+      _audio.playAt(monoNowMs());
+      _sendAnchor(discontinuity: true);
+    });
+  }
+
+  void _onOwnerGo(Map<String, dynamic> p) {
+    final epoch = (p['epoch'] as num?)?.toInt();
+    final t = (p['atServerMs'] as num?)?.toDouble();
+    final offset = clock.offsetMs;
+    if (epoch == null || t == null || offset == null || !_barrier.acceptsGo(epoch)) return;
+    _goFallback?.cancel();
+    final rid = _barrier.recordingId;
+    _barrier.clear();
+    _startAtServer = t;
+    _startFor = rid;
+    final audio = _audio;
+    final local = audio.currentSourceLocal;
+    audio.startLeadMs = _latency.estimate(local);
+    audio.playAt(t - offset);
+    _expectStart('barrier', t, local: local);
   }
 
   /// Vysílač: ~20 s před koncem naplánovat přirozený přechod (K4) --
@@ -614,7 +843,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final server = clock.serverNow(now)!;
     final xServer = plannedTransitionAt(atServerMs: server, positionMs: pos, durationMs: dur.inMilliseconds.toDouble(), rate: s.speed);
     final xMono = xServer - clock.offsetMs!;
+    _audio.startLeadMs = _latency.estimate(_audio.currentSourceLocal);
     _audio.planTransition(xMono: xMono, loadAtMono: loadAt(x: xMono, loadLeadMs: _loadLead.valueMs, startLeadMs: _audio.startLeadMs));
+    _expectStart('transition', xServer, local: _audio.currentSourceLocal);
     _plannedFor = key;
     _transitionAtServer = xServer;
     _sendAnchor(discontinuity: false);
@@ -633,10 +864,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   int _lastGen = -1;
   int _lastSeq = -1;
   double _lastSyncAsk = -1e9;
-  double? _startScheduledFor;
   double? _transitionStartedFor;
   double? _pendingSince;
-  bool _learnStartLead = false;
   bool _localPaused = false;
   double _commandedAt = -1e9;
   double _lastTickWall = 0;
@@ -650,7 +879,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   bool _playerQueueOurs = false;
   ProviderSubscription<AudioPlayerState>? _listenerPlayerSub;
 
-  int _prepMs() => (_listenerLoad.valueMs + _audio.startLeadMs + 100).round();
+  int _prepMs() => (_listenerLoad.valueMs + _latency.p80(_audio.currentSourceLocal) + 100).round();
 
   /// "Připojit": odloží vlastní frontu a hraje to, co vysílač. Volat přímo
   /// z klepnutí -- web smí spustit zvuk jen v reakci na gesto (proto se
@@ -671,10 +900,14 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _lastClockId = null;
     _lastGen = -1;
     _lastSeq = -1;
-    _startScheduledFor = null;
     _transitionStartedFor = null;
     _pendingSince = null;
     _localPaused = false;
+    _barrierEpoch = null;
+    _solo = null;
+    _lastSolo = -1e9;
+    _parkTarget = null;
+    _startMono = null;
     _playerQueueOurs = false;
     _endTimer?.cancel();
     _regulator.reset(monoNowMs());
@@ -697,6 +930,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         label: _label,
       ));
     }
+    audio.onPlayBlocked = _onPlayBlocked;
     _listenerPlayerSub?.close();
     _listenerPlayerSub = _ref.listen<AudioPlayerState>(audioPlayerControllerProvider, _onListenerPlayer);
     _startClock();
@@ -720,6 +954,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _listenerPlayerSub?.close();
     _listenerPlayerSub = null;
     _audio.onSourceLoaded = null;
+    _audio.onPlayBlocked = null;
+    _audio.onStartMeasured = null;
     final snapshot = _snapshot;
     _snapshot = null;
     state = BroadcastState(live: state.live);
@@ -738,33 +974,20 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   }
 
   void _onListenerState(Map<String, dynamic> p) {
-    final clockId = p['clockId'] as String?;
-    final gen = (p['gen'] as num?)?.toInt() ?? 0;
-    final seq = (p['seq'] as num?)?.toInt() ?? 0;
     // Pořadí (clockId, gen, seq) od serveru; jiné clockId (restart API) nebo
     // odpověď na join/sync = srovnání od nuly (N1).
-    final reset = p['reset'] == true || clockId != _lastClockId;
-    if (!reset && (gen < _lastGen || (gen == _lastGen && seq <= _lastSeq))) return;
+    final gen = (p['gen'] as num?)?.toInt() ?? 0;
+    final reset = p['reset'] == true || p['clockId'] != _lastClockId;
     if (gen != _lastGen && !reset && p['queue'] == null) {
       _askSync();
       return;
     }
-    _lastClockId = clockId;
-    _lastGen = gen;
-    _lastSeq = seq;
-    _pendingSince = null;
+    final seq = (p['seq'] as num?)?.toInt() ?? 0;
+    if (!reset && gen == _lastGen && seq <= _lastSeq) return;
+    if (!_acceptOrder(p)) return;
     final name = p['name'] as String?;
     if (name != null && name != state.hostName) state = state.copyWith(hostName: name);
-    final q = p['queue'] as Map<String, dynamic>?;
-    if (q != null) {
-      _queue = [
-        for (final i in (q['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
-          if (i['id'] is String && i['t'] is String) AudioPlayerController.queueItemFromJson(i),
-      ];
-      _queueBase = (q['baseIndex'] as num?)?.toInt() ?? 0;
-      _queueQv = (q['qv'] as num?)?.toInt() ?? 0;
-      _syncPlayerQueue();
-    }
+    _takeQueue(p);
     final a = p['anchor'] as Map<String, dynamic>?;
     if (a == null) return;
     final anchor = BroadcastAnchor.fromJson(a);
@@ -773,8 +996,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       _askSync();
       return;
     }
+    // Běžný stav během bariéry (vysílač mezitím pauzl) bariéru ruší.
+    if (_barrierEpoch != null) _barrierEpoch = null;
     if (_model.apply(anchor)) {
-      _startScheduledFor = null;
       _regulator.reset(monoNowMs());
     }
     if (state.waiting) state = state.copyWith(waiting: false);
@@ -839,8 +1063,6 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     return f().catchError((Object _) {});
   }
 
-  double _lastCatchUp = -1e9;
-
   // --- diagnostika (client-log, jen během vysílání / poslechu) ------------
   //
   // 1 záznam za ~2 s, odeslání dávkou po ~20 s jako `broadcast-sync` do
@@ -859,6 +1081,13 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _diagLast = now;
     _diagLines.add(line);
     if (_diagLines.length >= 10 || now - _diagSent > 20000) _diagFlush();
+  }
+
+  /// Mimořádná událost (start, bariéra, připravený start, zablokovaný zvuk) --
+  /// vždy, bez omezení na 1 za 2 s.
+  void _diagEvent(String line) {
+    _diagLines.add(line);
+    if (_diagLines.length >= 10 || monoNowMs() - _diagSent > 20000) _diagFlush();
   }
 
   void _diagFlush() {
@@ -884,18 +1113,242 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         'start=${_f(a?.startAtServerMs)} trans=${_f(a?.transitionAtServerMs)} '
         'tI=${t?.index ?? '-'} tP=${_f(t?.positionMs)} tW=${t?.waitingForStart == true ? 1 : 0} loaded=${_loadedAbs ?? '-'} '
         'pos=${_f(pos)} err=${_f(pos == null || t == null ? null : pos - t.positionMs)} ef=${_f(_regulator.filteredErrorMs)} '
-        'act=$action step=${_regulator.step} lead=${_f(_regulator.seekLead[true])}/${_f(_regulator.seekLead[false])} '
+        'act=$action step=${_regulator.step} solo=${_solo ?? '-'} bar=${_barrierEpoch ?? '-'} parkLead=${_f(_parkLead)} '
+        'evPos=${audio.lastPlaybackEvent.updatePosition.inMilliseconds} evAge=${DateTime.now().difference(audio.lastPlaybackEvent.updateTime).inMilliseconds} '
         'loose=${_regulator.looseMode ? 1 : 0} ready=${audio.sourceReady ? 1 : 0} play=${audio.playerPlaying ? 1 : 0} '
-        'local=${audio.currentSourceLocal ? 1 : 0} startLead=${_f(audio.startLeadMs)} lp=${_localPaused ? 1 : 0}');
+        'local=${audio.currentSourceLocal ? 1 : 0} est=${_f(_latency.estimate(audio.currentSourceLocal))} lp=${_localPaused ? 1 : 0}');
   }
 
   void _diagBroadcaster() {
     final s = _ref.read(audioPlayerControllerProvider);
     final audio = _audio;
-    _diag('B ${_clockDiag()} pos=${_f(audio.exactPosition.inMicroseconds / 1000.0)} uiPos=${s.position.inMilliseconds} '
+    _diag('B ${_clockDiag()} bar=${_barrier.epoch ?? (_barrier.active ? '?' : '-')} pos=${_f(audio.exactPosition.inMicroseconds / 1000.0)} uiPos=${s.position.inMilliseconds} '
         'dur=${s.duration?.inMilliseconds ?? '-'} play=${audio.playerPlaying ? 1 : 0} st=${s.isPlaying ? 1 : 0} buf=${s.isBuffering ? 1 : 0} '
         'ready=${audio.sourceReady ? 1 : 0} radio=${audio.radioStreamActive ? 1 : 0} abs=$_abs ep=$_epoch qv=$_qv '
         'lis=${state.listeners} plan=${_f(_transitionAtServer)} startAt=${_f(_startAtServer)} ws=${_ref.read(realtimeClientProvider).isConnected ? 1 : 0}');
+  }
+
+  // --- posluchač: bariéra a připravený start ------------------------------
+  //
+  // Žádný seek za běhu dokola (Kryštof 16. 10.: "přeskakovalo, nehrálo,
+  // hrálo"). Start skupiny = bariéra (prepare -> zaparkovat -> ready -> go v
+  // T). Dohánění jednoho (připojení, lagging, po bufferingu / pozadí, velká
+  // odchylka) = připravený start pro jednoho: ztichnout, zaparkovat na cíli
+  // za chvíli, ready -> vlastní go v T -> začít naráz. Za běhu jen rychlost.
+
+  int? _barrierEpoch;
+  bool _readySent = false;
+
+  /// Kam je přehrávač zaparkovaný (absolutní index, pozice).
+  ({int abs, double pos})? _parkTarget;
+  bool _parkSeeking = false;
+
+  /// Připravený start pro jednoho: null | 'parking' | 'awaiting'.
+  String? _solo;
+  double _soloSince = -1e9;
+  double _lastSolo = -1e9;
+  double _parkLead = 3500;
+  String _soloReason = '';
+
+  /// Naplánovaný start (mono) -- do té doby a chvíli po něm neřídit.
+  double? _startMono;
+  bool _suspendSent = false;
+
+  void _park(int abs, double pos) {
+    final li = abs - _queueBase;
+    if (li < 0 || li >= _queue.length) return _askSync();
+    _parkTarget = (abs: abs, pos: pos);
+    final audio = _audio;
+    if (_loadedAbs != abs || !audio.followingBroadcast) {
+      _loadedAbs = abs;
+      unawaited(_command(() => _load(li, positionMs: pos, playAtMono: double.infinity)));
+      return;
+    }
+    _parkSeeking = true;
+    unawaited(_command(() async {
+      await audio.followPause();
+      await audio.followSeek(Duration(milliseconds: pos.round()));
+    }).whenComplete(() => _parkSeeking = false));
+  }
+
+  bool _parkedReady() {
+    final p = _parkTarget;
+    final audio = _audio;
+    if (p == null || _parkSeeking || _loadedAbs != p.abs || !audio.sourceReady || audio.playerPlaying) return false;
+    return (audio.exactPosition.inMicroseconds / 1000.0 - p.pos).abs() < 150;
+  }
+
+  void _onPrepare(Map<String, dynamic> p) {
+    if (!_acceptOrder(p)) return;
+    _takeQueue(p);
+    final a = p['anchor'] as Map<String, dynamic>?;
+    if (a == null) return;
+    final anchor = BroadcastAnchor.fromJson({...a, 'isPlaying': false});
+    _model.anchor = anchor; // do `go` stojí na pozici
+    _barrierEpoch = (p['epoch'] as num?)?.toInt();
+    _readySent = false;
+    _solo = null;
+    _startMono = null;
+    _regulator.reset(monoNowMs());
+    if (state.waiting) state = state.copyWith(waiting: false);
+    _diagEvent('PREPARE L epoch=$_barrierEpoch rid=${anchor.recordingId} pos=${_f(anchor.positionMs)}');
+    _park(anchor.index, anchor.positionMs);
+  }
+
+  void _onGroupGo(Map<String, dynamic> p) {
+    final epoch = (p['epoch'] as num?)?.toInt();
+    final a = p['anchor'] as Map<String, dynamic>?;
+    if (a == null) return;
+    _acceptOrder(p, force: true);
+    final anchor = BroadcastAnchor.fromJson(a);
+    _model.anchor = anchor;
+    final wasOurs = epoch != null && epoch == _barrierEpoch;
+    _barrierEpoch = null;
+    final offset = clock.offsetMs;
+    if (wasOurs && offset != null && _parkedReady() && _parkTarget!.abs == anchor.index) {
+      _startAt(anchor.startAtServerMs ?? anchor.atServerMs, anchor.positionMs, 'barrier');
+    } else {
+      // Nestihl limit (lagging): dožene se připraveným startem sám.
+      _diagEvent('LAGGING L epoch=$epoch parked=${_parkedReady() ? 1 : 0}');
+      _lastSolo = -1e9;
+      _beginSolo('lagging');
+    }
+  }
+
+  void _onSoloGo(Map<String, dynamic> p) {
+    if (_solo != 'awaiting') return;
+    final t = (p['atServerMs'] as num?)?.toDouble();
+    final pos = (p['positionMs'] as num?)?.toDouble();
+    if (t == null || pos == null) return;
+    _applySoloGo(t, pos, p['isPlaying'] != false);
+  }
+
+  void _applySoloGo(double t, double pos, bool playing) {
+    _solo = null;
+    final park = _parkTarget;
+    if (!playing) {
+      if (park != null) _park(park.abs, pos);
+      return;
+    }
+    // Server zvolil pozdější místo, než kam jsme zaparkovali -> příště dál.
+    if (park != null) {
+      final behind = pos - park.pos;
+      _parkLead = behind > 30 ? math.min(8000, _parkLead + behind + 500) : math.max(2500, _parkLead - 200);
+    }
+    _startAt(t, pos, 'solo:$_soloReason');
+  }
+
+  /// Rozehrát zaparkovaný přehrávač tak, aby zazněl v serverovém čase `t`
+  /// na pozici `pos` (play() v T − naučená latence).
+  void _startAt(double t, double pos, String kind) {
+    final offset = clock.offsetMs;
+    if (offset == null) return;
+    final audio = _audio;
+    final local = audio.currentSourceLocal;
+    final tMono = t - offset;
+    _startMono = tMono;
+    _suspendSent = false;
+    _regulator.reset(monoNowMs());
+    _regulator.settle(tMono);
+    audio.startLeadMs = _latency.estimate(local);
+    final needSeek = (audio.exactPosition.inMicroseconds / 1000.0 - pos).abs() > 30;
+    unawaited(_command(() async {
+      if (needSeek) await audio.followSeek(Duration(milliseconds: pos.round()));
+      audio.playAt(tMono);
+    }));
+    _expectStart(kind, t, local: local);
+  }
+
+  /// Připravený start pro jednoho. Nejvýš jednou za 3 s.
+  void _beginSolo(String reason) {
+    final now = monoNowMs();
+    if (now - _lastSolo < 3000 || _barrierEpoch != null) return;
+    final a = _model.anchor;
+    final serverNow = clock.serverNow(now);
+    if (a == null || serverNow == null || _queue.isEmpty) return;
+    _lastSolo = now;
+    if (!a.isPlaying) {
+      _park(a.index, a.positionMs);
+      return;
+    }
+    final t = targetAt(a, serverNow + _parkLead, durationOf: _durationOf, queueEnd: _queueBase + _queue.length);
+    if (t.ended) return;
+    _solo = 'parking';
+    _soloSince = now;
+    _soloReason = reason;
+    _startMono = null;
+    _diagEvent('SOLO L reason=$reason park=${_f(t.positionMs)} lead=${_f(_parkLead)} tI=${t.index}');
+    _park(t.index, t.positionMs);
+  }
+
+  void _sendSoloReady() {
+    final p = _parkTarget!;
+    final local = _audio.currentSourceLocal;
+    final client = _ref.read(realtimeClientProvider);
+    final item = _queue[p.abs - _queueBase];
+    if (client.isConnected) {
+      client.send('broadcast.ready', {
+        'sid': state.sid,
+        'solo': true,
+        'recordingId': item.recordingId,
+        'index': p.abs,
+        'positionMs': p.pos,
+        'rtt': clock.minRtt.isFinite ? clock.minRtt : null,
+        'startLeadMs': _latency.p80(local),
+      });
+      _solo = 'awaiting';
+      _soloSince = monoNowMs();
+      return;
+    }
+    // Bez WS (pozadí): stejný výpočet jako server, z vlastních hodin.
+    final a = _model.anchor;
+    final serverNow = clock.serverNow(monoNowMs());
+    if (a == null || serverNow == null) return;
+    _solo = 'awaiting';
+    final (t, pos) = soloGo(a, serverNow: serverNow, parkedMs: p.pos, rttMs: clock.minRtt.isFinite ? clock.minRtt : 100, startLeadMs: _latency.p80(local));
+    _applySoloGo(t, pos, true);
+  }
+
+  /// "Klepni pro zvuk" (Safari bez gesta): play v gestu odemkne zvuk, pak
+  /// připravený start na správné místo.
+  void tapForSound() {
+    if (state.role != BroadcastRole.listening) return;
+    state = state.copyWith(needsTap: false);
+    _audio.playFromGesture();
+    _lastSolo = -1e9;
+    Timer(const Duration(milliseconds: 300), () => _beginSolo('tap'));
+  }
+
+  void _onPlayBlocked(Object error) {
+    _diagEvent('PLAY-BLOCKED ${state.role == BroadcastRole.broadcasting ? 'B' : 'L'} $error');
+    if (state.role == BroadcastRole.listening && error.toString().contains('NotAllowed')) {
+      state = state.copyWith(needsTap: true);
+    }
+  }
+
+  bool _acceptOrder(Map<String, dynamic> p, {bool force = false}) {
+    final clockId = p['clockId'] as String?;
+    final gen = (p['gen'] as num?)?.toInt() ?? 0;
+    final seq = (p['seq'] as num?)?.toInt() ?? 0;
+    final reset = force || p['reset'] == true || clockId != _lastClockId;
+    if (!reset && (gen < _lastGen || (gen == _lastGen && seq < _lastSeq))) return false;
+    _lastClockId = clockId;
+    _lastGen = gen;
+    _lastSeq = seq;
+    _pendingSince = null;
+    return true;
+  }
+
+  void _takeQueue(Map<String, dynamic> p) {
+    final q = p['queue'] as Map<String, dynamic>?;
+    if (q == null) return;
+    _queue = [
+      for (final i in (q['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>())
+        if (i['id'] is String && i['t'] is String) AudioPlayerController.queueItemFromJson(i),
+    ];
+    _queueBase = (q['baseIndex'] as num?)?.toInt() ?? 0;
+    _queueQv = (q['qv'] as num?)?.toInt() ?? 0;
+    _syncPlayerQueue();
   }
 
   void _listenerTick() {
@@ -911,12 +1364,51 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     if (pending != null && now - pending > 60000) return _onEnded('unknown');
     final a = _model.anchor;
     final serverNow = clock.serverNow(now);
+    final audio = _audio;
     // Hodiny neplatné: neřídit, jen hrát dál (S4).
     if (a == null || serverNow == null || _queue.isEmpty) {
       _diagListener(a, null, serverNow, null);
       return;
     }
-    final audio = _audio;
+
+    // Bariéra skupiny: zaparkovat a nahlásit ready, nic dalšího.
+    if (_barrierEpoch != null) {
+      if (!_readySent && _parkedReady()) {
+        _readySent = true;
+        client.send('broadcast.ready', {
+          'sid': state.sid,
+          'epoch': _barrierEpoch,
+          'rtt': clock.minRtt.isFinite ? clock.minRtt : null,
+          'startLeadMs': _latency.p80(audio.currentSourceLocal),
+        });
+      }
+      _diagListener(a, null, serverNow, null);
+      return;
+    }
+    // Připravený start pro jednoho.
+    if (_solo == 'parking') {
+      if (_parkedReady()) {
+        _sendSoloReady();
+      } else if (now - _soloSince > 10000) {
+        // Nenačetlo se ani za 10 s (hlídač startu mezitím zkouší znovu načíst).
+        _parkLead = math.min(8000, _parkLead + 2000);
+        _lastSolo = -1e9;
+        _beginSolo('slow-park');
+      }
+      _diagListener(a, null, serverNow, null);
+      return;
+    }
+    if (_solo == 'awaiting') {
+      if (now - _soloSince > 3000) {
+        _solo = null; // go nepřišlo -- znovu
+        _beginSolo('no-go');
+      }
+      return;
+    }
+    // Naplánovaný start ještě nenastal -- čekat.
+    final startMono = _startMono;
+    if (startMono != null && now < startMono + 300) return;
+
     final t = targetAt(a.clockOk ? a : a.copyWith(clearTransition: true), serverNow, durationOf: _durationOf, queueEnd: _queueBase + _queue.length);
     final li = t.index - _queueBase;
     if (li < 0 || li >= _queue.length) return _askSync();
@@ -937,91 +1429,64 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     // Plánovaný přirozený přechod: další skladbu načíst o chvilku dřív a
     // rozehrát přesně v čase plánu (N3).
     final x = a.clockOk ? a.transitionAtServerMs : null;
-    if (x != null && _loadedAbs == a.index && t.index == a.index && _transitionStartedFor != x && li + 1 < _queue.length && !_localPaused) {
+    if (x != null && _loadedAbs == a.index && t.index == a.index && _transitionStartedFor != x && li + 1 < _queue.length && !_localPaused && audio.playerPlaying) {
       final xMono = x - offset;
+      final local = audio.currentSourceLocal;
+      audio.startLeadMs = _latency.estimate(local);
       if (now >= loadAt(x: xMono, loadLeadMs: _listenerLoad.valueMs, startLeadMs: audio.startLeadMs)) {
         _transitionStartedFor = x;
-        _startScheduledFor = x; // start nové skladby v X už je naplánovaný
         _loadedAbs = a.index + 1;
-        _learnStartLead = true;
+        _startMono = xMono;
         _regulator.reset(now);
         _regulator.settle(xMono);
         unawaited(_command(() => _load(li + 1, positionMs: 0, playAtMono: xMono)));
+        _expectStart('transition', x, local: local);
         return;
       }
     }
 
     if (t.index != _loadedAbs) {
-      // Jiná skladba (přeskok vysílače, připojení, výpadek): načíst a začít
-      // na dopočtené pozici (plánovaný start / hned s předstihem / pozastaveně).
-      _loadedAbs = t.index;
-      _regulator.reset(now);
-      final lead = _regulator.seekLead[false]!;
-      if (t.waitingForStart) {
-        final startMono = a.startAtServerMs! - offset;
-        _startScheduledFor = a.startAtServerMs;
-        _learnStartLead = true;
-        _regulator.settle(startMono);
-        unawaited(_command(() => _load(li, positionMs: t.positionMs, playAtMono: startMono)));
-      } else if (t.playing && !_localPaused) {
-        unawaited(_command(() => _load(li, positionMs: t.positionMs + lead)));
+      // Jiná skladba bez bariéry (připojení, výpadek, vysílač bez posluchačů
+      // přeskočil): hraje -> připravený start, stojí -> zaparkovat.
+      if (t.playing && !_localPaused) {
+        _beginSolo('track');
       } else {
-        unawaited(_command(() => _load(li, positionMs: t.positionMs, playAtMono: double.infinity)));
+        _park(t.index, t.positionMs);
       }
       return;
     }
 
     if (!audio.sourceReady) {
+      // Buffering za hraní: skupinu nezastavuje (suspended), po něm dohnat.
+      if (t.playing && !_suspendSent && s.isBuffering) {
+        _suspendSent = true;
+        client.send('broadcast.suspend', {'sid': state.sid, 'reason': 'buffering'});
+      }
       _diagListener(a, t, serverNow, null);
-      return; // načítá se / bufferuje -- cíl běží dál
+      return;
     }
     final pos = audio.exactPosition.inMicroseconds / 1000.0;
     audio.followBaseSpeed(a.rate);
 
-    if (t.waitingForStart) {
-      if (_startScheduledFor == a.startAtServerMs) return;
-      _startScheduledFor = a.startAtServerMs;
-      final startMono = a.startAtServerMs! - offset;
-      _learnStartLead = true;
-      _regulator.settle(startMono);
-      unawaited(_command(() async {
-        if (audio.playerPlaying) await audio.followPause();
-        if ((pos - t.positionMs).abs() > 30) await audio.followSeek(Duration(milliseconds: t.positionMs.round()));
-        audio.playAt(startMono);
-      }));
-      return;
-    }
     if (!t.playing) {
-      // Vysílač stojí: stát na přesném místě (play pak začne u obou stejně).
+      // Vysílač stojí: stát na přesném místě (play pak přijde bariérou).
       if (audio.playerPlaying) unawaited(_command(audio.followPause));
-      if ((pos - t.positionMs).abs() > 40) unawaited(_command(() => audio.followSeek(Duration(milliseconds: t.positionMs.round()))));
+      if ((pos - t.positionMs).abs() > 40 && !_parkSeeking) {
+        _parkSeeking = true;
+        unawaited(_command(() => audio.followSeek(Duration(milliseconds: t.positionMs.round()))).whenComplete(() => _parkSeeking = false));
+      }
       return;
     }
     if (_localPaused) return;
-    if (!audio.playerPlaying) {
-      // Vysílač hraje, my stojíme (po pauze vysílače, po načtení): naskočit
-      // s předstihem seeku. Nejvýš jednou za 2 s -- když `play()` nezabere
-      // (iOS zvuková relace), nesmí to seekovat každý tik.
-      if (now - _lastCatchUp < 2000) return;
-      _lastCatchUp = now;
-      _diagAction = 'catchup';
-      final lead = _regulator.seekLead[audio.currentSourceLocal]!;
-      _regulator.reset(now);
-      unawaited(_command(() async {
-        await audio.followSeek(Duration(milliseconds: (t.positionMs + lead).round()));
-        audio.playAt(now);
-      }));
+    if (!audio.playerPlaying || _suspendSent) {
+      // Vysílač hraje, my stojíme (po bufferingu, po pauze bez bariéry):
+      // připravený start, ne seek a play.
+      _suspendSent = false;
+      _beginSolo(audio.playerPlaying ? 'buffering' : 'resume');
       return;
     }
     if (!usable) return;
-    final action = _regulator.observe(nowMs: now, errorMs: pos - t.positionMs, baseRate: a.rate, cached: audio.currentSourceLocal);
-    // Po plánovaném startu: zbytková chyba = chyba odhadu rozjezdu.
-    final filtered = _regulator.filteredErrorMs;
-    if (_learnStartLead && filtered != null) {
-      _learnStartLead = false;
-      // Jen věrohodná chyba -- velká odchylka má jinou příčinu než rozjezd.
-      if (filtered.abs() < 300) audio.startLeadMs = (audio.startLeadMs + 0.5 * filtered).clamp(0, 300).toDouble();
-    }
+    final action = _regulator.observe(nowMs: now, errorMs: pos - t.positionMs, baseRate: a.rate);
     if (action.kind != SyncActionKind.none) _diagAction = action.toString();
     _diagListener(a, t, serverNow, pos);
     switch (action.kind) {
@@ -1029,12 +1494,13 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         break;
       case SyncActionKind.setRate:
         unawaited(audio.followSetRate(action.rate!).catchError((Object _) => _regulator.rateUnsupported()));
-      case SyncActionKind.seek:
-        unawaited(_command(() => audio.followSeek(Duration(milliseconds: (t.positionMs + action.leadMs).round()))));
+      case SyncActionKind.resync:
+        _lastSolo = -1e9;
+        _beginSolo('drift');
     }
     if (_regulator.looseMode != state.weakSync) {
       state = state.copyWith(weakSync: _regulator.looseMode);
-      _ref.read(realtimeClientProvider).send('broadcast.prep', {'prepMs': _prepMs(), 'healthy': !_regulator.looseMode});
+      client.send('broadcast.prep', {'prepMs': _prepMs(), 'healthy': !_regulator.looseMode});
     }
   }
 
@@ -1105,6 +1571,11 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       if (audio.mounted && audio.followingBroadcast) unawaited(audio.endFollow().catchError((Object _) {}));
       if (audio.mounted) {
         if (audio.broadcastStartPlanner == _planStart) audio.broadcastStartPlanner = null;
+        audio.broadcastResumeBarrier = null;
+        audio.broadcastSeekBarrier = null;
+        audio.onBarrierParked = null;
+        audio.onPlayBlocked = null;
+        audio.onStartMeasured = null;
         audio.onSourceLoaded = null;
         audio.cancelTransitionPlan();
       }
@@ -1114,6 +1585,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _tick?.cancel();
     _clockTimer?.cancel();
     _sendTimer?.cancel();
+    _prepareTimer?.cancel();
+    _goFallback?.cancel();
+    _startCheckTimer?.cancel();
     _pollActive = false;
     _listenerPlayerSub?.close();
     _endTimer?.cancel();

@@ -222,6 +222,13 @@ class BroadcastListeningBanner extends ConsumerWidget {
                   ],
                 ),
               ),
+              // Safari pustí zvuk jen po klepnutí (NotAllowedError) -- klepnutí
+              // tady zvuk odemkne a posluchač naskočí připraveným startem.
+              if (b.needsTap && b.ended == null)
+                FilledButton.tonal(
+                  onPressed: () => ref.read(broadcastProvider.notifier).tapForSound(),
+                  child: const Text('Klepni pro zvuk'),
+                ),
               TextButton(
                 onPressed: () => ref.read(broadcastProvider.notifier).leave(),
                 child: Text(b.ended != null ? 'Vrátit se k mému' : 'Odejít'),

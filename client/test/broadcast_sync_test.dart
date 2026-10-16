@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opentify_client/core/broadcast_sync.dart';
+import 'package:opentify_client/core/stall_watch.dart';
 
 /// Sdílený stream: hodiny, cílová pozice, regulátor, plánovaný start --
 /// a simulace s virtuálním časem podle návrhu (7y-sync-navrh.md v3, bod 10):
@@ -157,75 +158,145 @@ void main() {
   });
 
   group('SyncRegulator', () {
-    test('malá odchylka -> plynule, velká -> seek, pak usazení', () {
+    test('malá odchylka -> rychlost, velká -> připravený start, pak usazení', () {
       final r = SyncRegulator();
-      var a = r.observe(nowMs: 0, errorMs: 80);
+      final a = r.observe(nowMs: 0, errorMs: 80);
       expect(a.kind, SyncActionKind.setRate);
       expect(a.rate, 0.99); // posluchač napřed -> zpomalit
+      expect(SyncRegulator().observe(nowMs: 0, errorMs: 30).kind, SyncActionKind.none); // do ±40 ms nic
       final s = SyncRegulator();
-      a = s.observe(nowMs: 0, errorMs: -900);
-      expect(a.kind, SyncActionKind.seek);
-      expect(a.leadMs, 120);
+      expect(s.observe(nowMs: 0, errorMs: -900).kind, SyncActionKind.resync);
       expect(s.observe(nowMs: 500, errorMs: -900).kind, SyncActionKind.none); // usazení
     });
 
-    test('nejvýš 1 seek za 3 s a po bouři volný režim s rostoucí délkou', () {
+    test('nikdy seek dokola: nejvýš 1 připravený start za 5 s, po opakovaných jen rychlost', () {
       final r = SyncRegulator();
       var t = 0.0;
       var n = 0;
-      for (var i = 0; i < 200; i++, t += 250) {
-        if (r.observe(nowMs: t, errorMs: 1000).kind == SyncActionKind.seek) n++;
+      for (var i = 0; i < 240; i++, t += 250) {
+        if (r.observe(nowMs: t, errorMs: 1000).kind == SyncActionKind.resync) n++;
       }
-      // 50 s, seeky po 3 s by byly ~16; volný režim (60 s, práh 2 s) je zastaví po 3.
+      // 60 s: po 3 startech volný režim (60 s, práh 2 s) -- dál jen rychlost.
       expect(n, 3);
       expect(r.looseMode, isTrue);
     });
 
-    test('setSpeed nefunguje -> jen práh', () {
+    test('setSpeed nefunguje -> malé odchylky nechat, velké připraveným startem', () {
       final r = SyncRegulator()..rateUnsupported();
       expect(r.observe(nowMs: 0, errorMs: 200).kind, SyncActionKind.none);
-      // Filtr (2 s) se k 400 ms dostane přes práh 250 ms za chvilku.
-      var seeked = false;
-      for (var t = 250.0; t < 4000 && !seeked; t += 250) {
-        final a = r.observe(nowMs: t, errorMs: 400);
+      var resynced = false;
+      for (var t = 250.0; t < 6000 && !resynced; t += 250) {
+        final a = r.observe(nowMs: t, errorMs: 600);
         expect(a.kind, isNot(SyncActionKind.setRate));
-        seeked = a.kind == SyncActionKind.seek;
+        resynced = a.kind == SyncActionKind.resync;
       }
-      expect(seeked, isTrue);
+      expect(resynced, isTrue);
     });
+  });
 
-    test('zbytková chyba po seeku opraví seekLead', () {
-      final r = SyncRegulator();
-      r.observe(nowMs: 0, errorMs: -1000);
-      // Po usazení je posluchač 100 ms napřed -> lead byl moc velký.
-      for (var t = 1250.0; t < 3000; t += 250) {
-        r.observe(nowMs: t, errorMs: 100);
+  group('StartLatency', () {
+    test('robustní odhad: medián pro play(), p80 pro předstih, úlety nerozhodí, uloží se', () {
+      final l = StartLatency();
+      expect(l.known(false), isFalse);
+      expect(l.estimate(false), 300);
+      l.add(false, 1200);
+      expect(l.estimate(false), 1200);
+      for (final v in const <double>[1100, 1150, 2900, 1180]) {
+        l.add(false, v);
       }
-      expect(r.seekLead[true], lessThan(120));
+      expect(l.estimate(false), 1180); // medián, úlet 2900 ho neposune
+      expect(l.p80(false), 1200);
+      expect(l.estimate(true), 150); // soubor v zařízení zvlášť
+      final back = StartLatency(l.toJson());
+      expect(back.estimate(false), 1180);
+      l.add(false, 99999); // nesmysl se zahodí
+      expect(l.estimate(false), 1180);
+    });
+  });
+
+  group('soloGo / goLead', () {
+    test('zaparkovaný daleko dopředu začne přesně tam, blízko -> nejbližší čas', () {
+      const a = BroadcastAnchor(recordingId: 'x', index: 0, positionMs: 10000, atServerMs: 0, isPlaying: true);
+      final (t1, p1) = soloGo(a, serverNow: 0, parkedMs: 13000, rttMs: 50);
+      expect(t1, 3000);
+      expect(p1, 13000);
+      final (t2, p2) = soloGo(a, serverNow: 0, parkedMs: 10100, rttMs: 50, startLeadMs: 900);
+      expect(t2, goLeadMs(rtts: [50], startLeads: [900]));
+      expect(p2, 10000 + t2);
+      expect(goLeadMs(), 800);
+      expect(goLeadMs(rtts: [1000]), 1800);
+    });
+  });
+
+  group('BarrierTracker', () {
+    test('rychlé přeskoky vysílače -> platí jen bariéra poslední volby', () {
+      final b = BarrierTracker();
+      b.begin('a');
+      b.begin('b');
+      b.begin('c'); // ťuk, ťuk, ťuk
+      b.prepared(1);
+      b.prepared(2);
+      expect(b.epoch, isNull); // potvrzení starších prepare neplatí
+      b.prepared(3);
+      expect(b.epoch, 3);
+      expect(b.recordingId, 'c');
+      expect(b.acceptsGo(1), isFalse);
+      expect(b.readyToReport, isFalse);
+      b.ownReady = true;
+      expect(b.readyToReport, isTrue);
+      expect(b.acceptsGo(3), isTrue);
+      b.clear();
+      expect(b.acceptsGo(3), isFalse);
     });
   });
 
   group('simulace', () {
-    test('ustálený stav: p95 skutečného posunu < 40 ms, bez seek bouře a kmitání', () {
-      final res = _simulate(seed: 1, minutes: 10, initialErrorMs: 500);
-      expect(res.p95SteadyMs, lessThan(40), reason: res.toString());
-      expect(res.maxSeeksIn3s, lessThanOrEqualTo(1), reason: res.toString());
-      expect(res.rateChangesPerMinSteady, lessThanOrEqualTo(2), reason: res.toString());
-      expect(res.settledWithinMs, lessThan(10000), reason: res.toString());
+    test('posluchač s pomalým startem a načítáním 0,2-3 s, jitterem a záseky: max 1 připravený start navíc, bez seeků', () {
+      for (final seed in [1, 2, 3, 4, 5, 6, 7, 8]) {
+        final r = _simulate(seed: seed, minutes: 5);
+        expect(r.extraStarts, lessThanOrEqualTo(1), reason: 'seed $seed: $r');
+        expect(r.p95AfterLastStartMs, lessThan(40), reason: 'seed $seed: $r');
+        expect(r.rateChangesPerMin, lessThanOrEqualTo(2), reason: 'seed $seed: $r');
+        expect(r.reloads, lessThanOrEqualTo(2), reason: 'seed $seed: $r');
+      }
     });
 
-    test('víc semínek a horší síť (shluky, výpadky), dva posluchači navzájem', () {
-      for (final seed in [2, 3, 4, 5]) {
-        final a = _simulate(seed: seed, minutes: 5, initialErrorMs: -1500, burstyNet: true);
-        final b = _simulate(seed: seed + 100, minutes: 5, initialErrorMs: 300, burstyNet: true);
-        expect(a.p95SteadyMs, lessThan(40), reason: 'seed $seed: $a');
-        expect(b.p95SteadyMs, lessThan(40), reason: 'seed $seed: $b');
-        expect(a.maxSeeksIn3s, lessThanOrEqualTo(1));
-        // Mezi dvěma posluchači: oba proti vysílači < 40 ms -> navzájem p95 < 80 ms
-        // v nejhorším; skutečně porovnáno ze stejné časové osy:
-        final mutual = _mutualP95(a.trace, b.trace);
-        expect(mutual, lessThan(60), reason: 'seed $seed: mutual $mutual');
+    test('naučená latence startu: po 1-2 startech chyba po startu < 60 ms', () {
+      for (final seed in [11, 12, 13, 14, 15, 16]) {
+        final r = _startsOnly(seed: seed, starts: 4);
+        expect(r[2].abs(), lessThan(60), reason: 'seed $seed: $r');
+        expect(r[3].abs(), lessThan(60), reason: 'seed $seed: $r');
       }
+    });
+
+    test('zásek zdroje: hlídač znovu načte nejvýš 2×, skupina nečeká déle než limit bariéry', () {
+      // Bariéra: 3 posluchači, jeden se zasekl (nikdy ready) -> go po limitu 4 s, ne později.
+      const limit = 4000.0;
+      final readyAt = <double?>[900, 2600, null]; // null = zasekl se
+      final allReady = readyAt.every((r) => r != null);
+      final goAfter = allReady ? readyAt.map((r) => r!).reduce(math.max) : limit;
+      expect(goAfter, limit);
+      // Hlídač u zaseknutého: po 5 s znovu načíst, nejvýš 2×, pak chyba.
+      final w = StallWatch();
+      w.newTrack();
+      var t = 0.0;
+      final actions = <String>[];
+      w.arm(t, 0);
+      for (; t < 30000; t += 250) {
+        final a = w.check(nowMs: t, positionMs: 0, wantsPlaying: true);
+        if (a != 'ok') {
+          actions.add(a);
+          if (a == 'reload') w.arm(t, 0);
+        }
+      }
+      expect(actions, ['reload', 'reload', 'fail']);
+      // Rozjede se po prvním znovunačtení -> dál nic.
+      final w2 = StallWatch()..newTrack();
+      w2.arm(0, 0);
+      expect(w2.check(nowMs: 5000, positionMs: 0, wantsPlaying: true), 'reload');
+      w2.arm(5000, 0);
+      expect(w2.check(nowMs: 6000, positionMs: 400, wantsPlaying: true), 'ok');
+      expect(w2.armed, isFalse);
     });
 
     test('10 přirozených přechodů: max posun v prvních 3 s po přechodu < 80 ms', () {
@@ -234,7 +305,7 @@ void main() {
       final loadL = LeadEstimate(150), startL = LeadEstimate(50);
       var worst = 0.0;
       for (var i = 0; i < 10; i++) {
-        const x = 100000.0; // plánovaný přechod (serverový čas)
+        const x = 100000.0;
         double startOf(LeadEstimate load, LeadEstimate start, double loadMean, double startMean) {
           final loadActual = loadMean + _gauss(rnd) * 30;
           final startActual = startMean + _gauss(rnd) * 8;
@@ -243,14 +314,11 @@ void main() {
           final playCall = math.max(ready, x - start.valueMs);
           load.add(loadActual);
           start.add(startActual);
-          return playCall + startActual; // kdy je zvuk skutečně slyšet
+          return playCall + startActual;
         }
 
-        // Vysílač z cache (web), posluchač nativně s pomalejším načítáním.
         final b = startOf(loadB, startB, 120, 40);
         final l = startOf(loadL, startL, 180, 60);
-        // Plánovaný start: chyba je rozdíl skutečných startů (pozice obou
-        // počítají od svého startu), regulátor se 1 s usazuje -> 3 s ~ tahle chyba.
         worst = math.max(worst, (b - l).abs());
       }
       expect(worst, lessThan(80));
@@ -259,145 +327,152 @@ void main() {
 }
 
 double _gauss(math.Random r) {
-  // Box-Muller
   final u1 = r.nextDouble().clamp(1e-12, 1.0);
   final u2 = r.nextDouble();
   return math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2);
 }
 
 class _SimResult {
-  _SimResult(this.p95SteadyMs, this.maxSeeksIn3s, this.rateChangesPerMinSteady, this.settledWithinMs, this.trace);
-  final double p95SteadyMs;
-  final int maxSeeksIn3s;
-  final double rateChangesPerMinSteady;
-  final double settledWithinMs;
-
-  /// (čas, skutečná pozice zvuku posluchače − vysílače)
-  final List<(double, double)> trace;
+  _SimResult(this.extraStarts, this.p95AfterLastStartMs, this.rateChangesPerMin, this.reloads);
+  final int extraStarts;
+  final double p95AfterLastStartMs;
+  final double rateChangesPerMin;
+  final int reloads;
 
   @override
   String toString() =>
-      'p95=${p95SteadyMs.toStringAsFixed(1)} ms, seeky/3s=$maxSeeksIn3s, rychlost/min=${rateChangesPerMinSteady.toStringAsFixed(2)}, usazeno=${settledWithinMs.round()} ms';
+      'starty navíc=$extraStarts, p95=${p95AfterLastStartMs.toStringAsFixed(1)} ms, rychlost/min=${rateChangesPerMin.toStringAsFixed(2)}, znovunačtení=$reloads';
 }
 
-double _mutualP95(List<(double, double)> a, List<(double, double)> b) {
-  final n = math.min(a.length, b.length);
-  final diffs = <double>[];
-  for (var i = 0; i < n; i++) {
-    if (a[i].$1 < 30000) continue;
-    diffs.add((a[i].$2 - b[i].$2).abs());
+/// Zařízení s proměnlivou latencí startu (play() -> zvuk): série připravených
+/// startů, chyba zvuku proti cíli po každém (ms, kladná = zazní pozdě).
+List<double> _startsOnly({required int seed, required int starts}) {
+  final rnd = math.Random(seed);
+  final latencyMean = 300 + rnd.nextDouble() * 1200; // 300-1500 ms
+  final learn = StartLatency();
+  final out = <double>[];
+  for (var i = 0; i < starts; i++) {
+    final est = learn.estimate(false);
+    const t = 10000.0; // čas go
+    final actual = latencyMean + _gauss(rnd) * 20;
+    out.add(t - est + actual - t);
+    learn.add(false, actual + _gauss(rnd) * 10); // změřeno z události přehrávače
   }
-  diffs.sort();
-  return diffs.isEmpty ? 0 : diffs[(diffs.length * 0.95).floor().clamp(0, diffs.length - 1)];
+  return out;
 }
 
-/// Jeden posluchač proti vysílači. Virtuální čas po 10 ms.
-_SimResult _simulate({required int seed, required int minutes, required double initialErrorMs, bool burstyNet = false}) {
+/// Posluchač proti vysílači, virtuální čas po 10 ms: připojení a dohánění
+/// připraveným startem (zaparkovat, ready, go, play v T − naučená latence),
+/// za běhu jen rychlost. Zařízení: načtení 0,2-3 s, občas zásek (zdroj
+/// nedojde do ready -> hlídač po 5 s znovu načte), latence startu 300-1500 ms
+/// s jitterem, drift zvukových hodin, chyba odhadu hodin, šum pozice.
+_SimResult _simulate({required int seed, required int minutes}) {
   final rnd = math.Random(seed);
   const dt = 10.0;
   final total = minutes * 60000.0;
-  // Hodiny: zvukové (DAC) proti systémovým zvlášť.
-  final dacB = 1 + (rnd.nextDouble() - 0.5) * 100e-6; // ±50 ppm
+  final dacB = 1 + (rnd.nextDouble() - 0.5) * 100e-6;
   final dacL = 1 + (rnd.nextDouble() - 0.5) * 100e-6;
-  final sysL = 1 + (rnd.nextDouble() - 0.5) * 200e-6; // ±100 ppm systémové hodiny posluchače
-  // Zbytková chyba odhadu posunu (asymetrie trasy), u obou stran.
   final clockErrB = (rnd.nextDouble() - 0.5) * 10;
   final clockErrL = (rnd.nextDouble() - 0.5) * 10;
-
-  // Vysílač: zvuk běží od t=0 od pozice 0.
+  final latencyMean = 300 + rnd.nextDouble() * 1200;
+  final learn = StartLatency();
   double bPos(double t) => t * dacB;
 
-  // Posluchač: skutečný zvuk.
-  var lPos = bPos(0) + initialErrorMs;
+  final model = TimelineModel();
+  final reg = SyncRegulator();
+  final watch = StallWatch();
+  var nextAnchor = 0.0;
+
+  var playing = false;
+  var lPos = 0.0;
   var lRate = 1.0;
   double? pendingRate;
   var pendingRateAt = 0.0;
-  var silentUntil = -1.0; // po seeku chvíli ticho, pozice stojí
-  var silentTarget = 0.0;
-  var reportedOverride = false;
-
-  final model = TimelineModel();
-  final reg = SyncRegulator()..reset(0); // připojení
-  // Kotvy v "síti": (čas doručení, kotva)
-  final inflight = <(double, BroadcastAnchor)>[];
-  var nextAnchor = 0.0;
-  var lastDelivery = 0.0;
-  var outageUntil = -1.0;
-
+  double? soundAt;
+  double? readyAt;
+  double? parkPos;
+  double? goPlayCall;
+  var starts = 0;
+  var lastStartAt = 0.0;
+  var rateChanges = 0;
+  var reloads = 0;
   final errs = <(double, double)>[];
-  final seekTimes = <double>[];
-  var rateChangesSteady = 0;
-  var lastRate = 1.0;
-  double? settledAt;
+
+  void load(double t) {
+    // 15 % načtení se zasekne (nikdy ready) -- jen první dvě, ať test skončí.
+    final stuck = reloads < 2 && rnd.nextDouble() < 0.15;
+    readyAt = stuck ? null : t + 200 + rnd.nextDouble() * 2800;
+    watch.arm(t, 0);
+  }
+
+  void beginPrepared(double t) {
+    // Ztichne, načte a zaparkuje na cíli za ~4 s.
+    playing = false;
+    soundAt = null;
+    goPlayCall = null;
+    final a = model.anchor!;
+    parkPos = targetAt(a, t + clockErrL + 4000).positionMs;
+    lPos = parkPos!;
+    watch.newTrack();
+    load(t);
+    starts++;
+  }
 
   for (var t = 0.0; t < total; t += dt) {
-    // --- vysílač posílá kotvu (heartbeat 10 s), medián 5 čtení ~ šum 4 ms
     if (t >= nextAnchor) {
       nextAnchor += 10000;
-      final pos = bPos(t) + _gauss(rnd) * 4;
-      final anchor = BroadcastAnchor(recordingId: 'x', index: 0, positionMs: pos, atServerMs: t + clockErrB, isPlaying: true, epoch: 1);
-      var delay = 20 + rnd.nextDouble() * 60;
-      if (burstyNet && rnd.nextDouble() < 0.1) delay += rnd.nextDouble() * 2000; // head-of-line shluk
-      // Výpadek spojení (po připojení -- bez první kotvy posluchač nehraje).
-      if (burstyNet && t > 20000 && rnd.nextDouble() < 0.03) outageUntil = t + 20000 + rnd.nextDouble() * 40000;
-      // TCP: v jednom spojení nic nepředběhne předchozí zprávu.
-      final at = math.max(t + delay, lastDelivery);
-      lastDelivery = at;
-      if (t >= outageUntil) inflight.add((at, anchor));
+      model.apply(BroadcastAnchor(recordingId: 'x', index: 0, positionMs: bPos(t) + _gauss(rnd) * 4, atServerMs: t + clockErrB, isPlaying: true, epoch: 1));
+      if (starts == 0) beginPrepared(t); // připojení
     }
-    while (inflight.isNotEmpty && inflight.first.$1 <= t) {
-      model.apply(inflight.removeAt(0).$2);
+    // Zásek načítání -> hlídač znovu načte.
+    if (readyAt == null && goPlayCall == null && soundAt == null && !playing && parkPos != null) {
+      final w = watch.check(nowMs: t, positionMs: 0, wantsPlaying: true);
+      if (w == 'reload') {
+        reloads++;
+        load(t);
+      }
     }
-
-    // --- skutečný zvuk posluchače
+    if (readyAt != null && t >= readyAt!) {
+      readyAt = null;
+      watch.disarm();
+      final (tg, pos) = soloGo(model.anchor!, serverNow: t + clockErrL + 30, parkedMs: parkPos!, rttMs: 60, startLeadMs: learn.p80(false));
+      lPos = pos; // posun pozastaveně stihne před T
+      goPlayCall = tg - clockErrL - learn.estimate(false);
+    }
+    if (goPlayCall != null && t >= goPlayCall!) {
+      final actual = latencyMean * (0.9 + rnd.nextDouble() * 0.2) + _gauss(rnd) * 15;
+      soundAt = t + actual;
+      goPlayCall = null;
+      learn.add(false, actual + _gauss(rnd) * 10);
+    }
+    if (soundAt != null && t >= soundAt!) {
+      playing = true;
+      soundAt = null;
+      lastStartAt = t;
+      reg.reset(t);
+    }
     if (pendingRate != null && t >= pendingRateAt) {
-      lRate = pendingRate;
+      lRate = pendingRate!;
       pendingRate = null;
     }
-    if (t < silentUntil) {
-      // po seeku: zvuk ještě nehraje, pozice stojí na cíli
-    } else {
-      if (reportedOverride) {
-        lPos = silentTarget;
-        reportedOverride = false;
-      }
-      lPos += dt * lRate * dacL;
-    }
+    if (playing) lPos += dt * lRate * dacL;
 
-    // --- měření a regulace každých 250 ms
-    if (t % 250 < dt && model.anchor != null) {
-      // Systémové hodiny posluchače driftují (sysL), ale posun se měří znovu
-      // každých 15 s -- zbývá jen chyba odhadu posunu.
-      final serverNowEst = t + clockErrL + (sysL - 1) * (t % 15000);
-      final target = targetAt(model.anchor!, serverNowEst).positionMs;
-      // Hlášená pozice: po seeku just_audio hlásí cíl hned, i když je ticho.
-      final reported = (t < silentUntil ? silentTarget : lPos) + _gauss(rnd) * 8;
-      final action = reg.observe(nowMs: t, errorMs: reported - target);
-      if (action.kind == SyncActionKind.seek) {
-        seekTimes.add(t);
-        silentUntil = t + 120 + _gauss(rnd).abs() * 40;
-        silentTarget = target + action.leadMs;
-        reportedOverride = true;
+    if (playing && t % 250 < dt) {
+      final target = targetAt(model.anchor!, t + clockErrL).positionMs;
+      final action = reg.observe(nowMs: t, errorMs: lPos + _gauss(rnd) * 8 - target);
+      if (action.kind == SyncActionKind.resync) {
+        beginPrepared(t);
       } else if (action.kind == SyncActionKind.setRate) {
         pendingRate = action.rate;
-        pendingRateAt = t + 100; // platforma použije rychlost o chvilku později
-        if (t > 30000 && action.rate != lastRate) rateChangesSteady++;
-        lastRate = action.rate!;
+        pendingRateAt = t + 100;
+        rateChanges++;
       }
     }
-
-    final trueErr = (t < silentUntil ? double.nan : lPos - bPos(t));
-    if (t % 100 < dt) errs.add((t, trueErr.isNaN ? 1e9 : trueErr));
-    if (settledAt == null && !trueErr.isNaN && trueErr.abs() < 40 && t > 0) settledAt = t;
+    if (playing && t % 100 < dt) errs.add((t, lPos - bPos(t)));
   }
-
-  final steady = errs.where((e) => e.$1 >= 10000).map((e) => e.$2.abs()).toList()..sort();
-  final p95 = steady[(steady.length * 0.95).floor()];
-  var maxIn3 = 0;
-  for (var i = 0; i < seekTimes.length; i++) {
-    final n = seekTimes.where((s) => s >= seekTimes[i] && s < seekTimes[i] + 3000).length;
-    maxIn3 = math.max(maxIn3, n);
-  }
-  final steadyMinutes = (total - 30000) / 60000;
-  return _SimResult(p95, maxIn3, rateChangesSteady / steadyMinutes, settledAt ?? double.infinity, errs);
+  // Ustálený stav: latence startu kolísá (±10 %), zbytek po startu dorovná
+  // rychlost během ~10 s -- měří se od 15 s po posledním startu.
+  final after = errs.where((e) => e.$1 >= lastStartAt + 15000).map((e) => e.$2.abs()).toList()..sort();
+  final p95 = after.isEmpty ? double.infinity : after[(after.length * 0.95).floor()];
+  return _SimResult(starts - 1, p95, rateChanges / (minutes - 0.5), reloads);
 }
