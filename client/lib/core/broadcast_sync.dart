@@ -684,3 +684,29 @@ String addGroupId(String addId, String byId) => 'add:$addId:$byId';
   if (parts.length < 3) return null;
   return (addId: parts[1], byId: parts.sublist(2).join(':'));
 }
+
+/// Vlastní pozice a stav vysílače pro kotvu. V rádio režimu (iPhone v
+/// Safari, jeden stream celé fronty) hlásí přehrávač pozici v RÁDIO streamu
+/// a `ready` neplatí -- správná pozice skladby je ve stavu přehrávače (živě
+/// 16. 10.: kotva nesla pozici streamu a "stojí", posluchač se nespustil).
+({double positionMs, bool playing}) broadcasterPlayback({
+  required bool radio,
+  required double exactMs,
+  required double uiMs,
+  required bool sourceReady,
+  required bool playerPlaying,
+  required bool stateIsPlaying,
+  required bool stateIsBuffering,
+}) {
+  if (radio) return (positionMs: uiMs, playing: stateIsPlaying && !stateIsBuffering);
+  return (
+    positionMs: sourceReady ? exactMs : uiMs,
+    // Načítání / buffering: just_audio hlásí `playing`, ale pozice stojí.
+    playing: stateIsPlaying && playerPlaying && !stateIsBuffering && sourceReady,
+  );
+}
+
+/// Hodiny pořád neplatné (WS nedoručuje pong: pozadí, Safari) -- po 3 s
+/// zkusit vzorek přes HTTP, nejvýš jednou za sekundu.
+bool needsHttpClockSample({required bool valid, required double invalidSinceMs, required double nowMs, required double lastHttpMs}) =>
+    !valid && nowMs - invalidSinceMs > 3000 && nowMs - lastHttpMs > 1000;
