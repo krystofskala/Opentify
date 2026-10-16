@@ -1324,6 +1324,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       state = state.copyWith(speed: 1.0);
       onOwnPlaybackWhileFollowing?.call();
     }
+    _userStartPending = !_followInternal;
     _followInternal = false;
     final index = startIndex.clamp(0, items.length - 1);
     _cancelPlan(); // nová fronta -- plán přechodu staré neplatí
@@ -1725,6 +1726,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   bool? _radioModeBeforeFollow;
 
+  /// Další načtení zdroje je start, který vybral uživatel (pro bariéru).
+  bool _userStartPending = false;
+
+  /// Načtená data (diagnostika bufferingu).
+  Duration get bufferedPosition => _player.bufferedPosition;
+
   /// Posluchač pustil během poslechu vlastní hudbu (klepnutí na skladbu
   /// kdekoli) -- ze streamu odchází (`BroadcastController`).
   void Function()? onOwnPlaybackWhileFollowing;
@@ -1971,6 +1978,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> next({bool auto = false}) async {
     if (_followingBroadcast) return; // řídí jen vysílač
     _cancelPlan();
+    _userStartPending = !auto;
     if (!auto && _skipChapter(forward: true)) return;
     final index = state.nextIndex;
     if (index == null) return;
@@ -2033,6 +2041,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Future<void> previous() async {
     if (_followingBroadcast) return;
     _cancelPlan();
+    _userStartPending = true;
     if (_skipChapter(forward: false)) return;
     if (_radioActive) {
       final restart = state.position > const Duration(seconds: 3) || state.previousIndex == null;
@@ -2050,6 +2059,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// `position`: začít tam (kapitola v jiném souboru knihy).
   Future<void> skipToIndex(int index, {Duration? position}) async {
     if (index < 0 || index >= state.queue.length) return;
+    _userStartPending = true;
     if (position != null) {
       _resumeAt = position;
       _resumeFor = state.queue[index].recordingId;
@@ -3053,7 +3063,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     // Sdílený stream: plánovaný start (posluchač / vysílač s posluchači).
     var hold = _holdPlay;
     _holdPlay = null;
-    if (hold == null && !_startPausedWhenReady && !_followingBroadcast && broadcastStartPlanner != null) {
+    // Bariéra jen pro start, který vybral uživatel (přeskok, klepnutí, nová
+    // fronta) -- ne pro znovunačtení po chybě / záseku / bufferingu (živě
+    // 16. 10.: buffering vysílače -> reload -> bariéra se zastavením -> znovu
+    // buffering, dokola).
+    final userStart = _userStartPending;
+    _userStartPending = false;
+    if (hold == null && userStart && !_startPausedWhenReady && !_followingBroadcast && broadcastStartPlanner != null) {
       hold = broadcastStartPlanner!();
     }
     final startPaused = _startPausedWhenReady || hold != null;
