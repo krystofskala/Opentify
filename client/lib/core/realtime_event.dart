@@ -49,17 +49,12 @@ sealed class RealtimeEvent {
       case 'devices.update' || 'remote.command' || 'handoff.request' || 'handoff.state':
         return ConnectEvent(type!, payload);
       // Sdílený stream mezi profily (app/broadcast.py) a hodiny pro jeho
-      // synchronizaci -- zpracovává state/broadcast_controller.dart.
-      case 'clock.pong' ||
-            'broadcast.state' ||
-            'broadcast.started' ||
-            'broadcast.pending' ||
-            'broadcast.ended' ||
-            'broadcast.listeners' ||
-            'broadcast.taken' ||
-            'broadcast.error' ||
-            'broadcasts.update':
-        return ConnectEvent(type!, payload);
+      // synchronizaci -- zpracovává state/broadcast_controller.dart. VŠECHNY
+      // `broadcast*` zprávy: výčet jednotlivých typů zapomněl `prepare`,
+      // `prepared`, `go` a bariéra pak na klientu nikdy neproběhla (živě
+      // 16. 10.: posluchač se nerozehrál, vysílač čekal na go).
+      case final String t when t == 'clock.pong' || t.startsWith('broadcast'):
+        return ConnectEvent(t, payload);
       default:
         return UnknownEvent(type ?? '<chybí type>', payload);
     }

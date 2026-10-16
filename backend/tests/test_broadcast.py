@@ -534,10 +534,9 @@ def test_late_joiner_and_solo_prepared_start() -> None:
         go = late.of("broadcast.go")[-1]
         lead = go["atServerMs"] - go["serverMs"]
         assert abs(lead - 900) < 5 and abs(go["positionMs"] - (10000 + (go["atServerMs"] - now))) < 1
-        # Jiná skladba než u vysílače -> dostane stav, žádné go.
-        n = len(late.of("broadcast.go"))
+        # Jiná skladba než u vysílače -> dostane stav a go s retry (žádné ticho).
         await hub.ready("late", late, {"sid": sid, "solo": True, "recordingId": "rec-x", "index": 5, "positionMs": 0})
-        assert len(late.of("broadcast.go")) == n
+        assert late.of("broadcast.go")[-1]["retry"] is True and late.of("broadcast.state")[-1]["reset"]
 
     asyncio.run(run())
 
@@ -595,5 +594,35 @@ def test_only_broadcaster_skips_or_seeks() -> None:
             with pytest.raises(bc.BroadcastError) as e:
                 await call("u0", {"sid": sid, "bid": bid, "bseq": 99, "anchor": _anchor("rec-z")})
             assert e.value.status == 403
+
+    asyncio.run(run())
+
+
+def test_live_16_oct_solo_always_answered_even_when_broadcaster_never_ready() -> None:
+    """Živě 16. 10.: vysílač nikdy neposlal ready, posluchač parkoval a
+    posílal solo ready dokola bez odpovědi. Teď vždy přijde odpověď a visící
+    bariéra se po limitu zruší."""
+
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub, 1)
+        now = hub.server_ms()
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1, "anchor": _anchor("rec-a", pos=84751, atServerMs=now)})
+        # Bez bariéry: solo dostane go.
+        await hub.ready("u0", lis[0], {"sid": sid, "solo": True, "recordingId": "rec-a", "index": 0, "positionMs": 84751 + 3000, "rtt": 26})
+        assert lis[0].of("broadcast.go")[-1].get("atServerMs")
+        # Vysílač začne bariéru a nikdy nepošle ready.
+        await hub.prepare("owner", _prepare(sid, bid, 2))
+        await hub.ready("u0", lis[0], {"sid": sid, "solo": True, "recordingId": "rec-b", "index": 1, "positionMs": 3000})
+        assert lis[0].of("broadcast.go")[-1]["wait"] is True
+        clock.t += 9  # po limitu vysílače
+        await hub.ready("u0", lis[0], {"sid": sid, "solo": True, "recordingId": "rec-b", "index": 1, "positionMs": 3000})
+        last = lis[0].of("broadcast.go")[-1]
+        assert hub.rooms[sid].barrier is None and "wait" not in last
+        # Kotva po zrušené bariéře stojí -> go říká "stojí" (žádné parkování dokola).
+        assert last["isPlaying"] is False
+        # Jiná skladba než u vysílače -> retry s důvodem, ne ticho.
+        await hub.ready("u0", lis[0], {"sid": sid, "solo": True, "recordingId": "rec-x", "index": 9, "positionMs": 0})
+        assert lis[0].of("broadcast.go")[-1] == {**lis[0].of("broadcast.go")[-1], "retry": True, "reason": "track"}
 
     asyncio.run(run())
