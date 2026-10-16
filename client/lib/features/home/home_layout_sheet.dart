@@ -143,13 +143,27 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
     ];
   }
 
+  /// Pod seznamem sekcí: žánry a chytré seznamy.
+  List<Widget> _extras(ThemeData theme) => [
+        if (!widget.spoken) ...[
+          const SizedBox(height: AppSpacing.sm),
+          GlassButton(
+            label: 'Přidat nebo odebrat žánry…',
+            icon: Symbols.category_rounded,
+            expand: true,
+            onPressed: _saving ? null : _editGenres,
+          ),
+        ],
+        ..._smartLists(theme),
+      ];
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final entries = _entries;
     return GlassSheet(
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.92),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.md),
           child: Column(
@@ -171,10 +185,17 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
                   child: Center(child: CircularProgressIndicator()),
                 )
               else
+                // Sekce, žánry i chytré seznamy scrollují jako jeden celek (footer),
+                // pevná jsou jen tlačítka dole -- na nízkém displeji (iPhone SE)
+                // chipy zakrývaly celý seznam (Kryštof 16. 10.).
                 Flexible(
                   child: ReorderableListView.builder(
                     shrinkWrap: true,
                     buildDefaultDragHandles: false,
+                    footer: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: _extras(theme),
+                    ),
                     itemCount: entries.length,
                     onReorderItem: (from, to) => setState(() => entries.insert(to, entries.removeAt(from))),
                     itemBuilder: (context, i) {
@@ -223,16 +244,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
                     },
                   ),
                 ),
-              if (!widget.spoken) ...[
-                const SizedBox(height: AppSpacing.sm),
-                GlassButton(
-                  label: 'Přidat nebo odebrat žánry…',
-                  icon: Symbols.category_rounded,
-                  expand: true,
-                  onPressed: _saving ? null : _editGenres,
-                ),
-              ],
-              ..._smartLists(theme),
+              if (entries == null) ..._extras(theme),
               const SizedBox(height: AppSpacing.xs),
               Row(
                 children: [
