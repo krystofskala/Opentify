@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/widgets.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -334,6 +335,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
 
   void _stopBroadcasting({String? notice}) {
     if (state.role != BroadcastRole.broadcasting) return;
+    _diagFlush();
     final sid = state.sid;
     final bid = _bid;
     final client = _ref.read(realtimeClientProvider);
@@ -408,7 +410,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final mono = monoNowMs();
     final server = clock.serverNow(mono);
     final pos = _audio.sourceReady ? _audio.exactPosition.inMicroseconds / 1000.0 : s.position.inMilliseconds.toDouble();
-    final playing = s.isPlaying && _audio.playerPlaying;
+    // Načítání / buffering: just_audio hlásí `playing`, ale zvuk nejde a pozice
+    // stojí -- posluchač by ujel dopředu. Hraje = opravdu hraje.
+    final playing = s.isPlaying && _audio.playerPlaying && !s.isBuffering && _audio.sourceReady;
     final planned = _startAtServer != null && _startFor == np.recordingId && server != null && server < _startAtServer! + 1500;
     return BroadcastAnchor(
       recordingId: np.recordingId,
@@ -521,7 +525,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     if (next.nowPlaying == null) return;
     if (_audio.followingBroadcast) return _stopBroadcasting();
     final trackChanged = prevS?.nowPlaying?.recordingId != next.nowPlaying?.recordingId || prevS?.queueIndex != next.queueIndex;
-    final playChanged = prevS?.isPlaying != next.isPlaying;
+    final playChanged = prevS?.isPlaying != next.isPlaying || prevS?.isBuffering != next.isBuffering;
     final speedChanged = prevS?.speed != next.speed;
     final key = _queueIdentity(next);
     final queueChanged = key != _queueKey;
@@ -588,6 +592,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// jen s posluchači, platnými hodinami a mimo rádio.
   void _broadcasterTick() {
     if (state.role != BroadcastRole.broadcasting) return;
+    _diagBroadcaster();
     final now = monoNowMs();
     // Na pozadí bez WS: heartbeat přes HTTP každých 30 s.
     final client = _ref.read(realtimeClientProvider);
@@ -705,6 +710,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// "Odejít" / "Vrátit se k mému": zpátky vlastní fronta a místo (pozastaveně).
   Future<void> leave() async {
     if (state.role != BroadcastRole.listening) return;
+    _diagFlush();
     final sid = state.sid;
     _ref.read(realtimeClientProvider).send('broadcast.leave', {'sid': sid});
     _tick?.cancel();
@@ -833,6 +839,65 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     return f().catchError((Object _) {});
   }
 
+  double _lastCatchUp = -1e9;
+
+  // --- diagnostika (client-log, jen během vysílání / poslechu) ------------
+  //
+  // 1 záznam za ~2 s, odeslání dávkou po ~20 s jako `broadcast-sync` do
+  // /data/db/client-log.jsonl -- ať reálný test dá data (16. 10.).
+
+  final List<String> _diagLines = [];
+  double _diagLast = -1e9;
+  double _diagSent = -1e9;
+  String? _diagAction;
+
+  String _f(double? v) => v == null ? '-' : v.round().toString();
+
+  void _diag(String line) {
+    final now = monoNowMs();
+    if (now - _diagLast < 2000) return;
+    _diagLast = now;
+    _diagLines.add(line);
+    if (_diagLines.length >= 10 || now - _diagSent > 20000) _diagFlush();
+  }
+
+  void _diagFlush() {
+    if (_diagLines.isEmpty) return;
+    _diagSent = monoNowMs();
+    final detail = _diagLines.join('\n');
+    _diagLines.clear();
+    unawaited(_ref
+        .read(apiClientProvider)
+        .postJson('/client-log', body: {'kind': 'broadcast-sync', 'detail': detail, 'platform': defaultTargetPlatform.name})
+        .then((_) {}, onError: (Object _) {}));
+  }
+
+  String _clockDiag() => 'off=${_f(clock.isValid ? clock.offsetMs : null)} rtt=${_f(clock.minRtt.isFinite ? clock.minRtt : null)} ok=${clock.isValid ? 1 : 0}';
+
+  void _diagListener(BroadcastAnchor? a, SyncTarget? t, double? serverNow, double? pos) {
+    final audio = _audio;
+    final action = _diagAction ?? '-';
+    _diagAction = null;
+    _diag('L ${_clockDiag()} '
+        'age=${_f(a == null || serverNow == null ? null : serverNow - a.atServerMs)} '
+        'aP=${_f(a?.positionMs)} aT=${_f(a?.atServerMs)} aPlay=${a?.isPlaying == true ? 1 : 0} aOk=${a?.clockOk == false ? 0 : 1} '
+        'start=${_f(a?.startAtServerMs)} trans=${_f(a?.transitionAtServerMs)} '
+        'tI=${t?.index ?? '-'} tP=${_f(t?.positionMs)} tW=${t?.waitingForStart == true ? 1 : 0} loaded=${_loadedAbs ?? '-'} '
+        'pos=${_f(pos)} err=${_f(pos == null || t == null ? null : pos - t.positionMs)} ef=${_f(_regulator.filteredErrorMs)} '
+        'act=$action step=${_regulator.step} lead=${_f(_regulator.seekLead[true])}/${_f(_regulator.seekLead[false])} '
+        'loose=${_regulator.looseMode ? 1 : 0} ready=${audio.sourceReady ? 1 : 0} play=${audio.playerPlaying ? 1 : 0} '
+        'local=${audio.currentSourceLocal ? 1 : 0} startLead=${_f(audio.startLeadMs)} lp=${_localPaused ? 1 : 0}');
+  }
+
+  void _diagBroadcaster() {
+    final s = _ref.read(audioPlayerControllerProvider);
+    final audio = _audio;
+    _diag('B ${_clockDiag()} pos=${_f(audio.exactPosition.inMicroseconds / 1000.0)} uiPos=${s.position.inMilliseconds} '
+        'dur=${s.duration?.inMilliseconds ?? '-'} play=${audio.playerPlaying ? 1 : 0} st=${s.isPlaying ? 1 : 0} buf=${s.isBuffering ? 1 : 0} '
+        'ready=${audio.sourceReady ? 1 : 0} radio=${audio.radioStreamActive ? 1 : 0} abs=$_abs ep=$_epoch qv=$_qv '
+        'lis=${state.listeners} plan=${_f(_transitionAtServer)} startAt=${_f(_startAtServer)} ws=${_ref.read(realtimeClientProvider).isConnected ? 1 : 0}');
+  }
+
   void _listenerTick() {
     if (state.role != BroadcastRole.listening || state.ended != null) return;
     final now = monoNowMs();
@@ -847,7 +912,10 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final a = _model.anchor;
     final serverNow = clock.serverNow(now);
     // Hodiny neplatné: neřídit, jen hrát dál (S4).
-    if (a == null || serverNow == null || _queue.isEmpty) return;
+    if (a == null || serverNow == null || _queue.isEmpty) {
+      _diagListener(a, null, serverNow, null);
+      return;
+    }
     final audio = _audio;
     final t = targetAt(a.clockOk ? a : a.copyWith(clearTransition: true), serverNow, durationOf: _durationOf, queueEnd: _queueBase + _queue.length);
     final li = t.index - _queueBase;
@@ -903,7 +971,10 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       return;
     }
 
-    if (!audio.sourceReady) return; // načítá se / bufferuje -- cíl běží dál
+    if (!audio.sourceReady) {
+      _diagListener(a, t, serverNow, null);
+      return; // načítá se / bufferuje -- cíl běží dál
+    }
     final pos = audio.exactPosition.inMicroseconds / 1000.0;
     audio.followBaseSpeed(a.rate);
 
@@ -929,7 +1000,11 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     if (_localPaused) return;
     if (!audio.playerPlaying) {
       // Vysílač hraje, my stojíme (po pauze vysílače, po načtení): naskočit
-      // s předstihem seeku.
+      // s předstihem seeku. Nejvýš jednou za 2 s -- když `play()` nezabere
+      // (iOS zvuková relace), nesmí to seekovat každý tik.
+      if (now - _lastCatchUp < 2000) return;
+      _lastCatchUp = now;
+      _diagAction = 'catchup';
       final lead = _regulator.seekLead[audio.currentSourceLocal]!;
       _regulator.reset(now);
       unawaited(_command(() async {
@@ -944,8 +1019,11 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final filtered = _regulator.filteredErrorMs;
     if (_learnStartLead && filtered != null) {
       _learnStartLead = false;
-      audio.startLeadMs = (audio.startLeadMs + 0.5 * filtered).clamp(0, 300).toDouble();
+      // Jen věrohodná chyba -- velká odchylka má jinou příčinu než rozjezd.
+      if (filtered.abs() < 300) audio.startLeadMs = (audio.startLeadMs + 0.5 * filtered).clamp(0, 300).toDouble();
     }
+    if (action.kind != SyncActionKind.none) _diagAction = action.toString();
+    _diagListener(a, t, serverNow, pos);
     switch (action.kind) {
       case SyncActionKind.none:
         break;
