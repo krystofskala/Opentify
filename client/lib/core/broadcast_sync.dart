@@ -237,7 +237,11 @@ SyncTarget targetAt(
   int? queueEnd,
 }) {
   if (!a.isPlaying) return SyncTarget(index: a.index, positionMs: a.positionMs, playing: false);
-  final start = a.startAtServerMs;
+  // Plán startu platí jen pro kotvu, která ho popisuje (pozice V čase startu,
+  // `atServerMs == startAtServerMs`). Kotva změřená až po rozjezdu nese
+  // vlastní čas -- počítat od startu by uběhlý čas započítalo dvakrát
+  // (živě 16. 10.: posluchač o 30 s napřed a seekoval dokola).
+  final start = (a.startAtServerMs != null && a.atServerMs <= a.startAtServerMs! + 1) ? a.startAtServerMs : null;
   if (start != null && serverNow < start) {
     return SyncTarget(index: a.index, positionMs: a.positionMs, playing: false, waitingForStart: true);
   }
@@ -274,6 +278,11 @@ class TimelineModel {
   /// Vrací `true`, když jde o nespojitost (posluchač má hned jednat).
   bool apply(BroadcastAnchor next) {
     final cur = anchor;
+    // Vysílač bez platných hodin (po startu, po návratu z pozadí): pozice
+    // v jeho kotvě je jen přibližná (čas přerazítkoval server). U téže
+    // skladby ve stejném stavu ji nebrat -- jinak by každý takový heartbeat
+    // posunul cíl a regulátor by seekoval.
+    if (cur != null && !next.clockOk && cur.clockOk && _sameEpoch(cur, next)) return false;
     if (cur == null || !_sameEpoch(cur, next) || !next.clockOk || !cur.clockOk) {
       anchor = next;
       return true;
@@ -296,7 +305,9 @@ class TimelineModel {
           isPlaying: true,
           durationMs: next.durationMs ?? cur.durationMs,
           repeatMode: next.repeatMode,
-          startAtServerMs: next.startAtServerMs ?? cur.startAtServerMs,
+          // Plán startu jen z novější kotvy: změřená kotva po rozjezdu ho už
+          // nemá a starý plán by uběhlý čas započítal dvakrát.
+          startAtServerMs: next.startAtServerMs,
           transitionAtServerMs: next.transitionAtServerMs ?? cur.transitionAtServerMs,
           clockOk: true,
         );

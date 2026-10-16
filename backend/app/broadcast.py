@@ -393,15 +393,22 @@ class BroadcastHub:
 
     def _set_anchor(self, room: Room, anchor: dict[str, Any]) -> None:
         prev = room.anchor
-        # Heartbeat bez plánu nesmí smazat plán téže skladby (N4).
+        now_ms = self.server_ms()
+        # Vysílač bez platných hodin posílá svůj vlastní (klientský) čas, který
+        # se serverem nesouvisí -- přerazítkovat časem přijetí (chyba = jen
+        # jednosměrná latence). Dřív se klientský čas posílal dál a posluchač
+        # ho extrapoloval proti času serveru (test 16. 10.).
+        if not anchor.get("clockOk", True):
+            anchor["atServerMs"] = now_ms
+        # Heartbeat bez plánu přechodu nesmí smazat plán téže skladby (N4).
+        # Plán STARTU se nepřenáší: kotva bez něj je změřená po rozjezdu a
+        # s ním by posluchač uběhlý čas započítal dvakrát.
         if prev and prev.get("recordingId") == anchor.get("recordingId") and prev.get("index") == anchor.get("index"):
-            for k in ("transitionAtServerMs", "startAtServerMs"):
-                if k not in anchor and k in prev and anchor.get("clockOk", True):
-                    if k == "startAtServerMs" and prev[k] < self.server_ms() - 5000:
-                        continue
-                    anchor[k] = prev[k]
+            k = "transitionAtServerMs"
+            if k not in anchor and k in prev and anchor.get("clockOk", True):
+                anchor[k] = prev[k]
         room.anchor = anchor
-        room.received_ms = self.server_ms()
+        room.received_ms = now_ms
         if anchor.get("isPlaying"):
             room.last_playing = self._now()
 

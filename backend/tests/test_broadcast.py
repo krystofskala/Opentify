@@ -395,3 +395,25 @@ def test_pending_listeners_are_capped(monkeypatch) -> None:
         assert socks[2].of("broadcast.ended")[0]["reason"] == "unknown"
 
     asyncio.run(run())
+
+
+def test_clock_not_ok_anchor_is_restamped_and_start_plan_not_carried() -> None:
+    """Test 16. 10.: kotva vysílače bez hodin nesla klientský čas a plán
+    startu se přenášel do změřených kotev -- posluchač o 30 s napřed."""
+
+    async def run():
+        hub, clock = _hub()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid, visibility="server"), set())
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1,
+                                  "anchor": _anchor("rec-b", index=1, atServerMs=12, clockOk=False)})
+        assert hub.rooms[sid].anchor["atServerMs"] == hub.server_ms()
+        start_at = hub.server_ms() + 600
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 2,
+                                  "anchor": _anchor("rec-c", index=2, atServerMs=start_at, startAtServerMs=start_at)})
+        clock.t += 1
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 3,
+                                  "anchor": _anchor("rec-c", pos=400, index=2, atServerMs=start_at + 400)})
+        assert "startAtServerMs" not in hub.rooms[sid].anchor
+
+    asyncio.run(run())
