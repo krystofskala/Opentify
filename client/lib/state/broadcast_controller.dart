@@ -755,6 +755,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// Bariéru jde použít: posluchači, platné hodiny, WS (go chodí přes WS),
   /// ne rádio (iPhone v Safari, start nejde odložit).
   bool get _barrierUsable =>
+      monoNowMs() - _lastBarrierAt > 5000 &&
       state.role == BroadcastRole.broadcasting &&
       state.listeners > 0 &&
       clock.isValid &&
@@ -804,6 +805,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// klidu, za poslední volbu; starší bariéra tím na serveru končí.
   void _queuePrepare(String kind, String rid, double positionMs) {
     if (!_barrier.active && _pendingPrepare == null) _barrierSince = monoNowMs();
+    _lastBarrierAt = monoNowMs();
     _barrierKind = kind;
     final ownReady = _pendingPrepare?.rid == rid && _barrier.ownReady;
     _pendingPrepare = (kind: kind, rid: rid, positionMs: positionMs);
@@ -852,6 +854,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   }
 
   double _barrierSince = -1e9;
+  double _lastBarrierAt = -1e9;
   String _barrierKind = 'start';
 
   /// Vysílač nikdy nečeká na `go` déle než limit (start 6 s, seek / play 3 s):
@@ -1240,7 +1243,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final audio = _audio;
     _diag('B ${_clockDiag()} sent=${_f(_lastAnchorPos)}/${_lastAnchorPlaying ? 1 : 0} bar=${_barrier.epoch ?? (_barrier.active ? '?' : '-')} pos=${_f(audio.exactPosition.inMicroseconds / 1000.0)} uiPos=${s.position.inMilliseconds} '
         'dur=${s.duration?.inMilliseconds ?? '-'} play=${audio.playerPlaying ? 1 : 0} st=${s.isPlaying ? 1 : 0} buf=${s.isBuffering ? 1 : 0} '
-        'ready=${audio.sourceReady ? 1 : 0} radio=${audio.radioStreamActive ? 1 : 0} abs=$_abs ep=$_epoch qv=$_qv '
+        'ready=${audio.sourceReady ? 1 : 0} radio=${audio.radioStreamActive ? 1 : 0} bufPos=${audio.bufferedPosition.inMilliseconds} '
+        'reload=${audio.startReloads} abs=$_abs ep=$_epoch qv=$_qv '
         'lis=${state.listeners} plan=${_f(_transitionAtServer)} startAt=${_f(_startAtServer)} ws=${_ref.read(realtimeClientProvider).isConnected ? 1 : 0}');
   }
 
@@ -1622,7 +1626,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     if (!t.playing) {
       // Vysílač stojí: stát na přesném místě (play pak přijde bariérou).
       if (audio.playerPlaying) unawaited(_command(audio.followPause));
-      if ((pos - t.positionMs).abs() > 40 && !_parkSeeking) {
+      // Malý rozdíl nechat (dorovná rychlost) -- seek v pozastaveném streamu
+      // Safari znovu bufferuje.
+      if ((pos - t.positionMs).abs() > 1000 && !_parkSeeking) {
         _parkSeeking = true;
         unawaited(_command(() => audio.followSeek(Duration(milliseconds: t.positionMs.round()))).whenComplete(() => _parkSeeking = false));
       }
@@ -1630,10 +1636,19 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     }
     if (_localPaused) return;
     if (!audio.playerPlaying || _suspendSent) {
-      // Vysílač hraje, my stojíme (po bufferingu, po pauze bez bariéry):
-      // připravený start, ne seek a play.
+      // Vysílač hraje, my stojíme (po jeho bufferingu, po pauze bez
+      // bariéry): stojíme blízko cíle -> hned hrát, zbytek dorovná rychlost;
+      // daleko -> připravený start (s cooldownem), nikdy seek a play dokola.
+      final wasSuspended = _suspendSent;
       _suspendSent = false;
-      _beginSolo(audio.playerPlaying ? 'buffering' : 'resume');
+      final behind = t.positionMs - pos;
+      if (!audio.playerPlaying && behind > -200 && behind < SyncRegulator.resyncThresholdMs) {
+        _regulator.reset(now);
+        _diagAction = 'resume-near';
+        unawaited(_command(() async => audio.playAt(now)));
+        return;
+      }
+      _beginSolo(wasSuspended ? 'buffering' : 'resume');
       return;
     }
     if (!usable) return;
@@ -1644,7 +1659,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       case SyncActionKind.none:
         break;
       case SyncActionKind.setRate:
-        unawaited(audio.followSetRate(action.rate!).catchError((Object _) => _regulator.rateUnsupported()));
+        break; // za běhu se rychlost nemění (rozhodnutí 16. 10.)
       case SyncActionKind.resync:
         _lastSolo = -1e9;
         _beginSolo('drift');

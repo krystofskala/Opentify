@@ -389,16 +389,21 @@ class SyncAction {
 }
 
 /// Dorovnání odchylky `e = skutečná − cílová pozice` (kladná = posluchač je
-/// napřed) za běhu -- JEN rychlostí. Do ±40 ms nic, do ~400 ms ±1/±2 %,
+/// napřed) za běhu -- JEN rychlostí. Do ±40 ms nic, do 1 s ±1/±2 %,
 /// větší odchylka = připravený start pro jednoho (posluchač ztichne,
 /// zaparkuje na cílové pozici a začne naráz), nikdy seek za běhu dokola
 /// (Kryštof 16. 10.: "přeskakovalo, nehrálo, hrálo"). Pojistky: usazení po
-/// každém zásahu, držení rychlosti, nejvýš 1 připravený start za 5 s a po
+/// každém zásahu, držení rychlosti, nejvýš 1 připravený start za 10 s a po
 /// opakovaných volný režim s rostoucí délkou (jen rychlost).
 class SyncRegulator {
-  SyncRegulator({this.canRate = true});
+  /// Kryštof 16. 10.: "nebude se nic dorovnávat, jednou se pustí skladba a
+  /// v tu chvíli se to srovná" -- rychlost se za běhu NEMĚNÍ (výchozí
+  /// `canRate: false`), synchronizace jen v okamžiku startu. Za běhu jen
+  /// hlídání velké odchylky (> 1 s, výpadek / pozadí) -> jeden připravený
+  /// start, nejvýš 1× za 15 s. `canRate: true` zůstává jen pro pokusy.
+  SyncRegulator({this.canRate = false});
 
-  /// Platforma umí plynule měnit rychlost.
+  /// Smí plynule měnit rychlost (vypnuto).
   bool canRate;
 
   static const tauMs = 2000.0;
@@ -406,8 +411,10 @@ class SyncRegulator {
   static const holdMs = 3000.0;
   static const minRateGapMs = 2000.0;
   static const deadbandMinMs = 40.0;
-  static const resyncThresholdMs = 400.0;
-  static const resyncGapMs = 5000.0;
+  // Připravený start pro jednoho až od 1 s a nejvýš 1× za 10 s (16. 10.:
+  // menší odchylky po startu dorovná rychlost, restart dokola sekal).
+  static const resyncThresholdMs = 1000.0;
+  static const resyncGapMs = 15000.0;
   static const looseThresholdMs = 2000.0;
 
   double? _filtered;
