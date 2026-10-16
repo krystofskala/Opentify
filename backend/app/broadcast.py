@@ -65,6 +65,13 @@ FLUSH_INTERVAL_S = 0.2
 MAX_QUEUE = 500
 MAX_INVITED = 50
 MAX_POLLS_PER_USER = 4
+# Čekající posluchači (neznámé vysílání po restartu API) -- strop, ať nejde
+# paměť zaplnit náhodnými sid.
+MAX_PENDING = 500
+MAX_PENDING_PER_SID = 50
+SEND_TIMEOUT_S = 5.0
+# Položka fronty: jen pole snímku přehrávače (`_infoToJson`) + čitelná pro seznam.
+_ITEM_FIELDS = ("id", "t", "a", "ai", "r", "art", "g", "gl", "d", "recordingId", "title", "artistName", "artworkUrl")
 PREP_MAX_MS = 1200
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
@@ -104,7 +111,18 @@ def clean_anchor(raw: Any) -> dict[str, Any] | None:
 def clean_queue(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
         return None
-    items = [i for i in raw["items"][:MAX_QUEUE] if isinstance(i, dict) and isinstance(i.get("recordingId"), str)]
+    items = []
+    for i in raw["items"][:MAX_QUEUE]:
+        if not isinstance(i, dict) or not isinstance(i.get("recordingId"), str):
+            continue
+        item = {}
+        for k in _ITEM_FIELDS:
+            v = i.get(k)
+            if isinstance(v, str):
+                item[k] = v[:1000]
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                item[k] = v
+        items.append(item)
     qv = raw.get("qv")
     base = raw.get("baseIndex")
     return {
@@ -224,7 +242,8 @@ class BroadcastHub:
         if ws is None:
             return False
         try:
-            await ws.send_text(json.dumps(message))
+            # Zaseknuté spojení (plný buffer) nesmí zdržet rozesílání ostatním.
+            await asyncio.wait_for(ws.send_text(json.dumps(message)), timeout=SEND_TIMEOUT_S)
             return True
         except Exception:  # noqa: BLE001 -- spojení se mezitím zavřelo
             return False
@@ -464,6 +483,10 @@ class BroadcastHub:
                 await self._send(ws, {"type": "broadcast.ended", "payload": {"sid": sid, "reason": "unknown"}})
                 return
             # Restart API: vysílač se ještě nepřihlásil -- chvíli počkat.
+            total = sum(len(w) for w in self._pending.values())
+            if total >= MAX_PENDING or len(self._pending.get(sid, {})) >= MAX_PENDING_PER_SID:
+                await self._send(ws, {"type": "broadcast.ended", "payload": {"sid": sid, "reason": "unknown"}})
+                return
             self._pending.setdefault(sid, {})[id(ws)] = (user_id, device_id, self._now())
             self._pending_ws[id(ws)] = ws
             await self._send(ws, {"type": "broadcast.pending", "payload": {"sid": sid}})
@@ -474,7 +497,7 @@ class BroadcastHub:
             await self._send(ws, {"type": "broadcast.ended", "payload": {"sid": sid, "reason": "unknown"}})
             return
         # Jedno zařízení poslouchá jedno vysílání.
-        for other in self.rooms.values():
+        for other in list(self.rooms.values()):
             if other is not room and id(ws) in other.listeners:
                 other.listeners.pop(id(ws), None)
                 await self._tell_owner(other)
@@ -524,7 +547,7 @@ class BroadcastHub:
     async def prep(self, ws: Any, payload: dict[str, Any]) -> None:
         prep = payload.get("prepMs")
         healthy = payload.get("healthy")
-        for room in self.rooms.values():
+        for room in list(self.rooms.values()):
             lst = room.listeners.get(id(ws))
             if lst is None:
                 continue

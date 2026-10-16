@@ -314,6 +314,8 @@ def test_replaced_broadcast_ends_old_one() -> None:
 def test_queue_limit_and_garbage_fields() -> None:
     q = bc.clean_queue({"qv": 3, "items": [{"recordingId": str(i)} for i in range(800)] + ["x"]})
     assert len(q["items"]) == bc.MAX_QUEUE
+    q = bc.clean_queue({"items": [{"recordingId": "r", "id": "r", "t": "T", "d": 1000, "evil": "<x>", "nested": {"a": 1}}]})
+    assert q["items"] == [{"recordingId": "r", "id": "r", "t": "T", "d": 1000}]
     a = bc.clean_anchor({"recordingId": "r", "positionMs": "5", "evil": 1, "rate": True})
     assert "positionMs" not in a and "evil" not in a and "rate" not in a
 
@@ -377,4 +379,19 @@ def test_connect_device_state_of_listener_skips_backup_listens(monkeypatch) -> N
         await hub.end(sid, "stopped")
 
     monkeypatch.setattr(realtime.ConnectionManager, "_store_playing", lambda self, u: asyncio.sleep(0))
+    asyncio.run(run())
+
+
+def test_pending_listeners_are_capped(monkeypatch) -> None:
+    monkeypatch.setattr(bc, "MAX_PENDING_PER_SID", 2)
+
+    async def run():
+        hub, _clock = _hub()
+        sid = _id()
+        socks = [FakeWS() for _ in range(3)]
+        for ws in socks:
+            await hub.join("u", None, ws, {"sid": sid})
+        assert socks[0].of("broadcast.pending") and socks[1].of("broadcast.pending")
+        assert socks[2].of("broadcast.ended")[0]["reason"] == "unknown"
+
     asyncio.run(run())
