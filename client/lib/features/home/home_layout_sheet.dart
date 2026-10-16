@@ -38,6 +38,8 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
   List<_Entry>? _entries;
   String? _error;
   bool _saving = false;
+  // Chytré seznamy sbalené, ať je vidět hlavně poskládání sekcí (Kryštof 16. 10.).
+  bool _smartOpen = false;
 
   String get _path => widget.spoken ? '/spoken/home/layout' : '/home/layout';
 
@@ -119,7 +121,20 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
     if (pins == null || pins.rails.isEmpty) return const [];
     return [
       const SizedBox(height: AppSpacing.sm),
-      Text('Chytré seznamy v Tvých výběrech', style: theme.textTheme.titleSmall),
+      InkWell(
+        onTap: () => setState(() => _smartOpen = !_smartOpen),
+        borderRadius: BorderRadius.circular(AppRadii.xs),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+          child: Row(
+            children: [
+              Expanded(child: Text('Chytré seznamy v Tvých výběrech', style: theme.textTheme.titleSmall)),
+              Icon(_smartOpen ? Symbols.expand_less_rounded : Symbols.expand_more_rounded),
+            ],
+          ),
+        ),
+      ),
+      if (_smartOpen) ...[
       const SizedBox(height: AppSpacing.xxs),
       Wrap(
         spacing: AppSpacing.xs,
@@ -140,6 +155,7 @@ class _HomeLayoutSheetState extends ConsumerState<_HomeLayoutSheet> {
             ),
         ],
       ),
+      ],
     ];
   }
 
