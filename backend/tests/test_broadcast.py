@@ -546,3 +546,54 @@ def test_go_lead_rules() -> None:
     assert bc.go_lead_ms([]) == 800  # bez dat: 500 + 300
     assert bc.go_lead_ms([1000]) == 1800
     assert bc.go_lead_ms([50], [1200]) == 1700
+
+
+# --- organizátor a přidávání posluchači (16. 10.) ---------------------------
+
+
+def test_listener_adds_to_stream_queue_with_limits_and_owner_ack(monkeypatch) -> None:
+    monkeypatch.setattr(bc, "profile_name", lambda uid: {"u0": "Kryštof"}.get(uid, "?"))
+
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub, 1)
+        item = {"recordingId": "rec-x", "id": "rec-x", "t": "Song X", "evil": "<x>"}
+        assert await hub.add_item("u0", lis[0], {"sid": sid, "item": item}) is None
+        added = owner_ws.of("broadcast.added")[-1]
+        assert added["by"] == "Kryštof" and added["item"]["byId"] == "u0" and "evil" not in added["item"]
+        # Rate limit 1 za 2 s.
+        assert "rychle" in await hub.add_item("u0", lis[0], {"sid": sid, "item": item})
+        # Nepřipojený (i když by vysílání viděl) nepřidá.
+        stranger = FakeWS()
+        assert await hub.add_item("u9", stranger, {"sid": sid, "item": item}) is not None
+        # Limit 10 čekajících.
+        for _ in range(9):
+            clock.t += 3
+            assert await hub.add_item("u0", lis[0], {"sid": sid, "item": item}) is None
+        clock.t += 3
+        assert "Čeká už" in await hub.add_item("u0", lis[0], {"sid": sid, "item": item})
+        # Vysílač je zařadil do fronty a dvě se už zahrály -> zase jde přidávat.
+        room = hub.rooms[sid]
+        adds = [a["item"] for a in room.pending_adds]
+        q = {"qv": 2, "baseIndex": 0, "items": [{"recordingId": "rec-a", "id": "rec-a", "t": "A"}] + adds}
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 50, "queue": q, "anchor": _anchor("rec-x", index=2, qv=2)})
+        assert room.pending_adds == []
+        assert hub._waiting_adds(room, "u0") == 8
+        assert await hub.add_item("u0", lis[0], {"sid": sid, "item": item}) is None
+        # Pořadí přidaných: addId roste.
+        ids = [int(a["addId"]) for a in adds]
+        assert ids == sorted(ids)
+
+    asyncio.run(run())
+
+
+def test_only_broadcaster_skips_or_seeks() -> None:
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub, 1)
+        for call in (hub.prepare, hub.state):
+            with pytest.raises(bc.BroadcastError) as e:
+                await call("u0", {"sid": sid, "bid": bid, "bseq": 99, "anchor": _anchor("rec-z")})
+            assert e.value.status == 403
+
+    asyncio.run(run())

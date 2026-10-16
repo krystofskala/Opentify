@@ -250,6 +250,19 @@ void main() {
     });
   });
 
+  group('přidávání posluchači', () {
+    test('zařadí se za poslední přidanou, jinak hned za hrající; groupId nese kdo a které', () {
+      // Hraje 1, fronta: 2 vlastní, 3 přidaná, 4 vlastní, 5 přidaná, 6 vlastní.
+      final ids = <String?>[null, null, null, addGroupId('1', 'u'), null, addGroupId('2', 'v'), null];
+      expect(addInsertIndex(ids, 1), 6);
+      expect(addInsertIndex([null, null, null], 0), 1);
+      // Přidaná před hrající (už zahraná) se nepočítá.
+      expect(addInsertIndex([addGroupId('1', 'u'), null, null], 1), 2);
+      expect(parseAddGroupId(addGroupId('7', 'a:b')), (addId: '7', byId: 'a:b'));
+      expect(parseAddGroupId('g123'), isNull);
+    });
+  });
+
   group('simulace', () {
     test('posluchač s pomalým startem a načítáním 0,2-3 s, jitterem a záseky: max 1 připravený start navíc, bez seeků', () {
       for (final seed in [1, 2, 3, 4, 5, 6, 7, 8]) {

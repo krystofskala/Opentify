@@ -28,6 +28,7 @@ import 'state_views.dart' show humanError;
 import '../state/auto_continue.dart' show playNowRepositoryProvider;
 import '../state/taste_exclusions.dart';
 import '../state/hints.dart';
+import '../state/broadcast_controller.dart' show BroadcastRole, broadcastProvider;
 
 /// `RecordingModel` -> `NowPlayingInfo` -- jediné místo, kde se tahle
 /// konverze dělá (dřív ji měl zvlášť `TrackTile`, `QueueActionBar`, Search).
@@ -197,11 +198,23 @@ class _TrackActionsSheet extends ConsumerWidget {
               const Divider(height: 1),
               // Pořadí skupin jako v každém menu (audit UI): fronta · uložit ·
               // objevovat · Sdílet… · odebrat (červeně) · admin.
+              // Poslech cizího vysílání: frontu řídí organizátor (vysílač),
+              // posluchač jen přidává (Kryštof 16. 10.).
+              if (ref.read(broadcastProvider).role == BroadcastRole.listening)
+                _Item(
+                  icon: Symbols.queue_music_rounded,
+                  label: 'Přidat do fronty streamu',
+                  onTap: () => run(() async {
+                    final err = await ref.read(broadcastProvider.notifier).addToStream(info);
+                    toast(err ?? 'Do fronty streamu: ${recording.title}');
+                  }),
+                ),
               _Item(
                 icon: Symbols.play_arrow_rounded,
                 label: 'Přehrát',
                 onTap: () => run(() => controller.playTrack(info)),
               ),
+              if (ref.read(broadcastProvider).role != BroadcastRole.listening) ...[
               _Item(
                 icon: Symbols.playlist_play_rounded,
                 label: 'Přehrát jako další',
@@ -220,6 +233,7 @@ class _TrackActionsSheet extends ConsumerWidget {
                   ref.read(hintsProvider.notifier).signal(Hint.queueSwipe);
                 }),
               ),
+              ],
               const _Divider(),
               _Item(
                 icon: isLiked ? Symbols.heart_minus_rounded : Symbols.favorite_rounded,
