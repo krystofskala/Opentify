@@ -14,12 +14,12 @@
       "tintColor": "6B3FD6",
       "versions": [
         {
-          "version": "0.1.91",
-          "buildVersion": "91",
-          "localizedDescription": "Noční build Opentify 0.1.91.",
-          "date": "2026-10-16T09:17:22Z",
-          "size": 14659041,
-          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-build-90/Opentify.ipa",
+          "version": "0.1.92",
+          "buildVersion": "92",
+          "localizedDescription": "Noční build Opentify 0.1.92.",
+          "date": "2026-10-16T10:18:04Z",
+          "size": 14688969,
+          "downloadURL": "https://github.com/krystofskala/Opentify/releases/download/ios-build-91/Opentify.ipa",
           "minOSVersion": "15.0"
         }
       ],
@@ -34,5 +34,5 @@
     }
   ],
   "news": [],
-  "opentifyCommit": "905f5305332cb59912a1a5c5eabc44bf1d2c5fea"
+  "opentifyCommit": "8264dd3daa00656b75c17a630f8f663b13b3ba02"
 }
