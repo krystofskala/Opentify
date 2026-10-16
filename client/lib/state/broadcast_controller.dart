@@ -9,6 +9,7 @@ import '../core/broadcast_sync.dart';
 import '../core/config.dart';
 import '../core/device_token.dart' show withDeviceToken, withoutDeviceToken;
 import '../core/realtime_event.dart';
+import '../core/ws_client.dart' show RealtimeClient;
 import 'audio_player_controller.dart';
 import 'providers.dart';
 
@@ -136,6 +137,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   BroadcastController(this._ref) : super(const BroadcastState()) {
     WidgetsBinding.instance.addObserver(this);
     final client = _ref.read(realtimeClientProvider);
+    _client = client;
+    _audioRef = _ref.read(audioPlayerControllerProvider.notifier);
     client.addConnectListener(_onConnected);
     _events = _ref.listen<AsyncValue<RealtimeEvent>>(realtimeEventsProvider, (_, next) {
       final event = next.valueOrNull;
@@ -146,6 +149,10 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
 
   final Ref _ref;
   late final ProviderSubscription<AsyncValue<RealtimeEvent>> _events;
+
+  // Pro `dispose` (přepnutí profilu, odhlášení) -- `ref.read` tam už nejde.
+  late final RealtimeClient _client;
+  late final AudioPlayerController _audioRef;
   ProviderSubscription<AudioPlayerState>? _playerSub;
 
   final ClockSync clock = ClockSync();
@@ -561,6 +568,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// načítání): s posluchači oba začnou za Δ, bez posluchačů hned.
   double? _planStart() {
     if (state.role != BroadcastRole.broadcasting || state.listeners == 0) return null;
+    // iPhone v Safari hraje rádio (jeden stream fronty) -- start nejde odložit.
+    if (_audio.radioStreamActive) return null;
     final mono = monoNowMs();
     final server = clock.serverNow(mono);
     if (server == null) return null; // hodiny neplatné -> neplánovat (N7)
@@ -1002,7 +1011,32 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _events.close();
-    _teardown();
+    // Přepnutí profilu / odhlášení uprostřed vysílání nebo poslechu: vysílání
+    // ukončit (jinak by do 90 s viselo v seznamu) a přehrávači vrátit
+    // normální režim (poslechy, fronta...). Cizí fronta se novému profilu
+    // neobnovuje -- jen se zastaví.
+    try {
+      if (state.role == BroadcastRole.broadcasting) {
+        _client.send('broadcast.stop', {'sid': state.sid, 'bid': _bid});
+      } else if (state.role == BroadcastRole.listening) {
+        _client.send('broadcast.leave', {'sid': state.sid});
+      }
+    } catch (_) {}
+    try {
+      final audio = _audioRef;
+      if (audio.mounted && audio.followingBroadcast) unawaited(audio.endFollow().catchError((Object _) {}));
+      if (audio.mounted) {
+        if (audio.broadcastStartPlanner == _planStart) audio.broadcastStartPlanner = null;
+        audio.onSourceLoaded = null;
+        audio.cancelTransitionPlan();
+      }
+    } catch (_) {}
+    _playerSub?.close();
+    _heartbeat?.cancel();
+    _tick?.cancel();
+    _clockTimer?.cancel();
+    _sendTimer?.cancel();
+    _pollActive = false;
     _listenerPlayerSub?.close();
     _endTimer?.cancel();
     super.dispose();
