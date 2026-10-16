@@ -366,53 +366,49 @@ class LeadEstimate {
 // Regulátor
 // ---------------------------------------------------------------------------
 
-enum SyncActionKind { none, setRate, seek }
+enum SyncActionKind { none, setRate, resync }
 
 class SyncAction {
   const SyncAction.none()
       : kind = SyncActionKind.none,
-        rate = null,
-        leadMs = 0;
-  const SyncAction.rate(double this.rate)
-      : kind = SyncActionKind.setRate,
-        leadMs = 0;
-  const SyncAction.seek(this.leadMs)
-      : kind = SyncActionKind.seek,
+        rate = null;
+  const SyncAction.rate(double this.rate) : kind = SyncActionKind.setRate;
+  const SyncAction.resync()
+      : kind = SyncActionKind.resync,
         rate = null;
 
   final SyncActionKind kind;
   final double? rate;
 
-  /// Seek na `cíl + leadMs` (o kolik dřív seek hraje, než je slyšet).
-  final double leadMs;
-
   @override
   String toString() => switch (kind) {
         SyncActionKind.none => 'nic',
         SyncActionKind.setRate => 'rychlost $rate',
-        SyncActionKind.seek => 'seek +${leadMs.round()} ms',
+        SyncActionKind.resync => 'připravený start',
       };
 }
 
 /// Dorovnání odchylky `e = skutečná − cílová pozice` (kladná = posluchač je
-/// napřed). Malé odchylky plynule rychlostí (±1/±2 %), velké jedním seekem.
-/// Pojistky: usazení po každém zásahu, držení rychlosti, nejvýš 1 seek za 3 s,
-/// volný režim s rostoucí délkou (návrh bod 6, recenze S1, S2, N5).
+/// napřed) za běhu -- JEN rychlostí. Do ±40 ms nic, do ~400 ms ±1/±2 %,
+/// větší odchylka = připravený start pro jednoho (posluchač ztichne,
+/// zaparkuje na cílové pozici a začne naráz), nikdy seek za běhu dokola
+/// (Kryštof 16. 10.: "přeskakovalo, nehrálo, hrálo"). Pojistky: usazení po
+/// každém zásahu, držení rychlosti, nejvýš 1 připravený start za 5 s a po
+/// opakovaných volný režim s rostoucí délkou (jen rychlost).
 class SyncRegulator {
   SyncRegulator({this.canRate = true});
 
-  /// Platforma umí plynule měnit rychlost (jinak jen práh + seek).
+  /// Platforma umí plynule měnit rychlost.
   bool canRate;
 
   static const tauMs = 2000.0;
-  static const settleMs = 1000.0;
+  static const settleMs = 1500.0;
   static const holdMs = 3000.0;
   static const minRateGapMs = 2000.0;
-  static const seekGapMs = 3000.0;
-  static const seekThresholdMs = 350.0;
-  static const thresholdOnlyDeadbandMs = 60.0;
-  static const thresholdOnlySeekMs = 250.0;
-  static const looseSeekMs = 2000.0;
+  static const deadbandMinMs = 40.0;
+  static const resyncThresholdMs = 400.0;
+  static const resyncGapMs = 5000.0;
+  static const looseThresholdMs = 2000.0;
 
   double? _filtered;
   double _var = 0;
@@ -424,60 +420,45 @@ class SyncRegulator {
   double _stepStartedErr = 0;
   bool _rateFailed = false;
 
-  final List<double> _seeks = [];
+  final List<double> _resyncs = [];
   double _looseUntil = -1e18;
   int _looseLevel = 0;
   double _lastTrouble = -1e18;
-  double _freshUntil = -1e18;
-  static const freshSeekMs = 100.0;
-
-  /// Odhad, o kolik dřív seek hraje, než je slyšet -- zvlášť soubor v cache
-  /// a stream; opravuje se zbytkovou chybou po každém seeku (S2).
-  final Map<bool, double> seekLead = {true: 120, false: 400};
-  bool? _pendingSeekCached;
-  int _postSeekSamples = 0;
+  double _now = 0;
 
   /// Počítadla pro testy a diagnostiku.
   int rateChanges = 0;
-  int seeks = 0;
+  int resyncs = 0;
 
   bool get looseMode => _now < _looseUntil;
   bool get rateFailed => _rateFailed;
   int get step => _step;
   double? get filteredErrorMs => _filtered;
-  double _now = 0;
 
-  /// Pásmo necitlivosti: 2σ šumu měření, nejméně 20 ms (filtr přes 2 s šum
-  /// jednotlivých čtení ±10-30 ms stáhne na jednotky ms), nejvýš 80 ms.
-  double get deadbandMs => _rateFailed || !canRate ? thresholdOnlyDeadbandMs : math.max(20, math.min(80, 2 * math.sqrt(_var)));
+  /// Pásmo necitlivosti: 2σ šumu měření, nejméně 40 ms, nejvýš 80 ms.
+  double get deadbandMs => math.max(deadbandMinMs, math.min(80, 2 * math.sqrt(_var)));
 
-  /// Po seeku / startu / play / `setSpeed`: just_audio hlásí novou pozici dřív,
-  /// než je zvuk slyšet -- chvíli neměřit a filtr začít znovu.
+  /// Po startu / pauze / `setSpeed`: chvíli neměřit (pozice po startu lže)
+  /// a filtr začít znovu. `nowMs` smí být v budoucnu (plánovaný start).
   void settle(double nowMs) {
     _settleUntil = nowMs + settleMs;
     _filtered = null;
     _lastSampleAt = null;
   }
 
-  /// Úplný reset (nová skladba, nové připojení). Naučené `seekLead` zůstávají.
-  /// Hned po připojení / startu skladby je seek neslyšitelný (zvuk teprve
-  /// začíná), tak první větší odchylku srovnat seekem, ne 15 s rychlostí.
+  /// Úplný reset (nová skladba, nový start).
   void reset(double nowMs) {
     settle(nowMs);
-    _freshUntil = nowMs + settleMs + 3000;
     _step = 0;
     _stepStartedAt = null;
-    _pendingSeekCached = null;
   }
 
   double rateFor(double base) => base * (1 - _step / 100);
 
-  /// Jedno měření (každých ~250 ms za přehrávání). `cached`: hraje se ze
-  /// souboru v cache (kratší seek).
-  SyncAction observe({required double nowMs, required double errorMs, double baseRate = 1.0, bool cached = true}) {
+  /// Jedno měření (každých ~250 ms za přehrávání).
+  SyncAction observe({required double nowMs, required double errorMs, double baseRate = 1.0}) {
     _now = nowMs;
     if (nowMs < _settleUntil) return const SyncAction.none();
-    // Filtr: EWMA s časovou konstantou 2 s + rozptyl kolem něj (šum měření).
     final last = _lastSampleAt;
     _lastSampleAt = nowMs;
     if (_filtered == null || last == null) {
@@ -488,24 +469,18 @@ class SyncRegulator {
       _filtered = _filtered! + alpha * d;
       _var = (1 - alpha) * (_var + alpha * d * d);
     }
-    // Zbytek po seeku -> oprava seekLead (po 4 měřeních po usazení).
-    if (_pendingSeekCached != null && ++_postSeekSamples >= 4) {
-      final k = _pendingSeekCached!;
-      seekLead[k] = (seekLead[k]! - 0.5 * _filtered!).clamp(0, 1500).toDouble();
-      _pendingSeekCached = null;
-    }
     // Filtr se za skutečností opožďuje o (rychlost korekce × τ) -- se svou
     // známou korekcí počítat, jinak by regulátor přestřelil (N5).
-    final correction = (rateFor(baseRate) - baseRate) / baseRate; // např. −0,02
+    final correction = (rateFor(baseRate) - baseRate) / baseRate;
     final e = _filtered! + correction * tauMs;
     final mag = e.abs();
-    if (nowMs - _lastTrouble > 10 * 60 * 1000) _looseLevel = 0; // 10 min klid
+    if (nowMs - _lastTrouble > 10 * 60 * 1000) _looseLevel = 0;
 
-    var seekAt = looseMode ? looseSeekMs : (_rateFailed || !canRate ? thresholdOnlySeekMs : seekThresholdMs);
-    if (nowMs < _freshUntil && !looseMode) seekAt = math.min(seekAt, freshSeekMs);
-    if (mag > seekAt) {
-      if (nowMs - (_seeks.isEmpty ? -1e18 : _seeks.last) < seekGapMs) return const SyncAction.none();
-      return _seek(nowMs, cached, baseRate);
+    final resyncAt = looseMode ? looseThresholdMs : resyncThresholdMs;
+    if (mag > resyncAt) {
+      final lastResync = _resyncs.isEmpty ? -1e18 : _resyncs.last;
+      if (nowMs - lastResync >= resyncGapMs) return _resync(nowMs);
+      // V čekání na další připravený start aspoň rychlostí (je-li to málo, nevadí).
     }
     if (_rateFailed || !canRate) return const SyncAction.none();
 
@@ -526,7 +501,7 @@ class SyncRegulator {
       want = (mag > 120 ? 2 : 1) * (e > 0 ? 1 : -1);
     } else {
       want = _step; // hystereze
-      if (want != 0 && (want > 0) != (e > 0)) want = 0; // přestřelilo -> stop
+      if (want != 0 && (want > 0) != (e > 0)) want = 0;
     }
     if (want == _step) return const SyncAction.none();
     if (nowMs - _lastRateChange < holdMs || nowMs - _lastRateChange < minRateGapMs) return const SyncAction.none();
@@ -537,7 +512,7 @@ class SyncRegulator {
     return _setStep(want, nowMs, baseRate: baseRate);
   }
 
-  /// `setSpeed` hodil výjimku -- dál jen práh + seek.
+  /// `setSpeed` hodil výjimku -- dál jen připravený start.
   void rateUnsupported() {
     _rateFailed = true;
     _step = 0;
@@ -548,35 +523,143 @@ class SyncRegulator {
     if (step == 0) _stepStartedAt = null;
     _lastRateChange = nowMs;
     rateChanges++;
-    // Usazení po změně rychlosti krátké -- just_audio extrapoluje novou
-    // rychlostí hned, platforma ji použije o chvilku později.
     _settleUntil = nowMs + 300;
     return SyncAction.rate(rateFor(baseRate));
   }
 
-  SyncAction _seek(double nowMs, bool cached, double baseRate) {
-    _seeks.add(nowMs);
-    _seeks.removeWhere((t) => nowMs - t > 30000);
-    seeks++;
+  SyncAction _resync(double nowMs) {
+    _resyncs.add(nowMs);
+    _resyncs.removeWhere((t) => nowMs - t > 60000);
+    resyncs++;
     _lastTrouble = nowMs;
-    if (_seeks.length >= 3 && !looseMode) {
-      // Seek bouře -> volný režim, pokaždé delší (60 -> 120 -> 240 -> 600 s).
+    if (_resyncs.length >= 3 && !looseMode) {
+      // Opakované připravené starty nepomáhají -> volný režim (jen rychlost),
+      // pokaždé delší (60 -> 120 -> 240 -> 600 s).
       const levels = [60000.0, 120000.0, 240000.0, 600000.0];
       _looseUntil = nowMs + levels[math.min(_looseLevel, levels.length - 1)];
       _looseLevel++;
-      _seeks.clear();
+      _resyncs.clear();
     }
     _step = 0;
     _stepStartedAt = null;
-    _pendingSeekCached = cached;
-    _postSeekSamples = 0;
-    _freshUntil = -1e18;
     settle(nowMs);
-    return SyncAction.seek(seekLead[cached]! * baseRate);
+    return const SyncAction.resync();
   }
+}
+
+/// Naučená latence startu (play() -> zvuk) tohoto zařízení, zvlášť pro
+/// soubor v zařízení a stream ze serveru (Kryštof 16. 10.: "každá appka musí
+/// hlásit, jak dlouho to trvá, a o ten čas si to načte dopředu"). Latence
+/// NENÍ stálá -- místo průměru robustní odhad z posledních 9 měření: medián
+/// pro okamžik play(), p80 pro předstih `go` (ať to stihne i pomalejší start).
+/// Ukládá se v zařízení. Bariéra stejně čeká na skutečnou připravenost.
+class StartLatency {
+  StartLatency([Map<String, dynamic>? saved]) {
+    for (final k in ['local', 'stream']) {
+      final raw = saved?[k];
+      if (raw is List) {
+        _samples[k] = [
+          for (final v in raw)
+            if (v is num && v >= 0 && v <= maxMs) v.toDouble(),
+        ];
+      }
+    }
+  }
+
+  static const maxMs = 3000.0;
+  static const window = 9;
+  final Map<String, List<double>> _samples = {};
+
+  static String _key(bool local) => local ? 'local' : 'stream';
+
+  bool known(bool local) => (_samples[_key(local)] ?? const []).isNotEmpty;
+
+  double _quantile(bool local, double q) {
+    final list = [...?_samples[_key(local)]]..sort();
+    if (list.isEmpty) return local ? 150 : 300;
+    return list[((list.length - 1) * q).round()];
+  }
+
+  /// Okamžik play(): medián.
+  double estimate(bool local) => _quantile(local, 0.5);
+
+  /// Předstih `go`: p80.
+  double p80(bool local) => _quantile(local, 0.8);
+
+  void add(bool local, double ms) {
+    if (ms.isNaN || ms < 0 || ms > 5000) return;
+    final list = _samples.putIfAbsent(_key(local), () => []);
+    list.add(math.min(ms, maxMs));
+    if (list.length > window) list.removeAt(0);
+  }
+
+  Map<String, dynamic> toJson() => {for (final e in _samples.entries) e.key: List.of(e.value)};
+}
+
+/// Předstih `go` (stejné pravidlo jako server, app/broadcast.py `go_lead_ms`).
+double goLeadMs({Iterable<double> rtts = const [], Iterable<double> startLeads = const []}) {
+  final worst = rtts.where((r) => r > 0).fold<double?>(null, (a, b) => a == null ? b : math.max(a, b)) ?? 100;
+  final slowest = startLeads.where((x) => x > 0).fold<double>(0, math.max);
+  return math.max(500, math.max(1.5 * math.min(worst, 5000), math.min(slowest, 3000) + 200)) + 300;
+}
+
+/// Připravený start jednoho (stejně jako server `solo_go`): posluchač
+/// zaparkoval na `parkedMs`; když tam vysílač dojde dost pozdě, začne se
+/// přesně tam, jinak v nejbližším možném čase. Vrací (T, pozice).
+(double, double) soloGo(BroadcastAnchor a, {required double serverNow, required double parkedMs, double rttMs = 100, double startLeadMs = 0}) {
+  final t0 = (a.startAtServerMs != null && a.atServerMs <= a.startAtServerMs! + 1) ? a.startAtServerMs! : a.atServerMs;
+  final earliest = serverNow + goLeadMs(rtts: [rttMs], startLeads: [startLeadMs]);
+  final tPark = t0 + (parkedMs - a.positionMs) / a.rate;
+  if (tPark >= earliest && tPark <= earliest + 3000) return (tPark, parkedMs);
+  return (earliest, a.positionMs + (earliest - t0) * a.rate);
 }
 
 /// Měření pozice je použitelné jen, když čas "na zdi" běžel stejně jako
 /// monotónní: just_audio extrapoluje pozici z `DateTime.now()` a skok hodin
 /// zařízení by se tvářil jako skok přehrávání.
 bool positionSampleUsable({required double wallDeltaMs, required double monoDeltaMs}) => (wallDeltaMs - monoDeltaMs).abs() <= 50;
+
+/// Vysílač: stav ready bariéry. Rychlé ťukání (další, další, další) se
+/// slučuje na poslední volbu -- platí jen epocha posledního odeslaného
+/// `prepare` (server potvrzuje v pořadí odeslání), `go` starší epochy se
+/// zahodí.
+class BarrierTracker {
+  int _sent = 0;
+  int _confirmed = 0;
+
+  /// Epocha serveru pro poslední `prepare` (`null` = ještě nepotvrzeno).
+  int? epoch;
+
+  /// Skladba, na kterou bariéra čeká (`null` = žádná bariéra).
+  String? recordingId;
+
+  /// Vlastní přehrávač je načtený a připravený na pozici.
+  bool ownReady = false;
+
+  bool get active => recordingId != null;
+
+  /// Odesílá se nový `prepare` -- předchozí bariéra neplatí.
+  void begin(String rid) {
+    recordingId = rid;
+    epoch = null;
+    ownReady = false;
+    _sent++;
+  }
+
+  /// `broadcast.prepared` ze serveru (v pořadí odeslání).
+  void prepared(int serverEpoch) {
+    _confirmed++;
+    if (_confirmed == _sent && active) epoch = serverEpoch;
+  }
+
+  /// Má se teď poslat vlastní `ready`?
+  bool get readyToReport => active && epoch != null && ownReady;
+
+  bool acceptsGo(int serverEpoch) => active && epoch == serverEpoch;
+
+  void clear() {
+    recordingId = null;
+    epoch = null;
+    ownReady = false;
+  }
+}

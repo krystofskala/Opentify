@@ -373,7 +373,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     });
     // Chyby uprostřed přehrávání (výpadek sítě, restart serveru) chodí jen
     // sem -- dřív je nikdo neposlouchal a appka "hrála" se stojící pozicí.
-    _player.playbackEventStream.listen((_) {}, onError: (Object e, StackTrace _) {
+    _player.playbackEventStream.listen(_onPlaybackEvent, onError: (Object e, StackTrace _) {
       final info = state.nowPlaying;
       if (info == null || _priming || _radioActive || _awaitingProvisioning) return;
       if (_readyGen != _sourceGen) return; // chyba staršího / ještě se načítajícího zdroje
@@ -1623,6 +1623,27 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// Hlášení doby načtení zdroje (`setUrl` -> připraveno) pro `loadLead`.
   void Function(double ms, bool cached)? onSourceLoaded;
 
+  /// Vysílač s posluchači: play po pauze jde přes ready bariéru -- `true` =
+  /// přehrávač teď nehraje, rozehraje ho `go` (playAt).
+  bool Function()? broadcastResumeBarrier;
+
+  /// Vysílač s posluchači: seek za přehrávání jde přes krátkou bariéru --
+  /// `true` = pozastavit, seeknout a čekat na `go`.
+  bool Function(Duration position)? broadcastSeekBarrier;
+
+  /// Po seeku pro bariéru je přehrávač zaparkovaný na nové pozici.
+  void Function()? onBarrierParked;
+
+  /// Naměřená latence startu (play() -> první skutečný posun pozice podle
+  /// události přehrávače), viz `playAt`.
+  void Function(double latencyMs, bool local)? onStartMeasured;
+
+  /// play() odmítnut (Safari bez gesta: NotAllowedError) -- "Klepni pro zvuk".
+  void Function(Object error)? onPlayBlocked;
+
+  DateTime? _measureCall;
+  Duration _measurePos0 = Duration.zero;
+
   Timer? _holdTimer;
   Timer? _planTimer;
   double? _planX;
@@ -1640,6 +1661,29 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   Duration get exactPosition => _player.position;
 
   bool get playerPlaying => _player.playing;
+
+  /// Poslední událost přehrávače (diagnostika: pozice a čas z platformy).
+  PlaybackEvent get lastPlaybackEvent => _player.playbackEvent;
+
+  /// "Klepni pro zvuk": play() přímo v gestu (odemkne zvuk v Safari).
+  void playFromGesture() => unawaited(_player.play().catchError((Object e) => onPlayBlocked?.call(e)));
+
+  /// Latence startu z událostí přehrávače: kdy po play() platforma ohlásila
+  /// skutečné přehrávání, minus kolik pozice mezitím ušla.
+  void _onPlaybackEvent(PlaybackEvent e) {
+    final call = _measureCall;
+    if (call == null) return;
+    if (DateTime.now().difference(call) > const Duration(seconds: 5)) {
+      _measureCall = null;
+      return;
+    }
+    if (!_player.playing || e.processingState != ProcessingState.ready || !e.updateTime.isAfter(call)) return;
+    final speed = state.speed <= 0 ? 1.0 : state.speed;
+    final advanced = (e.updatePosition - _measurePos0).inMicroseconds / 1000.0 / speed;
+    final latency = e.updateTime.difference(call).inMicroseconds / 1000.0 - advanced;
+    _measureCall = null;
+    if (latency >= 0 && latency < 5000) onStartMeasured?.call(latency, _currentLocal);
+  }
 
   /// Hraje rádio (nepřetržitý stream, iPhone v prohlížeči) -- tam přesné
   /// plánování přechodů nejde.
@@ -1696,7 +1740,13 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final wait = atMono - startLeadMs - monoNowMs();
     void go() {
       if (gen != _sourceGen) return;
-      unawaited(_player.play().catchError((Object _) {}));
+      _measureCall = DateTime.now();
+      _measurePos0 = _player.position;
+      unawaited(_player.play().catchError((Object e) {
+        _measureCall = null;
+        onPlayBlocked?.call(e);
+      }));
+      _armStartWatch();
     }
 
     if (wait <= 0) {
@@ -3626,6 +3676,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _restartRadio(state.position);
       _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
     } else {
+      // Vysílač s posluchači: play přes ready bariéru (všichni začnou naráz).
+      if (broadcastResumeBarrier?.call() == true) return;
       await _player.play();
       _armStartWatch();
       _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
@@ -3688,6 +3740,16 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
 
   Future<void> seek(Duration position) async {
     _hintOnSeek(position);
+    if (!_radioActive && _player.playing && broadcastSeekBarrier?.call(position) == true) {
+      // Krátká bariéra: zastavit, zaparkovat na nové pozici, `go` rozehraje.
+      _seekTarget = position;
+      _seekAt = DateTime.now();
+      state = state.copyWith(position: position);
+      await _player.pause();
+      await _player.seek(position);
+      onBarrierParked?.call();
+      return;
+    }
     if (!_radioActive) {
       // Lišta a čas hned na novém místě, ne až po hlášení přehrávače.
       _seekTarget = position;
