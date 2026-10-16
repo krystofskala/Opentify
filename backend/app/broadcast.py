@@ -32,6 +32,12 @@ připravený start pro jednoho: posluchač ztichne, zaparkuje na pozici a pošle
 server mu sám pošle `broadcast.go {solo: true, atServerMs: T, positionMs}`.
 `broadcast.suspend {sid, reason}`: posluchač bufferuje -- skupinu nezastavuje.
 Pauza bariéru nemá (levná, okamžitá).
+
+Organizátor (Kryštof 16. 10.): přeskakuje, mění pořadí a odebírá JEN vysílač.
+Posluchač smí jen přidat skladbu: `broadcast.add {sid, item}` -> server ji
+předá vysílači (`broadcast.added {addId, item, by}`), ten ji zařadí za
+poslední přidanou od posluchačů a pošle frontu (položka nese `by`, `byId`,
+`addId`). Nejvýš 10 čekajících přidaných na posluchače, 1 přidání za 2 s.
 Server -> všem přihlášeným: `broadcasts.update {items}` (jen viditelná).
 
 Pořadí (`clockId`, `gen`, `seq`) přiděluje server: vysílač po restartu appky
@@ -89,7 +95,10 @@ MAX_PENDING = 500
 MAX_PENDING_PER_SID = 50
 SEND_TIMEOUT_S = 5.0
 # Položka fronty: jen pole snímku přehrávače (`_infoToJson`) + čitelná pro seznam.
-_ITEM_FIELDS = ("id", "t", "a", "ai", "r", "art", "g", "gl", "d", "recordingId", "title", "artistName", "artworkUrl")
+_ITEM_FIELDS = ("id", "t", "a", "ai", "r", "art", "g", "gl", "d", "recordingId", "title", "artistName", "artworkUrl",
+                "by", "byId", "addId")
+MAX_ADDS_PER_LISTENER = 10
+ADD_GAP_S = 2.0
 PREP_MAX_MS = 1200
 BARRIER_LIMIT_S = {"start": 4.0, "seek": 1.5}
 # Vysílač, který se ani tak dlouho nenačte -- bariéra se zruší (zůstane pauza).
@@ -225,6 +234,7 @@ class _Listener:
     suspended: bool = False
     rtt_ms: float | None = None
     start_lead_ms: float | None = None
+    last_add: float = -1e18
 
 
 @dataclass
@@ -252,6 +262,9 @@ class Room:
     last_summary: Any = None
     last_listener_info: Any = None
     barrier_epoch: int = 0
+    # Přidané posluchači, které vysílač ještě nepotvrdil ve frontě.
+    pending_adds: list[dict[str, Any]] = field(default_factory=list)
+    add_seq: int = 0
     # {epoch, kind, anchor, deadline, required: set, ready: set, rtts: dict, owner_ready, created}
     barrier: dict[str, Any] | None = None
 
@@ -441,6 +454,7 @@ class BroadcastHub:
         room.bseq = bseq if isinstance(bseq, int) and not isinstance(bseq, bool) else room.bseq
         if queue is not None:
             room.queue = queue
+            self._ack_adds(room)
         if anchor is not None:
             self._set_anchor(room, anchor)
         room.seq += 1
@@ -500,6 +514,7 @@ class BroadcastHub:
         anchor = clean_anchor(payload.get("anchor"))
         if queue is not None:
             room.queue = queue
+            self._ack_adds(room)
         if anchor is not None:
             # Nový stav od vysílače (pauza, jiná skladba bez bariéry) ruší
             # rozběhnutou bariéru -- `go` by pustil něco, co už neplatí.
@@ -535,6 +550,7 @@ class BroadcastHub:
         queue = clean_queue(payload.get("queue"))
         if queue is not None:
             room.queue = queue
+            self._ack_adds(room)
         kind = "seek" if payload.get("kind") == "seek" else "start"
         # Do `go` stojí na pozici -- pozdní příchozí a HTTP posluchači vidí pauzu.
         anchor.pop("startAtServerMs", None)
@@ -711,6 +727,48 @@ class BroadcastHub:
             "recordingId": anchor.get("recordingId"), "index": anchor.get("index"),
             "clockId": CLOCK_ID, "gen": room.gen, "seq": room.seq, "serverMs": now,
         }})
+
+    # --- přidávání posluchači (organizátor = vysílač) ----------------------
+
+    def _ack_adds(self, room: Room) -> None:
+        if not room.pending_adds or not room.queue:
+            return
+        seen = {i.get("addId") for i in room.queue["items"] if i.get("addId")}
+        room.pending_adds = [a for a in room.pending_adds if a["addId"] not in seen]
+
+    def _waiting_adds(self, room: Room, user_id: str) -> int:
+        """Kolik přidaných od profilu ještě čeká (nepotvrzené + ve frontě před sebou)."""
+        n = sum(1 for a in room.pending_adds if a["byId"] == user_id)
+        if room.queue and room.anchor:
+            idx = room.anchor.get("index")
+            base = room.queue.get("baseIndex", 0)
+            start = (idx - base + 1) if isinstance(idx, int) else 0
+            n += sum(1 for i in room.queue["items"][max(0, start):] if i.get("byId") == user_id)
+        return n
+
+    async def add_item(self, user_id: str, ws: Any, payload: dict[str, Any]) -> str | None:
+        """Posluchač přidává skladbu do fronty vysílání. Vrací důvod odmítnutí."""
+        sid = payload.get("sid")
+        room = self.rooms.get(sid) if isinstance(sid, str) else None
+        lst = room.listeners.get(id(ws)) if room else None
+        if room is None or lst is None or lst.user_id != user_id or not self._visible(room, user_id):
+            return "Do tohohle vysílání nepřidáváš (nejsi připojený)."
+        q = clean_queue({"items": [payload.get("item")]}) if isinstance(payload.get("item"), dict) else None
+        if not q or not q["items"]:
+            return "Neplatná skladba."
+        now = self._now()
+        if now - lst.last_add < ADD_GAP_S:
+            return "Moc rychle – chvilku počkej."
+        if self._waiting_adds(room, user_id) >= MAX_ADDS_PER_LISTENER:
+            return f"Čeká už {MAX_ADDS_PER_LISTENER} tvých skladeb – počkej, až se zahrají."
+        lst.last_add = now
+        room.add_seq += 1
+        name = await asyncio.to_thread(profile_name, user_id)
+        item = {**q["items"][0], "by": name[:60], "byId": user_id, "addId": f"{room.add_seq}"}
+        room.pending_adds.append({"addId": item["addId"], "byId": user_id, "item": item})
+        logger.info("broadcast %s: %s přidal %s", room.sid[:8], name, item.get("title"))
+        await self._send(room.owner_ws, {"type": "broadcast.added", "payload": {"sid": room.sid, "addId": item["addId"], "item": item, "by": item["by"]}})
+        return None
 
     async def suspend(self, ws: Any, payload: dict[str, Any]) -> None:
         room = self.rooms.get(payload.get("sid")) if isinstance(payload.get("sid"), str) else None

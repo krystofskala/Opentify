@@ -663,3 +663,24 @@ class BarrierTracker {
     ownReady = false;
   }
 }
+
+/// Vysílač: kam zařadit skladbu přidanou posluchačem (jako Spotify Jam) --
+/// za poslední přidanou od posluchačů, která ještě nehrála, jinak hned za
+/// právě hrající. `groupIds` = `NowPlayingInfo.groupId` celé fronty.
+int addInsertIndex(List<String?> groupIds, int currentIndex) {
+  var at = currentIndex + 1;
+  for (var i = currentIndex + 1; i < groupIds.length; i++) {
+    if (groupIds[i]?.startsWith('add:') ?? false) at = i + 1;
+  }
+  return at;
+}
+
+/// `groupId` přidané skladby: `add:<addId>:<byId>` (jméno je v `groupLabel`).
+String addGroupId(String addId, String byId) => 'add:$addId:$byId';
+
+({String addId, String byId})? parseAddGroupId(String? groupId) {
+  if (groupId == null || !groupId.startsWith('add:')) return null;
+  final parts = groupId.split(':');
+  if (parts.length < 3) return null;
+  return (addId: parts[1], byId: parts.sublist(2).join(':'));
+}

@@ -208,6 +208,11 @@ class ConnectionManager:
                 await hub.prepare(user_id, payload, owner_ws=me.ws)
             elif kind == "broadcast.ready":
                 await hub.ready(user_id, me.ws, payload)
+            elif kind == "broadcast.add":
+                reason = await hub.add_item(user_id, me.ws, payload)
+                await self._send(user_id, me, json.dumps({"type": "broadcast.add_result", "payload": {
+                    "sid": payload.get("sid"), "ok": reason is None, "reason": reason,
+                }}))
             elif kind == "broadcast.suspend":
                 await hub.suspend(me.ws, payload)
             elif kind == "broadcast.stop":

@@ -1314,6 +1314,17 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     RepeatMode? repeatMode,
   }) async {
     if (items.isEmpty) return;
+    if (_followingBroadcast && !_followInternal) {
+      // Vlastní hudba během poslechu cizího vysílání = odchod ze streamu.
+      _followingBroadcast = false;
+      _holdPlay = null;
+      if (_radioModeBeforeFollow != null) _radioMode = _radioModeBeforeFollow!;
+      _radioModeBeforeFollow = null;
+      unawaited(_player.setSpeed(1.0).catchError((Object _) {}));
+      state = state.copyWith(speed: 1.0);
+      onOwnPlaybackWhileFollowing?.call();
+    }
+    _followInternal = false;
     final index = startIndex.clamp(0, items.length - 1);
     _cancelPlan(); // nová fronta -- plán přechodu staré neplatí
     _restoredIdle = false;
@@ -1699,6 +1710,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _radioModeBeforeFollow ??= _radioMode;
     _radioMode = false;
     _holdPlay = playAtMono;
+    _followInternal = true;
     await playQueue(
       queue,
       index,
@@ -1712,6 +1724,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }
 
   bool? _radioModeBeforeFollow;
+
+  /// Posluchač pustil během poslechu vlastní hudbu (klepnutí na skladbu
+  /// kdekoli) -- ze streamu odchází (`BroadcastController`).
+  void Function()? onOwnPlaybackWhileFollowing;
+  bool _followInternal = false;
 
   /// Položka fronty pro sdílený stream (stejný tvar jako snímek pro předání).
   static Map<String, dynamic> queueItemToJson(NowPlayingInfo i) => _infoToJson(i);

@@ -331,6 +331,12 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
           _barrier.prepared((p['epoch'] as num).toInt());
           _maybeSendOwnReady();
         }
+      case 'broadcast.added':
+        if (state.role == BroadcastRole.broadcasting && p['sid'] == state.sid) _onAdded(p);
+      case 'broadcast.add_result':
+        final c = _addWaiting;
+        _addWaiting = null;
+        if (c != null && !c.isCompleted) c.complete(p['ok'] == true ? null : (p['reason'] as String? ?? 'Nepodařilo se přidat.'));
       case 'broadcast.prepare':
         if (state.role == BroadcastRole.listening && p['sid'] == state.sid) _onPrepare(p);
       case 'broadcast.go':
@@ -388,6 +394,20 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   bool _discontinuityNext = false;
   final LeadEstimate _loadLead = LeadEstimate(150);
   double _lastHttpBeat = -1e9;
+
+  /// Skladba přidaná posluchačem: zařadit za poslední přidanou (organizátor
+  /// ji pak může odebrat jako kteroukoli jinou).
+  void _onAdded(Map<String, dynamic> p) {
+    final item = p['item'] as Map<String, dynamic>?;
+    final addId = p['addId'] as String?;
+    if (item == null || addId == null || item['id'] is! String || item['t'] is! String) return;
+    final s = _ref.read(audioPlayerControllerProvider);
+    if (s.queue.isEmpty) return;
+    final info = AudioPlayerController.queueItemFromJson(item)
+        .withGroup(addGroupId(addId, item['byId'] as String? ?? ''), 'Přidal ${p['by'] ?? item['by'] ?? '?'}');
+    final at = addInsertIndex([for (final q in s.queue) q.groupId], s.queueIndex);
+    _audio.insertQueueItems(at, [info]);
+  }
 
   // Ready bariéra: start po přeskoku, seek a play po pauze.
   final BarrierTracker _barrier = BarrierTracker();
@@ -507,6 +527,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         for (final q in _playOrder(s))
           {
             ...AudioPlayerController.queueItemToJson(q),
+            // Přidaná posluchačem: kdo a které přidání (server podle toho
+            // potvrdí a hlídá limit).
+            if (parseAddGroupId(q.groupId) case final add?) ...{'addId': add.addId, 'byId': add.byId, 'by': (q.groupLabel ?? '').replaceFirst('Přidal ', '')},
             // Pole, která čte server pro seznam (karta "Teď streamuje").
             'recordingId': q.recordingId,
             'title': q.title,
@@ -931,6 +954,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       ));
     }
     audio.onPlayBlocked = _onPlayBlocked;
+    audio.onOwnPlaybackWhileFollowing = _leftByOwnPlayback;
     _listenerPlayerSub?.close();
     _listenerPlayerSub = _ref.listen<AudioPlayerState>(audioPlayerControllerProvider, _onListenerPlayer);
     _startClock();
@@ -940,6 +964,27 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   }
 
   String get _label => 'Stream · ${state.hostName ?? ''}';
+
+  /// Posluchač pustil vlastní hudbu -- odchod bez obnovy fronty (vybral si
+  /// něco jiného).
+  void _leftByOwnPlayback() {
+    if (state.role != BroadcastRole.listening) return;
+    _diagFlush();
+    _ref.read(realtimeClientProvider).send('broadcast.leave', {'sid': state.sid});
+    _tick?.cancel();
+    _clockTimer?.cancel();
+    _endTimer?.cancel();
+    _pollActive = false;
+    _listenerPlayerSub?.close();
+    _listenerPlayerSub = null;
+    final audio = _audio;
+    audio.onSourceLoaded = null;
+    audio.onPlayBlocked = null;
+    audio.onStartMeasured = null;
+    audio.onOwnPlaybackWhileFollowing = null;
+    _snapshot = null;
+    state = BroadcastState(live: state.live);
+  }
 
   /// "Odejít" / "Vrátit se k mému": zpátky vlastní fronta a místo (pozastaveně).
   Future<void> leave() async {
@@ -956,6 +1001,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _audio.onSourceLoaded = null;
     _audio.onPlayBlocked = null;
     _audio.onStartMeasured = null;
+    _audio.onOwnPlaybackWhileFollowing = null;
     final snapshot = _snapshot;
     _snapshot = null;
     state = BroadcastState(live: state.live);
@@ -1307,6 +1353,28 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _solo = 'awaiting';
     final (t, pos) = soloGo(a, serverNow: serverNow, parkedMs: p.pos, rttMs: clock.minRtt.isFinite ? clock.minRtt : 100, startLeadMs: _latency.p80(local));
     _applySoloGo(t, pos, true);
+  }
+
+  Completer<String?>? _addWaiting;
+
+  /// Posluchač: "Přidat do fronty streamu". Vrací `null` = přidáno, jinak důvod.
+  Future<String?> addToStream(NowPlayingInfo info) async {
+    if (state.role != BroadcastRole.listening || state.ended != null) return 'Teď neposloucháš žádné vysílání.';
+    final client = _ref.read(realtimeClientProvider);
+    if (!client.isConnected) return 'Bez spojení se serverem.';
+    final c = Completer<String?>();
+    _addWaiting = c;
+    client.send('broadcast.add', {
+      'sid': state.sid,
+      'item': {
+        ...AudioPlayerController.queueItemToJson(info),
+        'recordingId': info.recordingId,
+        'title': info.title,
+        if (info.artistName != null) 'artistName': info.artistName,
+        if (info.artworkUrl != null) 'artworkUrl': withoutDeviceToken(info.artworkUrl!),
+      },
+    });
+    return c.future.timeout(const Duration(seconds: 5), onTimeout: () => 'Server neodpověděl.');
   }
 
   /// "Klepni pro zvuk" (Safari bez gesta): play v gestu odemkne zvuk, pak
