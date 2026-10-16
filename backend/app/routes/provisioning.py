@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from app import download_limits
+from app import download_limits, stream_copy
 from app.auth import get_current_user
 from app.db import engine, get_session
 from app.loudness import WAVEFORM_BUCKETS, decode_waveform, gain_for_client
@@ -233,6 +233,8 @@ async def stream_track(recording_id: str, session: Session = Depends(get_session
                 detail="Soubor skladby chybí, stahuje se znovu – zkus to za chvíli." if healed
                 else "Soubor skladby na serveru chybí.",
             )
+        # Hi-res (např. FLAC 192 kHz) jako menší bezztrátová kopie -- viz app/stream_copy.py.
+        path = await stream_copy.path_for_stream(recording_id, path, asset.bitrate_kbps)
         return FileResponse(path, media_type=media_type)
 
     if asset.status == MediaAssetStatus.DOWNLOADING and path.is_relative_to(MEDIA_ROOT):
