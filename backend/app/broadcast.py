@@ -102,7 +102,7 @@ ADD_GAP_S = 2.0
 PREP_MAX_MS = 1200
 BARRIER_LIMIT_S = {"start": 4.0, "seek": 1.5}
 # Vysílač, který se ani tak dlouho nenačte -- bariéra se zruší (zůstane pauza).
-BARRIER_OWNER_LIMIT_S = 15.0
+BARRIER_OWNER_LIMIT_S = 8.0  # klient vysílače to sám vzdá po 6 s
 GO_MIN_LEAD_MS = 500.0
 GO_RESERVE_MS = 300.0
 DEFAULT_RTT_MS = 100.0
@@ -626,6 +626,7 @@ class BroadcastHub:
         lead = float(lead) if isinstance(lead, (int, float)) and not isinstance(lead, bool) else None
         if owner or (room.owner_id == user_id and room.owner_ws is ws):
             b = room.barrier
+            logger.info("broadcast %s: ready vysílač #%s (bariéra %s)", room.sid[:8], payload.get("epoch"), b["epoch"] if b else "-")
             if b is not None and payload.get("epoch") == b["epoch"]:
                 b["owner_ready"] = True
                 if rtt is not None:
@@ -637,6 +638,8 @@ class BroadcastHub:
             return
         lst = room.listeners.get(id(ws))
         if lst is None:
+            logger.info("broadcast %s: ready od nepřipojeného %s -- ignoruji", room.sid[:8], user_id[:8])
+            await self._send(ws, {"type": "broadcast.ended", "payload": {"sid": room.sid, "reason": "unknown"}})
             return
         lst.last_seen = self._now()
         if rtt is not None:
@@ -648,6 +651,7 @@ class BroadcastHub:
             return
         b = room.barrier
         if b is None or payload.get("epoch") != b["epoch"]:
+            logger.info("broadcast %s: ready %s stará epocha %s (bariéra %s)", room.sid[:8], lst.user_id[:8], payload.get("epoch"), b["epoch"] if b else "-")
             return  # stará epocha
         b["ready"].add(id(ws))
         if rtt is not None:
@@ -704,13 +708,31 @@ class BroadcastHub:
         await self._announce()
 
     async def _solo(self, room: Room, lst: _Listener, payload: dict[str, Any]) -> None:
-        """Připravený start pro jednoho (pozdní příchozí, lagging, po bufferingu)."""
+        """Připravený start pro jednoho (pozdní příchozí, lagging, po bufferingu).
+        Odpověď přijde VŽDY -- `go`, nebo `go {wait|retry, reason}` (živě 16. 10.:
+        bez odpovědi posluchač parkoval dokola)."""
+        sid8 = room.sid[:8]
+        base = {"sid": room.sid, "solo": True, "clockId": CLOCK_ID, "gen": room.gen, "seq": room.seq}
+
+        async def reply(**kw: Any) -> None:
+            await self._send(lst.ws, {"type": "broadcast.go", "payload": {**base, "serverMs": self.server_ms(), **kw}})
+
+        if room.barrier is not None:
+            await self.check_barrier(room)  # visí (vysílač se nenačetl) -> zrušit
+        if room.barrier is not None:
+            logger.info("broadcast %s: solo %s čeká na bariéru #%d", sid8, lst.user_id[:8], room.barrier["epoch"])
+            await reply(wait=True, reason="barrier")
+            return
         anchor = room.anchor
-        if anchor is None or room.barrier is not None:
-            return  # běží bariéra -- dostane společné `go`
+        if anchor is None:
+            logger.info("broadcast %s: solo %s bez kotvy", sid8, lst.user_id[:8])
+            await reply(retry=True, reason="no-anchor")
+            return
         if payload.get("recordingId") != anchor.get("recordingId") or payload.get("index") != anchor.get("index"):
-            # Zaparkoval na jiné skladbě -- pošli mu aktuální stav, zkusí znovu.
+            logger.info("broadcast %s: solo %s jiná skladba (%s/%s vs %s/%s)", sid8, lst.user_id[:8],
+                        payload.get("index"), str(payload.get("recordingId"))[:8], anchor.get("index"), str(anchor.get("recordingId"))[:8])
             await self._send_state(room, lst, reset=True)
+            await reply(retry=True, reason="track")
             return
         parked = payload.get("positionMs")
         parked = float(parked) if isinstance(parked, (int, float)) and not isinstance(parked, bool) else 0.0
@@ -722,11 +744,10 @@ class BroadcastHub:
             t, pos, playing = now, float(anchor.get("positionMs") or 0.0), False
         lst.lagging = False
         lst.suspended = False
-        await self._send(lst.ws, {"type": "broadcast.go", "payload": {
-            "sid": room.sid, "solo": True, "atServerMs": t, "positionMs": pos, "isPlaying": playing,
-            "recordingId": anchor.get("recordingId"), "index": anchor.get("index"),
-            "clockId": CLOCK_ID, "gen": room.gen, "seq": room.seq, "serverMs": now,
-        }})
+        logger.info("broadcast %s: solo go %s za %.0f ms, pozice %.0f (zaparkováno %.0f)%s", sid8, lst.user_id[:8], t - now, pos, parked,
+                    "" if playing else ", vysílač stojí")
+        await reply(atServerMs=t, positionMs=pos, isPlaying=playing,
+                    recordingId=anchor.get("recordingId"), index=anchor.get("index"))
 
     # --- přidávání posluchači (organizátor = vysílač) ----------------------
 

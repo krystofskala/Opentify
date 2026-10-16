@@ -717,6 +717,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
       state.role == BroadcastRole.broadcasting &&
       state.listeners > 0 &&
       clock.isValid &&
+      // iPhone v Safari: rádio (jeden stream fronty) -- start nejde odložit.
+      !_audio.radioModeEnabled &&
       !_audio.radioStreamActive &&
       _ref.read(realtimeClientProvider).isConnected;
 
@@ -760,6 +762,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// Rychlé ťukání (další, další...) se slučuje: prepare odejde až po 150 ms
   /// klidu, za poslední volbu; starší bariéra tím na serveru končí.
   void _queuePrepare(String kind, String rid, double positionMs) {
+    if (!_barrier.active && _pendingPrepare == null) _barrierSince = monoNowMs();
+    _barrierKind = kind;
     final ownReady = _pendingPrepare?.rid == rid && _barrier.ownReady;
     _pendingPrepare = (kind: kind, rid: rid, positionMs: positionMs);
     _barrier.ownReady = ownReady;
@@ -771,7 +775,11 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final p = _pendingPrepare;
     if (p == null || state.role != BroadcastRole.broadcasting) return;
     final s = _ref.read(audioPlayerControllerProvider);
-    if (s.nowPlaying?.recordingId != p.rid) return; // mezitím jinde
+    if (s.nowPlaying?.recordingId != p.rid) {
+      _pendingPrepare = null; // mezitím jiná skladba bez bariéry
+      return;
+    }
+    if (!_ref.read(realtimeClientProvider).isConnected) return _abandonBarrier('no-ws');
     _pendingPrepare = null;
     final ownReady = _barrier.ownReady;
     _barrier.begin(p.rid);
@@ -800,6 +808,22 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     });
     _sendQueueNext = false;
     _diagEvent('PREPARE B kind=${p.kind} rid=${p.rid} pos=${_f(p.positionMs)} ${_clockDiag()}');
+  }
+
+  double _barrierSince = -1e9;
+  String _barrierKind = 'start';
+
+  /// Vysílač nikdy nečeká na `go` déle než limit (start 6 s, seek / play 3 s):
+  /// pak hraje sám a posílá kotvy, posluchači ho doženou připraveným startem.
+  void _abandonBarrier(String reason) {
+    if (!_barrier.active && _pendingPrepare == null) return;
+    _prepareTimer?.cancel();
+    _goFallback?.cancel();
+    _barrier.clear();
+    _pendingPrepare = null;
+    _diagEvent('BARRIER-ABANDON B reason=$reason kind=$_barrierKind waited=${_f(monoNowMs() - _barrierSince)}');
+    _audio.playAt(monoNowMs());
+    _sendAnchor(discontinuity: true, queue: true);
   }
 
   void _maybeSendOwnReady() {
@@ -846,6 +870,9 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     if (state.role != BroadcastRole.broadcasting) return;
     _diagBroadcaster();
     final now = monoNowMs();
+    if ((_barrier.active || _pendingPrepare != null) && now - _barrierSince > (_barrierKind == 'seek' ? 3000 : 6000)) {
+      _abandonBarrier('timeout');
+    }
     // Na pozadí bez WS: heartbeat přes HTTP každých 30 s.
     final client = _ref.read(realtimeClientProvider);
     if (!client.isConnected && now - _lastHttpBeat > 30000) {
@@ -1263,6 +1290,18 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
 
   void _onSoloGo(Map<String, dynamic> p) {
     if (_solo != 'awaiting') return;
+    if (p['wait'] == true) {
+      // Běží bariéra skupiny -- počkat na její prepare / go, zaparkovaný.
+      _diagEvent('SOLO-WAIT L reason=${p['reason']}');
+      _soloSince = monoNowMs() + 5000;
+      return;
+    }
+    if (p['retry'] == true) {
+      _diagEvent('SOLO-RETRY L reason=${p['reason']}');
+      _solo = null;
+      _lastSolo = -1e9;
+      return;
+    }
     final t = (p['atServerMs'] as num?)?.toDouble();
     final pos = (p['positionMs'] as num?)?.toDouble();
     if (t == null || pos == null) return;
