@@ -1249,6 +1249,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }) async {
     if (items.isEmpty) return;
     final index = startIndex.clamp(0, items.length - 1);
+    _cancelPlan(); // nová fronta -- plán přechodu staré neplatí
     _restoredIdle = false;
     // Nová fronta (i "Pokračovat" / převzetí) = nový poslech, ne pokračování
     // dřívějšího přehrání téže skladby (viz `_announceStart`).
@@ -1670,10 +1671,15 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (_player.playing) await _player.pause();
     unawaited(_player.setSpeed(1.0).catchError((Object _) {}));
     state = state.copyWith(speed: 1.0);
-    if (restore != null) {
+    final queue = restore?['queue'];
+    if (queue is List && queue.isNotEmpty) {
       _holdPlay = double.infinity;
-      await resumeFromHandoff(restore);
+      await resumeFromHandoff(restore!);
     }
+    // Pozastavený start se už spotřeboval (nebo nebylo co obnovit) -- jinak by
+    // příští vlastní přehrání zůstalo viset pozastavené. Skladba, která se
+    // teprve obstarává, si ho ještě vezme.
+    if (!_awaitingProvisioning) _holdPlay = null;
   }
 
   /// Vysílač: naplánovaný přirozený přechod -- v `loadAtMono` začne načítat
@@ -1687,7 +1693,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final current = state.nowPlaying?.recordingId;
     final wait = loadAtMono - monoNowMs();
     _planTimer = Timer(Duration(microseconds: (wait.clamp(0, 1e9) * 1000).round()), () {
-      if (_planX != xMono || state.nowPlaying?.recordingId != current) return;
+      if (_planX != xMono) return;
+      // Mezitím jiná skladba (nová fronta, klepnutí): plán neplatí -- jinak by
+      // se `completed` dál ignorovalo a přehrávání by se na konci zastavilo.
+      if (state.nowPlaying?.recordingId != current) return _cancelPlan();
       final idx = state.nextIndex;
       if (idx == null) return _cancelPlan();
       _holdPlay = xMono;
@@ -2590,6 +2599,9 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   }();
 
   Future<void> _playAtIndex(int index, {bool tapped = false}) async {
+    // Jakákoli jiná skladba ruší naplánovaný přechod (vlastní přechod plánu
+    // si `_planX` vynuluje sám, než sem zavolá).
+    _cancelPlan();
     final info = state.queue[index];
     _tappedTrack = tapped;
     _restoredIdle = false;
