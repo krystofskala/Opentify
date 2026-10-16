@@ -250,6 +250,34 @@ void main() {
     });
   });
 
+  group('regrese 16. 10. Safari (rádio)', () {
+    test('vysílač v rádio režimu: pozice skladby ze stavu, hraje podle stavu', () {
+      // Živý řádek: pos=39184 (rádio stream) uiPos=320884 play=1 st=1 buf=0 ready=0 radio=1.
+      final r = broadcasterPlayback(radio: true, exactMs: 39184, uiMs: 320884, sourceReady: false, playerPlaying: true, stateIsPlaying: true, stateIsBuffering: false);
+      expect(r.positionMs, 320884);
+      expect(r.playing, isTrue);
+      expect(broadcasterPlayback(radio: true, exactMs: 0, uiMs: 5, sourceReady: false, playerPlaying: true, stateIsPlaying: true, stateIsBuffering: true).playing, isFalse);
+      // Mimo rádio: přesná pozice, a buffering / nepřipravený zdroj = nehraje.
+      final n = broadcasterPlayback(radio: false, exactMs: 1000.5, uiMs: 900, sourceReady: true, playerPlaying: true, stateIsPlaying: true, stateIsBuffering: false);
+      expect(n.positionMs, 1000.5);
+      expect(n.playing, isTrue);
+      expect(broadcasterPlayback(radio: false, exactMs: 1, uiMs: 900, sourceReady: false, playerPlaying: true, stateIsPlaying: true, stateIsBuffering: false).playing, isFalse);
+    });
+
+    test('hodiny neplatné déle než 3 s -> vzorek přes HTTP, nejvýš 1× za sekundu', () {
+      expect(needsHttpClockSample(valid: false, invalidSinceMs: 0, nowMs: 2000, lastHttpMs: -1e9), isFalse);
+      expect(needsHttpClockSample(valid: false, invalidSinceMs: 0, nowMs: 3500, lastHttpMs: -1e9), isTrue);
+      expect(needsHttpClockSample(valid: false, invalidSinceMs: 0, nowMs: 3800, lastHttpMs: 3500), isFalse);
+      expect(needsHttpClockSample(valid: true, invalidSinceMs: 0, nowMs: 9000, lastHttpMs: -1e9), isFalse);
+      // Tři HTTP vzorky stačí na platné hodiny i bez WS.
+      final c = ClockSync();
+      for (var i = 0; i < 3; i++) {
+        c.add(c0: i * 1000.0, c1: i * 1000.0 + 120, s: i * 1000.0 + 60 + 7000, clockId: 'x');
+      }
+      expect(c.offsetMs, 7000);
+    });
+  });
+
   group('přidávání posluchači', () {
     test('zařadí se za poslední přidanou, jinak hned za hrající; groupId nese kdo a které', () {
       // Hraje 1, fronta: 2 vlastní, 3 přidaná, 4 vlastní, 5 přidaná, 6 vlastní.

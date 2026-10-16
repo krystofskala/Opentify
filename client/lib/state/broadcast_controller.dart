@@ -267,6 +267,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   void _ping() {
     final client = _ref.read(realtimeClientProvider);
     if (!client.isConnected) return;
+    _pingsSent++;
     client.send('clock.ping', {'c0': monoNowMs()});
   }
 
@@ -274,6 +275,36 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _clockTimer?.cancel();
     _burst();
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) => _ping());
+  }
+
+  double _clockInvalidSince = 0;
+  double? _lastAnchorPos;
+  bool _lastAnchorPlaying = false;
+  double _lastHttpClock = -1e9;
+  int _pingsSent = 0;
+  int _pongsSeen = 0;
+
+  /// Hodiny pořád neplatné -> vzorek přes HTTP (posluchač: stav vysílání
+  /// bez čekání, vysílač: heartbeat). Volá se z tiku.
+  void _ensureClock() {
+    final now = monoNowMs();
+    if (clock.isValid) {
+      _clockInvalidSince = now;
+      return;
+    }
+    if (!needsHttpClockSample(valid: false, invalidSinceMs: _clockInvalidSince, nowMs: now, lastHttpMs: _lastHttpClock)) return;
+    _lastHttpClock = now;
+    final sid = state.sid;
+    if (sid == null) return;
+    final api = _ref.read(apiClientProvider);
+    final c0 = monoNowMs();
+    if (state.role == BroadcastRole.listening) {
+      unawaited(api.getJsonMaybe('/broadcast/$sid/state', query: {'wait': '0'}, timeout: const Duration(seconds: 10)).then((body) {
+        if (body != null) _httpClockSample(c0, body);
+      }, onError: (Object _) {}));
+    } else if (state.role == BroadcastRole.broadcasting) {
+      unawaited(_httpPost('/broadcast/state', {'sid': sid, 'bid': _bid, 'bseq': ++_bseq}));
+    }
   }
 
   /// Vzorek hodin z HTTP odpovědi (WS na pozadí neběží).
@@ -301,6 +332,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         final c0 = (p['c0'] as num?)?.toDouble();
         final s = (p['s'] as num?)?.toDouble();
         final id = p['clockId'] as String?;
+        _pongsSeen++;
         if (c0 != null && s != null && id != null) clock.add(c0: c0, c1: monoNowMs(), s: s, clockId: id);
       case 'broadcasts.update':
         final items = (p['items'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
@@ -548,10 +580,19 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     final np = s.nowPlaying!;
     final mono = monoNowMs();
     final server = clock.serverNow(mono);
-    final pos = _audio.sourceReady ? _audio.exactPosition.inMicroseconds / 1000.0 : s.position.inMilliseconds.toDouble();
-    // Načítání / buffering: just_audio hlásí `playing`, ale zvuk nejde a pozice
-    // stojí -- posluchač by ujel dopředu. Hraje = opravdu hraje.
-    final playing = s.isPlaying && _audio.playerPlaying && !s.isBuffering && _audio.sourceReady;
+    final own = broadcasterPlayback(
+      radio: _audio.radioStreamActive,
+      exactMs: _audio.exactPosition.inMicroseconds / 1000.0,
+      uiMs: s.position.inMilliseconds.toDouble(),
+      sourceReady: _audio.sourceReady,
+      playerPlaying: _audio.playerPlaying,
+      stateIsPlaying: s.isPlaying,
+      stateIsBuffering: s.isBuffering,
+    );
+    final pos = own.positionMs;
+    final playing = own.playing;
+    _lastAnchorPos = pos;
+    _lastAnchorPlaying = playing;
     final planned = _startAtServer != null && _startFor == np.recordingId && server != null && server < _startAtServer! + 1500;
     return BroadcastAnchor(
       recordingId: np.recordingId,
@@ -868,6 +909,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   /// jen s posluchači, platnými hodinami a mimo rádio.
   void _broadcasterTick() {
     if (state.role != BroadcastRole.broadcasting) return;
+    _ensureClock();
     _diagBroadcaster();
     final now = monoNowMs();
     if ((_barrier.active || _pendingPrepare != null) && now - _barrierSince > (_barrierKind == 'seek' ? 3000 : 6000)) {
@@ -1174,7 +1216,8 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
         .then((_) {}, onError: (Object _) {}));
   }
 
-  String _clockDiag() => 'off=${_f(clock.isValid ? clock.offsetMs : null)} rtt=${_f(clock.minRtt.isFinite ? clock.minRtt : null)} ok=${clock.isValid ? 1 : 0}';
+  String _clockDiag() => 'off=${_f(clock.isValid ? clock.offsetMs : null)} rtt=${_f(clock.minRtt.isFinite ? clock.minRtt : null)} ok=${clock.isValid ? 1 : 0} '
+      'png=$_pingsSent/$_pongsSeen ws=${_ref.read(realtimeClientProvider).isConnected ? 1 : 0}';
 
   void _diagListener(BroadcastAnchor? a, SyncTarget? t, double? serverNow, double? pos) {
     final audio = _audio;
@@ -1195,7 +1238,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
   void _diagBroadcaster() {
     final s = _ref.read(audioPlayerControllerProvider);
     final audio = _audio;
-    _diag('B ${_clockDiag()} bar=${_barrier.epoch ?? (_barrier.active ? '?' : '-')} pos=${_f(audio.exactPosition.inMicroseconds / 1000.0)} uiPos=${s.position.inMilliseconds} '
+    _diag('B ${_clockDiag()} sent=${_f(_lastAnchorPos)}/${_lastAnchorPlaying ? 1 : 0} bar=${_barrier.epoch ?? (_barrier.active ? '?' : '-')} pos=${_f(audio.exactPosition.inMicroseconds / 1000.0)} uiPos=${s.position.inMilliseconds} '
         'dur=${s.duration?.inMilliseconds ?? '-'} play=${audio.playerPlaying ? 1 : 0} st=${s.isPlaying ? 1 : 0} buf=${s.isBuffering ? 1 : 0} '
         'ready=${audio.sourceReady ? 1 : 0} radio=${audio.radioStreamActive ? 1 : 0} abs=$_abs ep=$_epoch qv=$_qv '
         'lis=${state.listeners} plan=${_f(_transitionAtServer)} startAt=${_f(_startAtServer)} ws=${_ref.read(realtimeClientProvider).isConnected ? 1 : 0}');
@@ -1467,6 +1510,7 @@ class BroadcastController extends StateNotifier<BroadcastState> with WidgetsBind
     _lastTickMono = now;
     final client = _ref.read(realtimeClientProvider);
     if (!client.isConnected && !_pollActive) unawaited(_pollLoop());
+    _ensureClock();
     final pending = _pendingSince;
     if (pending != null && now - pending > 60000) return _onEnded('unknown');
     final a = _model.anchor;
