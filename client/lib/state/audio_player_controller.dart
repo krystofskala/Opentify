@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api_client.dart' show ApiException;
 import '../core/broadcast_sync.dart' show monoNowMs;
+import '../core/stall_watch.dart';
 import '../core/config.dart' show AppConfig;
 import '../core/device_token.dart' show authHeaders, withDeviceToken, withoutDeviceToken;
 import '../core/diagnostics.dart' show diagReport;
@@ -504,6 +505,71 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     }
     debugPrint('AudioPlayerController: pozice stojí ${_stallLimit.inSeconds} s ($processing), navazuji');
     _handleStreamFailure(info, 'zaseknuté přehrávání', isProgressive: false);
+  }
+
+  // --- Zásek startu -------------------------------------------------------
+  //
+  // Kryštof 16. 10.: i stažená skladba se někdy nepustí ("musím pustit další
+  // a vrátit se zpátky"). Po play() hlídá `StallWatch`: do 5 s nepřibyla
+  // pozice ANI načtená data -> znovu načíst zdroj od stejného místa (stejný
+  // efekt jako další a zpátky), nejvýš 2×, pak chyba jako dřív. Pomalé
+  // načítání (data přibývají) se nepřerušuje -- dřív to na pomalých datech
+  // začínalo pořád od nuly (táta, 11. 10.).
+
+  final StallWatch _startWatch = StallWatch();
+  Timer? _startWatchTimer;
+  String? _startWatchFor;
+  Duration _startWatchBuffered = Duration.zero;
+
+  /// Kolikrát hlídač zdroj aktuální skladby znovu načetl (diagnostika).
+  int get startReloads => _startWatch.reloads;
+
+  void _armStartWatch() {
+    final info = state.nowPlaying;
+    if (info == null || _radioActive || isSpokenId(info.recordingId)) return;
+    if (_startWatchFor != info.recordingId) {
+      _startWatch.newTrack();
+      _startWatchFor = info.recordingId;
+    }
+    _startWatch.arm(monoNowMs(), _player.position.inMilliseconds.toDouble());
+    _startWatchBuffered = _player.bufferedPosition;
+    _startWatchTimer?.cancel();
+    _startWatchTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => _checkStartWatch());
+  }
+
+  void _stopStartWatch() {
+    _startWatchTimer?.cancel();
+    _startWatchTimer = null;
+    _startWatch.disarm();
+  }
+
+  void _checkStartWatch() {
+    final info = state.nowPlaying;
+    if (info == null || info.recordingId != _startWatchFor || !_startWatch.armed) return _stopStartWatch();
+    final now = monoNowMs();
+    final pos = _player.position.inMilliseconds.toDouble();
+    // Skrytý panel prohlížeče načítání odkládá; data přibývají = pomalé
+    // načítání, ne zásek -- hlídat znovu od teď.
+    final buffered = _player.bufferedPosition;
+    if ((kIsWeb && !_appVisible) || _awaitingProvisioning || buffered > _startWatchBuffered + const Duration(milliseconds: 500)) {
+      _startWatchBuffered = buffered;
+      _startWatch.arm(now, pos);
+      return;
+    }
+    switch (_startWatch.check(nowMs: now, positionMs: pos, wantsPlaying: _player.playing)) {
+      case 'reload':
+        debugPrint('AudioPlayerController: start se zasekl (${_player.processingState}), znovu načítám ${_startWatch.reloads}×');
+        diagReport('playback-stall', '${info.recordingId} reload=${_startWatch.reloads} st=${_player.processingState.name} '
+            'pos=${pos.round()} buf=${buffered.inMilliseconds} local=$_currentLocal prog=$_currentProgressive');
+        _resumeAt = Duration(milliseconds: pos.round());
+        _resumeFor = info.recordingId;
+        unawaited(_playAtIndex(state.queueIndex));
+      case 'fail':
+        _stopStartWatch();
+        _handleStreamFailure(info, 'start se zasekl', isProgressive: _currentProgressive);
+      default:
+        if (!_startWatch.armed) _stopStartWatch();
+    }
   }
 
   final MediaSessionBridge _mediaSession = MediaSessionBridge();
@@ -1874,6 +1940,8 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _switchKind = 'manual';
   }
 
+  int _readyMs = -1;
+
   void _maybeRecordStart(Duration position) {
     final at = _switchAt;
     if (at == null || _priming || !_player.playing || position <= Duration.zero) return;
@@ -1881,7 +1949,10 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     _switchAt = null;
     final ms = DateTime.now().difference(at).inMilliseconds;
     if (ms > 120000) return; // mezitím pauza / pryč od appky
-    _startSamples.add('$_switchTag $ms');
+    // Druh startu, ms do zvuku, ms do načtení zdroje, znovunačtení hlídačem,
+    // formát (16. 10.: proč a u kterých skladeb se start zasekává).
+    final ext = (state.nowPlaying?.recordingId ?? '').startsWith('local:') ? 'local' : (_currentProgressive ? 'prog' : (_currentLocal ? 'file' : 'stream'));
+    _startSamples.add('$_switchTag $ms ready=$_readyMs reload=${_startWatch.reloads} src=$ext');
     if (_startSamples.length >= 8) {
       diagReport('playback-start', _startSamples.join('; '));
       _startSamples.clear();
@@ -3000,9 +3071,11 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
           debugPrint('AudioPlayerController: play() selhalo pro ${info.recordingId}: $e');
           _handleStreamFailure(info, e, isProgressive: isProgressive);
         }));
+        _armStartWatch();
       }
       await durationFuture;
       if (gen != _sourceGen) return; // mezitím spuštěn jiný zdroj
+      _readyMs = (monoNowMs() - loadStartedMono).round();
       _readyGen = gen;
       onSourceLoaded?.call(monoNowMs() - loadStartedMono, isLocal);
       _reprovisioned = null;
@@ -3554,6 +3627,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
     } else {
       await _player.play();
+      _armStartWatch();
       _realtime.playbackPlay(state.nowPlaying!.recordingId, positionMs: state.position.inMilliseconds);
     }
   }
@@ -3831,6 +3905,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   void dispose() {
     _lifecycle?.dispose();
     _stallWatch?.cancel();
+    _startWatchTimer?.cancel();
     _sleepTimer?.cancel();
     _sleepHintTimer?.cancel();
     _fadeTimer?.cancel();
