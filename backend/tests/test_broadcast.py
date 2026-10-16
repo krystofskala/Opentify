@@ -417,3 +417,132 @@ def test_clock_not_ok_anchor_is_restamped_and_start_plan_not_carried() -> None:
         assert "startAtServerMs" not in hub.rooms[sid].anchor
 
     asyncio.run(run())
+
+
+# --- ready bariéra (16. 10.) -------------------------------------------------
+
+
+async def _room_with(hub, n_listeners=2, **kw):
+    owner_ws = FakeWS()
+    sid, bid = _id(), _id()
+    await hub.start("owner", "K", "dev-o", _start(sid, bid, visibility="server"), set(), owner_ws)
+    lis = [FakeWS() for _ in range(n_listeners)]
+    for i, ws in enumerate(lis):
+        await hub.join(f"u{i}", f"d{i}", ws, {"sid": sid})
+    return sid, bid, owner_ws, lis
+
+
+def _prepare(sid, bid, bseq, kind="start", rid="rec-b", pos=0):
+    return {"sid": sid, "bid": bid, "bseq": bseq, "kind": kind, "anchor": _anchor(rid, pos=pos, index=1)}
+
+
+def test_barrier_go_after_everyone_ready_with_lead_from_rtt_and_start_lead() -> None:
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub)
+        await hub.prepare("owner", _prepare(sid, bid, 1))
+        epoch = owner_ws.of("broadcast.prepared")[-1]["epoch"]
+        assert all(ws.of("broadcast.prepare")[-1]["epoch"] == epoch for ws in lis)
+        # Do go stojí -- seznam / pozdní příchozí vidí pauzu.
+        assert hub.rooms[sid].anchor["isPlaying"] is False
+        await hub.ready("owner", owner_ws, {"sid": sid, "epoch": epoch, "rtt": 40, "startLeadMs": 900})
+        await hub.ready("u0", lis[0], {"sid": sid, "epoch": epoch, "rtt": 60})
+        assert not lis[0].of("broadcast.go")  # čeká se na druhého
+        await hub.ready("u1", lis[1], {"sid": sid, "epoch": epoch, "rtt": 600})
+        go = lis[1].of("broadcast.go")[-1]
+        assert go == lis[0].of("broadcast.go")[-1] == owner_ws.of("broadcast.go")[-1]
+        lead = go["atServerMs"] - go["serverMs"]
+        # 1,5 × 600 = 900 < nejdelší rozjezd 900 + 200 -> 1100 + rezerva 300.
+        assert abs(lead - 1400) < 5
+        assert go["anchor"]["startAtServerMs"] == go["atServerMs"] and go["anchor"]["isPlaying"] is True
+        assert hub.rooms[sid].barrier is None
+
+    asyncio.run(run())
+
+
+def test_barrier_timeout_marks_lagging_and_waits_for_broadcaster() -> None:
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub)
+        await hub.prepare("owner", _prepare(sid, bid, 1))
+        epoch = hub.rooms[sid].barrier["epoch"]
+        await hub.ready("u0", lis[0], {"sid": sid, "epoch": epoch, "rtt": 50})
+        clock.t += 5  # po limitu 4 s, ale vysílač ještě není ready
+        await hub.check_barrier(hub.rooms[sid])
+        assert not lis[0].of("broadcast.go")
+        await hub.ready("owner", owner_ws, {"sid": sid, "epoch": epoch, "rtt": 50})
+        assert lis[0].of("broadcast.go") and lis[1].of("broadcast.go")
+        room = hub.rooms[sid]
+        assert room.listeners[id(lis[1])].lagging and not room.listeners[id(lis[0])].lagging
+        # Vysílač, který se nenačte vůbec: bariéra se po 15 s zruší.
+        await hub.prepare("owner", _prepare(sid, bid, 2, rid="rec-c"))
+        clock.t += 16
+        await hub.check_barrier(room)
+        assert room.barrier is None
+
+    asyncio.run(run())
+
+
+def test_old_epoch_ready_ignored_and_pause_cancels_barrier() -> None:
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub, 1)
+        await hub.prepare("owner", _prepare(sid, bid, 1))
+        old = hub.rooms[sid].barrier["epoch"]
+        await hub.prepare("owner", _prepare(sid, bid, 2, rid="rec-c"))  # rychlý přeskok
+        await hub.ready("owner", owner_ws, {"sid": sid, "epoch": old})
+        await hub.ready("u0", lis[0], {"sid": sid, "epoch": old})
+        assert not lis[0].of("broadcast.go") and hub.rooms[sid].barrier["epoch"] == old + 1
+        # Pauza bariéru nemá a rozběhnutou ruší.
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 3, "anchor": _anchor("rec-c", pos=0, index=1, playing=False)})
+        assert hub.rooms[sid].barrier is None
+
+    asyncio.run(run())
+
+
+def test_suspended_listener_does_not_hold_the_group() -> None:
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub)
+        await hub.prepare("owner", _prepare(sid, bid, 1))
+        epoch = hub.rooms[sid].barrier["epoch"]
+        await hub.ready("owner", owner_ws, {"sid": sid, "epoch": epoch})
+        await hub.ready("u0", lis[0], {"sid": sid, "epoch": epoch})
+        await hub.suspend(lis[1], {"sid": sid, "reason": "buffering"})
+        assert lis[0].of("broadcast.go")
+
+    asyncio.run(run())
+
+
+def test_late_joiner_and_solo_prepared_start() -> None:
+    async def run():
+        hub, clock = _hub()
+        sid, bid, owner_ws, lis = await _room_with(hub, 0)
+        # Hraje: pozice 10 000 v čase serveru teď.
+        now = hub.server_ms()
+        await hub.state("owner", {"sid": sid, "bid": bid, "bseq": 1, "anchor": _anchor("rec-a", pos=10000, atServerMs=now)})
+        late = FakeWS()
+        await hub.join("late", "dl", late, {"sid": sid})
+        assert late.of("broadcast.state")
+        # Zaparkoval na 13 000 (vysílač tam bude za 3 s) -> go přesně tam.
+        await hub.ready("late", late, {"sid": sid, "solo": True, "recordingId": "rec-a", "index": 0, "positionMs": 13000, "rtt": 50, "startLeadMs": 400})
+        go = late.of("broadcast.go")[-1]
+        assert go["solo"] and go["positionMs"] == 13000 and abs(go["atServerMs"] - (now + 3000)) < 1
+        # Zaparkoval moc blízko (vysílač tam bude za 100 ms) -> nejbližší čas a pozice v něm.
+        now = hub.server_ms()
+        await hub.ready("late", late, {"sid": sid, "solo": True, "recordingId": "rec-a", "index": 0, "positionMs": 10100, "rtt": 50, "startLeadMs": 400})
+        go = late.of("broadcast.go")[-1]
+        lead = go["atServerMs"] - go["serverMs"]
+        assert abs(lead - 900) < 5 and abs(go["positionMs"] - (10000 + (go["atServerMs"] - now))) < 1
+        # Jiná skladba než u vysílače -> dostane stav, žádné go.
+        n = len(late.of("broadcast.go"))
+        await hub.ready("late", late, {"sid": sid, "solo": True, "recordingId": "rec-x", "index": 5, "positionMs": 0})
+        assert len(late.of("broadcast.go")) == n
+
+    asyncio.run(run())
+
+
+def test_go_lead_rules() -> None:
+    assert bc.go_lead_ms([]) == 800  # bez dat: 500 + 300
+    assert bc.go_lead_ms([1000]) == 1800
+    assert bc.go_lead_ms([50], [1200]) == 1700

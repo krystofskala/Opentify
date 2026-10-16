@@ -14,6 +14,24 @@ Posluchač:
 Server -> posluchač: `broadcast.state {sid, clockId, gen, seq, anchor, queue?,
 receivedServerMs}`, `broadcast.pending`, `broadcast.ended {reason}`.
 Server -> vysílač: `broadcast.listeners {count, prepMs}`, `broadcast.taken`.
+
+Ready bariéra (Kryštof 16. 10., rešerše 7y-reserse-synchronni-poslech.md):
+start nové skladby po přeskoku, seek a play po pauze jdou přes
+  - vysílač `broadcast.prepare {sid, bid, bseq, kind, anchor, queue?}` ->
+    server založí epochu a pošle všem `broadcast.prepare {epoch, anchor}`,
+    vysílači `broadcast.prepared {epoch}`,
+  - každý (i vysílač) načte, předbufferuje na pozici a pošle
+    `broadcast.ready {sid, epoch, rtt}`,
+  - po všech ready, nejpozději po limitu (start 4 s, seek / play 1,5 s),
+    server pošle `broadcast.go {epoch, atServerMs: T, anchor}` s
+    T = teď + max(500 ms, 1,5 × nejvyšší RTT) + 300 ms; kdo nestihl, je
+    `lagging` a dožene se sám.
+Dohánění jednoho (pozdní příchozí, lagging, po bufferingu, po pozadí) je
+připravený start pro jednoho: posluchač ztichne, zaparkuje na pozici a pošle
+`broadcast.ready {sid, solo: true, recordingId, index, positionMs, rtt}`;
+server mu sám pošle `broadcast.go {solo: true, atServerMs: T, positionMs}`.
+`broadcast.suspend {sid, reason}`: posluchač bufferuje -- skupinu nezastavuje.
+Pauza bariéru nemá (levná, okamžitá).
 Server -> všem přihlášeným: `broadcasts.update {items}` (jen viditelná).
 
 Pořadí (`clockId`, `gen`, `seq`) přiděluje server: vysílač po restartu appky
@@ -73,6 +91,38 @@ SEND_TIMEOUT_S = 5.0
 # Položka fronty: jen pole snímku přehrávače (`_infoToJson`) + čitelná pro seznam.
 _ITEM_FIELDS = ("id", "t", "a", "ai", "r", "art", "g", "gl", "d", "recordingId", "title", "artistName", "artworkUrl")
 PREP_MAX_MS = 1200
+BARRIER_LIMIT_S = {"start": 4.0, "seek": 1.5}
+# Vysílač, který se ani tak dlouho nenačte -- bariéra se zruší (zůstane pauza).
+BARRIER_OWNER_LIMIT_S = 15.0
+GO_MIN_LEAD_MS = 500.0
+GO_RESERVE_MS = 300.0
+DEFAULT_RTT_MS = 100.0
+
+
+def go_lead_ms(rtts: Iterable[float], start_leads: Iterable[float] = ()) -> float:
+    """Předstih `go`: aspoň 500 ms, 1,5 × nejpomalejší RTT a nejdelší naučený
+    rozjezd člena (play() -> zvuk, Kryštof 16. 10.: "o ten čas si to načte
+    dopředu"); + rezerva."""
+    worst = max((r for r in rtts if r and r > 0), default=DEFAULT_RTT_MS)
+    slowest_start = max((x for x in start_leads if x and x > 0), default=0.0)
+    return max(GO_MIN_LEAD_MS, 1.5 * min(worst, 5000.0), min(slowest_start, 3000.0) + 200.0) + GO_RESERVE_MS
+
+
+def solo_go(anchor: dict[str, Any], now_ms: float, parked_ms: float, rtt_ms: float, start_lead_ms: float = 0.0) -> tuple[float, float]:
+    """Připravený start jednoho posluchače: (T, pozice). Posluchač zaparkoval
+    na `parked_ms`; když tam vysílač dojde dost pozdě, začne se přesně tam
+    (bez seeku), jinak nejbližší možný čas a pozice v něm."""
+    rate = float(anchor.get("rate") or 1.0)
+    p0 = float(anchor.get("positionMs") or 0.0)
+    t0 = float(anchor.get("atServerMs") or now_ms)
+    start = anchor.get("startAtServerMs")
+    if isinstance(start, (int, float)) and t0 <= start + 1:
+        t0 = float(start)
+    earliest = now_ms + go_lead_ms([rtt_ms], [start_lead_ms])
+    t_park = t0 + (parked_ms - p0) / rate
+    if earliest <= t_park <= earliest + 3000:
+        return t_park, parked_ms
+    return earliest, p0 + (earliest - t0) * rate
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
@@ -170,6 +220,11 @@ class _Listener:
     healthy: bool = True
     sent_qv: int | None = None
     sent_gen: int | None = None
+    # Bariéra: nestihl limit (dožene se sám), bufferuje / je na pozadí.
+    lagging: bool = False
+    suspended: bool = False
+    rtt_ms: float | None = None
+    start_lead_ms: float | None = None
 
 
 @dataclass
@@ -196,6 +251,9 @@ class Room:
     cond: asyncio.Condition | None = None
     last_summary: Any = None
     last_listener_info: Any = None
+    barrier_epoch: int = 0
+    # {epoch, kind, anchor, deadline, required: set, ready: set, rtts: dict, owner_ready, created}
+    barrier: dict[str, Any] | None = None
 
 
 class BroadcastError(Exception):
@@ -443,6 +501,9 @@ class BroadcastHub:
         if queue is not None:
             room.queue = queue
         if anchor is not None:
+            # Nový stav od vysílače (pauza, jiná skladba bez bariéry) ruší
+            # rozběhnutou bariéru -- `go` by pustil něco, co už neplatí.
+            room.barrier = None
             self._set_anchor(room, anchor)
         if queue is None and anchor is None:
             return room  # jen heartbeat
@@ -453,6 +514,211 @@ class BroadcastHub:
     async def stop(self, owner_id: str, payload: dict[str, Any]) -> None:
         room = self._owned(owner_id, payload)
         await self.end(room.sid, "stopped")
+
+    # --- ready bariéra -----------------------------------------------------
+
+    async def prepare(self, owner_id: str, payload: dict[str, Any], owner_ws: Any = None) -> Room:
+        """Vysílač ohlásil start / seek / play: všichni načtou a nahlásí ready."""
+        room = self._owned(owner_id, payload)
+        room.last_contact = self._now()
+        if owner_ws is not None:
+            room.owner_ws = owner_ws
+        bseq = payload.get("bseq")
+        if not isinstance(bseq, int) or isinstance(bseq, bool):
+            raise BroadcastError(400, "Chybí bseq.")
+        if bseq <= room.bseq:
+            return room
+        room.bseq = bseq
+        anchor = clean_anchor(payload.get("anchor"))
+        if anchor is None:
+            raise BroadcastError(400, "Chybí kotva.")
+        queue = clean_queue(payload.get("queue"))
+        if queue is not None:
+            room.queue = queue
+        kind = "seek" if payload.get("kind") == "seek" else "start"
+        # Do `go` stojí na pozici -- pozdní příchozí a HTTP posluchači vidí pauzu.
+        anchor.pop("startAtServerMs", None)
+        anchor.pop("transitionAtServerMs", None)
+        self._set_anchor(room, {**anchor, "isPlaying": False})
+        room.barrier_epoch += 1
+        epoch = room.barrier_epoch
+        now = self._now()
+        room.barrier = {
+            "epoch": epoch,
+            "kind": kind,
+            "anchor": anchor,
+            "deadline": now + BARRIER_LIMIT_S[kind],
+            "created": now,
+            "required": {k for k, lst in room.listeners.items() if lst.ws is not None and not lst.suspended},
+            "ready": set(),
+            "rtts": {},
+            "leads": {},
+            "owner_ready": False,
+        }
+        room.seq += 1
+        logger.info("broadcast %s: prepare %s #%d, čeká %d", room.sid[:8], kind, epoch, len(room.barrier["required"]))
+        await self._send(room.owner_ws, {"type": "broadcast.prepared", "payload": {"sid": room.sid, "epoch": epoch}})
+        for lst in list(room.listeners.values()):
+            await self._send_prepare(room, lst)
+        if room.cond is not None:
+            async with room.cond:
+                room.cond.notify_all()
+        self._arm_barrier_timer(room, epoch, BARRIER_LIMIT_S[kind])
+        await self._announce()
+        return room
+
+    async def _send_prepare(self, room: Room, lst: _Listener) -> None:
+        b = room.barrier
+        if b is None or lst.ws is None:
+            return
+        qv = room.queue.get("qv") if room.queue else None
+        include_queue = lst.sent_qv != qv or lst.sent_gen != room.gen
+        msg = {
+            "sid": room.sid, "epoch": b["epoch"], "kind": b["kind"], "anchor": b["anchor"],
+            "clockId": CLOCK_ID, "gen": room.gen, "seq": room.seq, "serverMs": self.server_ms(),
+        }
+        if include_queue:
+            msg["queue"] = room.queue
+        if await self._send(lst.ws, {"type": "broadcast.prepare", "payload": msg}):
+            lst.sent_qv = qv
+            lst.sent_gen = room.gen
+
+    def _arm_barrier_timer(self, room: Room, epoch: int, delay: float) -> None:
+        try:
+            asyncio.get_running_loop().create_task(self._barrier_timer(room, epoch, delay))
+        except RuntimeError:
+            pass
+
+    async def _barrier_timer(self, room: Room, epoch: int, delay: float) -> None:
+        await asyncio.sleep(delay + 0.01)
+        if self.rooms.get(room.sid) is room and room.barrier and room.barrier["epoch"] == epoch:
+            await self.check_barrier(room)
+            if room.barrier and room.barrier["epoch"] == epoch:
+                # Čeká se už jen na vysílač -- zkusit znovu, nejdéle do zrušení.
+                self._arm_barrier_timer(room, epoch, 0.5)
+
+    async def ready(self, user_id: str, ws: Any, payload: dict[str, Any], owner: bool = False) -> None:
+        """Člen je načtený a předbufferovaný na pozici bariéry (nebo zaparkovaný
+        pro připravený start jednoho)."""
+        sid = payload.get("sid")
+        room = self.rooms.get(sid) if isinstance(sid, str) else None
+        if room is None:
+            return
+        rtt = payload.get("rtt")
+        rtt = float(rtt) if isinstance(rtt, (int, float)) and not isinstance(rtt, bool) else None
+        lead = payload.get("startLeadMs")
+        lead = float(lead) if isinstance(lead, (int, float)) and not isinstance(lead, bool) else None
+        if owner or (room.owner_id == user_id and room.owner_ws is ws):
+            b = room.barrier
+            if b is not None and payload.get("epoch") == b["epoch"]:
+                b["owner_ready"] = True
+                if rtt is not None:
+                    b["rtts"]["owner"] = rtt
+                if lead is not None:
+                    b["leads"]["owner"] = lead
+                room.last_contact = self._now()
+                await self.check_barrier(room)
+            return
+        lst = room.listeners.get(id(ws))
+        if lst is None:
+            return
+        lst.last_seen = self._now()
+        if rtt is not None:
+            lst.rtt_ms = rtt
+        if lead is not None:
+            lst.start_lead_ms = lead
+        if payload.get("solo"):
+            await self._solo(room, lst, payload)
+            return
+        b = room.barrier
+        if b is None or payload.get("epoch") != b["epoch"]:
+            return  # stará epocha
+        b["ready"].add(id(ws))
+        if rtt is not None:
+            b["rtts"][id(ws)] = rtt
+        if lead is not None:
+            b["leads"][id(ws)] = lead
+        await self.check_barrier(room)
+
+    async def check_barrier(self, room: Room) -> None:
+        b = room.barrier
+        if b is None:
+            return
+        now = self._now()
+        if not b["owner_ready"]:
+            if now - b["created"] > BARRIER_OWNER_LIMIT_S:
+                logger.info("broadcast %s: bariéra #%d zrušena, vysílač se nenačetl", room.sid[:8], b["epoch"])
+                room.barrier = None
+            return
+        # Kdo mezitím odešel nebo začal bufferovat, se nečeká.
+        required = {k for k in b["required"] if k in room.listeners and not room.listeners[k].suspended}
+        if not required <= b["ready"] and now < b["deadline"]:
+            return
+        await self._go(room)
+
+    async def _go(self, room: Room) -> None:
+        b = room.barrier
+        assert b is not None
+        room.barrier = None
+        rtts = list(b["rtts"].values())
+        t = self.server_ms() + go_lead_ms(rtts, b["leads"].values())
+        anchor = {**b["anchor"], "atServerMs": t, "startAtServerMs": t, "isPlaying": True, "clockOk": True}
+        self._set_anchor(room, anchor)
+        room.last_playing = self._now()
+        room.seq += 1
+        lagging = 0
+        for key, lst in room.listeners.items():
+            if key in b["required"] and key not in b["ready"]:
+                lst.lagging = True  # nestihl limit -- dožene se připraveným startem sám
+                lagging += 1
+            elif key in b["ready"]:
+                lst.lagging = False
+        logger.info("broadcast %s: go #%d za %.0f ms, ready %d, lagging %d", room.sid[:8], b["epoch"], t - self.server_ms(), len(b["ready"]), lagging)
+        msg = {
+            "sid": room.sid, "epoch": b["epoch"], "atServerMs": t, "anchor": anchor,
+            "clockId": CLOCK_ID, "gen": room.gen, "seq": room.seq, "serverMs": self.server_ms(),
+        }
+        await self._send(room.owner_ws, {"type": "broadcast.go", "payload": msg})
+        for lst in list(room.listeners.values()):
+            await self._send(lst.ws, {"type": "broadcast.go", "payload": msg})
+        room.last_flush = self._now()
+        if room.cond is not None:
+            async with room.cond:
+                room.cond.notify_all()
+        await self._announce()
+
+    async def _solo(self, room: Room, lst: _Listener, payload: dict[str, Any]) -> None:
+        """Připravený start pro jednoho (pozdní příchozí, lagging, po bufferingu)."""
+        anchor = room.anchor
+        if anchor is None or room.barrier is not None:
+            return  # běží bariéra -- dostane společné `go`
+        if payload.get("recordingId") != anchor.get("recordingId") or payload.get("index") != anchor.get("index"):
+            # Zaparkoval na jiné skladbě -- pošli mu aktuální stav, zkusí znovu.
+            await self._send_state(room, lst, reset=True)
+            return
+        parked = payload.get("positionMs")
+        parked = float(parked) if isinstance(parked, (int, float)) and not isinstance(parked, bool) else 0.0
+        now = self.server_ms()
+        if anchor.get("isPlaying"):
+            t, pos = solo_go(anchor, now, parked, lst.rtt_ms or DEFAULT_RTT_MS, lst.start_lead_ms or 0.0)
+            playing = True
+        else:
+            t, pos, playing = now, float(anchor.get("positionMs") or 0.0), False
+        lst.lagging = False
+        lst.suspended = False
+        await self._send(lst.ws, {"type": "broadcast.go", "payload": {
+            "sid": room.sid, "solo": True, "atServerMs": t, "positionMs": pos, "isPlaying": playing,
+            "recordingId": anchor.get("recordingId"), "index": anchor.get("index"),
+            "clockId": CLOCK_ID, "gen": room.gen, "seq": room.seq, "serverMs": now,
+        }})
+
+    async def suspend(self, ws: Any, payload: dict[str, Any]) -> None:
+        room = self.rooms.get(payload.get("sid")) if isinstance(payload.get("sid"), str) else None
+        lst = room.listeners.get(id(ws)) if room else None
+        if room is None or lst is None:
+            return
+        lst.suspended = True
+        await self.check_barrier(room)
 
     async def end(self, sid: str, reason: str, announce: bool = True) -> None:
         room = self.rooms.pop(sid, None)
@@ -518,6 +784,8 @@ class BroadcastHub:
         lst.sent_qv = None
         lst.sent_gen = None
         await self._send_state(room, lst, reset=True)
+        # Bariéra právě běží: načíst se může taky (nečeká se na něj).
+        await self._send_prepare(room, lst)
         await self._tell_owner(room)
         await self._announce()
 
