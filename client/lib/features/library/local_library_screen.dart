@@ -438,7 +438,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> with AutomaticKeepAliveCli
                 )
               else
                 SliverPadding(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
                   sliver: SliverGrid.builder(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
@@ -619,7 +619,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> with AutomaticKeepAliveC
                 )
               else if (_viewMode == ViewMode.grid)
                 SliverPadding(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
                   sliver: SliverGrid.builder(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
@@ -768,7 +768,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab> with AutomaticKeepAliv
                 )
               else if (_viewMode == ViewMode.grid)
                 SliverPadding(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
                   sliver: SliverGrid.builder(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
@@ -886,7 +886,7 @@ class _PlaylistsTab extends ConsumerWidget {
     final playlists = ref.watch(myPlaylistsProvider);
     // Připnuté nahoře v mřížce 2×2 (pod nimi je tak vidět víc playlistů).
     const liked = Padding(
-      padding: EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.xs),
+      padding: EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.sm, AppSpacing.xs, AppSpacing.xs),
       child: PinnedGrid(
         children: [LikedSongsCard(), ListenLaterCard(), SharedPlaylistsCard(), ShazamCard()],
       ),
@@ -970,7 +970,7 @@ class _PlaylistsTab extends ConsumerWidget {
                       liked,
                       // Moje playlisty: seznam, nebo galerie (mřížka obalů).
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.xs, 0),
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.sm, AppSpacing.xs, 0),
                         child: Row(
                           children: [
                             Expanded(child: Text('Moje playlisty', style: Theme.of(context).textTheme.titleMedium)),
@@ -1001,7 +1001,7 @@ class _PlaylistsTab extends ConsumerWidget {
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.all(AppSpacing.sm),
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
                     sliver: SliverGrid.builder(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: _gridColumns(MediaQuery.sizeOf(context).width),
