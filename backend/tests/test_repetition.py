@@ -83,7 +83,10 @@ def test_imported_skips_only_in_algorithm_context() -> None:
     lone = _recs(1)[0]
     album = _recs(3, same_album=True)
     for days in (20, 10):
-        _ev(user, lone, "skipped", days, origin="spotify-history")  # osamocená cizí -> algoritmus
+        # Osamocená cizí -> algoritmus. Zřetelně před albem: se stejným časem jako
+        # první skladba alba rozhodovalo pořadí náhodné ID a občas se ocitla
+        # uvnitř proklikávání alba (blikající test, ~1 z 4 běhů na Windows).
+        _ev(user, lone, "skipped", days + 0.3, origin="spotify-history")
         for i, rid in enumerate(album):  # proklikává album -> vlastní volba
             _ev(user, rid, "skipped", days - i * 0.001, origin="spotify-history")
     skips = rp._imported_skips(user)
