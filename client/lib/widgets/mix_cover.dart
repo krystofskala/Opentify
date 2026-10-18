@@ -428,15 +428,25 @@ Widget? mixCoverWideV2(MixArtSpec spec, String title) {
           right: h * 1.25 + h * 0.14,
           top: 0,
           bottom: 0,
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: _archivo(h * 0.26, 800, 112, tracking: -0.02, color: ink, height: 1.05),
-            ),
-          ),
+          child: LayoutBuilder(builder: (context, t) {
+            // Nejdelší slovo se musí vejít na řádek ("Moje nejpos / louchanější",
+            // 18. 10.): Flutter jinak láme uprostřed slova. Písmo se zmenší,
+            // nejvýš na 55 %.
+            var style = _archivo(h * 0.26, 800, 112, tracking: -0.02, color: ink, height: 1.05);
+            final longest = title.split(RegExp(r'\s+')).fold<String>('', (a, b) => b.length > a.length ? b : a);
+            final painter = TextPainter(
+              text: TextSpan(text: longest, style: style),
+              textDirection: TextDirection.ltr,
+              textScaler: MediaQuery.textScalerOf(context),
+            )..layout();
+            if (painter.width > t.maxWidth && painter.width > 0) {
+              style = style.copyWith(fontSize: style.fontSize! * math.max(0.55, t.maxWidth / painter.width * 0.98));
+            }
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: style),
+            );
+          }),
         ),
       ],
     );
@@ -499,15 +509,18 @@ class _DailyPainter extends CustomPainter {
     var shares = ((facts['shares'] as List<dynamic>?) ?? const []).map((e) => (e as num).toDouble()).toList();
     if (shares.length < 3) shares = const [0.4, 0.33, 0.27];
     var y = s * 0.5;
+    // Vlny přes celou šířku: v hlavičce detailu je plátno širší než vysoké a
+    // vlny končily na `s` -- vpravo prosvítal obdélník fotky (18. 10.).
+    final w = size.width, bottom = size.height;
     final colors = [pal.mid, pal.deep, pal.ink];
     for (var i = 0; i < 3; i++) {
       final f = 0.55 + rnd.nextDouble() * 0.45, amp = s * (0.022 + rnd.nextDouble() * 0.018), ph = rnd.nextDouble() * math.pi * 2;
-      final path = Path()..moveTo(0, s);
-      for (var x = 0.0; x <= s + 1; x += s / 80) {
+      final path = Path()..moveTo(0, bottom);
+      for (var x = 0.0; x <= w + 1; x += s / 80) {
         path.lineTo(x, y + math.sin(x / s * math.pi * 2 * f + ph) * amp);
       }
       path
-        ..lineTo(s, s)
+        ..lineTo(w, bottom)
         ..close();
       canvas.drawPath(path, Paint()..color = colors[i]);
       y += s * 0.5 * shares[i];
