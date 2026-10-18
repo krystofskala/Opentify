@@ -4,7 +4,9 @@ import asyncio
 import random
 import uuid
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from sqlmodel import Session
 
@@ -173,15 +175,40 @@ def test_session_cap_mutes_artist_played_a_lot():
     assert hits <= 2  # 0,3^3 ~ 3 % -- skoro nikdy
 
 
-def test_endless_keeps_one_seed_artist_track_even_when_capped():
-    user = "pn-seed-" + _RUN
+@pytest.mark.parametrize("seed_first", [False, True], ids=["restore-seed", "already-selected"])
+def test_endless_keeps_one_seed_artist_track_even_when_capped(monkeypatch, seed_first):
+    from app.home import activation, personal_mixes
+
+    now = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(__name__ + ".utcnow", lambda: now)
+    monkeypatch.setattr(pn, "utcnow", lambda: now)
+    monkeypatch.setattr(activation, "utcnow", lambda: now)
+    # Nový profil i při opakování testu ve stejném procesu/databázi.
+    user = "pn-seed-" + uuid.uuid4().hex
     ids = _setup(user)
     taste_cache.invalidate()
     act = pn._activation(user)
     seed = ids[("Metal Act", 0)]
     metal = act.artist_of[seed]
+    weighted_order = personal_mixes._weighted_order
+    selections = []
+
+    def controlled_order(items, weight, rng, **kwargs):
+        ordered = weighted_order(items, weight, rng, **kwargs)
+        if not selections:
+            # Pevný RNG seed sám nevynutí, zda Metal projde prvním výběrem.
+            # Zachováme skórování i kandidáty, řídíme jen pořadí losování.
+            ordered.sort(key=lambda r: (act.artist_of.get(r) == metal) != seed_first)
+        selections.append(ordered)
+        return ordered
+
+    monkeypatch.setattr(personal_mixes, "_weighted_order", controlled_order)
     fam, _s, _r = pn.pick(user, [seed], [seed], 3, random.Random(1), session_counts=Counter({metal: 2}))
-    assert any(act.artist_of.get(r) == metal for r in fam)
+    assert len(selections) == (1 if seed_first else 2)
+    assert len(fam) == 2  # round(3 * 0.8), po jedné skladbě interpreta
+    assert sum(act.artist_of.get(r) == metal for r in fam) == 1
+    assert seed not in fam
+    assert len(set(fam)) == len(fam)
 
 
 def test_second_tap_gives_a_different_batch():
