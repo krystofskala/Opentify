@@ -626,3 +626,45 @@ def test_live_16_oct_solo_always_answered_even_when_broadcaster_never_ready() ->
         assert lis[0].of("broadcast.go")[-1] == {**lis[0].of("broadcast.go")[-1], "retry": True, "reason": "track"}
 
     asyncio.run(run())
+
+
+def test_concurrent_adds_get_unique_add_ids(monkeypatch) -> None:
+    # EX2-2 nález 14 (Codex): addId se četl až po await -- dva současně přidávající
+    # posluchači dostali stejné, potvrzení jednoho pak smazalo obě čekající.
+    import time as _time
+
+    monkeypatch.setattr(bc, "profile_name", lambda uid: (_time.sleep(0.05), uid)[1])
+
+    async def run():
+        hub, _clock = _hub()
+        sid, _bid, owner_ws, lis = await _room_with(hub, 2)
+        item = {"recordingId": "rec-x", "id": "rec-x", "t": "Song X"}
+        res = await asyncio.gather(*(hub.add_item(f"u{i}", lis[i], {"sid": sid, "item": item}) for i in range(2)))
+        assert res == [None, None]
+        ids = [a["addId"] for a in hub.rooms[sid].pending_adds]
+        assert len(ids) == 2 and len(set(ids)) == 2
+
+    asyncio.run(run())
+
+
+def test_poll_after_listener_removed_while_waiting() -> None:
+    # EX2-2 nález 1 (Codex): čekající long-poll po odebrání pozvánky vrátil ještě celý stav.
+    async def run():
+        hub = bc.BroadcastHub()
+        sid, bid = _id(), _id()
+        await hub.start("owner", "K", None, _start(sid, bid, invited=["friend"]), {"friend"})
+        first = await hub.poll("friend", "phone", sid, None, 0)
+        after = f"{first['clockId']}.{first['gen']}.{first['seq']}"
+
+        async def remove():
+            await asyncio.sleep(0.05)
+            await hub.start("owner", "K", None, _start(sid, bid, invited=[]), set())
+
+        task = asyncio.create_task(remove())
+        with pytest.raises(bc.BroadcastError) as e:
+            await hub.poll("friend", "phone", sid, after, 2.0)
+        await task
+        assert e.value.status == 404
+        assert "friend" not in hub._polls
+
+    asyncio.run(run())

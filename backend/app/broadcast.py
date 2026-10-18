@@ -784,8 +784,11 @@ class BroadcastHub:
             return f"Čeká už {MAX_ADDS_PER_LISTENER} tvých skladeb – počkej, až se zahrají."
         lst.last_add = now
         room.add_seq += 1
+        add_id = f"{room.add_seq}"  # před await: souběžné přidání jiného posluchače by jinak dostalo stejné addId
         name = await asyncio.to_thread(profile_name, user_id)
-        item = {**q["items"][0], "by": name[:60], "byId": user_id, "addId": f"{room.add_seq}"}
+        if self.rooms.get(room.sid) is not room or not self._visible(room, user_id):
+            return "Vysílání skončilo nebo ho už nevidíš."
+        item = {**q["items"][0], "by": name[:60], "byId": user_id, "addId": add_id}
         room.pending_adds.append({"addId": item["addId"], "byId": user_id, "item": item})
         logger.info("broadcast %s: %s přidal %s", room.sid[:8], name, item.get("title"))
         await self._send(room.owner_ws, {"type": "broadcast.added", "payload": {"sid": room.sid, "addId": item["addId"], "item": item, "by": item["by"]}})
@@ -1032,6 +1035,11 @@ class BroadcastHub:
                 pass
             finally:
                 self._polls[user_id] -= 1
+                if self._polls[user_id] <= 0:
+                    self._polls.pop(user_id, None)
+        # Během čekání mohl vysílač posluchače odebrat (viditelnost/pozvánky).
+        if self.rooms.get(sid) is room and not self._visible(room, user_id):
+            raise BroadcastError(404, "Vysílání neexistuje.")
         if self.rooms.get(sid) is not room:
             ended = self._ended.get(sid)
             return {"sid": sid, "ended": ended[0] if ended else "stopped", "clockId": CLOCK_ID, "serverMs": self.server_ms()}
