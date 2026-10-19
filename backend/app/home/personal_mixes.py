@@ -33,7 +33,7 @@ from sqlmodel import Session, select
 
 from app import listen_later
 from app.genre_names import genre_name
-from app.catalog.artwork import primary_artist_name, same_artist_name
+from app.catalog.artwork import all_artist_names, primary_artist_name, same_artist_name
 from app.catalog.deezer import get_deezer_client
 from app.catalog.identity import is_own_artist
 from app.db import engine
@@ -1352,7 +1352,8 @@ async def build_discover_weekly() -> int:
     # semínka ze scén celé historie staré velké scény -- medián fanoušků
     # 12 tis. -> 45 tis., Objevy se nelíbily). Známý = kdokoli kdy slyšený.
     # Měnit dál po jednom kroku a s týdnem na vyzkoušení.
-    known_names = {primary_artist_name(n).casefold() for n in taste.artist_name.values()}
+    # I spoluautoři ("Simple Plan & State Champs" -> i State Champs), 19. 10.
+    known_names = {part.casefold() for n in taste.artist_name.values() for part in all_artist_names(n)}
     known_dz = set(taste.artist_deezer.values())
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
