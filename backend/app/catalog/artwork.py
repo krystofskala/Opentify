@@ -63,6 +63,15 @@ def primary_artist_name(name: str) -> str:
     return re.split(r"\s*(?:;|/|,|&|\bfeat\.?|\bft\.?|\bx\b)\s*", name, maxsplit=1, flags=re.IGNORECASE)[0].strip() or name
 
 
+def all_artist_names(name: str) -> list[str]:
+    """Všichni interpreti z jednoho pole: "Simple Plan & State Champs" ->
+    ["Simple Plan", "State Champs"] (19. 10.: State Champs se tak dostal do
+    Objevů, i když ho posloucháš přes společnou skladbu). Kapela s "&" v názvu
+    dá navíc i části -- pro "už znáš" je to bezpečná strana."""
+    parts = re.split(r"\s*(?:;|/|,|&|\bfeat\.?|\bft\.?|\bx\b)\s*", name, flags=re.IGNORECASE)
+    return [p.strip() for p in parts if len(p.strip()) >= 2] or [name]
+
+
 def _names_match(a: str, b: str) -> bool:
     na, nb = _normalize(a), _normalize(b)
     return bool(na) and bool(nb) and (na == nb or na.startswith(nb) or nb.startswith(na))
