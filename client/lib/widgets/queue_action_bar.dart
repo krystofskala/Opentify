@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../routing/branches.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,11 +44,16 @@ class QueueActionBar extends ConsumerWidget {
 
     void shuffle() {
       if (tracks.isEmpty) return;
-      final shuffled = [...tracks]..shuffle();
-      // Zamíchané pořadí se jako "kde jsem skončil" neukládá.
-      ref
-          .read(audioPlayerControllerProvider.notifier)
-          .playQueue(_infosFor(shuffled), 0, sourceLabel: sourceLabel, rememberProgress: false);
+      // Zapnuté náhodné přehrávání přehrávače, ne zamíchaný seznam: ikona
+      // se rozsvítí a vypnutím se hraje dál v pořadí alba (táta 21. 10.:
+      // zamíchané nešlo vypnout). "Kde jsem skončil" se neukládá.
+      ref.read(audioPlayerControllerProvider.notifier).playQueue(
+            _infosFor(tracks),
+            Random().nextInt(tracks.length),
+            sourceLabel: sourceLabel,
+            rememberProgress: false,
+            shuffle: true,
+          );
     }
 
     // Rozposlouchané album/playlist: "Pokračovat" tam, kde uživatel skončil.

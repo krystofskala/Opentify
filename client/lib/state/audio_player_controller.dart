@@ -3391,6 +3391,12 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     if (fromLocal && _prefetched.remove(info.recordingId) != null) {
       unawaited(PrefetchCache.remove(info.recordingId));
     }
+    // Vadný stažený soubor (táta 21. 10.: -11800 v 0:00) -> smazat a stáhnout
+    // znovu, jinak by se zasekl pokaždé, když na skladbu dojde.
+    final offline = _ref.read(offlineControllerProvider.notifier);
+    if (fromLocal && offline.has(info.recordingId)) {
+      unawaited(offline.remove(info.recordingId).then((_) => offline.add([info])));
+    }
     if (fromLocal && isSpokenId(info.recordingId)) {
       // Stažená epizoda nejde přečíst -> hrát ze serveru (obstarávání se
       // mluveného slova netýká), od stejného místa.
