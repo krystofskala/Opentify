@@ -212,13 +212,19 @@ async def _familiar_near(
 
 
 def _cap_known(ids: list[str], heard: set[str], limit: int) -> list[str]:
-    out, known = [], 0
-    for r in ids:
-        if r in heard:
-            if known >= limit:
-                continue
-            known += 1
-        out.append(r)
+    """Nejvýš `limit` známých a rovnoměrně mezi novými (ne známé napřed
+    a nové v bloku na konci)."""
+    known = [r for r in ids if r in heard][:limit]
+    new = [r for r in ids if r not in heard]
+    total = len(known) + len(new)
+    out, ki, ni = [], 0, 0
+    for i in range(total):
+        if ki < len(known) and (ni >= len(new) or ki * total <= i * len(known)):
+            out.append(known[ki])
+            ki += 1
+        else:
+            out.append(new[ni])
+            ni += 1
     return out
 
 

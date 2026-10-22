@@ -33,3 +33,5 @@ def test_known_capped_new_kept() -> None:
     from app.home.radio_station import _cap_known
 
     assert _cap_known(["k1", "n1", "k2", "k3", "n2"], {"k1", "k2", "k3"}, 2) == ["k1", "n1", "k2", "n2"]
+    # Známé napřed se rozloží mezi nové.
+    assert _cap_known(["k1", "k2", "n1", "n2", "n3", "n4"], {"k1", "k2"}, 2) == ["k1", "n1", "n2", "k2", "n3", "n4"]
