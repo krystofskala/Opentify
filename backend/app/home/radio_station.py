@@ -242,7 +242,13 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     if not seeds:
         raise StationError("k tomu teď rádio nenajdu (interpret není na Deezeru)")
     # U jednoho interpreta (skladba/interpret) přibrat pár podobných --
-    # samotné "artist radio" by se opakovalo.
+    # samotné "artist radio" by se opakovalo. Napřed posluchačovi interpreti
+    # stylem blízko semínka: Deezer "podobní" jsou podle publika (u Danny
+    # Very samý nizozemský pop), jeho vlastní okolí stylu ne.
+    familiar, near, styles = await _familiar_near(user_id, seed_artists, rng)
+    if near and len(seeds) < 4:
+        pick = rng.sample(near, min(4 - len(seeds), len(near)))
+        seeds += [d for d in await asyncio.gather(*(_deezer_id(a) for a in pick)) if d and d not in seeds]
     if len(seeds) < 3:
         try:
             related = await dz.artist_related(seeds[0], 12) or []
@@ -288,7 +294,6 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     from app.home.personal_mixes import _interleave
     from app.home.taste_bridge import artist_styles
 
-    familiar, near, styles = await _familiar_near(user_id, seed_artists, rng)
     familiar = [r for r in familiar if r not in first and r not in ids]
     new = [r for r in ids if r not in heard]
     styles.update(await artist_styles(list({artist_of[r] for r in new if r in artist_of} - styles.keys())))
