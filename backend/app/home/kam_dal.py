@@ -117,6 +117,19 @@ def _sum_vec(vs: list[dict[str, float]]) -> dict[str, float]:
     return dict(acc)
 
 
+async def _fitting(new: list[str], ref_artists: list[str]) -> list[str]:
+    """Nové jen stylem blízko scény / vlny (OP-ALG1 E)."""
+    from app.home import energy_flow
+    from app.home.personal_mixes import _artists_of
+    from app.home.taste_bridge import artist_styles
+
+    artist_of = await asyncio.to_thread(_artists_of, new)
+    ref = ref_artists[:40]
+    styles = await artist_styles(ref + list(set(artist_of.values())))
+    off = energy_flow.off_style(new, artist_of, styles, ref)
+    return [r for r in new if r not in off]
+
+
 async def compute(user_id: str, today: date | None = None) -> dict:
     """`today`: přehrání historie k danému dni (ověření)."""
     from app.home import activation as av
@@ -169,6 +182,7 @@ async def compute(user_id: str, today: date | None = None) -> dict:
     except Exception:  # noqa: BLE001
         near = []
     near = await asyncio.to_thread(novelty.filter_new, user_id, near, act)
+    near = await _fitting(near, wave.artists)
     near = [r for r in near if act.artist_of.get(r) not in family_artists][:PATH_SIZE]
     if near:
         paths["vedle"] = {"ids": near}
@@ -248,6 +262,7 @@ async def compute(user_id: str, today: date | None = None) -> dict:
         except Exception:  # noqa: BLE001
             new = []
         new = await asyncio.to_thread(novelty.filter_new, user_id, new, act)
+        new = await _fitting(new, scene.artists)
         paths["skok"] = {"scene": scene.id, "ids": entry + new[: PATH_SIZE - len(entry)], "label": scene.label,
                          "lastYear": scene.last_year}
     # Každá cesta plynule, i s novými (OP-ALG1 C); první skladba zůstává.

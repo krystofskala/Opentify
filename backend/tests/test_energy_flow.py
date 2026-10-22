@@ -42,3 +42,11 @@ def test_new_tracks_do_not_stand_together():
     ordered = energy_flow.order([k1, n1, n2, k2, k3], {}, unfamiliar={n1, n2})
     assert ordered[0] == k1 and sorted(ordered) == sorted([k1, n1, n2, k2, k3])
     assert abs(ordered.index(n1) - ordered.index(n2)) > 1
+
+
+def test_off_style_drops_only_far_new_tracks():
+    styles = {"folk1": {"folk": 1.0, "indie folk": 0.6}, "folk2": {"folk": 0.8},
+              "near": {"indie folk": 1.0, "folk": 0.5}, "far": {"pop punk": 1.0}}
+    artist_of = {"n1": "near", "n2": "far", "n3": "untagged"}
+    assert energy_flow.off_style(["n1", "n2", "n3"], artist_of, styles, {"folk1", "folk2"}) == {"n2"}
+    assert energy_flow.off_style(["n2"], artist_of, styles, set()) == set()

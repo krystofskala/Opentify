@@ -760,6 +760,14 @@ async def build_daily_mixes() -> int:
         # Strop interpreta platí pro celý mix -- nové od interpreta, který už
         # má mezi známými 3 skladby, se nepřidají (dřív 3 známé + 2 nové).
         new_artist = await asyncio.to_thread(_artists_of, new)
+        # Stylová kontrola nových (OP-ALG1 E): k mixu, ne kam uhne Deezer rádio.
+        from app.home import energy_flow
+        from app.home.taste_bridge import artist_styles
+
+        mix_known = {taste.artist_of[r] for r in familiar if r in taste.artist_of}
+        mix_styles = await artist_styles(list(mix_known | set(new_artist.values())))
+        off = energy_flow.off_style(new, new_artist, mix_styles, mix_known)
+        new = [r for r in new if r not in off]
         per_artist = Counter(taste.artist_of.get(r) for r in familiar)
         capped_new: list[str] = []
         for r in new:
@@ -791,8 +799,6 @@ async def build_daily_mixes() -> int:
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
         # Plynulé navazování (P3: energie, bod 4: styl) celého mixu i s novými
         # (OP-ALG1 C, dřív jen známá část a nové napevno každá třetí).
-        from app.home import energy_flow
-
         mix_artist_of = {**new_artist, **taste.artist_of}
         tracks = await energy_flow.smooth(tracks, mix_artist_of, set(tracks) - set(familiar))
         tracks = _head_cap(tracks, mix_artist_of)

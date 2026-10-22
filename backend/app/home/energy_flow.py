@@ -83,6 +83,32 @@ JUMP_STYLE_WITH_ENERGY = 0.6
 JUMP_ENERGY = 0.5
 
 
+# Nová skladba do mixu jen se stylem blízko mixu (OP-ALG1 E): vzdálenost od
+# součtu stylů známých interpretů mixu; kdo štítky nemá, projde.
+STYLE_FIT_MAX = 0.8
+
+
+def off_style(
+    ids: list[str], artist_of: dict[str, str], styles: dict[str, dict[str, float]], ref_artists: set[str] | list[str]
+) -> set[str]:
+    """Skladby, jejichž interpret stylem k `ref_artists` nepatří (Deezer
+    rádio i Last.fm občas uhnou jinam: k folku pop-punk)."""
+    centre: dict[str, float] = {}
+    for a in ref_artists:
+        vec = styles.get(a)
+        norm = sum(v * v for v in (vec or {}).values()) ** 0.5
+        for k, v in (vec or {}).items():
+            centre[k] = centre.get(k, 0.0) + v / norm
+    if not centre:
+        return set()
+    out = set()
+    for r in ids:
+        d = style_distance(styles.get(artist_of.get(r, "")), centre)
+        if d is not None and d >= STYLE_FIT_MAX:
+            out.add(r)
+    return out
+
+
 def is_jump(energy_gap: float | None, style_dist: float | None) -> bool:
     if style_dist is None:
         return False
