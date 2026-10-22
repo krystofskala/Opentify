@@ -91,6 +91,8 @@ def style_centre(ref_artists: set[str] | list[str], styles: dict[str, dict[str, 
     for a in ref_artists:
         vec = styles.get(a)
         norm = sum(v * v for v in (vec or {}).values()) ** 0.5
+        if not norm:
+            continue  # štítky s nulovou vahou
         for k, v in (vec or {}).items():
             centre[k] = centre.get(k, 0.0) + v / norm
     return centre

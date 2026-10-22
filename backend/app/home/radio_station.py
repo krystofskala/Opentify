@@ -199,7 +199,8 @@ async def _familiar_near(
     tracks: list[str] = []
     for a in near:
         pool = by_artist[a]
-        weights = [act.total[r] for r in pool]
+        # Nulové váhy (vyhaslé poslechy) by `choices` shodily.
+        weights = [max(act.total[r], 1e-9) for r in pool]
         picked: list[str] = []
         while pool and len(picked) < KNOWN_PER_ARTIST:
             r = rng.choices(pool, weights)[0]
@@ -228,6 +229,32 @@ def _cap_known(ids: list[str], heard: set[str], limit: int) -> list[str]:
     return out
 
 
+def _known_limit(ids: list[str], first: list[str], heard: set[str]) -> int:
+    """Kolik známých smí do stanice za semínkem: třetina celku bez známých
+    semínek a nejvýš půl na každou novou."""
+    new = sum(1 for r in ids if r not in heard)
+    seed_known = sum(1 for r in first if r in heard)
+    return max(0, min(int(STATION_SIZE * KNOWN_SHARE), new // 2) - seed_known)
+
+
+def _drop_known_over(ids: list[str], heard: set[str], limit: int) -> list[str]:
+    """Známé nad `limit` ven, pořadí zůstává."""
+    out: list[str] = []
+    for r in ids:
+        if r in heard:
+            if limit <= 0:
+                continue
+            limit -= 1
+        out.append(r)
+    return out
+
+
+def _unique_after(first: list[str], ids: list[str]) -> list[str]:
+    """`ids` bez písní, které už jsou v semínku nebo dřív v `ids`."""
+    head = set(first)
+    return [r for r in _unique_songs(first + ids) if r not in head]
+
+
 def _unique_songs(ids: list[str]) -> list[str]:
     """Stejná píseň jen jednou -- i když je interpret v katalogu dvakrát
     ("Kane" a "KANE", Kryštof 22. 10.)."""
@@ -240,7 +267,8 @@ def _unique_songs(ids: list[str]) -> list[str]:
         for r in ids:
             rec = session.get(Recording, r)
             art = session.get(Artist, rec.artist_id) if rec is not None and rec.artist_id else None
-            key = (_normalize(primary_artist_name(art.name)) if art else r, _title_key(rec.title) if rec else r)
+            who = _normalize(primary_artist_name(art.name)) if art else (rec.artist_id if rec else None) or r
+            key = (who, _title_key(rec.title) if rec else r)
             if key in seen:
                 continue
             seen.add(key)
@@ -318,19 +346,25 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     ids = [r for r in ids if r not in off]
     artist_of.update(await asyncio.to_thread(_artists_of, familiar))
     origins.update({r: "known" for r in familiar})
-    want_known = int(STATION_SIZE * KNOWN_SHARE) - sum(1 for r in ids if r in heard)
-    ids = _interleave(ids, familiar[: max(0, want_known)]) if want_known > 0 else ids
+    # Známé celé -- kolik jich zůstane, hlídá až `_cap_known` po vyřazení
+    # duplicit (dřív se kvóta počítala předem a duplicity ji vyjedly).
+    ids = _interleave(ids, familiar) if familiar else ids
     ids = await asyncio.to_thread(_guarded, user_id, ids, artist_of)
-    ids = await asyncio.to_thread(_unique_songs, ids)
-    ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
-    # Známých nejvýš třetina -- Deezer rádio jeho vlastních interpretů vrací
-    # i to, co zná, a rádio je hlavní místo, kde se nové ujímají.
-    ids = _cap_known(ids, heard, int(STATION_SIZE * KNOWN_SHARE))
+    ids = await asyncio.to_thread(_unique_after, first, ids)
+    ids = _cap_per_artist(ids, artist_of, 3)
+    # Známých nejvýš třetina celé stanice i se semínkem -- Deezer rádio jeho
+    # vlastních interpretů vrací i to, co zná, a rádio je hlavní místo, kde se
+    # nové ujímají. Na jednu novou nejvýš půl známé (krátká stanice).
+    limit = _known_limit(ids, first, heard)
+    # Střídání interpretů až po rozložení známých (to by ho jinak rozbilo).
+    ids = _spread(_cap_known(ids, heard, limit), artist_of)
     # Bez řazení (Kryštof 22. 10.: u rádia pořadí problém nebylo).
     from app.home.obtainable import swap_failed_async
 
-    recording_ids = first + (await swap_failed_async(ids[: STATION_SIZE + 10]))
-    recording_ids = recording_ids[:STATION_SIZE]
+    swapped = await swap_failed_async(ids[: STATION_SIZE + 10])
+    # Náhradní verze může být píseň, která už ve stanici je, nebo známá navíc.
+    swapped = await asyncio.to_thread(_unique_after, first, swapped)
+    recording_ids = (first + _drop_known_over(swapped, heard, _known_limit(swapped, first, heard)))[:STATION_SIZE]
     if len(recording_ids) < 5:
         raise StationError("na rádio je tu zatím málo podobné hudby")
 
