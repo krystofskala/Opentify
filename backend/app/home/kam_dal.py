@@ -250,6 +250,14 @@ async def compute(user_id: str, today: date | None = None) -> dict:
         new = await asyncio.to_thread(novelty.filter_new, user_id, new, act)
         paths["skok"] = {"scene": scene.id, "ids": entry + new[: PATH_SIZE - len(entry)], "label": scene.label,
                          "lastYear": scene.last_year}
+    # Každá cesta plynule, i s novými (OP-ALG1 C); první skladba zůstává.
+    from app.home import energy_flow
+    from app.home.personal_mixes import _artists_of
+
+    for p in paths.values():
+        ids = p.get("ids") or []
+        path_artist_of = {**await asyncio.to_thread(_artists_of, ids), **act.artist_of}
+        p["ids"] = await energy_flow.smooth(ids, path_artist_of, {r for r in ids if r not in heard})
     info = _wave_info(wave, smap, names)
     return {**base, "state": wave.state, "wave": info, "paths": paths}
 

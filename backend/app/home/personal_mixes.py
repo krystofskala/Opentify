@@ -730,14 +730,6 @@ async def build_daily_mixes() -> int:
         familiar_target = round(DAILY_MIX_SIZE * familiar_share)
         familiar = _cap_per_artist(preferred + fallback, taste.artist_of, DAILY_MIX_ARTIST_CAP)[:familiar_target]
         familiar = _spread(familiar, taste.artist_of)
-        # Plynulé navazování energie (P3) -- konec skladby k začátku další.
-        from app.home import energy_flow
-
-        from app.home.taste_bridge import artist_styles
-
-        # + vzdálenost stylů (bod 4): v jedné skupině bývají i dost odlišné věci.
-        styles = await artist_styles(list({taste.artist_of[r] for r in familiar if r in taste.artist_of}))
-        familiar = await asyncio.to_thread(energy_flow.order, familiar, taste.artist_of, None, styles)
         # Poměr ~70/30, u menších skupin nejvýš půl na půl -- málo známých
         # skladeb se nezaplácne novými (dřív mixy s 85 % neznámé hudby), ale
         # se stropem 3 na interpreta se malá skupina nescvrkne na 19 skladeb.
@@ -797,7 +789,13 @@ async def build_daily_mixes() -> int:
             **{r: "known" for r in familiar},
         }
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
-        tracks = _head_cap(tracks, {**new_artist, **taste.artist_of})
+        # Plynulé navazování (P3: energie, bod 4: styl) celého mixu i s novými
+        # (OP-ALG1 C, dřív jen známá část a nové napevno každá třetí).
+        from app.home import energy_flow
+
+        mix_artist_of = {**new_artist, **taste.artist_of}
+        tracks = await energy_flow.smooth(tracks, mix_artist_of, set(tracks) - set(familiar))
+        tracks = _head_cap(tracks, mix_artist_of)
         used_today.update(tracks)
         names = [taste.artist_name[a] for a in featured[:2] if a in taste.artist_name]
         scene = scene_of_cluster.get(id(cluster))

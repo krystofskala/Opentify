@@ -34,3 +34,11 @@ def test_order_reduces_jumps_and_keeps_tracks():
 
 def test_without_analysis_order_is_unchanged():
     assert energy_flow.order(["a", "b", "c", "d"], {}) == ["a", "b", "c", "d"]
+
+
+def test_new_tracks_do_not_stand_together():
+    # OP-ALG1 C: celý mix se řadí i s novými, ale dvě nové za sebou jen když není zbytí.
+    k1, n1, n2, k2, k3 = (_track(100, 100, 0.0) for _ in range(5))
+    ordered = energy_flow.order([k1, n1, n2, k2, k3], {}, unfamiliar={n1, n2})
+    assert ordered[0] == k1 and sorted(ordered) == sorted([k1, n1, n2, k2, k3])
+    assert abs(ordered.index(n1) - ordered.index(n2)) > 1

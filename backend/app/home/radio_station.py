@@ -214,6 +214,10 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     artist_of = await asyncio.to_thread(_artists_of, ids + first)
     ids = await asyncio.to_thread(_guarded, user_id, ids, artist_of)
     ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
+    # Plynule od semínka, i s novými (OP-ALG1 C).
+    from app.home import energy_flow
+
+    ids = await energy_flow.smooth(ids[: STATION_SIZE + 10], artist_of, {r for r in ids if r not in heard}, first[-1] if first else None)
     from app.home.obtainable import swap_failed_async
 
     recording_ids = first + (await swap_failed_async(ids[: STATION_SIZE + 10]))
