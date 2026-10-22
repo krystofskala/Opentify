@@ -16,3 +16,4 @@ __pycache__/
 /.reference/
 # Podpisový klíč Androidu -- NIKDY do gitu
 .android-signing/
+CLAUDE.local.md
