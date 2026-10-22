@@ -183,6 +183,8 @@ async def _familiar_near(
     plays: Counter = Counter()
     by_artist: dict[str, list[str]] = {}
     for r, n in act.total.items():
+        if n <= 0:
+            continue  # vyhaslé poslechy -- už ne "známá", jinak by je `choices` shodily
         a = act.artist_of.get(r)
         if a and a not in seed_artists:
             plays[a] += n
@@ -199,8 +201,7 @@ async def _familiar_near(
     tracks: list[str] = []
     for a in near:
         pool = by_artist[a]
-        # Nulové váhy (vyhaslé poslechy) by `choices` shodily.
-        weights = [max(act.total[r], 1e-9) for r in pool]
+        weights = [act.total[r] for r in pool]
         picked: list[str] = []
         while pool and len(picked) < KNOWN_PER_ARTIST:
             r = rng.choices(pool, weights)[0]
