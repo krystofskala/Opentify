@@ -36,12 +36,17 @@ def test_without_analysis_order_is_unchanged():
     assert energy_flow.order(["a", "b", "c", "d"], {}) == ["a", "b", "c", "d"]
 
 
-def test_new_tracks_do_not_stand_together():
-    # OP-ALG1 C: celý mix se řadí i s novými, ale dvě nové za sebou jen když není zbytí.
-    k1, n1, n2, k2, k3 = (_track(100, 100, 0.0) for _ in range(5))
-    ordered = energy_flow.order([k1, n1, n2, k2, k3], {}, unfamiliar={n1, n2})
-    assert ordered[0] == k1 and sorted(ordered) == sorted([k1, n1, n2, k2, k3])
-    assert abs(ordered.index(n1) - ordered.index(n2)) > 1
+def test_repair_fixes_only_rough_jumps():
+    # OP-ALG1: pořadí zůstane, jen skladba za hrubým skokem se prohodí s bližší.
+    ids = [_track(100, 100, 0.0) for _ in range(6)]
+    artist_of = dict(zip(ids, ["folk1", "punk", "folk2", "folk3", "folk4", "folk5"]))
+    styles = {a: {"folk": 1.0} for a in ("folk1", "folk2", "folk3", "folk4", "folk5")} | {"punk": {"pop punk": 1.0}}
+    out = energy_flow.repair(ids, artist_of, styles)
+    assert sorted(out) == sorted(ids) and out[0] == ids[0]
+    assert len(energy_flow.jumps(ids, artist_of, styles)) == 2
+    assert out[-1] == ids[1] and len(energy_flow.jumps(out, artist_of, styles)) == 1  # punk na konec, folk drží
+    smooth_ids = [ids[0], ids[2], ids[3], ids[4]]
+    assert energy_flow.repair(smooth_ids, artist_of, styles) == smooth_ids
 
 
 def test_off_style_drops_only_far_new_tracks():

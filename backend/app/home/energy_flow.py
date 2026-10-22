@@ -27,9 +27,6 @@ from app.models import MediaAsset
 
 EDGE_BUCKETS = 8
 SAME_ARTIST_PENALTY = 0.5
-# Dvě neznámé za sebou (OP-ALG1 C): řadí se celý mix i s novými, ale nové
-# mají zůstat rozprostřené mezi známými (dřív 2 známé : 1 nová pevně).
-NEW_RUN_PENALTY = 0.35
 
 
 def _edges(session: Session, ids: list[str]) -> dict[str, tuple[float, float]]:
@@ -146,12 +143,10 @@ def order(
     artist_of: dict[str, str],
     anchor: str | None = None,
     styles: dict[str, dict[str, float]] | None = None,
-    unfamiliar: set[str] | None = None,
 ) -> list[str]:
     """Stejné skladby, plynulejší pořadí. Bez `anchor` zůstává první skladba
     první (mix začíná tím, čím začínal); s `anchor` (právě hraje, není ve
-    výsledku) se navazuje na něj. `styles` = interpret -> stylové štítky.
-    `unfamiliar` = nové skladby, které nemají stát dvě za sebou."""
+    výsledku) se navazuje na něj. `styles` = interpret -> stylové štítky."""
     if len(ids) < (2 if anchor else 3):
         return list(ids)
     full = ([anchor] if anchor else []) + [r for r in ids if r != anchor]
@@ -161,7 +156,6 @@ def order(
     mean_in = sum(e[0] for e in edges.values()) / len(edges)
     mean_out = sum(e[1] for e in edges.values()) / len(edges)
     styles = styles or {}
-    unfamiliar = unfamiliar or set()
 
     def edge(r: str) -> tuple[float, float]:
         return edges.get(r, (mean_in, mean_out))
@@ -172,8 +166,6 @@ def order(
             c += TEMPO_WEIGHT * _tempo_gap(tempo[a], tempo[b])
         if artist_of.get(a) and artist_of.get(a) == artist_of.get(b):
             c += SAME_ARTIST_PENALTY
-        if a in unfamiliar and b in unfamiliar:
-            c += NEW_RUN_PENALTY
         d = style_distance(styles.get(artist_of.get(a, "")), styles.get(artist_of.get(b, "")))
         if d is not None:
             c += STYLE_WEIGHT * d
@@ -229,18 +221,67 @@ def order(
     return best_path[1:] if anchor else best_path
 
 
-async def smooth(
-    ids: list[str], artist_of: dict[str, str], unfamiliar: set[str] | None = None, anchor: str | None = None
+REPAIR_WINDOW = 6
+
+
+def repair(
+    ids: list[str],
+    artist_of: dict[str, str],
+    styles: dict[str, dict[str, float]] | None,
+    unfamiliar: set[str] | None = None,
+    window: int = REPAIR_WINDOW,
 ) -> list[str]:
-    """Celý seznam plynule (energie + styl), i s novými skladbami -- jedno
-    řazení pro denní mixy, rádio i Kam dál (OP-ALG1 C, dřív se řadila jen
-    známá část a nové se vkládaly napevno mezi ně)."""
+    """Pořadí zůstane, opraví se jen hrubé skoky (OP-ALG1, Kryštof 22. 10.):
+    skladba za skokem se prohodí s bližší o pár míst dál. Celé řazení
+    (`order`) lepí podobné k sobě -- v mixech bloky 7–19 skladeb stejného
+    stylu místo přirozeného promíchání. Prohození se bere, jen když
+    nevznikne jiný skok, stejný interpret vedle sebe ani dvě nové za sebou."""
+    if len(ids) < 3:
+        return list(ids)
+    edges, _tempo = _model(ids)
+    styles = styles or {}
+    unfamiliar = unfamiliar or set()
+    out = list(ids)
+
+    def bad(a: str, b: str) -> bool:
+        e = abs(edges[a][1] - edges[b][0]) if a in edges and b in edges else None
+        d = style_distance(styles.get(artist_of.get(a, "")), styles.get(artist_of.get(b, "")))
+        return is_jump(e, d)
+
+    def flaws(p: list[str], at: set[int]) -> int:
+        n = 0
+        for i in at:
+            if 0 <= i < len(p) - 1:
+                a, b = p[i], p[i + 1]
+                n += 2 * bad(a, b)
+                n += bool(artist_of.get(a)) and artist_of.get(a) == artist_of.get(b)
+                n += a in unfamiliar and b in unfamiliar
+        return n
+
+    for i in range(len(out) - 1):
+        if not bad(out[i], out[i + 1]):
+            continue
+        for j in range(i + 2, min(len(out), i + 2 + window)):
+            at = {i, i + 1, j - 1, j}
+            cand = list(out)
+            cand[i + 1], cand[j] = cand[j], cand[i + 1]
+            if not bad(cand[i], cand[i + 1]) and flaws(cand, at) < flaws(out, at):
+                out = cand
+                break
+    return out
+
+
+async def smooth(
+    ids: list[str], artist_of: dict[str, str], unfamiliar: set[str] | None = None
+) -> list[str]:
+    """Hotový seznam (i s novými) bez hrubých skoků, jinak promíchaný, jak
+    vznikl -- denní mixy a Kam dál (OP-ALG1)."""
     import asyncio
 
     from app.home.taste_bridge import artist_styles
 
     styles = await artist_styles(list({artist_of[r] for r in ids if artist_of.get(r)}))
-    return await asyncio.to_thread(order, ids, artist_of, anchor, styles, unfamiliar)
+    return await asyncio.to_thread(repair, ids, artist_of, styles, unfamiliar)
 
 
 def jumps(

@@ -797,8 +797,8 @@ async def build_daily_mixes() -> int:
             **{r: "known" for r in familiar},
         }
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
-        # Plynulé navazování (P3: energie, bod 4: styl) celého mixu i s novými
-        # (OP-ALG1 C, dřív jen známá část a nové napevno každá třetí).
+        # Bez hrubých skoků stylu/energie v celém mixu i s novými, jinak
+        # promíchaný (OP-ALG1, Kryštof 22. 10.: celé řazení dělalo bloky).
         mix_artist_of = {**new_artist, **taste.artist_of}
         tracks = await energy_flow.smooth(tracks, mix_artist_of, set(tracks) - set(familiar))
         tracks = _head_cap(tracks, mix_artist_of)

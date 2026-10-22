@@ -265,7 +265,7 @@ async def compute(user_id: str, today: date | None = None) -> dict:
         new = await _fitting(new, scene.artists)
         paths["skok"] = {"scene": scene.id, "ids": entry + new[: PATH_SIZE - len(entry)], "label": scene.label,
                          "lastYear": scene.last_year}
-    # Každá cesta plynule, i s novými (OP-ALG1 C); první skladba zůstává.
+    # Každá cesta bez hrubých skoků, i s novými (OP-ALG1); první skladba zůstává.
     from app.home import energy_flow
     from app.home.personal_mixes import _artists_of
 
