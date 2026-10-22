@@ -35,6 +35,14 @@ from app.utils import utcnow
 KINDS = ("track", "album", "playlist", "artist")
 STATION_SIZE = 50
 TTL = timedelta(days=7)
+# Rádio i z posluchačova vkusu, ne jen z Deezeru/Last.fm (Kryštof 22. 10.:
+# rádio od Danny Very bylo samý nizozemský pop -- oba zdroje berou
+# podobnost podle publika, ne zvuku). Jako Spotify/Apple: semínko + známé
+# stylem blízko + nové.
+KNOWN_SHARE = 1 / 3
+KNOWN_TOP_ARTISTS = 200
+KNOWN_STYLE_MAX = 0.5
+KNOWN_PER_ARTIST = 2
 
 
 class StationError(Exception):
@@ -161,6 +169,68 @@ def _guarded(user_id: str, ids: list[str], artist_of: dict[str, str]) -> list[st
     return guard.load(user_id).filter(ids, artist_of, known=set(av.cached(user_id).total))
 
 
+async def _familiar_near(
+    user_id: str, seed_artists: list[str], rng: random.Random
+) -> tuple[list[str], list[str], dict[str, dict[str, float]]]:
+    """Posluchačovy známé skladby od interpretů stylem blízko semínka:
+    (skladby, ti interpreti, styly). Bere jeho nejposlouchanější interprety,
+    od každého pár skladeb podle počtu poslechů."""
+    from app.home import activation as av
+    from app.home import energy_flow
+    from app.home.taste_bridge import artist_styles
+
+    act = await asyncio.to_thread(av.cached, user_id)
+    plays: Counter = Counter()
+    by_artist: dict[str, list[str]] = {}
+    for r, n in act.total.items():
+        a = act.artist_of.get(r)
+        if a and a not in seed_artists:
+            plays[a] += n
+            by_artist.setdefault(a, []).append(r)
+    top = [a for a, _ in plays.most_common(KNOWN_TOP_ARTISTS)]
+    styles = await artist_styles(top + seed_artists)
+    centre = energy_flow.style_centre(seed_artists, styles)
+    if not centre:
+        return [], [], styles
+    near = [
+        a for a in top
+        if (d := energy_flow.style_distance(styles.get(a), centre)) is not None and d <= KNOWN_STYLE_MAX
+    ]
+    tracks: list[str] = []
+    for a in near:
+        pool = by_artist[a]
+        weights = [act.total[r] for r in pool]
+        picked: list[str] = []
+        while pool and len(picked) < KNOWN_PER_ARTIST:
+            r = rng.choices(pool, weights)[0]
+            i = pool.index(r)
+            pool, weights = pool[:i] + pool[i + 1:], weights[:i] + weights[i + 1:]
+            picked.append(r)
+        tracks += picked
+    rng.shuffle(tracks)
+    return tracks, near, styles
+
+
+def _unique_songs(ids: list[str]) -> list[str]:
+    """Stejná píseň jen jednou -- i když je interpret v katalogu dvakrát
+    ("Kane" a "KANE", Kryštof 22. 10.)."""
+    from app.catalog.artwork import _normalize
+    from app.home.play_now import _title_key
+
+    seen: set[tuple[str, str]] = set()
+    out: list[str] = []
+    with Session(engine) as session:
+        for r in ids:
+            rec = session.get(Recording, r)
+            art = session.get(Artist, rec.artist_id) if rec is not None and rec.artist_id else None
+            key = (_normalize(primary_artist_name(art.name)) if art else r, _title_key(rec.title) if rec else r)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, Any]:
     if kind not in KINDS:
         raise StationError("neznámý druh")
@@ -212,10 +282,26 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     origins.update({r: "seed" for r in first})
     ids = [i for i in ids if i not in first]
     artist_of = await asyncio.to_thread(_artists_of, ids + first)
+    # Známé stylem blízko semínka a nové jen se stylem blízko semínka a těch
+    # známých (OP-ALG1 E; vzdálené styly dřív prošly všechny).
+    from app.home import energy_flow
+    from app.home.personal_mixes import _interleave
+    from app.home.taste_bridge import artist_styles
+
+    familiar, near, styles = await _familiar_near(user_id, seed_artists, rng)
+    familiar = [r for r in familiar if r not in first and r not in ids]
+    new = [r for r in ids if r not in heard]
+    styles.update(await artist_styles(list({artist_of[r] for r in new if r in artist_of} - styles.keys())))
+    off = energy_flow.off_style(new, artist_of, styles, seed_artists + near)
+    ids = [r for r in ids if r not in off]
+    artist_of.update(await asyncio.to_thread(_artists_of, familiar))
+    origins.update({r: "known" for r in familiar})
+    want_known = int(STATION_SIZE * KNOWN_SHARE) - sum(1 for r in ids if r in heard)
+    ids = _interleave(ids, familiar[: max(0, want_known)]) if want_known > 0 else ids
     ids = await asyncio.to_thread(_guarded, user_id, ids, artist_of)
+    ids = await asyncio.to_thread(_unique_songs, ids)
     ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
-    # Rádio bez řazení a stylové kontroly nových (Kryštof 22. 10.: u rádia
-    # problém nebyl a jen z rádia od skladby se nové ujímají).
+    # Bez řazení (Kryštof 22. 10.: u rádia pořadí problém nebylo).
     from app.home.obtainable import swap_failed_async
 
     recording_ids = first + (await swap_failed_async(ids[: STATION_SIZE + 10]))
