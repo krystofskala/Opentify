@@ -98,7 +98,7 @@ def _ensure_columns() -> None:
             ("lastfm_user", "VARCHAR"),
             ("lastfm_connected_at", "DATETIME"),
         ],
-        "playlistitem": [("added_by", "VARCHAR")],
+        "playlistitem": [("added_by", "VARCHAR"), ("origin", "VARCHAR")],
         "playevent": [("rec_batch_id", "VARCHAR"), ("rec_slot", "VARCHAR")],
         "recbatchitem": [("source", "VARCHAR")],
         "spokenbook": [("source_files", "JSON"), ("language", "VARCHAR"), ("metadata_source", "VARCHAR"), ("kind", "VARCHAR"), ("description", "VARCHAR"), ("series_name", "VARCHAR"), ("series_number", "FLOAT")],

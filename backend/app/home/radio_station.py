@@ -192,9 +192,10 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     # Rádio od skladby: navrch podobné skladby z Last.fm (podle toho, co
     # posluchači pouštějí po sobě) -- Deezer "artist radio" je jen podle
     # interpreta a opakuje se.
+    lf_ids: list[str] = []
     if kind == "track":
-        raw = await _lastfm_similar(first[0], rng) + raw
-    ids = await asyncio.to_thread(g._ingest_tracks, raw)
+        lf_ids = await asyncio.to_thread(g._ingest_tracks, await _lastfm_similar(first[0], rng))
+    ids = lf_ids + [i for i in await asyncio.to_thread(g._ingest_tracks, raw) if i not in lf_ids]
     if kind != "track":
         # Interpret / album / playlist: napřed skladby, které posluchači
         # Last.fm pouštějí spolu s jeho skladbami.
@@ -203,6 +204,12 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
         seeds = await asyncio.to_thread(_seed_recordings, kind, target_id, rng)
         lf_ids = await lt.similar_track_ids(seeds, set(seeds), rng, 25, per_seed=15)
         ids = lf_ids + [i for i in ids if i not in lf_ids]
+    from app.home import activation as av
+
+    heard = set((await asyncio.to_thread(av.cached, user_id)).total)
+    lf_set = set(lf_ids)
+    origins = {r: ("known" if r in heard else "new:lastfm" if r in lf_set else "new:deezer") for r in ids}
+    origins.update({r: "seed" for r in first})
     ids = [i for i in ids if i not in first]
     artist_of = await asyncio.to_thread(_artists_of, ids + first)
     ids = await asyncio.to_thread(_guarded, user_id, ids, artist_of)
@@ -215,11 +222,14 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
         raise StationError("na rádio je tu zatím málo podobné hudby")
 
     covers = await asyncio.to_thread(g._covers_for, recording_ids)
-    playlist_id = await asyncio.to_thread(_save, user_id, kind, target_id, name, recording_ids, covers)
+    playlist_id = await asyncio.to_thread(_save, user_id, kind, target_id, name, recording_ids, covers, origins)
     return {"playlistId": playlist_id, "title": f"Rádio · {name}", "count": len(recording_ids)}
 
 
-def _save(user_id: str, kind: str, target_id: str, name: str, recording_ids: list[str], covers: list[str]) -> str:
+def _save(
+    user_id: str, kind: str, target_id: str, name: str, recording_ids: list[str], covers: list[str],
+    origins: dict[str, str] | None = None,
+) -> str:
     source = f"radio:{kind}:{target_id}"
     with Session(engine) as session:
         playlist = session.exec(
@@ -232,7 +242,9 @@ def _save(user_id: str, kind: str, target_id: str, name: str, recording_ids: lis
         for item in session.exec(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)).all():
             session.delete(item)
         for position, recording_id in enumerate(without_disliked(user_id, recording_ids)):
-            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
+            session.add(PlaylistItem(
+                playlist_id=playlist.id, recording_id=recording_id, position=position, origin=(origins or {}).get(recording_id)
+            ))
         now = utcnow()
         what = {"track": "skladby", "album": "alba", "playlist": "playlistu", "artist": "interpreta"}[kind]
         playlist.title = f"Rádio · {name}"

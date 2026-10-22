@@ -153,7 +153,10 @@ def _save_playlist(
     recording_ids: list[str],
     cover_urls: list[str],
     ttl: timedelta,
+    origins: dict[str, str] | None = None,
 ) -> str:
+    """`origins`: skladba -> odkud ji skládání vzalo (PlaylistItem.origin)."""
+    origins = origins or {}
     with Session(engine) as session:
         playlist = session.exec(select(Playlist).where(Playlist.owner_user_id == owner, Playlist.source == source)).first()
         if playlist is None:
@@ -170,7 +173,11 @@ def _save_playlist(
         if not source.startswith(("personal:year:", "personal:decade:", "personal:on-repeat")):
             recording_ids = _drop_version_twins(session, recording_ids)
         for position, recording_id in enumerate(without_disliked(owner, recording_ids)):
-            session.add(PlaylistItem(playlist_id=playlist.id, recording_id=recording_id, position=position))
+            session.add(
+                PlaylistItem(
+                    playlist_id=playlist.id, recording_id=recording_id, position=position, origin=origins.get(recording_id)
+                )
+            )
         now = utcnow()
         playlist.title = title
         playlist.description = description

@@ -183,6 +183,9 @@ class PlaylistItem(SQLModel, table=True):
     added_at: datetime = Field(default_factory=utcnow)
     # Kdo skladbu přidal (společné playlisty).
     added_by: str | None = None
+    # Odkud ji skládání vzalo (OP-ALG1 B): "known", "new:lastfm",
+    # "new:deezer", "later" ... None = ručně / starší zápis.
+    origin: str | None = None
 
 
 GLOBAL_PLAYLIST_OWNER = "__global__"

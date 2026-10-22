@@ -22,13 +22,16 @@ def _key(user_id: str, day: str) -> str:
     return f"mixlog:{user_id}:{day}"
 
 
-def record(user_id: str, day: str, mixes: dict[str, list[str]]) -> None:
+def record(
+    user_id: str, day: str, mixes: dict[str, list[str]], origins: dict[str, dict[str, str | None]] | None = None
+) -> None:
+    """`origins`: číslo mixu -> skladba -> odkud ji skládání vzalo (OP-ALG1 B)."""
     from app.models import HomeSnapshot
     from app.utils import utcnow
 
     with Session(engine) as session:
         row = session.get(HomeSnapshot, _key(user_id, day)) or HomeSnapshot(key=_key(user_id, day))
-        row.payload = {"mixes": mixes}
+        row.payload = {"mixes": mixes, **({"origins": origins} if origins else {})}
         row.generated_at = utcnow()
         session.add(row)
         old = (date.fromisoformat(day) - timedelta(days=KEEP_DAYS)).isoformat()

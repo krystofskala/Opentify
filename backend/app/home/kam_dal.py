@@ -267,8 +267,11 @@ def _save_mixes(user_id: str, data: dict) -> None:
     from app.home.personal_mixes import _clear_playlists
     from app.models import PlaylistKind
 
+    from app.home import activation as av
+
     paths = data.get("paths") or {}
     wave = (data.get("wave") or {}).get("title") or "vlně"
+    heard = av.cached(user_id).total
     empty = []
     for name, (title, what) in MIXES.items():
         p = paths.get(name) or {}
@@ -283,6 +286,7 @@ def _save_mixes(user_id: str, data: dict) -> None:
             owner=user_id, source=source, title=title, description=f"Po vlně {wave}: {desc}",
             kind=PlaylistKind.PERSONAL_MIX, section="mixes", recording_ids=ids,
             cover_urls=g._covers_for(ids), ttl=timedelta(days=2),
+            origins={r: "known" if r in heard else "new:lastfm" for r in ids},
         )
     if empty:
         _clear_playlists(user_id, empty)

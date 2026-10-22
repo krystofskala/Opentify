@@ -677,6 +677,7 @@ async def build_daily_mixes() -> int:
     later_used: set[str] = set()
     used_today: set[str] = set()
     results: list[tuple[int, Cluster, list[str], str, list[str]]] = []
+    origins: dict[int, dict[str, str]] = {}  # číslo skupiny -> skladba -> odkud (OP-ALG1 B)
     memory = await asyncio.to_thread(_mix_memory, g.home_user(), day, taste)
     from app.home.play_now import discovery_level
 
@@ -789,6 +790,12 @@ async def build_daily_mixes() -> int:
         rng.shuffle(fitting)  # dřív každý den tytéž tři
         tracks = listen_later.weave(tracks, fitting)
         later_used.update(fitting[:3])
+        origins[index] = {
+            **{r: "later" for r in fitting[:3]},
+            **{r: "new:deezer" for r in from_radio},
+            **{r: "new:lastfm" for r in from_lastfm},
+            **{r: "known" for r in familiar},
+        }
         tracks = [r for r in tracks if r not in used_today]  # jedna skladba = jeden mix
         tracks = _head_cap(tracks, {**new_artist, **taste.artist_of})
         used_today.update(tracks)
@@ -829,6 +836,7 @@ async def build_daily_mixes() -> int:
             recording_ids=tracks,
             cover_urls=_artist_covers(taste, list(dict.fromkeys([*featured, *cluster.artists]))) or g._covers_for(tracks),
             ttl=g.DAILY_TTL,
+            origins=origins.get(_idx),
         )
         await g._preprovision(tracks[:1])
     built = len(results)
@@ -847,7 +855,8 @@ async def build_daily_mixes() -> int:
         from app.home import mix_log
 
         await asyncio.to_thread(
-            mix_log.record, g.home_user(), day, {str(n): tr for n, (_i, _c, tr, _d, _f) in enumerate(results, start=1)}
+            mix_log.record, g.home_user(), day, {str(n): tr for n, (_i, _c, tr, _d, _f) in enumerate(results, start=1)},
+            {str(n): {r: origins.get(i, {}).get(r) for r in tr} for n, (i, _c, tr, _d, _f) in enumerate(results, start=1)},
         )
     except Exception:  # noqa: BLE001
         logger.exception("záznam Denních mixů")
@@ -1431,6 +1440,7 @@ async def build_discover_weekly() -> int:
         recording_ids=picked[:30],
         cover_urls=g._covers_for(picked),
         ttl=timedelta(days=7),
+        origins={r: "new:deezer-top" for r in picked},
     )
     await g._preprovision(picked[:1])
     g._save_snapshot("personal:discover-weekly", {"stamp": week, "count": len(picked[:30])})
