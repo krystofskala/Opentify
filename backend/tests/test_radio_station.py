@@ -27,3 +27,9 @@ def test_same_song_from_duplicated_artist_once() -> None:
         c = _rec(s, f"Kane {tag}", "Rain Down On Me")
         s.commit()
     assert _unique_songs([a, b, c]) == [a, c]
+
+
+def test_known_capped_new_kept() -> None:
+    from app.home.radio_station import _cap_known
+
+    assert _cap_known(["k1", "n1", "k2", "k3", "n2"], {"k1", "k2", "k3"}, 2) == ["k1", "n1", "k2", "n2"]

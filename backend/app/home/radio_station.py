@@ -211,6 +211,17 @@ async def _familiar_near(
     return tracks, near, styles
 
 
+def _cap_known(ids: list[str], heard: set[str], limit: int) -> list[str]:
+    out, known = [], 0
+    for r in ids:
+        if r in heard:
+            if known >= limit:
+                continue
+            known += 1
+        out.append(r)
+    return out
+
+
 def _unique_songs(ids: list[str]) -> list[str]:
     """Stejná píseň jen jednou -- i když je interpret v katalogu dvakrát
     ("Kane" a "KANE", Kryštof 22. 10.)."""
@@ -306,6 +317,9 @@ async def build_station(user_id: str, kind: str, target_id: str) -> dict[str, An
     ids = await asyncio.to_thread(_guarded, user_id, ids, artist_of)
     ids = await asyncio.to_thread(_unique_songs, ids)
     ids = _spread(_cap_per_artist(ids, artist_of, 3), artist_of)
+    # Známých nejvýš třetina -- Deezer rádio jeho vlastních interpretů vrací
+    # i to, co zná, a rádio je hlavní místo, kde se nové ujímají.
+    ids = _cap_known(ids, heard, int(STATION_SIZE * KNOWN_SHARE))
     # Bez řazení (Kryštof 22. 10.: u rádia pořadí problém nebylo).
     from app.home.obtainable import swap_failed_async
 
