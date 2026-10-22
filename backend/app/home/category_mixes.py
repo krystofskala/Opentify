@@ -225,17 +225,18 @@ def _familiar(taste: pm.Taste, artists: dict[str, float], rng: random.Random) ->
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
     preferred = [r for r in liked_or_played if taste.artist_of.get(r) in artists]
     fallback = [r for r in taste.library if taste.artist_of.get(r) in artists and r not in liked_or_played]
+    from app.home import guard
+
+    gd = guard.load(g.home_user())  # společný filtr (OP-ALG1)
+    preferred = [r for r in preferred if gd.allowed(r, taste.artist_of.get(r))]
+    fallback = [r for r in fallback if gd.allowed(r, taste.artist_of.get(r))]
     if taste.activation is not None:
         # v2: podle toho, jak moc skladba teď "žije" (jako Denní mixy), a
-        # "víc / míň takových" (audit 7. 10. po změnách, chyba 3).
-        from app.home.feedback import deltas, fit_multiplier
-
+        # "víc / míň takových" + většinou přeskakované (app/home/guard.py).
         liked = set(taste.liked)
-        manual = deltas(g.home_user())
 
         def weight(r: str) -> float:
-            a = taste.artist_of.get(r)
-            return (taste.track_score(r) + (0.05 if r in liked else 0.0)) * (fit_multiplier(manual[a]) if a in manual else 1.0)
+            return (taste.track_score(r) + (0.05 if r in liked else 0.0)) * gd.weight(r, taste.artist_of.get(r))
 
         preferred = pm._weighted_order(preferred, weight, rng)
     else:

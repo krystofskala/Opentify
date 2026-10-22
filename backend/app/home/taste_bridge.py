@@ -31,7 +31,6 @@ from app.catalog.artwork import _normalize
 
 # Do profilu vkusu jen styly (tags.is_style) a jazyk/země posluchače.
 PROFILE_EXTRA = {"czech", "slovak"}
-JUNK_VERSION = re.compile(r"(slowed|sped up|speed up|reverb|nightcore|8d audio|instrumental)", re.I)
 # Styl, který je jen jiným jménem hlavního žánru ("rap" = rodina hiphop).
 FAMILY_ALIAS = {"rap": "hiphop", "hip-hop": "hiphop", "hip hop": "hiphop"}
 # Podstyly, které na Last.fm znamenají i něco jiného ("lo-fi" = hlavně lo-fi
@@ -41,7 +40,9 @@ MIN_LISTENERS = 10_000
 
 
 def is_junk_version(title: str | None) -> bool:
-    return bool(JUNK_VERSION.search(title or ""))
+    from app.home.guard import is_junk
+
+    return is_junk(title)
 
 
 def strong(tags: list[tuple[str, int]], t: str) -> bool:

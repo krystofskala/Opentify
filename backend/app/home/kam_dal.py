@@ -198,9 +198,17 @@ async def compute(user_id: str, today: date | None = None) -> dict:
     if cands:
         scene = max(cands, key=lambda x: x[0])[1]
         members = set(scene.artists) | set(scene.tail)
-        pool = [r for r in act.total if act.artist_of.get(r) in members]
+        from app.home import guard
+
+        gd = await asyncio.to_thread(guard.load, user_id)  # společný filtr (OP-ALG1)
+        pool = [r for r in act.total if act.artist_of.get(r) in members and gd.allowed(r, act.artist_of.get(r))]
         former = set(act.former_loves()[:300])
-        fam = _weighted_order(pool, lambda r: (act.long.get(r, 0.0) ** 0.5) + (0.5 if r in former else 0.0) + 1e-6, rng)
+        fam = _weighted_order(
+            pool,
+            lambda r: ((act.long.get(r, 0.0) ** 0.5) + (0.5 if r in former else 0.0)) * gd.weight(r, act.artist_of.get(r))
+            + 1e-6,
+            rng,
+        )
         fam = _one_per_artist(fam, act.artist_of, 3)[: PATH_SIZE * 3 // 4]
         paths["navrat"] = {"scene": scene.id, "ids": fam, "label": scene.label, "lastYear": scene.last_year}
 

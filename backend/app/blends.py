@@ -72,29 +72,14 @@ def _taste(user_id: str) -> tuple[dict[str, float], set[str]]:
     return score, set(act.total)
 
 
-def _blocked(session: Session, user_ids: list[str]) -> tuple[set[str], set[str]]:
-    """(skladby, interpreti), které nechce aspoň jeden z dvojice."""
-    from app.home import repetition
-    from app.home.feedback import deltas, fit_multiplier
-    from app.library.dislikes import disliked_artist_ids, disliked_ids
-    from app.models import SkipStreak
+def _guard(session: Session, user_ids: list[str]):
+    """Co nechce aspoň jeden z dvojice (app/home/guard.py)."""
+    from app.home import guard
 
-    tracks: set[str] = set()
-    artists: set[str] = set()
+    out = guard.Guard()
     for uid in user_ids:
-        tracks |= disliked_ids(session, uid) | repetition.imported_skips(uid)
-        tracks |= set(
-            session.exec(
-                select(SkipStreak.recording_id).where(
-                    SkipStreak.user_id == uid,
-                    SkipStreak.streak >= 2,
-                    SkipStreak.updated_at >= (utcnow() - timedelta(days=90)).replace(tzinfo=None),
-                )
-            ).all()
-        )
-        artists |= disliked_artist_ids(session, uid)
-        artists |= {a for a, d in deltas(uid).items() if fit_multiplier(d) < 1}
-    return tracks, artists
+        out = out.merge(guard.load(uid, session))
+    return out
 
 
 def compute(session: Session, user_a: str, user_b: str) -> dict[str, list[str]]:
@@ -102,7 +87,8 @@ def compute(session: Session, user_a: str, user_b: str) -> dict[str, list[str]]:
     strany a společné objevy přidává `build_async`."""
     a, heard_a = _taste(user_a)
     b, heard_b = _taste(user_b)
-    bad_tracks, bad_artists = _blocked(session, [user_a, user_b])
+    blocked = _guard(session, [user_a, user_b])
+    muted = blocked.muted_artists
     ids = list(set(a) | set(b))
     artist_of: dict[str, str | None] = {}
     for k in range(0, len(ids), 500):
@@ -112,10 +98,10 @@ def compute(session: Session, user_a: str, user_b: str) -> dict[str, list[str]]:
             artist_of[rid] = aid
 
     def ok(rid: str) -> bool:
-        return rid not in bad_tracks and artist_of.get(rid) not in bad_artists
+        return blocked.allowed(rid, artist_of.get(rid)) and artist_of.get(rid) not in muted
 
-    top_a = [r for r in sorted(a, key=lambda r: -a[r]) if ok(r)][: _LIMIT * 2]
-    top_b = [r for r in sorted(b, key=lambda r: -b[r]) if ok(r)][: _LIMIT * 2]
+    top_a = [r for r in sorted(a, key=lambda r: -a[r] * blocked.weight(r, artist_of.get(r))) if ok(r)][: _LIMIT * 2]
+    top_b = [r for r in sorted(b, key=lambda r: -b[r] * blocked.weight(r, artist_of.get(r))) if ok(r)][: _LIMIT * 2]
     shared = sorted((r for r in heard_a & heard_b if ok(r)), key=lambda r: -min(a.get(r, 0), b.get(r, 0)))
     best = shared[:_LIMIT]
     if len(best) < _LIMIT:

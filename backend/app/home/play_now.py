@@ -27,7 +27,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.home import activation as av
-from app.models import Artist, Listen, PlayEvent, Recording, SkipStreak
+from app.models import Artist, Listen, PlayEvent, Recording
 from app.utils import utcnow
 
 NEW_SHARE = 0.2
@@ -393,17 +393,9 @@ def pick(
                         .limit(3)
                     ).all()
                 )
-        ninety = (utcnow() - timedelta(days=90)).replace(tzinfo=None)
-        skipped_tracks = set(
-            session.exec(
-                select(SkipStreak.recording_id).where(
-                    SkipStreak.user_id == user_id, SkipStreak.streak >= 2, SkipStreak.updated_at >= ninety
-                )
-            ).all()
-        )
-        from app.home import repetition
+        from app.home import guard, repetition
 
-        skipped_tracks |= repetition.imported_skips(user_id)  # přeskočené ve Spotify (algoritmus, 180 dní)
+        skipped_tracks = guard.skipped_ids(session, user_id)  # appka 90 dní + import 180 dní
         paused_offers, muted_offers = repetition.ignored_offers(user_id)
         small = len(act.total) < SMALL_PROFILE
         chosen: list[str] = _chosen_tracks(session, user_id) if small else []

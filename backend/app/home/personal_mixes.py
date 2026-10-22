@@ -72,7 +72,6 @@ MIX_FEATURED = 3  # hlavní interpreti dne -- obal, popis, semínka rádia
 MIX_FAMILIAR_SHARE = {"low": FAMILIAR_SHARE, "mid": 0.6, "high": 0.5}
 _TOP_ARTISTS = 30
 _EXTRA_ARTISTS = 200
-_JUNK = ("karaoke", "originally performed", "in the style of", "made famous by", "tribute to", "instrumental version")
 
 
 def _day_key() -> str:
@@ -173,7 +172,7 @@ def _load_taste(user_id: str) -> Taste:
         # Jen stažené na serveru (jiným profilem, dopředu do fronty) ne --
         # dřív se počítaly všechny soubory a admina to tlačilo k cizímu vkusu.
         from app.auth import ADMIN_ID
-        from app.models import LibraryEntry, SkipStreak
+        from app.models import LibraryEntry
 
         available = set(
             session.exec(
@@ -195,19 +194,11 @@ def _load_taste(user_id: str) -> Taste:
         taste.library = added & available
         # Dvakrát po sobě přeskočené -- do mixů ne (jednou = jen nálada).
         # Po 90 dnech se přeskočení zapomene (vkus se mění, "teď ne" není navždy).
-        taste.skipped = set(
-            session.exec(
-                select(SkipStreak.recording_id).where(
-                    SkipStreak.user_id == user_id,
-                    SkipStreak.streak >= 2,
-                    SkipStreak.updated_at >= (now - timedelta(days=90)).replace(tzinfo=None),
-                )
-            ).all()
-        )
-        # + přeskočené ve Spotify / Apple v kontextu algoritmu (180 dní).
-        from app.home.repetition import imported_skips
+        # 2x po sobě přeskočené (appka 90 dní, import 180) -- do mixů ne
+        # (jednou = jen nálada). Společné pravidlo app/home/guard.py.
+        from app.home.guard import skipped_ids
 
-        taste.skipped |= imported_skips(user_id)
+        taste.skipped = skipped_ids(session, user_id)
         from app.models import Playlist, PlaylistKind, PlaylistMember
 
         member_of = set(
@@ -496,8 +487,9 @@ async def build_clusters(taste: Taste) -> list[Cluster]:
 
 
 def _is_junk(track: dict[str, Any]) -> bool:
-    text = f"{track.get('title', '')} {(track.get('artist') or {}).get('name', '')}".lower()
-    return any(marker in text for marker in _JUNK)
+    from app.home.guard import is_junk
+
+    return is_junk(track.get("title"), (track.get("artist") or {}).get("name"))
 
 
 def _drop_heard(taste: Taste, recording_ids: list[str]) -> list[str]:
