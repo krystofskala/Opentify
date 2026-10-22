@@ -66,7 +66,6 @@ DAILY_MIX_ARTIST_CAP = 3
 MIX_SERVE_HALF_LIFE = 2.0
 MIX_PER_SERVE = 0.25
 MIX_MEMORY_DAYS = 7
-MIX_RESURFACE = 5  # míst pro dlouho neslyšené oblíbené ze skupiny
 MIX_FEATURED = 3  # hlavní interpreti dne -- obal, popis, semínka rádia
 # "Kolik nového" (Pusť teď) platí i pro mixy: podíl známých skladeb.
 MIX_FAMILIAR_SHARE = {"low": FAMILIAR_SHARE, "mid": 0.6, "high": 0.5}
@@ -670,14 +669,11 @@ async def build_daily_mixes() -> int:
     known = taste.known
     liked_or_played = set(taste.liked) | set(taste.listen_counts)
     later = await asyncio.to_thread(_listen_later_candidates, g.home_user())
-    # "Víc / míň takových" i při výběru skladeb ze skupiny (dřív jen váha
-    # interpreta při tvorbě skupin -- audit 7. 10. po změnách, chyba 3).
-    from app.home.feedback import deltas, fit_multiplier
+    # Společný filtr (app/home/guard.py): "víc / míň takových", většinou
+    # přeskakované a nabídnuté-nepuštěné slabší, nelíbí se ven.
+    from app.home import guard
 
-    manual = deltas(g.home_user())
-
-    def mood_mult(artist_id: str | None) -> float:
-        return fit_multiplier(manual[artist_id]) if artist_id in manual else 1.0
+    gd = await asyncio.to_thread(guard.load, g.home_user())
     later_used: set[str] = set()
     used_today: set[str] = set()
     results: list[tuple[int, Cluster, list[str], str, list[str]]] = []
@@ -692,14 +688,13 @@ async def build_daily_mixes() -> int:
         g.home_user(),
     )
     act = taste.activation
-    former = set(act.former_loves()[:300]) if act is not None else set()
     from app.home.caught import caught_tracks
 
     caught = await asyncio.to_thread(caught_tracks, g.home_user(), act) if act is not None else []
     liked_set = set(taste.liked)
-    from app.home import classics
-
-    evergreen = await asyncio.to_thread(classics.evergreens, g.home_user(), act) if act is not None else {}
+    # Mixy z toho, co se poslouchá teď, slábnou s odcházejícími interprety
+    # (krátká vrstva proti střední); spící scény a Stálice jsou o minulosti.
+    fade = act.fading() if act is not None else {}
     for index, cluster in _stable_numbers(clusters, _previous_groups()):
         rng = random.Random(f"{g.home_user()}:{day}:{index}")
         cluster_artists = set(cluster.artists)
@@ -707,25 +702,27 @@ async def build_daily_mixes() -> int:
         if cluster.only is not None:
             preferred = [r for r in preferred if r in cluster.only]
         fallback = [r for r in taste.library if taste.artist_of.get(r) in cluster_artists and r not in liked_or_played]
-        featured = _featured_artists(cluster, taste, memory, rng)
+        preferred = [r for r in preferred if gd.allowed(r, taste.artist_of.get(r))]
+        fallback = [r for r in fallback if gd.allowed(r, taste.artist_of.get(r))]
+        now_mix = cluster.kind in ("", "wave") and id(cluster) not in scene_of_cluster
+        cfade = fade if now_mix else {}
+        featured = _featured_artists(cluster, taste, memory, rng, cfade)
         if taste.activation is not None:
             # v2: známé podle toho, jak moc teď "žijí" (vážené losování --
             # oblíbené častěji, ale každý den jinak; jednou puštěné z 2014
             # skoro nikdy). Lajk bez poslechu dostane malou základní váhu.
             # 13. 10.: odmocnina místo druhé mocniny (dřív vyhrávaly pořád
             # tytéž) a paměť minulých dnů.
+            # 22. 10. (OP-ALG1 D): bez vynucených míst pro dlouho neslyšené
+            # oblíbené (5) a klasiky (20 %) -- držely v mixech pořád tytéž
+            # interprety; minulost mají spící scény, Stálice a Kam dál · Návrat.
             def weight(r: str) -> float:
                 a = taste.artist_of.get(r)
                 w = (taste.track_score(r) + (0.05 if r in liked_set else 0.0)) ** 0.5
-                return w * mood_mult(a) * memory.track_factor(r) * memory.artist_factor(a) * (1.3 if a in featured else 1.0)
+                w *= gd.weight(r, a) * cfade.get(a, 1.0)
+                return w * memory.track_factor(r) * memory.artist_factor(a) * (1.3 if a in featured else 1.0)
 
             preferred = _weighted_order(preferred, weight, rng, sharpen=1.0)
-            # Dlouho neslyšené oblíbené ze skupiny dopředu (návrat do minulosti).
-            back = [r for r in preferred if r in former and memory.track_factor(r) > 0.5][:MIX_RESURFACE]
-            # Klasiky ze stylu mixu (i do mixu vlny a spící scény).
-            n_classic = round(DAILY_MIX_SIZE * familiar_share * CLASSICS_SHARE) if cluster.kind != "classics" else 0
-            classic = [r for r in preferred if r in evergreen and r not in back and memory.track_factor(r) > 0.5][:n_classic]
-            preferred = back + classic + [r for r in preferred if r not in back and r not in classic]
         else:
             rng.shuffle(preferred)
         rng.shuffle(fallback)
@@ -860,7 +857,6 @@ async def build_daily_mixes() -> int:
 STABLE_MIXES = 3  # z toho, co se poslouchá teď; zbytek ze spících scén
 
 
-CLASSICS_SHARE = 0.2  # stálice v každém mixu (z jeho stylu)
 WAVE_CLUSTER_SHARE = 0.5
 
 
@@ -875,6 +871,13 @@ async def _stable_lineup(clusters: list[Cluster], taste: Taste, smap) -> list[Cl
     family = {a for s in wave.get("scenes") or [] if s in by_id for a in by_id[s].artists}
     if wave.get("state") not in ("rising", "peak", "fading"):
         family = set()
+    act = taste.activation
+    if family and wave.get("state") == "fading" and act is not None:
+        # Doznívající vlna jen dokud ji krátká vrstva drží (OP-ALG1 D, dřív
+        # mix vlny pevně 45 + 30 dní i po tom, co ji člověk přestal hrát).
+        short, med = act.artist_scores("short"), act.artist_scores("medium")
+        if sum(short.get(a, 0.0) for a in family) < 0.5 * sum(med.get(a, 0.0) for a in family):
+            family = set()
     out: list[Cluster] = []
     rest: list[Cluster] = []
     has_wave = False
@@ -890,7 +893,6 @@ async def _stable_lineup(clusters: list[Cluster], taste: Taste, smap) -> list[Cl
             out.append(c)
         else:
             rest.append(c)
-    act = taste.activation
     ever = await asyncio.to_thread(classics.evergreens, g.home_user(), act) if act is not None else {}
     if len(ever) >= 15:
         artist_score: Counter = Counter()
@@ -1019,13 +1021,16 @@ def _mix_memory(user_id: str, day: str, taste: Taste) -> MixMemory:
     return mem
 
 
-def _featured_artists(cluster: Cluster, taste: Taste, memory: MixMemory, rng: random.Random) -> list[str]:
+def _featured_artists(
+    cluster: Cluster, taste: Taste, memory: MixMemory, rng: random.Random, fade: dict[str, float] | None = None
+) -> list[str]:
     """Hlavní interpreti dne ve stálé skupině: losovaní podle váhy, kdo byl
     hlavní nedávno, má menší šanci -- obal, popis i rádio se den ode dne mění,
-    skupina (a číslo mixu) zůstává."""
+    skupina (a číslo mixu) zůstává. `fade`: odcházející interpreti slabší."""
+    fade = fade or {}
     keyed = []
     for a in cluster.artists[:12]:
-        w = max(taste.artist_weight.get(a, 0.0), 1e-6) ** 0.5 * memory.artist_factor(a) ** 2
+        w = max(taste.artist_weight.get(a, 0.0), 1e-6) ** 0.5 * memory.artist_factor(a) ** 2 * fade.get(a, 1.0) ** 2
         keyed.append((rng.random() ** (1.0 / w), a))
     keyed.sort(reverse=True)
     return [a for _k, a in keyed[:MIX_FEATURED]]

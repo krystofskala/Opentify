@@ -59,6 +59,10 @@ PEAK_MIN = 4
 # vlastní volba (stejná váha, feedback_equal_listen_weight).
 YOUNG_DAYS = 30  # mladý profil = méně různých dnů poslechu (audit: 300 poslechů jsou u někoho 4 dny)
 ALGO_DAY = 1 / 3
+# Odcházející interpret (OP-ALG1 D, 22. 10.): podíl v krátké vrstvě proti
+# střední. Kdo přestal hrát (A&JS 13. 10. -> 0 poslechů, v mixech dál každý
+# den), slábne až na čtvrtinu; vrátí se, jakmile si ho člověk zase pustí.
+FADE_FLOOR = 0.25
 CONFIRMED_AT = 0.5  # od téhle váhy je interpret "potvrzený" (Celá alba, osobní část)
 
 
@@ -327,6 +331,17 @@ class Activation:
     timeline: list[tuple[datetime, str]] = field(default_factory=list)
     # Pustil to algoritmus? (paralelně s `timeline`)
     timeline_algo: list[bool] = field(default_factory=list)
+
+    def fading(self) -> dict[str, float]:
+        """Interpret -> FADE_FLOOR..1: jak moc odešel z "teď" (podíl v krátké
+        vrstvě / podíl ve střední). Kdo hraje stejně nebo víc, chybí (= 1)."""
+        short = self.artist_scores("short")
+        out: dict[str, float] = {}
+        for artist, med in self.artist_scores("medium").items():
+            ratio = short.get(artist, 0.0) / med
+            if ratio < 1.0:
+                out[artist] = max(FADE_FLOOR, ratio)
+        return out
 
     def artist_days(self) -> dict[str, tuple[float, float]]:
         """Interpret -> (dní návratů, algoritmus = třetina dne; rozpětí v dnech)."""
