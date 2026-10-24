@@ -20,11 +20,24 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
 import urllib.request
 from pathlib import Path
+
+# Jen IPv4: firewall VM pouští ven jen IPv4 a zahozené IPv6 pokusy (Docker
+# Hub za Cloudflare) kontrolu zdržely o 17 minut a spustily výstrahu
+# „zablokovaný pokus z VM“ (24. 10.).
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_only(host, port, family=0, *args, **kwargs):
+    return _getaddrinfo(host, port, socket.AF_INET, *args, **kwargs)
+
+
+socket.getaddrinfo = _ipv4_only
 
 ROOT = Path(os.environ.get("OPENTIFY_DIR", "/opt/opentify"))
 OVERRIDE = ROOT / "docker-compose.override.yml"
