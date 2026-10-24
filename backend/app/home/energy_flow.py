@@ -114,6 +114,30 @@ def off_style(
     return out
 
 
+def core_artists(featured: list[str], styles: dict[str, dict[str, float]]) -> list[str]:
+    """Hlavní interpreti dne stylem u toho, ke komu má nejvíc ostatních
+    blízko -- střed mixu (Stálice 24. 10.: Plíhal + Mňága a Žďorp by daly
+    střed mezi folkem a rockem a prošlo by obojí)."""
+    tagged = [a for a in featured if styles.get(a)]
+    if not tagged:
+        return list(featured)
+
+    def close(a: str, b: str) -> bool:
+        d = style_distance(styles.get(a), styles.get(b))
+        return d is None or d < STYLE_FIT_MAX
+
+    anchor = max(tagged, key=lambda a: sum(close(a, b) for b in tagged))  # shoda -> první
+    return [a for a in featured if close(a, anchor)]
+
+
+def near_artists(artists: list[str] | set[str], core: list[str], styles: dict[str, dict[str, float]]) -> set[str]:
+    """Interpreti stylem blízko středu `core`; kdo štítky nemá, projde."""
+    centre = style_centre(core, styles)
+    if not centre:
+        return set(artists)
+    return {a for a in artists if (d := style_distance(styles.get(a), centre)) is None or d < STYLE_FIT_MAX}
+
+
 def is_jump(energy_gap: float | None, style_dist: float | None) -> bool:
     if style_dist is None:
         return False

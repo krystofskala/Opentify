@@ -580,15 +580,20 @@ def _spread(recording_ids: list[str], artist_of: dict[str, str]) -> list[str]:
 
 
 def _interleave(familiar: list[str], new: list[str]) -> list[str]:
+    """Nové rovnoměrně po celém mixu, začíná se známou (24. 10.: po vzoru
+    "2 známé, 1 nová" zbyl na konci blok samých známých)."""
+    if not new or not familiar:
+        return familiar + new
+    total = len(familiar) + len(new)
+    step = total / len(new)
     out, fi, ni = [], 0, 0
-    while fi < len(familiar) or ni < len(new):
-        for _ in range(2):
-            if fi < len(familiar):
-                out.append(familiar[fi])
-                fi += 1
-        if ni < len(new):
+    for k in range(total):
+        if ni < len(new) and (fi >= len(familiar) or (k > 0 and k >= int(step * (ni + 1)) - 1)):
             out.append(new[ni])
             ni += 1
+        else:
+            out.append(familiar[fi])
+            fi += 1
     return out
 
 
@@ -708,6 +713,20 @@ async def build_daily_mixes() -> int:
         now_mix = cluster.kind in ("", "wave") and id(cluster) not in scene_of_cluster
         cfade = fade if now_mix else {}
         featured = _featured_artists(cluster, taste, memory, rng, cfade)
+        from app.home import energy_flow
+        from app.home.taste_bridge import artist_styles
+
+        if cluster.kind == "classics":
+            # Stálice: jeden styl na den kolem hlavních interpretů (24. 10.:
+            # Mňága a Žďorp, Fleetwood Mac a Carpenters ve folkovém mixu);
+            # ostatní stálice přijdou jiný den se svým stylem.
+            styles = await artist_styles(list(cluster_artists | set(featured)))
+            featured = energy_flow.core_artists(featured, styles)
+            fits = energy_flow.near_artists(cluster_artists, featured, styles)
+            in_style = [r for r in preferred if taste.artist_of.get(r) in fits]
+            if len(in_style) >= MIN_MIX_SIZE:
+                preferred = in_style
+                fallback = [r for r in fallback if taste.artist_of.get(r) in fits]
         if taste.activation is not None:
             # v2: známé podle toho, jak moc teď "žijí" (vážené losování --
             # oblíbené častěji, ale každý den jinak; jednou puštěné z 2014
@@ -761,12 +780,13 @@ async def build_daily_mixes() -> int:
         # má mezi známými 3 skladby, se nepřidají (dřív 3 známé + 2 nové).
         new_artist = await asyncio.to_thread(_artists_of, new)
         # Stylová kontrola nových (OP-ALG1 E): k mixu, ne kam uhne Deezer rádio.
-        from app.home import energy_flow
-        from app.home.taste_bridge import artist_styles
-
+        # Proti jádru mixu -- známí stylem blízko většině mixu; jeden ulítlý
+        # známý (Fleetwood Mac) by jinak pustil i nové stejně daleko (Rolling
+        # Stones, 24. 10.).
         mix_known = {taste.artist_of[r] for r in familiar if r in taste.artist_of}
         mix_styles = await artist_styles(list(mix_known | set(new_artist.values())))
-        off = energy_flow.off_style(new, new_artist, mix_styles, mix_known)
+        mix_core = energy_flow.near_artists(mix_known, list(mix_known), mix_styles) or mix_known
+        off = energy_flow.off_style(new, new_artist, mix_styles, mix_core)
         new = [r for r in new if r not in off]
         per_artist = Counter(taste.artist_of.get(r) for r in familiar)
         capped_new: list[str] = []
@@ -788,6 +808,16 @@ async def build_daily_mixes() -> int:
             if rid not in later_used and (artist_id in cluster_artists or (dz_id and dz_id in cluster.signature))
         ]
         rng.shuffle(fitting)  # dřív každý den tytéž tři
+        # I tyhle do stropu 3 na interpreta (24. 10.: Rachel Sermanni 4×).
+        later_artist = {rid: artist_id for rid, artist_id, _dz in later}
+        fitting_capped: list[str] = []
+        for r in fitting:
+            a = later_artist.get(r) or r
+            if r in tracks or per_artist[a] >= DAILY_MIX_ARTIST_CAP:
+                continue
+            per_artist[a] += 1
+            fitting_capped.append(r)
+        fitting = fitting_capped
         tracks = listen_later.weave(tracks, fitting)
         later_used.update(fitting[:3])
         origins[index] = {
