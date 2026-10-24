@@ -35,3 +35,19 @@ def test_added_song_goes_on_top() -> None:
             select(PlaylistItem).where(PlaylistItem.playlist_id == pid).order_by(PlaylistItem.position)
         ).all()]
     assert order == ids[::-1]
+
+
+def test_existing_playlist_reordered_newest_first() -> None:
+    from datetime import datetime
+
+    from app.tools.playlists_newest_on_top import newest_first
+
+    day = lambda d: datetime(2026, 10, d)  # noqa: E731
+    items = [
+        PlaylistItem(id="a", playlist_id="p", recording_id="ra", position=0, added_at=day(1)),
+        PlaylistItem(id="b", playlist_id="p", recording_id="rb", position=1, added_at=day(5)),
+        PlaylistItem(id="c", playlist_id="p", recording_id="rc", position=2, added_at=day(5)),
+        PlaylistItem(id="d", playlist_id="p", recording_id="rd", position=3, added_at=day(3)),
+    ]
+    # Stejné datum drží dosavadní pořadí.
+    assert [i.id for i in newest_first(items)] == ["b", "c", "d", "a"]
