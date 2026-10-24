@@ -547,8 +547,10 @@ def add_item(
             )
         ).first()
         if existing is None:
-            # Za poslední (po odebrání můžou v pozicích být díry -- len() by dal duplicitu).
-            position = max((i.position for i in _playlist_items(session, playlist.id)), default=-1) + 1
+            # NAHORU, nejnovější první jako u Oblíbených (Kryštof 24. 10.: „to
+            # nejnovější je nahoře“); vlastní pořadí dál tažením. Nad nejmenší
+            # pozici, ne len() -- po odebrání v pozicích bývají díry.
+            position = min((i.position for i in _playlist_items(session, playlist.id)), default=1) - 1
             session.add(
                 PlaylistItem(playlist_id=playlist.id, recording_id=body.recording_id, position=position, added_by=user_id)
             )

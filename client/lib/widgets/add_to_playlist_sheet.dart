@@ -89,7 +89,9 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
     final repo = ref.read(playlistsRepositoryProvider);
     var added = 0;
     try {
-      for (final id in widget.recordingIds) {
+      // Server dává každou novou nahoru -- odzadu, aby album / výběr
+      // skončil nahoře ve svém pořadí.
+      for (final id in widget.recordingIds.reversed) {
         await repo.addItem(playlistId, id);
         added++;
       }
