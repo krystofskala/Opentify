@@ -1192,94 +1192,6 @@ def _scene_seeds(user_id: str, rng: random.Random, skip: set[str], n: int) -> li
     return out
 
 
-async def _in_scene_blocks(user_id: str, picked: list[str], track_seed: dict[str, str], rng: random.Random) -> list[str]:
-    """Objevy v blocích podle scény, ze které vzešly (13. 10.: pop-punk,
-    pak jazzová zpěvačka, pak zase pop-punk -- dřív se vše zamíchalo).
-    Plynule: bloky za sebou podle podobnosti stylů (štítky Last.fm všech
-    interpretů bloku), uvnitř bloku řetěz od skladby nejbližší konci
-    předchozího bloku -- přechod jde přes to, co mají scény společné."""
-    from app.home import scenes
-    from app.home.extra_sections import _artist_names
-
-    try:
-        smap = scenes.load(user_id)
-    except Exception:  # noqa: BLE001
-        smap = scenes.SceneMap([])
-    scene_of: dict[str, scenes.Scene] = {}
-    for sc in smap.scenes:
-        for a in [*sc.artists, *sc.tail]:
-            scene_of.setdefault(a, sc)
-    blocks: dict[str, list[str]] = {}
-    for t in picked:
-        sc = scene_of.get(track_seed.get(t, ""))
-        blocks.setdefault(sc.id if sc else f"seed:{track_seed.get(t, '')}", []).append(t)
-    names = await asyncio.to_thread(_artist_names, picked)
-    tag_cache: dict[str, list[str]] = {}
-    vec: dict[str, Counter] = {}
-    for t in picked:
-        name = names.get(t, "")
-        if name and name not in tag_cache:
-            try:
-                tag_cache[name] = (await lt.artist_tags(name))[:6]
-            except Exception:  # noqa: BLE001 -- bez štítků jen bloky
-                tag_cache[name] = []
-        vec[t] = Counter({tag: 1.0 / (1 + i) for i, tag in enumerate(tag_cache.get(name, []))})
-
-    def sim(x: Counter, y: Counter) -> float:
-        dot = sum(v * y.get(k, 0.0) for k, v in x.items())
-        nx = sum(v * v for v in x.values()) ** 0.5
-        ny = sum(v * v for v in y.values()) ** 0.5
-        return dot / (nx * ny) if nx and ny else 0.0
-
-    block_vec = {k: sum((vec[t] for t in ts), Counter()) for k, ts in blocks.items()}
-    # Pořadí bloků: hladově z každého možného začátku, pak 2-opt (obrácení
-    # úseků) -- dřív jen hladově od největšího bloku a na konec zbyly bloky,
-    # které se k ničemu nehodily (bossa nova -> pop-punk -> klasická kytara).
-    keys = list(blocks)
-    rng.shuffle(keys)
-    S = {(x, y): sim(block_vec[x], block_vec[y]) for x in keys for y in keys if x != y}
-
-    def total(seq: list[str]) -> float:
-        return sum(S[(x, y)] for x, y in zip(seq, seq[1:]))
-
-    best: list[str] = keys[:1]
-    for start in keys:
-        left = [k for k in keys if k != start]
-        seq = [start]
-        while left:
-            nxt = max(left, key=lambda k: S[(seq[-1], k)])
-            left.remove(nxt)
-            seq.append(nxt)
-        if len(best) < len(seq) or total(seq) > total(best):
-            best = seq
-    improved = True
-    while improved and len(best) > 3:
-        improved = False
-        for i in range(len(best) - 1):
-            for j in range(i + 2, len(best) + 1):
-                cand = best[:i] + best[i:j][::-1] + best[j:]
-                if total(cand) > total(best) + 1e-9:
-                    best, improved = cand, True
-    order = best
-    out: list[str] = []
-    for i, k in enumerate(order):
-        rest = list(blocks[k])
-        rng.shuffle(rest)
-        towards = block_vec[order[i + 1]] if i + 1 < len(order) else None
-        # Poslední místo bloku = skladba nejbližší dalšímu bloku.
-        last = max(rest, key=lambda t: sim(vec[t], towards)) if towards is not None and len(rest) > 1 else None
-        if last is not None:
-            rest.remove(last)
-        while rest:
-            prev = vec[out[-1]] if out else Counter()
-            t = max(rest, key=lambda r: sim(prev, vec[r])) if out else rest[0]
-            rest.remove(t)
-            out.append(t)
-        if last is not None:
-            out.append(last)
-    return out
-
-
 def _discover_ignored(user_id: str) -> set[str]:
     """Skladby z minulých Objevů, které profil nepustil nebo přeskočil --
     znovu se nenabízejí (audit 13. 10.: Objevy si nabídnuté nepamatovaly).
@@ -1334,6 +1246,52 @@ def _known_for_discover(taste: Taste) -> tuple[set[str], set[str]]:
     return names, deezer
 
 
+SOUNDTRACK_TAGS = {"soundtrack", "video game music", "game soundtrack", "video game", "videogame", "game music",
+                   "ost", "score", "film score", "original soundtrack", "chiptune"}
+SIDE_SHARE = 0.25  # soundtracky pod čtvrtinou poslechů = vedlejší scéna
+
+
+def _side_soundtracks(top: list[str], weight: Counter, styles: dict[str, dict[str, float]]) -> set[str]:
+    """Interpreti herních a filmových soundtracků, když jsou u posluchače
+    vedlejší (Kryštof 19. 10. 🅰️: "kdo poslouchá hlavně soundtracky, ať mu
+    je to tam dává; u mě je to bokovka"). Jako semínka Objevů ne -- z C418
+    vzešel celý blok herní hudby."""
+    def ost(a: str) -> bool:
+        vec = styles.get(a) or {}
+        main = max(vec, key=lambda t: vec[t]) if vec else ""
+        return main in SOUNDTRACK_TAGS or "soundtrack" in main
+
+    found = {a for a in top if ost(a)}
+    total = sum(weight[a] for a in top) or 1.0
+    return found if sum(weight[a] for a in found) / total < SIDE_SHARE else set()
+
+
+def _recording_artists(ids: list[str]) -> dict[str, str]:
+    with Session(engine) as session:
+        return dict(session.exec(
+            select(Recording.id, Recording.artist_id).where(Recording.id.in_(ids))  # type: ignore[attr-defined]
+        ).all())
+
+
+async def _near_seed(ids: list[str], seed: str, styles: dict[str, dict[str, float]]) -> list[str]:
+    """Jen skladby interpretů stylem blízko svému semínku (Kryštof 19. 10.:
+    "pokud nesedí žánrem a náladou, nemá tam být"; Deezer related bere i
+    zemi -- k Vypsané fiXe Xindl X)."""
+    from app.home import energy_flow
+    from app.home.taste_bridge import artist_styles
+
+    if not ids or not styles.get(seed):
+        return ids
+    artist_of = await asyncio.to_thread(_recording_artists, ids)
+    cand = await artist_styles(list(set(artist_of.values())))
+    out = []
+    for r in ids:
+        d = energy_flow.style_distance(cand.get(artist_of.get(r, "")), styles[seed])
+        if d is None or d < energy_flow.STYLE_FIT_MAX:
+            out.append(r)
+    return out
+
+
 async def build_discover_weekly() -> int:
     week = _week_key()
     done = _already_built("personal:discover-weekly", week)
@@ -1358,16 +1316,33 @@ async def build_discover_weekly() -> int:
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
     transient = _transient_seeds(taste, 10)
-    lasting = [a for a, w in taste.artist_weight.most_common(60) if w > 0 and a not in transient]
+    from app.home import energy_flow
+    from app.home.taste_bridge import artist_styles
+
+    top = [a for a, w in taste.artist_weight.most_common(60) if w > 0]
+    styles = await artist_styles(list(dict.fromkeys(top + transient)))
+    side = _side_soundtracks(top, taste.artist_weight, styles)
+    # Trvalí interpreti jen ve stylu blízko něčeho, co teď posloucháš
+    # (Kryštof 26. 10.: Objevy z pěti světů -- punk, herní OST, dětský pop,
+    # jazz -- jsou buď sekce, nebo skoky). Vzdálenější scény jinde (Objevuj).
+    def near_now(a: str) -> bool:
+        return any(
+            (d := energy_flow.style_distance(styles.get(a), styles.get(t))) is not None and d < energy_flow.STYLE_FIT_MAX
+            for t in transient
+        )
+
+    lasting = [a for a in top if a not in transient and a not in side and near_now(a)]
     rng.shuffle(lasting)
     seeds = transient + lasting[:8]
+    logger.info("objevy týdne: semínka %s, stranou %s", [taste.artist_name.get(a, a) for a in seeds],
+                [taste.artist_name.get(a, a) for a in side])
 
     # Kandidáti = "related" interpreti tvých interpretů, které neznáš. Každé
     # semínko přispěje svými nejbližšími rovnoměrně (dřív vyhrávala shoda
     # víc semínek = vždy střed nejsilnějšího žánru).
     candidates: Counter = Counter()
     per_seed: list[list[str]] = []
-    seed_of: dict[str, str] = {}  # kandidát -> semínko (bloky podle scény)
+    seed_of: dict[str, str] = {}  # kandidát -> semínko (kontrola stylu)
     for artist_id in seeds:
         dz = await _deezer_id(taste, artist_id)
         if dz is None:
@@ -1425,7 +1400,6 @@ async def build_discover_weekly() -> int:
 
     dzc = get_deezer_client()
     picked: list[str] = []
-    track_seed: dict[str, str] = {}
     for rid in ranked:
         if len(picked) >= 30:
             break
@@ -1440,9 +1414,8 @@ async def build_discover_weekly() -> int:
         from app.home import novelty
 
         ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
-        for t in ids[: 2 if len(ranked) < 20 else 1]:
-            picked.append(t)
-            track_seed[t] = seed_of.get(rid, "")
+        ids = await _near_seed(ids, seed_of.get(rid, ""), styles)
+        picked.extend(ids[: 2 if len(ranked) < 20 else 1])
         await asyncio.sleep(0.05)
     if len(picked) < 15:
         # Málo kandidátů: z každého víc skladeb (dřív výjimka a týden nic).
@@ -1458,13 +1431,16 @@ async def build_discover_weekly() -> int:
             ids = [r for r in await asyncio.to_thread(g._ingest_tracks, [t for t in top if not _is_junk(t)])
                    if r not in exclude and r not in picked]
             ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
-            for t in ids[:3]:
-                picked.append(t)
-                track_seed[t] = seed_of.get(rid, "")
+            ids = await _near_seed(ids, seed_of.get(rid, ""), styles)
+            picked.extend(ids[:3])
     logger.info("objevy týdne: semínek %d, kandidátů %d, vybráno %d", len(seeds), len(ranked), len(picked))
     if len(picked) < DISCOVER_MIN:
         raise RuntimeError(f"objevy týdne: jen {len(picked)} nových skladeb")
-    picked = await _in_scene_blocks(g.home_user(), picked[:30], track_seed, rng)
+    # Přirozeně promíchané, opravené jen hrubé skoky -- jako denní mixy
+    # (Kryštof 22. 10.: bloky podle scény rozsekaly Objevy na sekce).
+    picked = picked[:30]
+    rng.shuffle(picked)
+    picked = await energy_flow.smooth(picked, await asyncio.to_thread(_recording_artists, picked))
     g._save_playlist(
         owner=g.home_user(),
         source="personal:discover-weekly",

@@ -30,3 +30,14 @@ def test_interleave_spreads_new_over_whole_mix() -> None:
     assert positions[-1] >= len(out) - 4  # žádný blok samých známých na konci
     assert all(b - a >= 3 for a, b in zip(positions, positions[1:]))
     assert _interleave(["k"], []) == ["k"] and _interleave([], ["n"]) == ["n"]
+
+
+def test_objevy_soundtrack_seeds_only_when_side() -> None:
+    from collections import Counter
+
+    from app.home.personal_mixes import _side_soundtracks
+
+    styles = {"c418": {"video game music": 1.0, "ambient": 0.5}, "punk": {"pop punk": 1.0}}
+    assert _side_soundtracks(["punk", "c418"], Counter({"punk": 9, "c418": 1}), styles) == {"c418"}
+    # Kdo poslouchá hlavně soundtracky, tomu zůstanou.
+    assert _side_soundtracks(["punk", "c418"], Counter({"punk": 1, "c418": 9}), styles) == set()
