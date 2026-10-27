@@ -9,6 +9,10 @@ import tempfile
 
 if os.environ.get("DATABASE_URL", "").startswith("sqlite:////data/") or not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.gettempdir()}/opentify-tests.db"
+# Ani proti živé ntfy: v kontejneru api je NTFY_URL nastavená a testy bezpečnosti
+# (testclient, 1.2.3.4) pak Kryštofovi posílaly falešné výstrahy (24. 10.).
+# Testy, které ntfy potřebují, si ji nastaví přes monkeypatch.
+os.environ.pop("NTFY_URL", None)
 
 from sqlmodel import SQLModel  # noqa: E402
 
