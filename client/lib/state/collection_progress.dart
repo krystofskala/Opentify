@@ -42,8 +42,10 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
   ApiClient get _api => _ref.read(apiClientProvider);
   String get deviceId => _api.deviceId;
 
-  // Poslední odeslání na server (pozice se posílá nejvýš jednou za 10 s,
-  // změna skladby hned).
+  // Poslední odeslání na server (pozice se posílá nejvýš jednou za minutu,
+  // změna skladby hned). Dřív každých 10 s: ~6 požadavků za minutu po celou
+  // dobu hraní alba, mobilní rádio na zamčeném telefonu nikdy neusnulo
+  // (baterie, 27. 10.: 1 150 PUT za 3 hodiny).
   final Map<String, DateTime> _sentAt = {};
   final Map<String, String> _sentTrack = {};
 
@@ -147,7 +149,7 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
     final now = DateTime.now();
     final trackChanged = _sentTrack[route] != progress.recordingId;
     final last = _sentAt[route];
-    if (!trackChanged && last != null && now.difference(last) < const Duration(seconds: 10)) return;
+    if (!trackChanged && last != null && now.difference(last) < const Duration(minutes: 1)) return;
     _sentAt[route] = now;
     _sentTrack[route] = progress.recordingId;
     unawaited(_push(route, progress));

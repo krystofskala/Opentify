@@ -97,6 +97,9 @@ class _AppBackgroundState extends State<AppBackground> {
   // na ProMotion) a na webu se pak celá scéna rasterizuje pokaždé, i když
   // pozadí kreslí jen 30 fps. Časovač vyžádá snímek jen, když je co kreslit.
   Timer? _ticker;
+  // Na pozadí časovač úplně stojí (ne jen tiká naprázdno), po návratu se
+  // rozběhne znovu.
+  late final AppLifecycleListener _lifecycle = AppLifecycleListener(onResume: _wake);
   final Stopwatch _clock = Stopwatch()..start();
   final ValueNotifier<int> _frame = ValueNotifier(0);
   ui.FragmentProgram? _programReady;
@@ -161,6 +164,7 @@ class _AppBackgroundState extends State<AppBackground> {
   @override
   void initState() {
     super.initState();
+    _lifecycle;
     final target = _target();
     final palette = target.palette.map(_Lab.fromColor).toList();
     _from = palette;
@@ -319,11 +323,12 @@ class _AppBackgroundState extends State<AppBackground> {
   }
 
   void _onTick(Timer _) {
-    // Appka na pozadí / zamčený telefon (hudba hraje dál): nic nepočítat ani
-    // nepřekreslovat -- dřív 30x za vteřinu naprázdno (baterie).
+    // Appka na pozadí / zamčený telefon (hudba hraje dál): časovač zastavit,
+    // ne jen nepočítat -- i prázdné tiky budily telefon 30x za vteřinu po celou
+    // dobu hraní (baterie, 27. 10.). Rozběhne ho `_lifecycle.onResume`.
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle != null && lifecycle != AppLifecycleState.resumed) {
-      _lastPaintAt = _now;
+      _stopTicker();
       _frameClock = -1;
       return;
     }
@@ -482,6 +487,7 @@ class _AppBackgroundState extends State<AppBackground> {
   @override
   void dispose() {
     _stopTicker();
+    _lifecycle.dispose();
     _frame.dispose();
     _lastShader?.dispose();
     super.dispose();

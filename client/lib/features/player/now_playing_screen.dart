@@ -1624,10 +1624,30 @@ class _SteppedClock extends ChangeNotifier {
 
   double get value => _value;
 
+  // Má běžet (hraje se); na pozadí časovač stojí a po návratu se rozběhne.
+  bool _wanted = false;
+  AppLifecycleListener? _lifecycle;
+
   void repeat() {
+    _wanted = true;
+    _lifecycle ??= AppLifecycleListener(onResume: () {
+      if (_wanted) _start();
+    });
+    _start();
+  }
+
+  void _start() {
     if (_timer != null) return;
     _last = DateTime.now();
     _timer = Timer.periodic(const Duration(milliseconds: 42), (_) {
+      // Zamčený telefon: zastavit úplně -- prázdné tiky ho budily 24x za
+      // vteřinu po celou dobu hraní (baterie, 27. 10.).
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle != null && lifecycle != AppLifecycleState.resumed) {
+        _timer?.cancel();
+        _timer = null;
+        return;
+      }
       final now = DateTime.now();
       final dt = now.difference(_last).inMicroseconds / 1e6;
       _last = now;
@@ -1638,6 +1658,7 @@ class _SteppedClock extends ChangeNotifier {
   }
 
   void stop() {
+    _wanted = false;
     _timer?.cancel();
     _timer = null;
   }
@@ -1645,6 +1666,7 @@ class _SteppedClock extends ChangeNotifier {
   @override
   void dispose() {
     stop();
+    _lifecycle?.dispose();
     super.dispose();
   }
 }
