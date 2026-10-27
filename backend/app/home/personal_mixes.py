@@ -1322,16 +1322,13 @@ async def build_discover_weekly() -> int:
     top = [a for a, w in taste.artist_weight.most_common(60) if w > 0]
     styles = await artist_styles(list(dict.fromkeys(top + transient)))
     side = _side_soundtracks(top, taste.artist_weight, styles)
-    # Trvalí interpreti jen ve stylu blízko něčeho, co teď posloucháš
-    # (Kryštof 26. 10.: Objevy z pěti světů -- punk, herní OST, dětský pop,
-    # jazz -- jsou buď sekce, nebo skoky). Vzdálenější scény jinde (Objevuj).
-    def near_now(a: str) -> bool:
-        return any(
-            (d := energy_flow.style_distance(styles.get(a), styles.get(t))) is not None and d < energy_flow.STYLE_FIT_MAX
-            for t in transient
-        )
-
-    lasting = [a for a in top if a not in transient and a not in side and near_now(a)]
+    # Trvalí interpreti z celé šíře vkusu, i daleko od současné vlny (měřeno
+    # 27. 10. na Kryštofových poslechích: z Objevů 13. 10. se chytlo 12 z 29,
+    # z toho 6 jazz a zpěvačky od trvalých semínek, a scény se střídaly;
+    # 19. a 26. 10. začínaly blokem jedné scény a skončil po 12-15 skladbách,
+    # 0 chycených). Sekce nevzniknou: bez bloků a každý kandidát stylem
+    # u svého semínka.
+    lasting = [a for a in top if a not in transient and a not in side]
     rng.shuffle(lasting)
     seeds = transient + lasting[:8]
     logger.info("objevy týdne: semínka %s, stranou %s", [taste.artist_name.get(a, a) for a in seeds],
