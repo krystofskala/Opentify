@@ -43,7 +43,8 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
   String get deviceId => _api.deviceId;
 
   // Poslední odeslání na server (pozice se posílá nejvýš jednou za minutu,
-  // změna skladby hned). Dřív každých 10 s: ~6 požadavků za minutu po celou
+  // změna skladby, pauza, přetočení a odchod z appky hned -- pokračování na
+  // jiném zařízení je pak přesné). Dřív každých 10 s: ~6 požadavků za minutu po celou
   // dobu hraní alba, mobilní rádio na zamčeném telefonu nikdy neusnulo
   // (baterie, 27. 10.: 1 150 PUT za 3 hodiny).
   final Map<String, DateTime> _sentAt = {};
@@ -121,7 +122,7 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
     return p;
   }
 
-  void record(String route, CollectionProgress progress) {
+  void record(String route, CollectionProgress progress, {bool immediate = false}) {
     final current = state[route];
     if (current != null &&
         current.recordingId == progress.recordingId &&
@@ -149,7 +150,7 @@ class CollectionProgressController extends StateNotifier<Map<String, CollectionP
     final now = DateTime.now();
     final trackChanged = _sentTrack[route] != progress.recordingId;
     final last = _sentAt[route];
-    if (!trackChanged && last != null && now.difference(last) < const Duration(minutes: 1)) return;
+    if (!immediate && !trackChanged && last != null && now.difference(last) < const Duration(minutes: 1)) return;
     _sentAt[route] = now;
     _sentTrack[route] = progress.recordingId;
     unawaited(_push(route, progress));

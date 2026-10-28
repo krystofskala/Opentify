@@ -658,7 +658,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
   /// pak nabídne "Pokračovat". Pozice po 5 s jako relace.
   bool _rememberProgress = true;
 
-  void _recordCollectionProgress(AudioPlayerState s) {
+  void _recordCollectionProgress(AudioPlayerState s, {bool immediate = false}) {
     if (!_rememberProgress) return;
     final route = _queueContext;
     final np = s.nowPlaying;
@@ -673,7 +673,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       positionMs: s.position.inMilliseconds,
       deviceId: null,
       updatedAt: null,
-    ));
+    ), immediate: immediate);
   }
 
   /// Uloží stav: hned při změně skladby/fronty, pozici nejvýš jednou za 5 s.
@@ -690,7 +690,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final now = DateTime.now();
     if (!force && key == _lastPersistKey && now.difference(_lastPersist) < const Duration(seconds: 5)) return;
     // Až za omezením (dřív se pokrok alba ukládal na disk ~5x za vteřinu).
-    _recordCollectionProgress(s);
+    _recordCollectionProgress(s, immediate: force);
     _lastPersistKey = key;
     _lastPersist = now;
     // Frontu (klidně tisíce skladeb, stovky kB) zakódovat A ZAPSAT jen když
