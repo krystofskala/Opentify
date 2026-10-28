@@ -1292,6 +1292,35 @@ async def _near_seed(ids: list[str], seed: str, styles: dict[str, dict[str, floa
     return out
 
 
+def _spread_seeds(lasting: list[str], wave: list[str], styles: dict[str, dict[str, float]], n: int) -> list[str]:
+    """Trvalá semínka co nejdál od sebe i od současné vlny (28. 10.: náhodných
+    8 z 50 byla loterie -- 13. 10. padly jazz a zpěvačky a chytlo 12 z 29,
+    tentokrát Thin Lizzy a Beatles a z folku skoro nic). `lasting` už je
+    zamíchané, takže při shodě rozhoduje týden."""
+    from app.home.energy_flow import style_centre, style_distance
+
+    chosen: list[str] = []
+    refs = [style_centre(wave, styles)] if wave else []
+    pool = [a for a in lasting if styles.get(a)]
+    while pool and len(chosen) < n:
+        def gap(a: str) -> float:
+            ds = [style_distance(styles[a], r) for r in refs]
+            ds = [d for d in ds if d is not None]
+            return min(ds) if ds else 1.0
+        best = max(pool, key=gap)
+        chosen.append(best)
+        refs.append(styles[best])
+        pool.remove(best)
+    # Bez stylových štítků doplnit, jak padly.
+    chosen += [a for a in lasting if a not in chosen][: n - len(chosen)]
+    return chosen
+
+
+# Skladba tak známá, že v Objevech nepřekvapí (Deezer rank 0..1 000 000;
+# 28. 10.: Common People 672 tis., Superman 555 tis., méně známé 200-500 tis.).
+BIG_HIT_RANK = 550_000
+
+
 async def build_discover_weekly() -> int:
     week = _week_key()
     done = _already_built("personal:discover-weekly", week)
@@ -1330,7 +1359,7 @@ async def build_discover_weekly() -> int:
     # u svého semínka.
     lasting = [a for a in top if a not in transient and a not in side]
     rng.shuffle(lasting)
-    seeds = transient + lasting[:8]
+    seeds = transient + _spread_seeds(lasting, transient, styles, 8)
     logger.info("objevy týdne: semínka %s, stranou %s", [taste.artist_name.get(a, a) for a in seeds],
                 [taste.artist_name.get(a, a) for a in side])
 
@@ -1372,7 +1401,11 @@ async def build_discover_weekly() -> int:
             hits = await dzc_lookup.search_artist(name, limit=5)
         except Exception:  # noqa: BLE001
             continue
-        hit = next((h for h in hits if same_artist_name(h.get("name", ""), name)), None)
+        # Ze stejnojmenných ten s nejvíc fanoušky (28. 10.: Last.fm „Travis“
+        # = skotská kapela, první shoda na Deezeru měla 18 fanoušků a cizí
+        # skladbu „Dimoun Lo Zil“).
+        same = [h for h in hits if same_artist_name(h.get("name", ""), name)]
+        hit = max(same, key=lambda h: h.get("nb_fan") or 0, default=None)
         rid = str(hit["id"]) if hit and hit.get("id") else ""
         if rid and rid not in known_dz:
             candidates[rid] += 2 * score
@@ -1388,7 +1421,13 @@ async def build_discover_weekly() -> int:
     for rid, _ in candidates.most_common(60):
         if rid not in ranked:
             ranked.append(rid)
-    ranked = ranked[:60]
+    # Současná vlna a trvalý vkus střídavě (28. 10.: 24 z 30 od semínek
+    # současné vlny, prvních 20 skladeb jeden kout pop punku/emo -- šíře
+    # přišla až na konci a Kryštof ji nedoposlouchal).
+    wave = set(transient)
+    now_part = [r for r in ranked if seed_of.get(r) in wave]
+    wide_part = [r for r in ranked if seed_of.get(r) not in wave]
+    ranked = [r for pair in zip_longest(now_part, wide_part) for r in pair if r is not None][:60]
     if not ranked:
         # Není z čeho (13. 10.: profil s jedinou vlastní skladbou hlásil
         # "selhal" každou hodinu celý týden) -- tiše nic.
@@ -1397,14 +1436,21 @@ async def build_discover_weekly() -> int:
 
     dzc = get_deezer_client()
     picked: list[str] = []
+    # Nejvýš 3 skladby od jednoho semínka (28. 10. na kopii: Thin Lizzy
+    # samo přivedlo 5 skladeb hard rocku).
+    per_seed_count: Counter = Counter()
     for rid in ranked:
         if len(picked) >= 30:
             break
+        if per_seed_count[seed_of.get(rid, "")] >= 3:
+            continue
         try:
             top = await dzc.artist_top(rid, 5) or []
         except Exception:  # noqa: BLE001
             continue
-        top = [t for t in top if not _is_junk(t)]
+        # Bez velkých hitů (Deezer rank ≥ 550 tis.): Common People, Superman,
+        # Let's Dance to Joy Division nejsou objev, ty zná každý (28. 10.).
+        top = [t for t in top if not _is_junk(t) and (t.get("rank") or 0) < BIG_HIT_RANK]
         ids = [r for r in await asyncio.to_thread(g._ingest_tracks, top) if r not in exclude and r not in picked]
         # Objevy = opravdu neslyšené (i pod jiným id) a bez nelíbí / míň /
         # přeskočených / pauzy -- společný filtr všech mixů (app/home/novelty.py).
@@ -1412,7 +1458,9 @@ async def build_discover_weekly() -> int:
 
         ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
         ids = await _near_seed(ids, seed_of.get(rid, ""), styles)
-        picked.extend(ids[: 2 if len(ranked) < 20 else 1])
+        ids = ids[: 2 if len(ranked) < 20 else 1]
+        per_seed_count[seed_of.get(rid, "")] += len(ids)
+        picked.extend(ids)
         await asyncio.sleep(0.05)
     if len(picked) < 15:
         # Málo kandidátů: z každého víc skladeb (dřív výjimka a týden nic).
@@ -1425,7 +1473,8 @@ async def build_discover_weekly() -> int:
                 top = await dzc.artist_top(rid, 5) or []
             except Exception:  # noqa: BLE001
                 continue
-            ids = [r for r in await asyncio.to_thread(g._ingest_tracks, [t for t in top if not _is_junk(t)])
+            top = [t for t in top if not _is_junk(t) and (t.get("rank") or 0) < BIG_HIT_RANK]
+            ids = [r for r in await asyncio.to_thread(g._ingest_tracks, top)
                    if r not in exclude and r not in picked]
             ids = await asyncio.to_thread(novelty.filter_new, g.home_user(), ids, taste.activation)
             ids = await _near_seed(ids, seed_of.get(rid, ""), styles)
