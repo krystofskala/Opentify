@@ -431,6 +431,35 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final now = DateTime.now();
     final position = _player.position;
     final processing = _player.processingState;
+    // Pozice běží dál za konec skladby a `completed` nepřišlo (iPhone, stažený
+    // soubor; Kryštof 29. 10.: Clock poslední v Objevech „stojí“ na 3:54/3:54
+    // a hraje dál, appka hlásila pozici 7:00). Hlídání zaseknutí to nechytí --
+    // pozice se hýbe -- a stažené soubory nehlídá vůbec. Platí i pro ně.
+    final length = _player.duration;
+    if (info != null &&
+        _player.playing &&
+        length != null &&
+        length > Duration.zero &&
+        position > length + const Duration(seconds: 3) &&
+        !_radioActive &&
+        !_priming &&
+        !_awaitingProvisioning &&
+        !_followingBroadcast &&
+        !_transitionPlanned &&
+        _readyGen == _sourceGen &&
+        processing != ProcessingState.completed &&
+        processing != ProcessingState.idle) {
+      debugPrint('AudioPlayerController: pozice $position za koncem $length bez completed, pokračuji dál');
+      _stallSince = now;
+      _stallPosition = Duration.zero;
+      final last = state.nextIndex == null &&
+          state.repeatMode != RepeatMode.one &&
+          spokenParts(info.recordingId) == null;
+      _onTrackEnded();
+      // Konec fronty: `next` nemá kam -- zastavit, jinak by „hrálo“ dál.
+      if (last) unawaited(_player.pause().catchError((Object _) {}));
+      return;
+    }
     final watched = info != null &&
         _player.playing &&
         !_radioActive &&
@@ -496,11 +525,7 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
     final duration = _player.duration;
     if (duration != null && duration > Duration.zero && position >= duration - const Duration(seconds: 2)) {
       debugPrint('AudioPlayerController: stojí na konci skladby bez completed, pokračuji dál');
-      if (state.repeatMode == RepeatMode.one) {
-        unawaited(_replayCurrent());
-      } else {
-        unawaited(next(auto: true));
-      }
+      _onTrackEnded();
       return;
     }
     debugPrint('AudioPlayerController: pozice stojí ${_stallLimit.inSeconds} s ($processing), navazuji');
@@ -3868,24 +3893,29 @@ class AudioPlayerController extends StateNotifier<AudioPlayerState> {
       // skladbě, jinak by se přeskočilo o dvě.
       final early = _earlyAdvancedAt;
       if (early != null && DateTime.now().difference(early) < const Duration(seconds: 3)) return;
-      if (state.repeatMode == RepeatMode.one) {
-        unawaited(_replayCurrent());
-      } else {
-        // Doposlouchané album/playlist -- už nenabízet "Pokračovat".
-        final route = _queueContext;
-        if (state.nextIndex == null && CollectionProgressController.isCollection(route)) {
-          _ref.read(collectionProgressProvider.notifier).clear(route!);
-        }
-        // Kniha se ještě stahuje: mezitím dorazily další kapitoly -> přidat.
-        if (state.nextIndex == null && spokenParts(state.nowPlaying?.recordingId ?? '') != null) {
-          unawaited(_continueSpokenBook());
-          return;
-        }
-        // Fronta dohrála do ticha -> tip na nekonečné hraní.
-        if (state.nextIndex == null && state.repeatMode == RepeatMode.off) _hints.signal(Hint.endless);
-        unawaited(next(auto: true));
-      }
+      _onTrackEnded();
     }
+  }
+
+  /// Skladba dohrála (`completed`, nebo ho iPhone neposlal -- viz `_checkStall`).
+  void _onTrackEnded() {
+    if (state.repeatMode == RepeatMode.one) {
+      unawaited(_replayCurrent());
+      return;
+    }
+    // Doposlouchané album/playlist -- už nenabízet "Pokračovat".
+    final route = _queueContext;
+    if (state.nextIndex == null && CollectionProgressController.isCollection(route)) {
+      _ref.read(collectionProgressProvider.notifier).clear(route!);
+    }
+    // Kniha se ještě stahuje: mezitím dorazily další kapitoly -> přidat.
+    if (state.nextIndex == null && spokenParts(state.nowPlaying?.recordingId ?? '') != null) {
+      unawaited(_continueSpokenBook());
+      return;
+    }
+    // Fronta dohrála do ticha -> tip na nekonečné hraní.
+    if (state.nextIndex == null && state.repeatMode == RepeatMode.off) _hints.signal(Hint.endless);
+    unawaited(next(auto: true));
   }
 
   // --- Scrobbling (poslechy pro osobní mixy + ListenBrainz) ---------------
