@@ -58,3 +58,13 @@ def test_old_favourites_keep_weight_and_former_loves():
     assert act.short[ids["Old Love"]] < 1e-6
     assert ids["Old Love"] in act.former_loves()
     assert ids["Now"] not in act.former_loves()
+
+
+def test_track_key_ignores_artist_punctuation():
+    # Kryštof 3. 11.: Spotify "F. J. McMahon" vs. Deezer "F.J. McMahon" -- Early Blue
+    # (12 poslechů) prošla do Objevů jako neznámá.
+    assert av.track_key("F. J. McMahon", "Early Blue") == av.track_key("F.J. McMahon", "Early Blue")
+    assert av.artist_key("AC/DC") == av.artist_key("ACDC")
+    assert av.artist_key("Simon & Garfunkel") == av.artist_key("Simon")
+    assert av.artist_key("Sigur Rós") == av.artist_key("Sigur Ros")
+    assert av.artist_key("Pink Floyd") != av.artist_key("Pink")

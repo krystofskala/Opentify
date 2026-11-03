@@ -302,13 +302,22 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def artist_key(artist_name: str) -> str:
+    """První interpret bez diakritiky, mezer a interpunkce. Kryštof 3. 11.:
+    historie ze Spotify má "F. J. McMahon", Deezer "F.J. McMahon" -- Early
+    Blue, slyšená 12×, tak prošla do Objevů jako neznámá."""
+    from app.download_match import fold, tokens
+
+    first = re.split(r"\s*(?:,|&| feat\.? | ft\.? | x | and | a )\s*", fold(artist_name or ""), maxsplit=1)[0]
+    return "".join(tokens(first)) or first.strip()
+
+
 def track_key(artist_name: str, title: str) -> str:
     """Interpret + název bez verzí a diakritiky -- "už slyšené" i když import
     a katalog mají tutéž skladbu pod jiným id ("(Remastered 2009)", feat.)."""
-    from app.download_match import core_title, fold, tokens
+    from app.download_match import core_title, tokens
 
-    artist = re.split(r"\s*(?:,|&| feat\.? | ft\.? | x | and | a )\s*", fold(artist_name or ""), maxsplit=1)[0].strip()
-    return f"{artist}|{' '.join(tokens(core_title(title or '')))}"
+    return f"{artist_key(artist_name)}|{' '.join(tokens(core_title(title or '')))}"
 
 
 @dataclass

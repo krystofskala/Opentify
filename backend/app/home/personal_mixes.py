@@ -1340,7 +1340,9 @@ async def build_discover_weekly() -> int:
     # 12 tis. -> 45 tis., Objevy se nelíbily). Známý = kdokoli kdy slyšený.
     # Měnit dál po jednom kroku a s týdnem na vyzkoušení.
     # I spoluautoři ("Simple Plan & State Champs" -> i State Champs), 19. 10.
-    known_names = {part.casefold() for n in taste.artist_name.values() for part in all_artist_names(n)}
+    from app.home.activation import artist_key
+
+    known_names = {artist_key(part) for n in taste.artist_name.values() for part in all_artist_names(n)}
     known_dz = set(taste.artist_deezer.values())
     # Semínka: dočasný vkus + interpreti z trvalého vkusu mimo něj (12. 10.:
     # jen z dočasného byly Objevy celé z jednoho žánrového rybníka).
@@ -1376,7 +1378,7 @@ async def build_discover_weekly() -> int:
         mine: list[str] = []
         for rel in await _related(dz):
             rid, name = str(rel.get("id") or ""), rel.get("name") or ""
-            if not rid or rid in known_dz or primary_artist_name(name).casefold() in known_names:
+            if not rid or rid in known_dz or artist_key(primary_artist_name(name)) in known_names:
                 continue
             candidates[rid] += 1
             mine.append(rid)
@@ -1391,7 +1393,7 @@ async def build_discover_weekly() -> int:
         if is_own_artist(artist_id):  # Last.fm by našel stejnojmennou cizí kapelu
             continue
         for name, match in await lt.similar_artist_names(taste.artist_name.get(artist_id, ""), 25):
-            if primary_artist_name(name).casefold() not in known_names:
+            if artist_key(primary_artist_name(name)) not in known_names:
                 lf_scores[name] += match
                 if match > lf_seed.get(name, (-1.0, ""))[0]:
                     lf_seed[name] = (match, artist_id)
