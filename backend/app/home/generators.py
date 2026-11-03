@@ -502,6 +502,38 @@ def _listenbrainz_user(user_id: str) -> str | None:
     return None
 
 
+MY_TOP_DAYS = 30
+MY_TOP_MIN_PLAYS = 2
+
+
+def my_top_recording_ids(owner: str, limit: int = 40, days: int = MY_TOP_DAYS) -> list[str]:
+    """Nejhranější skladby profilu za posledních `days` dní z vlastních
+    poslechů (všech zdrojů stejně). Tatáž skladba pod víc id (album vs. singl,
+    remaster) se počítá jednou a do playlistu jde její nejhranější verze."""
+    from collections import Counter, defaultdict
+
+    from app.home.activation import track_key
+    from app.models import Listen
+
+    since = utcnow().replace(tzinfo=None) - timedelta(days=days)
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Listen.recording_id, Recording.title, Artist.name)
+            .select_from(Listen)
+            .join(Recording, Recording.id == Listen.recording_id)
+            .join(Artist, Artist.id == Recording.artist_id, isouter=True)
+            .where(Listen.user_id == owner, Listen.played_at >= since)
+            .where((Listen.duration_played_ms.is_(None)) | (Listen.duration_played_ms >= 30_000))
+        ).all()
+    plays: Counter = Counter()
+    per_id: dict[str, Counter] = defaultdict(Counter)
+    for rid, title, artist in rows:
+        key = track_key(artist or "", title or "")
+        plays[key] += 1
+        per_id[key][rid] += 1
+    return [per_id[k].most_common(1)[0][0] for k, n in plays.most_common(limit) if n >= MY_TOP_MIN_PLAYS]
+
+
 async def build_personal_mixes() -> int:
     """Discover / Moje top / Trendy / Komunita jako playlisty (karty na
     Domů), plus Daily Jams, který už playlist je."""
@@ -511,10 +543,27 @@ async def build_personal_mixes() -> int:
     # Každý profil ze SVÉHO ListenBrainz účtu (Profil › ListenBrainz); bez
     # připojeného účtu tyhle mixy nemá -- nikdy ne z cizího (adminova).
     owner = home_user()
+    built = 0
+    # "Moje nejposlouchanější" z vlastních poslechů za posledních 30 dní --
+    # dřív ListenBrainz range=month = minulý kalendářní měsíc, přepočítaný jen
+    # občas (Kryštof 3. 11.: 3. listopadu ukazovalo září). Nezávisí na LB.
+    top_ids = await asyncio.to_thread(my_top_recording_ids, owner)
+    if top_ids:
+        _save_playlist(
+            owner=owner,
+            source="home:mix:my-top",
+            title="Moje nejposlouchanější",
+            description="Tvoje top skladby za posledních 30 dní",
+            kind=PlaylistKind.GENERATED_RECOMMENDATION,
+            section="mixes",
+            recording_ids=top_ids,
+            cover_urls=_covers_for(top_ids),
+            ttl=DAILY_TTL,
+        )
+        built += 1
     lb_user = _listenbrainz_user(owner)
     if not lb_user:
-        return 0
-    built = 0
+        return built
     with Session(engine) as session:
         service = RecommendationService(session, get_listenbrainz_client(), get_listenbrainz_public_client())
         try:
@@ -524,7 +573,6 @@ async def build_personal_mixes() -> int:
             logger.exception("home: daily jams selhal")
         mixes: list[tuple[str, str, str, Callable[[], Awaitable[list[Any]]]]] = [
             ("home:mix:discover", "Objevuj", "Nová hudba podle tvého poslechu", lambda: service.discover(lb_user, 40)),
-            ("home:mix:my-top", "Moje nejposlouchanější", "Tvoje top skladby za měsíc", lambda: service.my_top_tracks(lb_user, 40)),
             ("home:mix:trending", "Trendy na ListenBrainz", "Co se tento týden nejvíc poslouchá", lambda: service.trending(100)),
             ("home:mix:community", "Komunitní objevy", "Tipy od komunity ListenBrainz", lambda: service.community_picks(lb_user, 40)),
         ]
